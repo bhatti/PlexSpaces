@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# This file is part of PlexSpaces.
+#
+# PlexSpaces is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# PlexSpaces is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+[package]
+name = "plexspaces-locks"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+description = "Distributed lock/lease coordination for PlexSpaces (db-locks inspired)"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+
+[dependencies]
+# PlexSpaces crates
+plexspaces-proto = { path = "../proto" }
+
+# Async runtime
+tokio = { version = "1.44", features = ["sync", "time", "macros", "rt-multi-thread"] }
+async-trait = "0.1"
+
+# Database backends (all optional)
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "migrate"], optional = true }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], optional = true }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+prost = "0.12"
+
+# Error handling
+thiserror = "1.0"
+
+# Utilities
+ulid = { version = "1.1", features = ["serde"] }
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+default = ["memory-backend", "sqlite-backend"]
+
+# Backend features
+memory-backend = []
+postgres-backend = ["sqlx", "sqlx/postgres"]
+redis-backend = ["redis"]
+sqlite-backend = ["sqlx", "sqlx/sqlite"]
+
+# All backends
+all-backends = ["postgres-backend", "redis-backend", "sqlite-backend"]
+
+# Full feature set
+full = ["all-backends"]
+
+[dev-dependencies]
+tokio-test = "0.4"
+anyhow = "1.0"
+env_logger = "0.11"
+serial_test = "3.0"
+

@@ -1,0 +1,90 @@
+[workspace]
+# Empty workspace to make this standalone
+
+[package]
+name = "byzantine-generals"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+plexspaces = { path = "../../.." }
+plexspaces-proto = { path = "../../../crates/proto" }
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-mailbox = { path = "../../../crates/mailbox" }
+plexspaces-behavior = { path = "../../../crates/behavior" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-supervisor = { path = "../../../crates/supervisor" }
+plexspaces-persistence = { path = "../../../crates/persistence" }
+plexspaces-tuplespace = { path = "../../../crates/tuplespace", features = ["redis-backend", "sql-backend"] }
+plexspaces-process-groups = { path = "../../../crates/process-groups" }
+plexspaces-keyvalue = { path = "../../../crates/keyvalue" }
+# tuplespace-registry removed - use object-registry instead
+plexspaces-grpc-middleware = { path = "../../../crates/grpc-middleware" }
+tokio = { version = "1.45", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+async-trait = "0.1"
+bincode = "1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tonic = { version = "0.10", features = ["transport"] }
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager", "aio"] }
+chrono = "0.4"
+ulid = { version = "1.1", features = ["serde"] }
+
+[features]
+default = ["sql-backend"]
+redis-backend = ["plexspaces/redis-backend"]
+sql-backend = ["plexspaces/sql-backend"]
+
+[[test]]
+name = "basic_consensus"
+path = "tests/basic_consensus.rs"
+
+[[test]]
+name = "byzantine_walking_skeleton"
+path = "tests/byzantine_walking_skeleton.rs"
+
+[[test]]
+name = "distributed_consensus"
+path = "tests/distributed_consensus.rs"
+
+[[test]]
+name = "multi_process_consensus"
+path = "tests/multi_process_consensus.rs"
+
+[[test]]
+name = "remote_consensus"
+path = "tests/remote_consensus.rs"
+
+[[test]]
+name = "distributed_tuplespace_test"
+path = "tests/distributed_tuplespace_test.rs"
+
+[[test]]
+name = "process_groups_consensus"
+path = "tests/process_groups_consensus.rs"
+
+[[test]]
+name = "registry_distributed_consensus"
+path = "tests/registry_distributed_consensus.rs"
+
+[[test]]
+name = "e2e_application"
+path = "tests/e2e_application.rs"
+
+[[test]]
+name = "middleware_integration"
+path = "tests/middleware_integration.rs"
+
+[[bin]]
+name = "byzantine_node"
+path = "bin/byzantine_node.rs"
+
+[[bin]]
+name = "byzantine"
+path = "src/main.rs"

@@ -1,0 +1,38 @@
+[package]
+name = "timeseries-forecasting"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+license = "LGPL-2.1-or-later"
+description = "Time-series forecasting example using PlexSpaces actors"
+
+[workspace]
+
+[dependencies]
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-proto = { path = "../../../crates/proto" }
+plexspaces-mailbox = { path = "../../../crates/mailbox" }
+plexspaces-scheduler = { path = "../../../crates/scheduler" }
+
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time-series processing
+chrono = "0.4"
+ndarray = "0.15"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[[bin]]
+name = "timeseries_forecasting"
+path = "src/main.rs"
+

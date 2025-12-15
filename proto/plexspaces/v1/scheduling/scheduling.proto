@@ -1,0 +1,254 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Resource-Aware Scheduling API
+//
+// ## Purpose
+// Implements two-layer resource-aware scheduling:
+// - **Layer 1 (Actor-Level)**: Place actors on nodes that match resource requirements and labels
+// - **Layer 2 (Task-Level)**: Route tasks to appropriate actors based on groups and load
+//
+// ## Architecture Context
+// This proto file supports resource-aware scheduling across all PlexSpaces pillars:
+// - **Node Capacity Tracking**: Nodes report available resources via heartbeat
+// - **Actor Resource Requirements**: Actors declare CPU, memory, disk, GPU needs
+// - **Label-Based Matching**: Kubernetes-inspired label selectors for node filtering
+// - **Placement Strategies**: Bin-packing, spread, pack, random placement algorithms
+//
+// ## Design Decisions
+// - **Synchronous API with Immediate Response**: Returns immediately with request_id and status
+//   - Industry best practice (Kubernetes, Ray, Orleans)
+//   - Least element of surprise for clients
+//   - Background scheduler processes requests asynchronously
+//
+// - **Channel-Based Coordination**: Requests published to channel, background schedulers subscribe
+//   - Simplicity: No leader election needed
+//   - Scalability: Multiple schedulers can process requests
+//   - Reliability: Channel provides at-least-once delivery
+//
+// - **Lease-Based Coordination**: Background scheduler uses distributed locks for coordination
+//   - Only one scheduler processes requests at a time (per lease)
+//   - Fault tolerance: If scheduler dies, lease expires, another takes over
+//   - Version-based optimistic locking for atomic operations
+
+syntax = "proto3";
+
+package plexspaces.scheduling.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "buf/validate/validate.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/actors/actor_runtime.proto";
+import "plexspaces/v1/node/node.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.scheduling.v1";
+option java_multiple_files = true;
+
+// Actor group for task routing (Layer 2)
+message ActorGroup {
+  // Group name (unique identifier)
+  string group_name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Actor IDs in this group
+  repeated string actor_ids = 2;
+  
+  // Group metadata (labels, annotations)
+  map<string, string> metadata = 3;
+}
+
+// Scheduling decision made by background scheduler
+message SchedulingDecision {
+  // Request ID
+  string request_id = 1;
+  
+  // Selected node ID (if scheduled)
+  string selected_node_id = 2;
+  
+  // Selected node gRPC address
+  string selected_node_address = 3;
+  
+  // Decision timestamp
+  google.protobuf.Timestamp decided_at = 4;
+  
+  // Decision reason (for debugging/monitoring)
+  string reason = 5;
+  
+  // Score/priority of selected node (for comparison)
+  double score = 6;
+}
+
+// Scheduling request stored in state store
+message SchedulingRequest {
+  // Request ID (unique)
+  string request_id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Request details (imported from actor_runtime.proto)
+  plexspaces.actor.v1.ActorResourceRequirements requirements = 2;
+  string namespace = 3;
+  string tenant_id = 4;
+  
+  // Status
+  SchedulingStatus status = 5;
+  
+  // Result (if scheduled)
+  string selected_node_id = 6;
+  string actor_id = 7; // Created actor ID
+  
+  // Error (if failed)
+  string error_message = 8;
+  
+  // Timestamps
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp scheduled_at = 10;
+  google.protobuf.Timestamp completed_at = 11;
+}
+
+// Scheduling status enum
+enum SchedulingStatus {
+  SCHEDULING_STATUS_UNSPECIFIED = 0;
+  // Request accepted, queued for processing
+  SCHEDULING_STATUS_PENDING = 1;
+  // Successfully scheduled (node selected, actor will be spawned)
+  SCHEDULING_STATUS_SCHEDULED = 2;
+  // Scheduling failed (no matching node, invalid request, etc.)
+  SCHEDULING_STATUS_FAILED = 3;
+}
+
+// Scheduling service for resource-aware actor placement
+service SchedulingService {
+  // Schedule actor on best matching node (synchronous, returns immediately)
+  rpc ScheduleActor(ScheduleActorRequest) returns (ScheduleActorResponse) {
+    option (google.api.http) = {
+      post: "/v1/scheduling/actors"
+      body: "*"
+    };
+  }
+  
+  // Get scheduling request status (for polling)
+  rpc GetSchedulingStatus(GetSchedulingStatusRequest) returns (GetSchedulingStatusResponse) {
+    option (google.api.http) = {
+      get: "/v1/scheduling/requests/{request_id}"
+    };
+  }
+  
+  // Get node capacity (for monitoring)
+  rpc GetNodeCapacity(GetNodeCapacityRequest) returns (GetNodeCapacityResponse) {
+    option (google.api.http) = {
+      get: "/v1/scheduling/nodes/{node_id}/capacity"
+    };
+  }
+  
+  // List all node capacities
+  rpc ListNodeCapacities(ListNodeCapacitiesRequest) returns (ListNodeCapacitiesResponse) {
+    option (google.api.http) = {
+      get: "/v1/scheduling/nodes/capacities"
+    };
+  }
+}
+
+// Request to schedule an actor
+message ScheduleActorRequest {
+  // Actor resource requirements (imported from actor_runtime.proto)
+  plexspaces.actor.v1.ActorResourceRequirements requirements = 1 [(google.api.field_behavior) = REQUIRED];
+  
+  // Namespace (optional)
+  string namespace = 2;
+  
+  // Tenant ID (optional)
+  string tenant_id = 3;
+  
+  // Optional: Client-provided request ID (for idempotency)
+  // If not provided, server generates one
+  string request_id = 4;
+}
+
+// Response for schedule actor request
+message ScheduleActorResponse {
+  // Request ID for tracking
+  string request_id = 1;
+  
+  // Immediate status (PENDING, SCHEDULED, or FAILED)
+  SchedulingStatus status = 2;
+  
+  // If SCHEDULED: selected node ID
+  string node_id = 3;
+  
+  // If SCHEDULED: node gRPC address
+  string node_address = 4;
+  
+  // If FAILED: error message
+  string error_message = 5;
+  
+  // Timestamp
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+// Request to get scheduling status
+message GetSchedulingStatusRequest {
+  // Request ID
+  string request_id = 1 [(google.api.field_behavior) = REQUIRED, (buf.validate.field).string = {min_len: 1, max_len: 255}];
+}
+
+// Response for get scheduling status
+message GetSchedulingStatusResponse {
+  // Scheduling request
+  SchedulingRequest request = 1;
+}
+
+// Request to get node capacity
+message GetNodeCapacityRequest {
+  // Node ID
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED, (buf.validate.field).string = {min_len: 1, max_len: 255}];
+}
+
+// Response for get node capacity
+message GetNodeCapacityResponse {
+  // Node capacity (imported from node.proto)
+  plexspaces.node.v1.NodeCapacity capacity = 1;
+}
+
+// Request to list all node capacities
+message ListNodeCapacitiesRequest {
+  // Optional: Filter by labels
+  map<string, string> label_filters = 1;
+  
+  // Optional: Pagination
+  plexspaces.common.v1.PageRequest page = 2;
+}
+
+// Response for list node capacities
+message ListNodeCapacitiesResponse {
+  // Node capacities
+  repeated NodeCapacityEntry capacities = 1;
+  
+  // Pagination
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// Node capacity entry (node ID + capacity)
+message NodeCapacityEntry {
+  // Node ID
+  string node_id = 1;
+  
+  // Node capacity (imported from node.proto)
+  plexspaces.node.v1.NodeCapacity capacity = 2;
+}
+

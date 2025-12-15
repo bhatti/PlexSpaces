@@ -1,0 +1,658 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Metrics API (Observability Core)
+//
+// ## Purpose
+// **CORE OBSERVABILITY BUILDING BLOCK**: Defines typed metrics for observability across all PlexSpaces services.
+// **CORE PRINCIPLE**: Every service operation MUST emit metrics.
+//
+// ## Design Principle: Observability-First
+// PlexSpaces is designed to be **production-ready from day one**. This requires:
+// 1. Metrics for EVERY operation (actor spawn, message send, supervision restart, etc.)
+// 2. Multiple backend support (Prometheus, StatsD, OpenTelemetry)
+// 3. Proto-defined metrics (typed, documented, discoverable)
+// 4. Low-overhead collection (async, batched)
+//
+// ## Industry Standards
+// Follows **OpenTelemetry** and **Prometheus** best practices:
+// - **OpenTelemetry**: Standard observability framework (metrics, traces, logs)
+// - **Prometheus**: De facto standard for metrics collection
+// - **Structured Metrics**: Typed, labeled, discoverable
+// - **Multiple Export Formats**: Prometheus text, OTLP, StatsD
+//
+// ## Why Proto-Defined Metrics?
+// - **Documentation**: Metric definitions ARE the specification
+// - **Type Safety**: Metric names, labels, types validated at compile time
+// - **Discoverability**: List all metrics via gRPC reflection
+// - **Consistency**: All services use same metric definitions
+//
+// ## Integration Points
+// - **Prometheus**: `/metrics` HTTP endpoint (Prometheus text format)
+// - **StatsD**: UDP batched metrics (DogStatsD format)
+// - **OpenTelemetry**: OTLP exporter for traces + metrics
+// - **Custom**: Pluggable metric backends via Facets
+//
+// ## System Metrics
+// Detailed system performance metrics (CPU, memory, disk, network, components) are defined
+// in this file as part of the observability core. System management operations (health,
+// config, logs, backups) are in system.proto.
+//
+// ## Standard Metrics (All Services)
+//
+// ### Actor Metrics
+// - `plexspaces_actor_spawn_total` (counter) - Actors created
+// - `plexspaces_actor_active` (gauge) - Currently active actors
+// - `plexspaces_actor_message_received_total` (counter) - Messages received
+// - `plexspaces_actor_message_processed_duration_seconds` (histogram) - Processing latency
+// - `plexspaces_actor_error_total` (counter) - Errors by actor type
+//
+// ### Supervision Metrics
+// - `plexspaces_supervisor_restart_total` (counter) - Restarts by strategy
+// - `plexspaces_supervisor_child_failure_total` (counter) - Child failures
+// - `plexspaces_supervisor_recovery_duration_seconds` (histogram) - Recovery time
+//
+// ### Remoting Metrics
+// - `plexspaces_remote_message_sent_total` (counter) - Remote messages
+// - `plexspaces_remote_message_latency_seconds` (histogram) - Network latency
+// - `plexspaces_registry_lookup_total` (counter) - Registry lookups
+// - `plexspaces_registry_lookup_duration_seconds` (histogram) - Lookup latency
+//
+// ### System Metrics
+// - `plexspaces_node_cpu_usage` (gauge) - CPU utilization
+// - `plexspaces_node_memory_bytes` (gauge) - Memory usage
+// - `plexspaces_node_actors_count` (gauge) - Actors per node
+// - `plexspaces_node_up` (gauge) - Node health (1=up, 0=down)
+
+syntax = "proto3";
+
+package plexspaces.metrics.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/node/node.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/metrics/v1;metricsv1";
+option java_package = "com.bhatti.plexspaces.metrics.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpaces Metrics API";
+    version: "1.0";
+    description: "Observability and metrics for all PlexSpaces services";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// ============================================================================
+// METRICS SERVICE
+// ============================================================================
+
+service MetricsService {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Metrics export and monitoring service"
+  };
+
+  // Export metrics in Prometheus text format
+  rpc ExportPrometheus(ExportPrometheusRequest) returns (ExportPrometheusResponse) {
+    option (google.api.http) = {
+      get: "/metrics"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Export Prometheus Metrics"
+      description: "Returns metrics in Prometheus text format"
+      tags: "Metrics"
+    };
+  }
+
+  // Get current metric values (structured)
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {
+    option (google.api.http) = {
+      get: "/v1/metrics"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Metrics"
+      description: "Returns structured metric values"
+      tags: "Metrics"
+    };
+  }
+
+  // List all registered metric definitions
+  rpc ListMetricDefinitions(ListMetricDefinitionsRequest) returns (ListMetricDefinitionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/metrics/definitions"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List Metric Definitions"
+      description: "Returns all registered metric definitions"
+      tags: "Metrics"
+    };
+  }
+
+  // Record metric (for testing/manual recording)
+  rpc RecordMetric(RecordMetricRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      post: "/v1/metrics/record"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Metric"
+      description: "Manually record a metric value"
+      tags: "Metrics"
+    };
+  }
+}
+
+// ============================================================================
+// METRIC TYPES
+// ============================================================================
+
+// Metric type enumeration
+enum MetricType {
+  METRIC_TYPE_UNSPECIFIED = 0;
+  METRIC_TYPE_COUNTER = 1;     // Monotonically increasing value
+  METRIC_TYPE_GAUGE = 2;       // Can go up and down
+  METRIC_TYPE_HISTOGRAM = 3;   // Distribution of values
+  METRIC_TYPE_SUMMARY = 4;     // Similar to histogram but with quantiles
+}
+
+// Metric definition (registry of available metrics)
+message MetricDefinition {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "MetricDefinition"
+      description: "Definition of a metric"
+      required: ["name", "type", "help"]
+    }
+  };
+
+  // Metric name (e.g., "plexspaces_actor_spawn_total")
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Metric type
+  MetricType type = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Help text describing the metric
+  string help = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Label names (e.g., ["node_id", "actor_type"])
+  repeated string labels = 4;
+
+  // Histogram buckets (for histogram metrics)
+  repeated double buckets = 5;
+}
+
+// Metric value with labels
+message Metric {
+  // Metric name
+  string name = 1;
+
+  // Labels (key-value pairs)
+  map<string, string> labels = 2;
+
+  // Metric value
+  oneof value {
+    double counter_value = 10;
+    double gauge_value = 11;
+    HistogramValue histogram_value = 12;
+    SummaryValue summary_value = 13;
+  }
+
+  // When metric was recorded
+  google.protobuf.Timestamp timestamp = 20;
+}
+
+// Histogram value
+message HistogramValue {
+  uint64 count = 1;
+  double sum = 2;
+  repeated Bucket buckets = 3;
+
+  message Bucket {
+    double upper_bound = 1;
+    uint64 count = 2;
+  }
+}
+
+// Summary value
+message SummaryValue {
+  uint64 count = 1;
+  double sum = 2;
+  repeated Quantile quantiles = 3;
+
+  message Quantile {
+    double quantile = 1;  // e.g., 0.5, 0.9, 0.99
+    double value = 2;
+  }
+}
+
+// ============================================================================
+// REQUEST/RESPONSE MESSAGES
+// ============================================================================
+
+message ExportPrometheusRequest {
+  // Empty - exports all metrics
+}
+
+message ExportPrometheusResponse {
+  // Prometheus text format
+  string content = 1 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Metrics in Prometheus text format"
+      example: "\"# HELP plexspaces_actor_spawn_total Actors created\\n# TYPE plexspaces_actor_spawn_total counter\\nplexspaces_actor_spawn_total{node_id=\\\"node1\\\"} 42\\n\""
+    }
+  ];
+}
+
+message GetMetricsRequest {
+  // Filter by metric name pattern (e.g., "plexspaces_actor_*")
+  string name_pattern = 1;
+
+  // Filter by labels
+  map<string, string> label_filter = 2;
+}
+
+message GetMetricsResponse {
+  repeated Metric metrics = 1;
+}
+
+message ListMetricDefinitionsRequest {
+  // Filter by name pattern
+  string name_pattern = 1;
+}
+
+message ListMetricDefinitionsResponse {
+  repeated MetricDefinition definitions = 1;
+}
+
+message RecordMetricRequest {
+  // Metric to record
+  Metric metric = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Request to get actor metrics
+message GetActorMetricsRequest {
+  // Empty - returns metrics for the local ActorService
+}
+
+// Request to get node metrics
+message GetNodeMetricsRequest {
+  // Node ID (empty = local node)
+  string node_id = 1;
+}
+
+// ============================================================================
+// STANDARD METRIC DEFINITIONS
+// ============================================================================
+// These are the built-in metrics that all PlexSpaces services emit.
+// Services can register additional custom metrics as needed.
+
+// Standard actor metrics (high-level, for ActorService)
+// Note: Detailed actor/message metrics are in the ActorMetrics message below
+message ActorServiceMetrics {
+  // Total actors spawned
+  uint64 spawn_total = 1;
+
+  // Currently active actors
+  uint64 active = 2;
+
+  // Total messages received
+  uint64 message_received_total = 3;
+
+  // Total messages processed
+  uint64 message_processed_total = 4;
+
+  // Total errors
+  uint64 error_total = 5;
+
+  // Message processing latency (histogram)
+  HistogramValue message_processed_duration = 6;
+}
+
+// Standard supervision metrics
+message SupervisionMetrics {
+  // Total restarts by strategy
+  map<string, uint64> restart_total = 1;  // key = strategy name
+
+  // Total child failures
+  uint64 child_failure_total = 2;
+
+  // Recovery duration (histogram)
+  HistogramValue recovery_duration = 3;
+}
+
+// Standard remoting metrics
+message RemotingMetrics {
+  // Total remote messages sent
+  uint64 message_sent_total = 1;
+
+  // Total remote messages received
+  uint64 message_received_total = 2;
+
+  // Remote message latency (histogram)
+  HistogramValue message_latency = 3;
+
+  // Total registry lookups
+  uint64 registry_lookup_total = 4;
+
+  // Registry lookup duration (histogram)
+  HistogramValue registry_lookup_duration = 5;
+}
+
+// Actor and message routing/delivery metrics
+//
+// ## Purpose
+// Tracks actor lifecycle and message routing/delivery metrics that can be updated by ActorRegistry
+// without depending on Node. These metrics are also synced to NodeMetrics
+// via NodeMetricsUpdater for backward compatibility.
+//
+// ## Design
+// Proto-first design: All actor/message metrics are defined in proto for:
+// - Wire compatibility (gRPC metrics APIs)
+// - Language-agnostic observability
+// - Consistent metrics semantics across implementations
+//
+// ## Metrics Categories
+// - Actor lifecycle: Spawned, active, errors
+// - Message routing: Total messages routed
+// - Delivery metrics: Local, remote, and failed deliveries
+message ActorMetrics {
+  // Total actors spawned
+  uint64 spawn_total = 1;
+
+  // Currently active actors
+  uint64 active = 2;
+
+  // Total messages routed through this node/registry
+  uint64 messages_routed = 3;
+
+  // Local message deliveries (same node)
+  uint64 local_deliveries = 4;
+
+  // Remote message deliveries (different node)
+  uint64 remote_deliveries = 5;
+
+  // Failed message deliveries
+  uint64 failed_deliveries = 6;
+
+  // Total errors
+  uint64 error_total = 7;
+}
+
+// ============================================================================
+// SYSTEM METRICS (Detailed)
+// ============================================================================
+// Detailed system performance metrics following industry standards
+// (OpenTelemetry/Prometheus-inspired)
+
+// System metrics snapshot
+//
+// ## Purpose
+// Comprehensive system performance metrics for observability.
+// Follows OpenTelemetry/Prometheus best practices with structured metrics.
+//
+// ## Design Notes
+// - Timestamped snapshot of system state
+// - Nested messages for logical grouping (CPU, memory, disk, network, components)
+// - Can be converted to Prometheus metrics via labels
+// - Supports both structured (this message) and flat (Prometheus) formats
+message SystemMetrics {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "System Metrics"
+      description: "System performance metrics snapshot"
+    }
+  };
+
+  // When this metrics snapshot was taken
+  google.protobuf.Timestamp timestamp = 1;
+
+  // CPU metrics
+  CpuMetrics cpu = 2;
+
+  // Memory metrics
+  MemoryMetrics memory = 3;
+
+  // Disk metrics
+  DiskMetrics disk = 4;
+
+  // Network metrics
+  NetworkMetrics network = 5;
+
+  // Component metrics (actors, workflows, etc.)
+  ComponentMetrics components = 6;
+}
+
+// CPU performance metrics
+//
+// ## Prometheus Mapping
+// - `plexspaces_system_cpu_usage_percent` (gauge)
+// - `plexspaces_system_cpu_load_average_1m` (gauge)
+// - `plexspaces_system_cpu_load_average_5m` (gauge)
+// - `plexspaces_system_cpu_load_average_15m` (gauge)
+// - `plexspaces_system_cpu_active_processes` (gauge)
+message CpuMetrics {
+  // CPU usage percentage (0.0 to 100.0)
+  double usage_percent = 1;
+
+  // Load average over 1 minute
+  double load_average_1m = 2;
+
+  // Load average over 5 minutes
+  double load_average_5m = 3;
+
+  // Load average over 15 minutes
+  double load_average_15m = 4;
+
+  // Number of active processes
+  int32 active_processes = 5;
+}
+
+// Memory performance metrics
+//
+// ## Prometheus Mapping
+// - `plexspaces_system_memory_total_bytes` (gauge)
+// - `plexspaces_system_memory_used_bytes` (gauge)
+// - `plexspaces_system_memory_free_bytes` (gauge)
+// - `plexspaces_system_memory_cached_bytes` (gauge)
+// - `plexspaces_system_memory_usage_percent` (gauge)
+message MemoryMetrics {
+  // Total memory in megabytes
+  uint64 total_mb = 1;
+
+  // Used memory in megabytes
+  uint64 used_mb = 2;
+
+  // Free memory in megabytes
+  uint64 free_mb = 3;
+
+  // Cached memory in megabytes
+  uint64 cached_mb = 4;
+
+  // Memory usage percentage (0.0 to 100.0)
+  double usage_percent = 5;
+}
+
+// Disk performance metrics
+//
+// ## Prometheus Mapping
+// - `plexspaces_system_disk_total_bytes` (gauge)
+// - `plexspaces_system_disk_used_bytes` (gauge)
+// - `plexspaces_system_disk_free_bytes` (gauge)
+// - `plexspaces_system_disk_usage_percent` (gauge)
+// - `plexspaces_system_disk_read_ops_per_sec` (gauge)
+// - `plexspaces_system_disk_write_ops_per_sec` (gauge)
+message DiskMetrics {
+  // Total disk space in gigabytes
+  uint64 total_gb = 1;
+
+  // Used disk space in gigabytes
+  uint64 used_gb = 2;
+
+  // Free disk space in gigabytes
+  uint64 free_gb = 3;
+
+  // Disk usage percentage (0.0 to 100.0)
+  double usage_percent = 4;
+
+  // Disk read operations per second
+  uint64 read_ops_per_sec = 5;
+
+  // Disk write operations per second
+  uint64 write_ops_per_sec = 6;
+}
+
+// Network performance metrics
+//
+// ## Prometheus Mapping
+// - `plexspaces_system_network_bytes_received_per_sec` (gauge)
+// - `plexspaces_system_network_bytes_sent_per_sec` (gauge)
+// - `plexspaces_system_network_packets_received_per_sec` (gauge)
+// - `plexspaces_system_network_packets_sent_per_sec` (gauge)
+// - `plexspaces_system_network_active_connections` (gauge)
+message NetworkMetrics {
+  // Bytes received per second
+  uint64 bytes_received_per_sec = 1;
+
+  // Bytes sent per second
+  uint64 bytes_sent_per_sec = 2;
+
+  // Packets received per second
+  uint64 packets_received_per_sec = 3;
+
+  // Packets sent per second
+  uint64 packets_sent_per_sec = 4;
+
+  // Number of active network connections
+  uint32 active_connections = 5;
+}
+
+// Component metrics (PlexSpaces-specific)
+//
+// ## Purpose
+// Tracks PlexSpaces-specific component counts and sizes.
+//
+// ## Design
+// Uses maps to support extensible actor types and component types without schema changes.
+// Actor types are strings (e.g., "counter", "worker", "virtual_actor", "genserver", "workflow").
+//
+// ## Prometheus Mapping
+// - `plexspaces_components_active_actors_by_type{actor_type="counter"}` (gauge)
+// - `plexspaces_components_active_actors_by_type{actor_type="worker"}` (gauge)
+// - `plexspaces_components_active_vms` (gauge)
+// - `plexspaces_components_tuplespace_size` (gauge)
+// - `plexspaces_components_active_subscriptions` (gauge)
+// - `plexspaces_components_active_transactions` (gauge)
+message ComponentMetrics {
+  // Active actors by type (supports all actor types: "counter", "worker", "virtual_actor", "genserver", "workflow", etc.)
+  // Key: actor type (string), Value: count of active actors of that type
+  // Examples:
+  //   - "counter" -> 10
+  //   - "worker" -> 50
+  //   - "virtual_actor" -> 100
+  //   - "genserver" -> 25
+  //   - "workflow" -> 5
+  map<string, uint32> active_actors_by_type = 1;
+
+  // Number of active VMs
+  uint32 active_vms = 2;
+
+  // TupleSpace size (number of tuples)
+  uint64 tuplespace_size = 3;
+
+  // Number of active subscriptions
+  uint32 active_subscriptions = 4;
+
+  // Number of active transactions
+  uint32 active_transactions = 5;
+}
+
+// ============================================================================
+// COORDINATION VS COMPUTE METRICS
+// ============================================================================
+// Tracks coordination overhead vs actual computation time for HPC workloads.
+// Per CLAUDE.md Design Principle #6: Computation Cost >> Communication Cost
+//
+// ## Purpose
+// Measure granularity ratio (compute / coordinate) to ensure efficient parallelism.
+// Golden Rule: compute_time / coordinate_time >= 10x (minimum), ideally >= 100x
+//
+// ## Usage
+// Start tracking with start_compute() / start_coordinate(), then finalize() to get metrics.
+// This helps identify bottlenecks and optimize actor granularity.
+
+// Coordination vs Compute metrics for workflow/actor execution
+message CoordinationComputeMetrics {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "CoordinationComputeMetrics"
+      description: "Metrics tracking coordination overhead vs computation time"
+    }
+  };
+
+  // Workflow/actor ID being tracked
+  string workflow_id = 1;
+
+  // Time spent on actual computation (ms)
+  uint64 compute_duration_ms = 2;
+
+  // Time spent on coordination (message passing, barriers, scheduling) (ms)
+  uint64 coordinate_duration_ms = 3;
+
+  // Number of messages sent between actors
+  uint64 message_count = 4;
+
+  // Number of barrier synchronizations
+  uint64 barrier_count = 5;
+
+  // Total execution duration (ms)
+  uint64 total_duration_ms = 6;
+
+  // Granularity ratio (compute / coordinate)
+  // Should be >= 10.0, ideally >= 100.0
+  double granularity_ratio = 7;
+
+  // Efficiency (compute / total)
+  // Closer to 1.0 means less coordination overhead
+  double efficiency = 8;
+
+  // Step-by-step breakdown (optional)
+  repeated StepMetrics step_metrics = 9;
+}
+
+// Metrics for individual workflow step
+message StepMetrics {
+  // Step name
+  string step_name = 1;
+
+  // Computation time for this step (ms)
+  uint64 compute_ms = 2;
+
+  // Coordination time for this step (ms)
+  uint64 coordinate_ms = 3;
+
+  // Number of messages sent in this step
+  uint64 message_count = 4;
+}

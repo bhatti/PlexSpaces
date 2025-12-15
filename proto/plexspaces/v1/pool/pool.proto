@@ -1,0 +1,482 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Elastic Actor Pool API
+//
+// ## Purpose
+// Provides auto-scaling actor pools for microservices, inspired by Erlang poolboy
+// and database connection pools. Combines actors with dynamic scaling based on load.
+//
+// ## Architecture Context
+// ElasticPool is built on PlexSpaces Supervisor + Channel:
+// - **Supervisor**: Manages actor pools with restart policies
+// - **Channel**: Work queue for distributing requests
+// - **Auto-scaler**: Monitors load and adjusts pool size
+//
+// ## Use Cases
+// - **Database Connection Pools**: Manage expensive DB connections
+// - **HTTP Client Pools**: Reuse HTTP/2 connections with connection pooling
+// - **gRPC Client Pools**: Maintain open gRPC channels
+// - **Actor Pools**: Any resource that benefits from pooling and reuse
+//
+// ## Design Decisions
+// - **Why Erlang/OTP supervisor-based**: Proven fault-tolerance patterns
+// - **Why elastic**: Adapt to varying load without manual intervention
+// - **Why metrics-driven**: Auto-scaling decisions based on observable data
+
+syntax = "proto3";
+
+package plexspaces.pool.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Pool scaling state
+enum ScalingState {
+  SCALING_STATE_STABLE = 0;
+  SCALING_STATE_SCALING_UP = 1;
+  SCALING_STATE_SCALING_DOWN = 2;
+  SCALING_STATE_PAUSED = 3; // Manual override
+}
+
+// Actor state in pool
+enum PoolActorState {
+  POOL_ACTOR_STATE_AVAILABLE = 0;
+  POOL_ACTOR_STATE_BUSY = 1;
+  POOL_ACTOR_STATE_IDLE = 2;
+  POOL_ACTOR_STATE_FAILED = 3;
+}
+
+// Pool configuration (Erlang poolboy-inspired)
+message PoolConfig {
+  // Pool name (unique identifier)
+  string name = 1;
+
+  // Minimum pool size (always maintained)
+  uint32 min_size = 2;
+
+  // Maximum pool size (overflow limit)
+  uint32 max_size = 3;
+
+  // Initial pool size (on startup)
+  uint32 initial_size = 4;
+
+  // Scaling thresholds
+  double scaling_threshold = 5; // Scale up when load > this (default: 0.8)
+  double scale_down_threshold = 6; // Scale down when load < this (default: 0.3)
+
+  // Idle timeout (kill idle workers after this duration)
+  google.protobuf.Duration idle_timeout = 7;
+
+  // Checkout timeout (max time to wait for available actor)
+  google.protobuf.Duration checkout_timeout = 8;
+
+  // Health check interval
+  google.protobuf.Duration health_check_interval = 9;
+
+  // Scaling check interval
+  google.protobuf.Duration scaling_check_interval = 10;
+
+  // Scaling policies
+  ScalingPolicy scaling_policy = 11;
+
+  // Actor configuration (behavior-specific)
+  ActorConfig actor_config = 12;
+
+  // Circuit breaker configuration (optional)
+  CircuitBreakerConfig circuit_breaker = 13;
+}
+
+// Scaling policy
+message ScalingPolicy {
+  // Scaling strategy
+  enum Strategy {
+    // Add/remove workers one at a time
+    STRATEGY_INCREMENTAL = 0;
+
+    // Add/remove a percentage of current size
+    STRATEGY_PERCENTAGE = 1;
+
+    // Double/halve pool size
+    STRATEGY_EXPONENTIAL = 2;
+
+    // Custom scaling function
+    STRATEGY_CUSTOM = 3;
+  }
+
+  Strategy strategy = 1;
+
+  // For percentage strategy: how much to scale (e.g., 0.5 = 50%)
+  double scale_factor = 2;
+
+  // Cooldown period after scaling (prevent thrashing)
+  google.protobuf.Duration cooldown = 3;
+
+  // Minimum workers to add/remove at a time
+  uint32 min_scale_step = 4;
+
+  // Maximum workers to add/remove at a time
+  uint32 max_scale_step = 5;
+}
+
+// Actor configuration
+message ActorConfig {
+  // Actor behavior type (e.g., "DbConnectionActor", "HttpClientActor")
+  string actor_type = 1;
+
+  // Actor initialization arguments (serialized)
+  bytes init_args = 2;
+
+  // Actor restart policy
+  enum RestartPolicy {
+    RESTART_POLICY_PERMANENT = 0; // Always restart
+    RESTART_POLICY_TEMPORARY = 1; // Never restart
+    RESTART_POLICY_TRANSIENT = 2; // Restart only on abnormal exit
+  }
+
+  RestartPolicy restart_policy = 3;
+
+  // Actor shutdown timeout
+  google.protobuf.Duration shutdown_timeout = 4;
+
+  // Maximum restarts per time window
+  uint32 max_restarts = 5;
+  google.protobuf.Duration restart_window = 6;
+}
+
+// Circuit breaker configuration
+message CircuitBreakerConfig {
+  // Failure threshold to open circuit
+  uint32 failure_threshold = 1;
+
+  // Success threshold to close circuit
+  uint32 success_threshold = 2;
+
+  // Timeout before trying to close circuit
+  google.protobuf.Duration timeout = 3;
+
+  // Half-open state: allow some requests through
+  uint32 half_open_max_requests = 4;
+}
+
+// Pool metrics (for monitoring and auto-scaling decisions)
+message PoolMetrics {
+  // Pool name
+  string name = 1;
+
+  // Current state
+  ScalingState scaling_state = 2;
+
+  // Actor counts
+  uint32 total_actors = 3;
+  uint32 available_actors = 4;
+  uint32 busy_actors = 5;
+  uint32 idle_actors = 6;
+  uint32 failed_actors = 7;
+
+  // Queue metrics
+  uint32 waiting_requests = 8;
+  uint32 total_checkouts = 9;
+  uint32 total_checkins = 10;
+  uint32 total_timeouts = 11;
+
+  // Load metrics (0.0 to 1.0)
+  double current_load = 12;
+  double avg_load_1m = 13;
+  double avg_load_5m = 14;
+
+  // Latency metrics (microseconds)
+  uint64 avg_checkout_latency = 15;
+  uint64 p95_checkout_latency = 16;
+  uint64 p99_checkout_latency = 17;
+
+  // Actor usage metrics
+  uint64 avg_actor_usage_time = 18;
+  uint64 avg_actor_idle_time = 19;
+
+  // Circuit breaker state
+  string circuit_state = 20; // "closed", "open", "half-open"
+
+  // Last scaling event
+  google.protobuf.Timestamp last_scale_up = 21;
+  google.protobuf.Timestamp last_scale_down = 22;
+
+  // Custom metrics (backend-specific)
+  map<string, double> custom_metrics = 23;
+}
+
+// Actor handle (returned from checkout)
+message ActorHandle {
+  // Actor ID
+  string actor_id = 1;
+
+  // Pool name
+  string pool_name = 2;
+
+  // Checkout timestamp
+  google.protobuf.Timestamp checkout_time = 3;
+
+  // Checkout ID (for tracking)
+  string checkout_id = 4;
+
+  // Actor metadata
+  map<string, string> metadata = 5;
+}
+
+// Pool service for managing elastic pools
+service PoolService {
+  // Create a new pool
+  rpc CreatePool(CreatePoolRequest) returns (CreatePoolResponse) {
+    option (google.api.http) = {
+      post: "/v1/pools"
+      body: "*"
+    };
+  }
+
+  // Checkout an actor from pool
+  rpc Checkout(CheckoutRequest) returns (CheckoutResponse) {
+    option (google.api.http) = {
+      post: "/v1/pools/{pool_name}:checkout"
+      body: "*"
+    };
+  }
+
+  // Checkin an actor to pool
+  rpc Checkin(CheckinRequest) returns (CheckinResponse) {
+    option (google.api.http) = {
+      post: "/v1/pools/{pool_name}:checkin"
+      body: "*"
+    };
+  }
+
+  // Get pool statistics
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
+    option (google.api.http) = {
+      get: "/v1/pools/{pool_name}/stats"
+    };
+  }
+
+  // Scale pool manually
+  rpc Scale(ScaleRequest) returns (ScaleResponse) {
+    option (google.api.http) = {
+      post: "/v1/pools/{pool_name}:scale"
+      body: "*"
+    };
+  }
+
+  // Pause auto-scaling
+  rpc PauseScaling(PauseScalingRequest) returns (PauseScalingResponse) {
+    option (google.api.http) = {
+      post: "/v1/pools/{pool_name}:pauseScaling"
+      body: "*"
+    };
+  }
+
+  // Resume auto-scaling
+  rpc ResumeScaling(ResumeScalingRequest) returns (ResumeScalingResponse) {
+    option (google.api.http) = {
+      post: "/v1/pools/{pool_name}:resumeScaling"
+      body: "*"
+    };
+  }
+
+  // Drain pool (stop accepting new checkouts)
+  rpc Drain(DrainRequest) returns (DrainResponse) {
+    option (google.api.http) = {
+      post: "/v1/pools/{pool_name}:drain"
+      body: "*"
+    };
+  }
+
+  // Delete pool
+  rpc DeletePool(DeletePoolRequest) returns (DeletePoolResponse) {
+    option (google.api.http) = {
+      delete: "/v1/pools/{pool_name}"
+    };
+  }
+
+  // Stream pool metrics (for monitoring)
+  rpc StreamMetrics(StreamMetricsRequest) returns (stream PoolMetrics) {
+    option (google.api.http) = {
+      get: "/v1/pools/{pool_name}/metrics/stream"
+    };
+  }
+}
+
+// CreatePool request
+message CreatePoolRequest {
+  PoolConfig config = 1;
+}
+
+// CreatePool response
+message CreatePoolResponse {
+  string pool_id = 1;
+}
+
+// Checkout request
+message CheckoutRequest {
+  string pool_name = 1;
+  google.protobuf.Duration timeout = 2;
+  map<string, string> metadata = 3; // For tracking/correlation
+}
+
+// Checkout response
+message CheckoutResponse {
+  oneof result {
+    ActorHandle actor = 1;
+    CheckoutError error = 2;
+  }
+}
+
+// Checkout error
+message CheckoutError {
+  enum ErrorType {
+    ERROR_TYPE_TIMEOUT = 0;
+    ERROR_TYPE_POOL_EXHAUSTED = 1;
+    ERROR_TYPE_CIRCUIT_OPEN = 2;
+    ERROR_TYPE_POOL_DRAINING = 3;
+    ERROR_TYPE_POOL_NOT_FOUND = 4;
+  }
+
+  ErrorType type = 1;
+  string message = 2;
+}
+
+// Checkin request
+message CheckinRequest {
+  string pool_name = 1;
+  string actor_id = 2;
+  string checkout_id = 3;
+
+  // Optional: actor health status
+  bool healthy = 4;
+}
+
+// Checkin response
+message CheckinResponse {
+  bool checked_in = 1;
+}
+
+// GetStats request
+message GetStatsRequest {
+  string pool_name = 1;
+}
+
+// GetStats response
+message GetStatsResponse {
+  PoolMetrics metrics = 1;
+}
+
+// Scale request (manual scaling)
+message ScaleRequest {
+  string pool_name = 1;
+
+  oneof scale_type {
+    uint32 absolute_size = 2; // Set to exact size
+    int32 relative_size = 3; // Add/remove N actors
+  }
+}
+
+// Scale response
+message ScaleResponse {
+  uint32 new_size = 1;
+  uint32 actors_added = 2;
+  uint32 actors_removed = 3;
+}
+
+// PauseScaling request
+message PauseScalingRequest {
+  string pool_name = 1;
+}
+
+// PauseScaling response
+message PauseScalingResponse {
+  bool paused = 1;
+}
+
+// ResumeScaling request
+message ResumeScalingRequest {
+  string pool_name = 1;
+}
+
+// ResumeScaling response
+message ResumeScalingResponse {
+  bool resumed = 1;
+}
+
+// Drain request
+message DrainRequest {
+  string pool_name = 1;
+  google.protobuf.Duration timeout = 2; // Wait for actors to finish
+}
+
+// Drain response
+message DrainResponse {
+  bool drained = 1;
+  uint32 actors_drained = 2;
+}
+
+// DeletePool request
+message DeletePoolRequest {
+  string pool_name = 1;
+  bool force = 2; // Force delete even with busy actors
+}
+
+// DeletePool response
+message DeletePoolResponse {
+  bool deleted = 1;
+}
+
+// StreamMetrics request
+message StreamMetricsRequest {
+  string pool_name = 1;
+  google.protobuf.Duration interval = 2; // Update frequency
+}
+
+// ==================== Error Types ====================
+
+// Elastic pool error types
+//
+// ## Purpose
+// Defines error types for elastic pool operations.
+// Used in error responses and for error handling in pool service.
+enum ElasticPoolError {
+  ELASTIC_POOL_ERROR_UNSPECIFIED = 0;
+
+  // Pool not found
+  ELASTIC_POOL_ERROR_POOL_NOT_FOUND = 1;
+
+  // Checkout timeout (waited too long for actor)
+  ELASTIC_POOL_ERROR_CHECKOUT_TIMEOUT = 2;
+
+  // Pool exhausted (all actors busy, max size reached)
+  ELASTIC_POOL_ERROR_POOL_EXHAUSTED = 3;
+
+  // Circuit open (too many failures)
+  ELASTIC_POOL_ERROR_CIRCUIT_OPEN = 4;
+
+  // Pool draining (not accepting new requests)
+  ELASTIC_POOL_ERROR_POOL_DRAINING = 5;
+
+  // Invalid configuration
+  ELASTIC_POOL_ERROR_INVALID_CONFIG = 6;
+
+  // Actor error
+  ELASTIC_POOL_ERROR_ACTOR_ERROR = 7;
+}

@@ -1,0 +1,23 @@
+# N-Body Simulation Release Configuration
+
+[release]
+name = "nbody-simulation"
+version = "0.1.0"
+
+[[applications]]
+name = "nbody"
+version = "0.1.0"
+
+[nbody]
+# Number of bodies to simulate
+body_count = 3
+
+# Number of simulation steps
+steps = 10
+
+# Time step (seconds)
+dt = 1.0
+
+# Use 3-body system (Sun, Earth, Moon) if true
+use_3body_system = true
+

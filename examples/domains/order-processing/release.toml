@@ -1,0 +1,20 @@
+# Order Processing Example Configuration
+# Erlang/OTP-style configuration with environment variable overrides
+# Precedence: Environment variables > release.toml > defaults
+
+[order_processor]
+max_orders = 1000
+enable_metrics = true
+
+[channel]
+use_in_memory = true
+use_redis = false
+redis_url = "redis://localhost:6379"
+use_kafka = false
+kafka_brokers = ["localhost:9092"]
+
+[node]
+node_id = "order-node-1"
+grpc_port = 9001
+registry_port = 9101
+

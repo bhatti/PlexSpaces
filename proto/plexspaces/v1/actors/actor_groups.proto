@@ -1,0 +1,662 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+
+// PlexSpaces Actor Groups API (Sharding Pattern)
+//
+// ## Purpose
+// Implements data-parallel actors (NSDI'22 paper pattern) for horizontal scaling through
+// sharding and lattice-based state merging. Actor groups enable coordination-free parallelism
+// by partitioning data across N shards, where each shard handles a subset of keys independently.
+//
+// ## Terminology
+// **In PlexSpaces, we use "actor" terminology consistently:**
+// - Each shard is an actor instance
+// - Actor Groups (Sharding) = collections of actors for data parallelism
+// - Process Groups (Pub/Sub) = collections of actors for coordination
+// - Both are collections of actors, just different coordination patterns
+//
+// ## When to Use Actor Groups (Sharding)
+// ✅ **Use when:**
+// - High-throughput workloads (millions of ops/sec)
+// - Horizontally scalable state (counters, sets, maps)
+// - Partitionable data (user IDs, session IDs, timestamps)
+// - Eventual consistency acceptable
+// - Need scatter-gather queries
+//
+// ❌ **Don't use when:**
+// - Need broadcast/coordination → Use Process Groups (Pub/Sub) instead
+// - Strong consistency required → Use single actor with transactions
+// - Small datasets → Overhead not worth it
+//
+// **See**: `docs/GROUPS_COMPARISON.md` for detailed comparison and decision guide
+//
+// ## Architecture Context
+// This proto file bridges **Pillar 2 (Erlang/OTP)** with **data-parallel computing**:
+// - **Pillar 1 (TupleSpace)**: Shards can coordinate via TupleSpace for cross-shard operations
+// - **Pillar 2 (Erlang/OTP)**: Each shard is a supervised actor with independent lifecycle
+// - **Pillar 3 (Durability)**: Shard state journaled independently for parallel recovery
+// - **Pillar 4 (WASM)**: Shards can be WASM actors for portable execution
+// - **Pillar 5 (Firecracker)**: Shards can run in separate VMs for isolation
+//
+// ### Integration with Other Pillars
+// - **Supervision**: Each shard supervised independently (failure of shard-0 doesn't affect shard-1)
+// - **Mobility**: Shards can migrate independently for load balancing
+// - **Lattice State**: CRDTs enable coordination-free state merging (NSDI'22 key insight)
+// - **Scatter-Gather**: Query all shards in parallel, aggregate results
+//
+// ## Component Interactions
+// - **Used by**: Applications needing horizontal scaling (counters, caches, indexes)
+// - **Depends on**: actor_runtime.proto (Actor, PartitionStrategy, DataParallelConfig),
+//   common.proto (PageRequest/PageResponse for listing)
+// - **Provides**: Data-parallel actor abstraction for high-throughput workloads
+//
+// ## Design Decisions
+// - **Why actor groups** (not just "run N actors"):
+//   - Unified management: Create/delete/scale N actors as one operation
+//   - Consistent partition strategy: Ensures keys always route to same shard
+//   - Rebalancing support: Move data when shards added/removed
+//   - Scatter-gather: Query all shards efficiently
+//
+// - **Why partition strategies** (Hash, Range, ConsistentHash):
+//   - **Hash**: Simple, uniform distribution, but full reshuffle on scale
+//   - **Range**: Ordered keys (e.g., timestamps), range queries efficient
+//   - **ConsistentHash**: Minimal key movement on scale (only 1/N keys move)
+//   - Configurable per group based on access pattern
+//
+// - **Why rebalancing is separate operation**:
+//   - Scaling up: Add new shards, rebalance gradually (avoid overwhelming cluster)
+//   - Scaling down: Drain shards, redistribute data (graceful shutdown)
+//   - Progress tracking: Users can monitor rebalancing (ETA, percent complete)
+//
+// - **Why scatter-gather**:
+//   - NSDI'22 pattern: Query all shards in parallel for full dataset view
+//   - Aggregation strategies: Different merge semantics (concat, lattice merge, reduce)
+//   - Partial results: min_responses allows returning even if some shards fail
+//
+// - **Why streaming scatter-gather**:
+//   - Low-latency queries: Return results as each shard responds (don't wait for all)
+//   - Early termination: Client can stop after N responses
+//   - Progress indication: Client sees partial results immediately
+//
+// - **Why lattice-based state** (STATE_MGMT_MODE_LATTICE in actor_runtime.proto):
+//   - Coordination-free: Shards update independently, merge via CRDT
+//   - No blocking: No distributed locks or two-phase commit
+//   - Eventual consistency: State converges automatically
+//   - NSDI'22 key insight: Most data-parallel workloads tolerate eventual consistency
+//
+// ## Actor Groups Examples
+//
+// ### Global Counter (Sharded for High Throughput)
+// ```protobuf
+// CreateGroupRequest {
+//   group_id: "global-counter"
+//   actor_type: "counter-shard"
+//   shard_count: 16                                   // 16 shards
+//   partition_strategy: PARTITION_STRATEGY_HASH      // Uniform distribution
+//   shard_config: {
+//     data_parallel_config: {
+//       group_id: "global-counter"
+//       shard_count: 16
+//       partition_strategy: PARTITION_STRATEGY_HASH
+//     }
+//     state_management_mode: STATE_MGMT_MODE_LATTICE  // CRDT-based
+//     consistency_level: CONSISTENCY_LEVEL_EVENTUAL   // No coordination
+//   }
+// }
+// // Each shard handles 1/16th of key space independently
+// // Total count = sum of all shard counts (scatter-gather query)
+// ```
+//
+// ### Distributed Cache (Consistent Hashing)
+// ```protobuf
+// CreateGroupRequest {
+//   group_id: "user-cache"
+//   actor_type: "cache-shard"
+//   shard_count: 32                                      // 32 shards
+//   partition_strategy: PARTITION_STRATEGY_CONSISTENT_HASH  // Minimal rebalancing
+//   shard_config: {
+//     max_memory_mb: 512                                 // 512 MB per shard
+//   }
+// }
+// // Send to shard: Hash(user_id) % 32
+// // Scale to 64 shards: Only ~50% of keys move (not 100%)
+// ```
+//
+// ### Time-Series Index (Range Partitioning)
+// ```protobuf
+// CreateGroupRequest {
+//   group_id: "metrics-index"
+//   actor_type: "timeseries-shard"
+//   shard_count: 8                                  // 8 time ranges
+//   partition_strategy: PARTITION_STRATEGY_RANGE    // Timestamp-based ranges
+//   shard_config: { /* ... */ }
+// }
+// // Shard 0: Jan 1-15, Shard 1: Jan 16-31, etc.
+// // Range queries efficient (query single shard)
+// ```
+//
+// ## Partition Strategy Comparison
+//
+// ### HASH (Uniform Distribution)
+// ```
+// Hash(key) % shard_count
+//
+// Example (4 shards):
+//   "user-001" → hash=12345 → shard=1 (12345 % 4)
+//   "user-002" → hash=67890 → shard=2 (67890 % 4)
+//
+// Pros: Uniform distribution, simple
+// Cons: Full reshuffle on scale (4→8 shards = ~50% keys move)
+// Use: Uniform access patterns, infrequent scaling
+// ```
+//
+// ### CONSISTENT_HASH (Minimal Rebalancing)
+// ```
+// ConsistentHash(key, virtual_nodes)
+//
+// Example (4 shards, 100 virtual nodes each):
+//   Ring: [vn1:shard0, vn2:shard1, ..., vn400:shard3]
+//   "user-001" → hash=12345 → find closest vn → shard
+//
+// Pros: Minimal key movement on scale (1/N keys move)
+// Cons: More complex, virtual node management
+// Use: Frequent scaling, large datasets
+// ```
+//
+// ### RANGE (Ordered Keys)
+// ```
+// Key ranges assigned to shards
+//
+// Example (4 shards, timestamp keys):
+//   Shard 0: 2025-01-01 to 2025-01-07
+//   Shard 1: 2025-01-08 to 2025-01-14
+//   Shard 2: 2025-01-15 to 2025-01-21
+//   Shard 3: 2025-01-22 to 2025-01-31
+//
+// Pros: Range queries efficient (single shard)
+// Cons: Hotspots if recent data accessed more
+// Use: Time-series, sorted data, range queries
+// ```
+//
+// ## Scatter-Gather Examples
+//
+// ### Total Count (Aggregation: Concat → Sum)
+// ```protobuf
+// ScatterGatherQuery {
+//   group_id: "global-counter"
+//   query: {
+//     message_type: "get_count"
+//     payload: []
+//   }
+//   timeout: { seconds: 5 }
+//   aggregation: AGGREGATION_STRATEGY_CONCAT  // Collect all responses
+//   min_responses: 16                         // Need all 16 shards
+// }
+// // Responses: [shard0:1000, shard1:1500, ..., shard15:900]
+// // Total: 1000 + 1500 + ... + 900 = 24000
+// ```
+//
+// ### Cache Lookup (Aggregation: First)
+// ```protobuf
+// ScatterGatherQuery {
+//   group_id: "user-cache"
+//   query: {
+//     message_type: "lookup"
+//     payload: [key pattern]
+//   }
+//   aggregation: AGGREGATION_STRATEGY_FIRST  // Return first match
+//   min_responses: 1                         // Stop after first response
+// }
+// // Search all shards in parallel, return first hit
+// // Latency = min(shard_latencies) not sum
+// ```
+//
+// ### Majority Vote (Aggregation: Majority)
+// ```protobuf
+// ScatterGatherQuery {
+//   group_id: "replicated-state"
+//   query: {
+//     message_type: "read"
+//     payload: [state_key]
+//   }
+//   aggregation: AGGREGATION_STRATEGY_MAJORITY  // Return majority value
+//   min_responses: 3                            // Need quorum (out of 5)
+// }
+// // Responses: [shard0:v1, shard1:v1, shard2:v2, shard3:v1, shard4:v1]
+// // Majority: v1 (4 out of 5)
+// ```
+//
+// ## Rebalancing Examples
+//
+// ### Scale Up (4 → 8 Shards)
+// ```protobuf
+// ScaleGroupRequest {
+//   group_id: "global-counter"
+//   new_shard_count: 8                          // Double capacity
+//   rebalance_policy: REBALANCE_POLICY_LOAD_BASED  // Move based on load
+//   new_shard_config: { /* same as original */ }
+// }
+//
+// // System creates 4 new shards (4-7)
+// // Rebalancing:
+// //   - Hash strategy: ~50% of keys move from shards 0-3 to 4-7
+// //   - ConsistentHash: ~25% of keys move (1/8th per new shard)
+// //
+// // Progress tracking:
+// // t=0s:   RebalanceStatus { progress: 0%,   keys_moved: 0 }
+// // t=30s:  RebalanceStatus { progress: 50%,  keys_moved: 50000 }
+// // t=60s:  RebalanceStatus { progress: 100%, keys_moved: 100000 }
+// ```
+//
+// ### Scale Down (8 → 4 Shards)
+// ```protobuf
+// ScaleGroupRequest {
+//   group_id: "global-counter"
+//   new_shard_count: 4                          // Reduce capacity
+//   rebalance_policy: REBALANCE_POLICY_ON_SCALE  // Move all keys
+// }
+//
+// // System drains shards 4-7:
+// //   1. Stop accepting new writes to shards 4-7
+// //   2. Move all keys from shards 4-7 to shards 0-3
+// //   3. Delete shards 4-7 when empty
+// ```
+//
+// ## Integration with NSDI'22 Lattice Actors
+//
+// PlexSpaces actor groups implement the coordination-free parallelism from the NSDI'22 paper:
+//
+// 1. **Lattice-Based State** (StateMgmtMode.LATTICE):
+//    - Each shard maintains local state as a CRDT (counter, set, map)
+//    - Updates monotonic (always move up the lattice)
+//    - Merges commutative and idempotent (order-independent)
+//
+// 2. **Coordination-Free Execution**:
+//    - No distributed locks or barriers
+//    - No two-phase commit
+//    - Shards operate independently
+//
+// 3. **Eventual Consistency** (ConsistencyLevel.EVENTUAL):
+//    - State converges automatically via lattice merge
+//    - Acceptable for many workloads (counters, analytics, caching)
+//
+// 4. **Scatter-Gather for Reads**:
+//    - Query all shards in parallel
+//    - Aggregate via lattice merge (not manual reduce)
+//
+// **Key Difference from NSDI'22**:
+// - NSDI'22: Pure lattice actors (no mutable state)
+// - PlexSpaces: Configurable (traditional mutable OR lattice-based)
+//   - STATE_MGMT_MODE_TRADITIONAL: Single-shard operations (coordination may be needed)
+//   - STATE_MGMT_MODE_LATTICE: Multi-shard operations (coordination-free)
+//
+// ## Use Case Guidelines
+//
+// ### When to Use Actor Groups
+// - ✅ High-throughput workloads (millions of ops/sec)
+// - ✅ Horizontally scalable state (counters, sets, maps)
+// - ✅ Partitionable data (user IDs, session IDs, timestamps)
+// - ✅ Eventual consistency acceptable
+// - ✅ Scatter-gather queries needed
+//
+// ### When NOT to Use Actor Groups
+// - ❌ Strong consistency required (use single actor with transactions)
+// - ❌ Cross-shard transactions needed (use saga pattern instead)
+// - ❌ Small datasets (overhead not worth it)
+// - ❌ Non-partitionable data (can't split logically)
+//
+// ### Performance Expectations
+// - **Throughput**: N × single-actor throughput (linear scaling)
+// - **Latency**: Same as single actor (no coordination overhead)
+// - **Scatter-gather**: Parallel query latency = max(shard_latencies)
+// - **Rebalancing**: Gradual (configurable rate, non-blocking)
+
+syntax = "proto3";
+
+package plexspaces.actor_groups.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/actors/actor_runtime.proto";
+
+// Actor group - collection of sharded actors with the same behavior
+message ActorGroup {
+  // Unique group identifier
+  string group_id = 1;
+
+  // Actor type for all shards (must be the same)
+  string actor_type = 2;
+
+  // Number of shards in this group
+  uint32 shard_count = 3;
+
+  // Partition strategy for routing messages
+  plexspaces.actor.v1.PartitionStrategy partition_strategy = 4;
+
+  // Actor IDs for each shard (indexed by shard_id)
+  repeated string shard_actors = 5;
+
+  // Current group state
+  GroupState state = 6;
+
+  // Rebalancing status (if currently rebalancing)
+  RebalanceStatus rebalance_status = 7;
+
+  // When the group was created
+  google.protobuf.Timestamp created_at = 8;
+
+  // Group metadata
+  map<string, string> metadata = 9;
+}
+
+// Actor group state
+enum GroupState {
+  GROUP_STATE_UNSPECIFIED = 0;
+  GROUP_STATE_CREATING = 1;     // Shards being created
+  GROUP_STATE_ACTIVE = 2;       // All shards active
+  GROUP_STATE_REBALANCING = 3;  // Shards being rebalanced
+  GROUP_STATE_DRAINING = 4;     // Shards being drained
+  GROUP_STATE_STOPPED = 5;      // All shards stopped
+}
+
+// Partition strategy imported from actor_runtime.proto
+// See plexspaces.actor.v1.PartitionStrategy
+
+// Rebalancing status
+message RebalanceStatus {
+  // Is currently rebalancing
+  bool is_rebalancing = 1;
+
+  // Old shard count (before rebalancing)
+  uint32 old_shard_count = 2;
+
+  // New shard count (after rebalancing)
+  uint32 new_shard_count = 3;
+
+  // Progress (0.0 to 100.0)
+  double progress_percent = 4;
+
+  // When rebalancing started
+  google.protobuf.Timestamp started_at = 5;
+
+  // Estimated completion time
+  google.protobuf.Timestamp estimated_completion = 6;
+}
+
+// Scatter-gather query across all shards in a group
+message ScatterGatherQuery {
+  // Group to query
+  string group_id = 1;
+
+  // Query message to send to all shards
+  plexspaces.actor.v1.Message query = 2;
+
+  // Timeout for gathering results
+  google.protobuf.Duration timeout = 3;
+
+  // Aggregation strategy for combining results
+  AggregationStrategy aggregation = 4;
+
+  // Minimum number of shards that must respond (default: all)
+  uint32 min_responses = 5;
+}
+
+// Aggregation strategy for scatter-gather results
+enum AggregationStrategy {
+  AGGREGATION_STRATEGY_UNSPECIFIED = 0;
+  AGGREGATION_STRATEGY_CONCAT = 1;   // Concatenate all results
+  AGGREGATION_STRATEGY_MERGE = 2;    // Merge using lattice (coordination-free)
+  AGGREGATION_STRATEGY_REDUCE = 3;   // Custom reduce function
+  AGGREGATION_STRATEGY_FIRST = 4;    // Return first response only
+  AGGREGATION_STRATEGY_MAJORITY = 5; // Return majority value
+}
+
+// Scatter-gather response
+message ScatterGatherResponse {
+  // Aggregated result
+  plexspaces.actor.v1.Message result = 1;
+
+  // Individual shard responses
+  repeated ShardResponse shard_responses = 2;
+
+  // Statistics
+  ScatterGatherStats stats = 3;
+}
+
+// Response from a single shard
+message ShardResponse {
+  // Shard ID that responded
+  uint32 shard_id = 1;
+
+  // Response message
+  plexspaces.actor.v1.Message response = 2;
+
+  // Response latency
+  google.protobuf.Duration latency = 3;
+
+  // Success flag
+  bool success = 4;
+
+  // Error message (if failed)
+  string error = 5;
+}
+
+// Scatter-gather statistics
+message ScatterGatherStats {
+  // Total shards queried
+  uint32 shards_queried = 1;
+
+  // Shards that responded
+  uint32 shards_responded = 2;
+
+  // Maximum latency across all shards
+  google.protobuf.Duration max_latency = 3;
+
+  // Total time for scatter-gather operation
+  google.protobuf.Duration total_time = 4;
+
+  // Average latency
+  google.protobuf.Duration avg_latency = 5;
+}
+
+// DataParallelConfig, PartitionStrategy, and RebalancePolicy are defined in actor_runtime.proto
+// See plexspaces.actor.v1.DataParallelConfig
+// See plexspaces.actor.v1.PartitionStrategy
+// See plexspaces.actor.v1.RebalancePolicy
+
+// Actor group service
+service ActorGroupService {
+  // Create an actor group with N shards
+  rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse) {
+    option (google.api.http) = {
+      post: "/v1/actor-groups"
+      body: "*"
+    };
+  }
+
+  // Delete an actor group and all shards
+  rpc DeleteGroup(DeleteGroupRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/actor-groups/{group_id}"
+    };
+  }
+
+  // Get group information
+  rpc GetGroup(GetGroupRequest) returns (GetGroupResponse) {
+    option (google.api.http) = {
+      get: "/v1/actor-groups/{group_id}"
+    };
+  }
+
+  // List all actor groups
+  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse) {
+    option (google.api.http) = {
+      get: "/v1/actor-groups"
+    };
+  }
+
+  // Scale group (add or remove shards)
+  rpc ScaleGroup(ScaleGroupRequest) returns (ScaleGroupResponse) {
+    option (google.api.http) = {
+      post: "/v1/actor-groups/{group_id}:scale"
+      body: "*"
+    };
+  }
+
+  // Send message to specific shard based on partition key
+  rpc SendToShard(SendToShardRequest) returns (SendToShardResponse) {
+    option (google.api.http) = {
+      post: "/v1/actor-groups/{group_id}/shards:send"
+      body: "*"
+    };
+  }
+
+  // Scatter-gather query across all shards
+  rpc ScatterGather(ScatterGatherQuery) returns (ScatterGatherResponse) {
+    option (google.api.http) = {
+      post: "/v1/actor-groups/{group_id}:scatterGather"
+      body: "*"
+    };
+  }
+
+  // Stream responses as shards respond (for low-latency queries)
+  rpc ScatterGatherStream(ScatterGatherQuery) returns (stream ShardResponse) {
+    option (google.api.http) = {
+      post: "/v1/actor-groups/{group_id}:scatterGatherStream"
+      body: "*"
+    };
+  }
+}
+
+message CreateGroupRequest {
+  // Group identifier
+  string group_id = 1;
+
+  // Actor type for all shards
+  string actor_type = 2;
+
+  // Number of shards to create
+  uint32 shard_count = 3;
+
+  // Partition strategy
+  plexspaces.actor.v1.PartitionStrategy partition_strategy = 4;
+
+  // Configuration for each shard actor
+  plexspaces.actor.v1.ActorConfig shard_config = 5;
+
+  // Initial state for each shard (if any)
+  bytes initial_state = 6;
+
+  // Group metadata
+  map<string, string> metadata = 7;
+}
+
+message CreateGroupResponse {
+  // Created actor group
+  ActorGroup group = 1;
+}
+
+message DeleteGroupRequest {
+  // Group to delete
+  string group_id = 1;
+
+  // Force deletion even if shards are active
+  bool force = 2;
+
+  // Graceful shutdown timeout
+  google.protobuf.Duration shutdown_timeout = 3;
+}
+
+message GetGroupRequest {
+  // Group to retrieve
+  string group_id = 1;
+}
+
+message GetGroupResponse {
+  // Actor group
+  ActorGroup group = 1;
+}
+
+message ListGroupsRequest {
+  // Filter by actor type (optional)
+  string actor_type = 1;
+
+  // Filter by state (optional)
+  GroupState state = 2;
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page_request = 3;
+}
+
+message ListGroupsResponse {
+  // Actor groups
+  repeated ActorGroup groups = 1;
+
+  // Pagination
+  plexspaces.common.v1.PageResponse page_response = 2;
+}
+
+message ScaleGroupRequest {
+  // Group to scale
+  string group_id = 1;
+
+  // New shard count
+  uint32 new_shard_count = 2;
+
+  // Rebalancing policy
+  plexspaces.actor.v1.RebalancePolicy rebalance_policy = 3;
+
+  // Configuration for new shards (if scaling up)
+  plexspaces.actor.v1.ActorConfig new_shard_config = 4;
+}
+
+message ScaleGroupResponse {
+  // Updated actor group
+  ActorGroup group = 1;
+
+  // Rebalancing status
+  RebalanceStatus rebalance_status = 2;
+}
+
+message SendToShardRequest {
+  // Group to send to
+  string group_id = 1;
+
+  // Partition key to determine target shard
+  bytes partition_key = 2;
+
+  // Message to send
+  plexspaces.actor.v1.Message message = 3;
+
+  // Wait for response
+  bool wait_for_response = 4;
+
+  // Timeout for response
+  google.protobuf.Duration timeout = 5;
+}
+
+message SendToShardResponse {
+  // Shard that handled the message
+  uint32 shard_id = 1;
+
+  // Response from shard (if wait_for_response = true)
+  plexspaces.actor.v1.Message response = 2;
+}

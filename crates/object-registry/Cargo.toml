@@ -1,0 +1,40 @@
+[package]
+name = "plexspaces-object-registry"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+description = "Unified object registry for PlexSpaces (actors, tuplespaces, services)"
+license = "LGPL-2.1-or-later"
+
+[dependencies]
+# Core proto definitions
+plexspaces-proto = { path = "../proto" }
+
+# Key-value storage backend (with SQLite support for integration tests)
+plexspaces-keyvalue = { path = "../keyvalue", features = ["sql-backend"] }
+
+# Serialization (use workspace version to match proto crate)
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Error handling
+thiserror = "2.0"
+
+# Time handling
+chrono = "0.4"
+
+# Logging
+log = "0.4"
+
+[dev-dependencies]
+# Testing
+tokio-test = "0.4"
+env_logger = "0.11"
+
+[features]
+default = []
+sql-backend = ["plexspaces-keyvalue/sql-backend"]

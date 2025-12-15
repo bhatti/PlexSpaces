@@ -1,0 +1,442 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+
+// PlexSpaces Timer and Reminder API
+//
+// ## Purpose
+// Implements Orleans-inspired time-based actor callbacks with two distinct semantics:
+// - **Timers**: Non-durable, in-memory, lost on actor deactivation (like `setInterval`)
+// - **Reminders**: Durable, persistent, survive deactivation/restart (like cron jobs)
+//
+// ## Architecture Context
+// This proto file supports **time-based actor automation** across PlexSpaces pillars:
+// - **Pillar 1 (TupleSpace)**: Reminders can write tuples at scheduled times
+// - **Pillar 2 (Erlang/OTP)**: GenServer equivalent of `erlang:send_after/3`
+// - **Pillar 3 (Durability)**: Reminders journaled and replayed after crashes
+// - **Pillar 4 (WASM)**: WASM actors can register timers/reminders like native actors
+// - **Pillar 5 (Firecracker)**: Timers work across VM boundaries
+//
+// ### Integration with Other Pillars
+// - **Supervision**: Failed actors reactivate with reminders intact (timers lost)
+// - **Workflows**: Long-running workflows use reminders for timeout detection
+// - **Virtual Actors**: Reminders trigger auto-activation (Orbit-inspired)
+// - **Mobility**: Reminders migrate with actors (timers recreated on destination)
+//
+// ## Component Interactions
+// - **Used by**: All actors needing periodic or scheduled operations
+// - **Depends on**: common.proto (actor IDs), actor_runtime.proto (actor lifecycle)
+// - **Provides**: Scheduled callback mechanism for time-based automation
+//
+// ## Design Decisions
+// - **Why two types (Timers vs Reminders)**:
+//   - **Performance tradeoff**: Timers are fast (in-memory), Reminders are reliable (persistent)
+//   - **Use case fit**: Timers for transient tasks (heartbeats), Reminders for critical tasks (billing)
+//   - **Orleans pattern**: Proven design from Microsoft Orleans framework
+//
+// - **Why timers are non-durable**:
+//   - Performance: No disk I/O on every tick (can fire at millisecond intervals)
+//   - Simplicity: No persistence complexity for ephemeral needs
+//   - Expected behavior: Like `setInterval` in JavaScript (lost on page reload)
+//
+// - **Why reminders are durable**:
+//   - Reliability: Critical operations must not be lost (billing, SLA enforcement)
+//   - Auto-activation: Reminder can wake up deactivated actor (Orbit-inspired)
+//   - Crash recovery: Actor restarts don't skip scheduled operations
+//
+// - **Why interval + due_time**:
+//   - Flexibility: Delay first fire, then repeat at interval
+//   - Example: Wait 10s, then fire every 1m (due_time=10s, interval=1m)
+//   - Orleans compatibility: Matches Orleans timer API
+//
+// - **Why max_occurrences** (Reminders only):
+//   - Limited schedules: Fire N times then stop (e.g., retry 3 times)
+//   - Memory efficiency: Auto-cleanup after completion
+//   - Use case: One-time events at specific time (max_occurrences=1)
+//
+// - **Why persist_across_activations** flag:
+//   - Optimization: Some reminders only needed while actor is active
+//   - Example: Session timeout reminder (only while session active)
+//   - Storage efficiency: Don't persist temporary reminders
+//
+// ## Timer vs Reminder Comparison
+//
+// | Feature | Timers | Reminders |
+// |---------|--------|-----------|
+// | **Durability** | In-memory only | Persisted to storage |
+// | **Survives deactivation** | ❌ No | ✅ Yes |
+// | **Survives crash/restart** | ❌ No | ✅ Yes |
+// | **Triggers auto-activation** | ❌ No | ✅ Yes |
+// | **Performance** | Fast (no I/O) | Slower (disk writes) |
+// | **Min interval** | Milliseconds | Seconds |
+// | **Use cases** | Heartbeats, polling, short-lived | Billing, SLA, cron jobs |
+//
+// ## Timer Examples (Non-Durable)
+//
+// ### Heartbeat Timer (Every 5 Seconds)
+// ```protobuf
+// RegisterTimerRequest {
+//   registration: {
+//     actor_id: "worker-001"
+//     timer_name: "heartbeat"
+//     interval: { seconds: 5 }     // Fire every 5 seconds
+//     due_time: { seconds: 0 }     // Start immediately
+//     periodic: true               // Repeat forever
+//     callback_data: []            // No data needed
+//   }
+// }
+// // Actor receives TimerFired message every 5 seconds
+// // Lost if actor deactivates
+// ```
+//
+// ### One-Time Delayed Action
+// ```protobuf
+// RegisterTimerRequest {
+//   registration: {
+//     actor_id: "session-123"
+//     timer_name: "session_timeout"
+//     due_time: { seconds: 1800 }  // Fire after 30 minutes
+//     periodic: false              // Fire once
+//   }
+// }
+// // Actor receives TimerFired after 30 minutes
+// // Can implement idle timeout this way
+// ```
+//
+// ### Polling Timer (Fast Interval)
+// ```protobuf
+// RegisterTimerRequest {
+//   registration: {
+//     actor_id: "monitor"
+//     timer_name: "check_status"
+//     interval: { milliseconds: 100 }  // Fire every 100ms
+//     due_time: { seconds: 0 }
+//     periodic: true
+//   }
+// }
+// // High-frequency polling (not suitable for Reminders)
+// ```
+//
+// ## Reminder Examples (Durable)
+//
+// ### Monthly Billing Reminder
+// ```protobuf
+// RegisterReminderRequest {
+//   registration: {
+//     actor_id: "customer-456"
+//     reminder_name: "monthly_billing"
+//     interval: { seconds: 2592000 }      // 30 days
+//     first_fire_time: { /* next month 1st at midnight */ }
+//     callback_data: [billing metadata]
+//     persist_across_activations: true    // Survive deactivation
+//     max_occurrences: 0                  // Infinite (until unregistered)
+//   }
+// }
+// // Fires monthly even if actor deactivated
+// // Triggers auto-activation if needed
+// ```
+//
+// ### Retry Reminder (Limited Occurrences)
+// ```protobuf
+// RegisterReminderRequest {
+//   registration: {
+//     actor_id: "email-sender"
+//     reminder_name: "retry_send"
+//     interval: { seconds: 60 }           // Retry every minute
+//     first_fire_time: { /* now + 1 min */ }
+//     callback_data: [email data]
+//     persist_across_activations: true
+//     max_occurrences: 3                  // Try 3 times then stop
+//   }
+// }
+// // Retries up to 3 times
+// // Auto-deletes after 3 fires
+// ```
+//
+// ### SLA Enforcement Reminder
+// ```protobuf
+// RegisterReminderRequest {
+//   registration: {
+//     actor_id: "support-ticket-789"
+//     reminder_name: "sla_check"
+//     interval: { seconds: 3600 }         // Check every hour
+//     first_fire_time: { /* now */ }
+//     callback_data: [SLA policy]
+//     persist_across_activations: true
+//     max_occurrences: 24                 // Check for 24 hours max
+//   }
+// }
+// // Escalates ticket if not resolved within SLA
+// // Survives actor restarts
+// ```
+//
+// ### Session Reminder (Temporary)
+// ```protobuf
+// RegisterReminderRequest {
+//   registration: {
+//     actor_id: "user-session-001"
+//     reminder_name: "idle_check"
+//     interval: { seconds: 300 }          // Check every 5 minutes
+//     first_fire_time: { /* now + 5 min */ }
+//     persist_across_activations: false   // Only while session active
+//     max_occurrences: 12                 // Max 1 hour (12 * 5 min)
+//   }
+// }
+// // Deactivates session after idle
+// // Not persisted (session-scoped)
+// ```
+//
+// ## Timer Lifecycle
+//
+// ### Timer Creation → Firing → Deletion
+// ```
+// RegisterTimer
+//    ↓
+// Timer created (in-memory)
+//    ↓
+// due_time elapses
+//    ↓
+// TimerFired message sent to actor
+//    ↓ [if periodic]
+// Wait interval
+//    ↓
+// TimerFired again (repeat)
+//    ↓ [if actor deactivates]
+// Timer lost (not persisted)
+// ```
+//
+// ### Reminder Creation → Firing → Persistence
+// ```
+// RegisterReminder
+//    ↓
+// Reminder persisted to storage
+//    ↓
+// first_fire_time reached
+//    ↓
+// ReminderFired message sent to actor
+//    ↓ [if actor deactivated]
+// Auto-activate actor (Orbit-inspired)
+//    ↓
+// Send ReminderFired message
+//    ↓
+// Wait interval
+//    ↓
+// Repeat until max_occurrences reached
+//    ↓
+// Auto-delete reminder
+// ```
+//
+// ## Integration with Orleans Design
+//
+// PlexSpaces timers/reminders follow Orleans semantics closely:
+//
+// 1. **Timer API** (Orleans `RegisterTimer`):
+//    - Non-durable, in-memory only
+//    - Lost on grain deactivation
+//    - No persistence overhead
+//    - Suitable for high-frequency operations
+//
+// 2. **Reminder API** (Orleans `RegisterReminder`):
+//    - Durable, persisted to storage
+//    - Survive grain deactivation/reactivation
+//    - Trigger auto-activation if grain inactive
+//    - Suitable for critical operations
+//
+// 3. **Key Differences from Orleans**:
+//    - PlexSpaces: `max_occurrences` for auto-cleanup (Orleans requires manual unregister)
+//    - PlexSpaces: `persist_across_activations` flag (Orleans reminders always persist)
+//    - PlexSpaces: Reminders integrate with journal for replay (Orleans uses separate storage)
+//
+// ## Use Case Guidelines
+//
+// ### When to Use Timers
+// - ✅ Heartbeats and health checks
+// - ✅ Polling external resources (while actor active)
+// - ✅ Short-term scheduling (seconds to minutes)
+// - ✅ High-frequency operations (< 1 second intervals)
+// - ✅ Actor-lifetime-scoped operations
+//
+// ### When to Use Reminders
+// - ✅ Billing and invoicing (monthly, yearly)
+// - ✅ SLA enforcement (hourly, daily checks)
+// - ✅ Scheduled reports (daily, weekly)
+// - ✅ Cron-like jobs (fixed schedules)
+// - ✅ Retry logic with persistence
+// - ✅ Long-term scheduling (hours, days, months)
+//
+// ### When NOT to Use Either
+// - ❌ Complex workflows (use WorkflowService instead)
+// - ❌ External event triggers (use signals instead)
+// - ❌ Large-scale job scheduling (use dedicated job queue)
+// - ❌ Distributed transactions (use sagas instead)
+
+syntax = "proto3";
+
+package plexspaces.timer.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "plexspaces/v1/common.proto";
+
+// Timer registration (non-durable, in-memory)
+// Timers are NOT persisted and are lost on actor deactivation
+message TimerRegistration {
+  // Actor that owns this timer
+  string actor_id = 1;
+
+  // Unique name for this timer within the actor
+  string timer_name = 2;
+
+  // How often the timer fires (for periodic timers)
+  google.protobuf.Duration interval = 3;
+
+  // Delay before first firing
+  google.protobuf.Duration due_time = 4;
+
+  // Optional data passed to timer callback
+  bytes callback_data = 5;
+
+  // true = repeat periodically, false = fire once
+  bool periodic = 6;
+}
+
+// Timer fired event
+message TimerFired {
+  string actor_id = 1;
+  string timer_name = 2;
+  google.protobuf.Timestamp fired_at = 3;
+  bytes callback_data = 4;
+}
+
+// Reminder registration (durable, persistent)
+// Reminders ARE persisted and survive actor deactivation
+message ReminderRegistration {
+  // Actor that owns this reminder
+  string actor_id = 1;
+
+  // Unique name for this reminder within the actor
+  string reminder_name = 2;
+
+  // How often the reminder fires
+  google.protobuf.Duration interval = 3;
+
+  // When to fire for the first time
+  google.protobuf.Timestamp first_fire_time = 4;
+
+  // Optional data passed to reminder callback
+  bytes callback_data = 5;
+
+  // If true, reminder persists across actor deactivation/reactivation
+  bool persist_across_activations = 6;
+
+  // Maximum number of times to fire (0 = infinite)
+  int32 max_occurrences = 7;
+}
+
+// Reminder fired event
+message ReminderFired {
+  string actor_id = 1;
+  string reminder_name = 2;
+  google.protobuf.Timestamp fired_at = 3;
+  bytes callback_data = 4;
+}
+
+// Reminder state (persisted)
+message ReminderState {
+  // The registration details
+  ReminderRegistration registration = 1;
+
+  // Last time this reminder fired
+  google.protobuf.Timestamp last_fired = 2;
+
+  // Next scheduled fire time
+  google.protobuf.Timestamp next_fire_time = 3;
+
+  // How many times has this reminder fired
+  int32 fire_count = 4;
+
+  // Is this reminder currently active
+  bool is_active = 5;
+}
+
+// Timer/Reminder service
+service TimerService {
+  // Register a non-durable timer
+  rpc RegisterTimer(RegisterTimerRequest) returns (RegisterTimerResponse);
+
+  // Unregister a timer
+  rpc UnregisterTimer(UnregisterTimerRequest) returns (plexspaces.common.v1.Empty);
+
+  // Register a durable reminder
+  rpc RegisterReminder(RegisterReminderRequest) returns (RegisterReminderResponse);
+
+  // Unregister a reminder
+  rpc UnregisterReminder(UnregisterReminderRequest) returns (plexspaces.common.v1.Empty);
+
+  // List all timers for an actor
+  rpc ListTimers(ListTimersRequest) returns (ListTimersResponse);
+
+  // List all reminders for an actor
+  rpc ListReminders(ListRemindersRequest) returns (ListRemindersResponse);
+}
+
+message RegisterTimerRequest {
+  TimerRegistration registration = 1;
+}
+
+message RegisterTimerResponse {
+  bool success = 1;
+  string timer_id = 2;
+  string error_message = 3;
+}
+
+message UnregisterTimerRequest {
+  string actor_id = 1;
+  string timer_name = 2;
+}
+
+message RegisterReminderRequest {
+  ReminderRegistration registration = 1;
+}
+
+message RegisterReminderResponse {
+  bool success = 1;
+  string reminder_id = 2;
+  string error_message = 3;
+}
+
+message UnregisterReminderRequest {
+  string actor_id = 1;
+  string reminder_name = 2;
+}
+
+message ListTimersRequest {
+  string actor_id = 1;
+}
+
+message ListTimersResponse {
+  repeated TimerRegistration timers = 1;
+}
+
+message ListRemindersRequest {
+  string actor_id = 1;
+}
+
+message ListRemindersResponse {
+  repeated ReminderState reminders = 1;
+}

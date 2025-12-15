@@ -1,0 +1,88 @@
+{
+  "name": "E-commerce Order Processing",
+  "version": 1,
+  "description": "Netflix Conductor workflow for e-commerce order processing",
+  "tasks": [
+    {
+      "name": "ProcessPayment",
+      "taskReferenceName": "payment_task",
+      "type": "HTTP",
+      "inputParameters": {
+        "http_request": {
+          "uri": "https://api.payment.com/charge",
+          "method": "POST",
+          "body": {
+            "order_id": "${workflow.input.order_id}",
+            "amount": "${workflow.input.total_amount}"
+          }
+        }
+      }
+    },
+    {
+      "name": "UpdateInventory",
+      "taskReferenceName": "inventory_task",
+      "type": "HTTP",
+      "inputParameters": {
+        "http_request": {
+          "uri": "https://api.inventory.com/reserve",
+          "method": "POST",
+          "body": {
+            "items": "${workflow.input.items}"
+          }
+        }
+      }
+    },
+    {
+      "name": "CheckDiscountEligibility",
+      "taskReferenceName": "discount_task",
+      "type": "DECISION",
+      "inputParameters": {
+        "case_value_param": "${workflow.input.total_amount}",
+        "decisionCases": {
+          ">100": [
+            {
+              "name": "SendDiscountEmail",
+              "type": "EVENT",
+              "inputParameters": {
+                "sink": "notification_topic",
+                "event": "discount_eligible"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "CreateShipment",
+      "taskReferenceName": "shipping_task",
+      "type": "HTTP",
+      "inputParameters": {
+        "http_request": {
+          "uri": "https://api.shipping.com/create",
+          "method": "POST",
+          "body": {
+            "order_id": "${workflow.input.order_id}",
+            "address": "${workflow.input.shipping_address}"
+          }
+        }
+      }
+    },
+    {
+      "name": "PublishOrderProcessed",
+      "taskReferenceName": "notification_task",
+      "type": "EVENT",
+      "inputParameters": {
+        "sink": "order_events",
+        "event": {
+          "type": "order_processed",
+          "order_id": "${workflow.input.order_id}"
+        }
+      }
+    }
+  ],
+  "outputParameters": {
+    "payment_transaction_id": "${payment_task.output.transaction_id}",
+    "tracking_number": "${shipping_task.output.tracking_number}",
+    "discount_eligible": "${discount_task.output.eligible}"
+  }
+}

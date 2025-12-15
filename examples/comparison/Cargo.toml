@@ -1,0 +1,53 @@
+[workspace]
+members = [
+    "erlang_otp",
+    "aws_durable_lambda",
+    "aws_step_functions",
+    "azure_durable_functions",
+    "cadence",
+    "conductor",
+    "zeebe",
+    "dirigo",
+    "temporal",
+    "ray",
+    "cloudflare_workers",
+    "orleans",
+    "restate",
+    "rivet",
+    "dapr",
+    "gosiris",
+    "kueue",
+    "luats",
+    "merlin",
+    "mozartspaces",
+    "orbit",
+    "ractor",
+    "skypilot",
+    "wasmcloud",
+    "eflows4hpc",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+# Shared dependencies - all examples use these
+plexspaces-core = { path = "../../crates/core" }
+plexspaces-actor = { path = "../../crates/actor" }
+plexspaces-behavior = { path = "../../crates/behavior" }
+plexspaces-journaling = { path = "../../crates/journaling" }
+plexspaces-node = { path = "../../crates/node" }
+plexspaces-mailbox = { path = "../../crates/mailbox" }
+plexspaces-tuplespace = { path = "../../crates/tuplespace" }
+plexspaces-supervisor = { path = "../../crates/supervisor" }
+plexspaces-facet = { path = "../../crates/facet" }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ulid = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+reqwest = { version = "0.11", features = ["json"] }

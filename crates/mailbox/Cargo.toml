@@ -1,0 +1,46 @@
+[package]
+name = "plexspaces-mailbox"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Message queue and mailbox implementations"
+
+[dependencies]
+# Mailbox depends on channel for backend abstraction
+plexspaces-proto = { workspace = true }
+plexspaces-channel = { path = "../channel", default-features = false }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ulid = { version = "1.1", features = ["serde"] }
+rand = "0.8"
+
+# Proto conversion
+prost-types = { workspace = true }
+chrono = { workspace = true }
+
+[features]
+default = []
+sqlite-backend = ["plexspaces-channel/sqlite-backend"]
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+tempfile = { version = "3.10" }
+plexspaces-journaling = { path = "../journaling", default-features = false, features = ["sqlite-backend"] }
+plexspaces-facet = { path = "../facet" }
+plexspaces-proto = { workspace = true }
+
+[lib]
+name = "plexspaces_mailbox"
+path = "src/lib.rs"

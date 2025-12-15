@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # Worker 1 - Processes 1000 reads
+  worker1:
+    build:
+      context: ../..
+      dockerfile: examples/genomic-workflow-pipeline/Dockerfile
+    container_name: genomic-worker-1
+    command: ["genomic-workflow-pipeline", "1000"]
+    environment:
+      - RUST_LOG=info
+      - WORKER_ID=1
+    networks:
+      - plexspaces-net
+    volumes:
+      - ./results:/app/results
+
+  # Worker 2 - Processes 2000 reads
+  worker2:
+    build:
+      context: ../..
+      dockerfile: examples/genomic-workflow-pipeline/Dockerfile
+    container_name: genomic-worker-2
+    command: ["genomic-workflow-pipeline", "2000"]
+    environment:
+      - RUST_LOG=info
+      - WORKER_ID=2
+    networks:
+      - plexspaces-net
+    volumes:
+      - ./results:/app/results
+
+  # Worker 3 - Processes 5000 reads
+  worker3:
+    build:
+      context: ../..
+      dockerfile: examples/genomic-workflow-pipeline/Dockerfile
+    container_name: genomic-worker-3
+    command: ["genomic-workflow-pipeline", "5000"]
+    environment:
+      - RUST_LOG=info
+      - WORKER_ID=3
+    networks:
+      - plexspaces-net
+    volumes:
+      - ./results:/app/results
+
+  # Worker 4 - Processes 10000 reads (stress test)
+  worker4:
+    build:
+      context: ../..
+      dockerfile: examples/genomic-workflow-pipeline/Dockerfile
+    container_name: genomic-worker-4
+    command: ["genomic-workflow-pipeline", "10000"]
+    environment:
+      - RUST_LOG=info
+      - WORKER_ID=4
+    networks:
+      - plexspaces-net
+    volumes:
+      - ./results:/app/results
+
+networks:
+  plexspaces-net:
+    driver: bridge

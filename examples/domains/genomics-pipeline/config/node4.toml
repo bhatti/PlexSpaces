@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Genomics Pipeline - Node 4 (Annotation + Reporting)
+#
+# Role: Variant annotation and clinical report generation
+# Components:
+#   - AnnotationWorkerPool (2 workers)
+#   - ReportWorkerPool (2 workers)
+#
+# Dependencies: None (workers wait for coordinator requests)
+
+[release]
+name = "genomics-pipeline-annotation"
+version = "0.1.0"
+description = "Genomics Pipeline Annotation and Reporting Workers"
+
+[node]
+id = "genomics-annotation"
+listen_address = "0.0.0.0:9004"
+cluster_seed_nodes = [
+    "genomics-coordinator:9001",
+    "genomics-qc-alignment:9002",
+    "genomics-chromosomes:9003"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9004"
+max_connections = 100
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "genomics-coordinator-secret-key"
+allow_unauthenticated = true
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 100
+burst_size = 20
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "genomics-annotation"
+sampling_rate = 1.0
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+[[applications]]
+name = "genomics-annotation-workers"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 60
+shutdown_strategy = "graceful"
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "worker"
+# Annotation Worker Pool
+ANNOTATION_POOL_SIZE = "2"
+ANNOTATION_POOL_ENABLED = "true"
+# Report Worker Pool
+REPORT_POOL_SIZE = "2"
+REPORT_POOL_ENABLED = "true"
+# All other workers disabled
+QC_POOL_ENABLED = "false"
+ALIGNMENT_POOL_ENABLED = "false"
+CHROMOSOME_POOL_ENABLED = "false"
+# Coordinator address
+COORDINATOR_ADDRESS = "genomics-coordinator:9001"
+# Annotation databases
+ANNOTATION_DB_CLINVAR = "/data/clinvar/clinvar.vcf.gz"
+ANNOTATION_DB_DBSNP = "/data/dbsnp/dbsnp.vcf.gz"
+ANNOTATION_DB_GNOMAD = "/data/gnomad/gnomad.vcf.gz"
+# Report generation
+REPORT_FORMAT = "pdf"
+REPORT_TEMPLATE = "/templates/clinical_report.html"
+
+# Resource limits (moderate)
+[resources]
+max_memory_mb = 2048
+max_cpu_percent = 60
+
+[shutdown]
+global_timeout_seconds = 120
+grace_period_seconds = 15
+grpc_drain_timeout_seconds = 30

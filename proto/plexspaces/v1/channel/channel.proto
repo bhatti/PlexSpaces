@@ -1,0 +1,539 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Channel/Queue API
+//
+// ## Purpose
+// Provides extensible channel/queue abstraction for both in-process and inter-process communication.
+// Inspired by Go channels for simplicity and Kafka/Redis for distributed messaging.
+//
+// ## Architecture Context
+// Channels are the primary communication mechanism for microservices in PlexSpaces:
+// - **In-Process**: Go-like MPSC channels for fast actor-to-actor messaging
+// - **Inter-Process**: Redis Streams or Kafka for cross-node messaging
+// - **Extensible**: Plugin architecture for custom transports
+//
+// ## Use Cases
+// - **Worker Queues**: Distribute work across elastic worker pools
+// - **Pub/Sub**: Event notification (GenEvent pattern)
+// - **Request/Reply**: RPC-style communication (GenServer pattern)
+// - **Streaming**: Data pipelines with backpressure
+//
+// ## Design Decisions
+// - **Why multiple backends**: In-process for performance, distributed for scale
+// - **Why proto-defined**: Type-safe, language-agnostic, evolvable
+// - **Why extensible**: Custom transports without framework changes
+
+syntax = "proto3";
+
+package plexspaces.channel.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Channel backend type determines the underlying transport
+enum ChannelBackend {
+  // In-process multi-producer single-consumer channel (Go-like)
+  // - Fastest for same-node communication
+  // - No persistence, lost on crash
+  // - Bounded or unbounded capacity
+  CHANNEL_BACKEND_IN_MEMORY = 0;
+
+  // Redis Streams for distributed messaging
+  // - Persistent, survives crashes
+  // - Consumer groups for load balancing
+  // - Cross-node communication
+  CHANNEL_BACKEND_REDIS = 1;
+
+  // Kafka for high-throughput distributed streaming
+  // - Durable, partitioned, replicated
+  // - Horizontal scalability
+  // - Cross-node, cross-datacenter
+  CHANNEL_BACKEND_KAFKA = 2;
+
+  // SQLite for testing and single-node durability
+  // - Persistent, survives crashes
+  // - Good for testing recovery scenarios
+  // - Single-node only (not distributed)
+  CHANNEL_BACKEND_SQLITE = 3;
+
+  // NATS for lightweight distributed messaging
+  // - High performance, low latency
+  // - Pub/sub and request/reply patterns
+  // - JetStream for persistence (optional)
+  // - Cross-node, cross-datacenter
+  CHANNEL_BACKEND_NATS = 4;
+
+  // Custom backend (user-provided implementation)
+  CHANNEL_BACKEND_CUSTOM = 99;
+}
+
+// Channel delivery semantics
+enum DeliveryGuarantee {
+  // At-most-once: Fire and forget, may lose messages
+  DELIVERY_GUARANTEE_AT_MOST_ONCE = 0;
+
+  // At-least-once: Retries until acknowledged, may duplicate
+  DELIVERY_GUARANTEE_AT_LEAST_ONCE = 1;
+
+  // Exactly-once: Deduplication, no retries needed (Kafka only)
+  DELIVERY_GUARANTEE_EXACTLY_ONCE = 2;
+}
+
+// Channel ordering guarantee
+enum OrderingGuarantee {
+  // No ordering guarantee (fastest)
+  ORDERING_GUARANTEE_NONE = 0;
+
+  // FIFO per producer
+  ORDERING_GUARANTEE_FIFO = 1;
+
+  // Total order across all producers (Kafka partition)
+  ORDERING_GUARANTEE_TOTAL = 2;
+}
+
+// Channel configuration
+message ChannelConfig {
+  // Unique channel name/topic
+  string name = 1;
+
+  // Backend type (in-memory, Redis, Kafka)
+  ChannelBackend backend = 2;
+
+  // Capacity (0 = unbounded, >0 = bounded)
+  // - In-memory: buffer size
+  // - Redis: stream max length
+  // - Kafka: batch size hint
+  uint64 capacity = 3;
+
+  // Delivery guarantee
+  DeliveryGuarantee delivery = 4;
+
+  // Ordering guarantee
+  OrderingGuarantee ordering = 5;
+
+  // Backend-specific configuration
+  oneof backend_config {
+    InMemoryConfig in_memory = 10;
+    RedisConfig redis = 11;
+    KafkaConfig kafka = 12;
+    SqliteConfig sqlite = 13;
+    NatsConfig nats = 14;
+  }
+
+  // Optional: TTL for messages
+  google.protobuf.Duration message_ttl = 20;
+
+  // Optional: Dead-letter queue for failed messages
+  string dead_letter_queue = 21;
+}
+
+// In-memory channel configuration
+message InMemoryConfig {
+  // Backpressure strategy when channel is full
+  enum BackpressureStrategy {
+    // Block sender until space available
+    BACKPRESSURE_STRATEGY_BLOCK = 0;
+
+    // Drop oldest message
+    BACKPRESSURE_STRATEGY_DROP_OLDEST = 1;
+
+    // Drop newest message (reject send)
+    BACKPRESSURE_STRATEGY_DROP_NEWEST = 2;
+
+    // Return error to sender
+    BACKPRESSURE_STRATEGY_ERROR = 3;
+  }
+
+  BackpressureStrategy backpressure = 1;
+
+  // Timeout for blocking sends
+  google.protobuf.Duration send_timeout = 2;
+
+  // Timeout for blocking receives
+  google.protobuf.Duration receive_timeout = 3;
+}
+
+// Redis Streams configuration
+message RedisConfig {
+  // Redis connection URL
+  string url = 1;
+
+  // Stream key (channel name in Redis)
+  string stream_key = 2;
+
+  // Consumer group name (for load balancing)
+  string consumer_group = 3;
+
+  // Consumer name (unique per worker)
+  string consumer_name = 4;
+
+  // Maximum stream length (MAXLEN in Redis)
+  uint64 max_length = 5;
+
+  // Claim timeout for failed consumers
+  google.protobuf.Duration claim_timeout = 6;
+
+  // Connection pool size
+  uint32 pool_size = 7;
+}
+
+// Kafka configuration
+message KafkaConfig {
+  // Kafka broker addresses
+  repeated string brokers = 1;
+
+  // Topic name
+  string topic = 2;
+
+  // Consumer group ID
+  string consumer_group = 3;
+
+  // Number of partitions (for topic creation)
+  uint32 partitions = 4;
+
+  // Replication factor
+  uint32 replication_factor = 5;
+
+  // Compression type
+  enum CompressionType {
+    COMPRESSION_TYPE_NONE = 0;
+    COMPRESSION_TYPE_GZIP = 1;
+    COMPRESSION_TYPE_SNAPPY = 2;
+    COMPRESSION_TYPE_LZ4 = 3;
+    COMPRESSION_TYPE_ZSTD = 4;
+  }
+
+  CompressionType compression = 6;
+
+  // Producer acks
+  enum ProducerAcks {
+    // No acks (fastest, least reliable)
+    PRODUCER_ACKS_NONE = 0;
+
+    // Leader ack only
+    PRODUCER_ACKS_LEADER = 1;
+
+    // All replicas ack
+    PRODUCER_ACKS_ALL = 2;
+  }
+
+  ProducerAcks acks = 7;
+
+  // Batch size for producers
+  uint64 batch_size = 8;
+
+  // Linger time for batching
+  google.protobuf.Duration linger_ms = 9;
+}
+
+// SQLite configuration (for testing and single-node durability)
+message SqliteConfig {
+  // SQLite database path (":memory:" for in-memory, file path for persistent)
+  string database_path = 1;
+
+  // Table name for storing messages (default: "channel_messages")
+  string table_name = 2;
+
+  // Enable WAL mode for better concurrency (default: true)
+  bool wal_mode = 3;
+
+  // Cleanup old messages after ack (default: true)
+  bool cleanup_acked = 4;
+
+  // Maximum age for acked messages before cleanup (in seconds, 0 = no cleanup)
+  uint64 cleanup_age_seconds = 5;
+}
+
+// NATS configuration (for lightweight distributed messaging)
+message NatsConfig {
+  // NATS server URLs (comma-separated for clustering)
+  // Example: "nats://localhost:4222,nats://localhost:4223"
+  string servers = 1;
+
+  // Subject/topic name (default: channel name)
+  string subject = 2;
+
+  // Queue group for load-balanced consumption (optional)
+  // - If set, messages are distributed across consumers in the group
+  // - If empty, all subscribers receive all messages (pub/sub)
+  string queue_group = 3;
+
+  // Enable JetStream for persistence (default: false)
+  // - Requires NATS server with JetStream enabled
+  // - Provides at-least-once delivery guarantees
+  bool jetstream_enabled = 4;
+
+  // JetStream stream name (default: channel name)
+  string jetstream_stream = 5;
+
+  // JetStream consumer name (default: queue_group or channel name)
+  string jetstream_consumer = 6;
+
+  // Connection timeout (default: 5 seconds)
+  google.protobuf.Duration connect_timeout = 7;
+
+  // Reconnect attempts (default: 10, -1 for unlimited)
+  int32 reconnect_attempts = 8;
+
+  // Enable TLS (default: false)
+  bool tls_enabled = 9;
+
+  // TLS certificate path (optional)
+  string tls_cert_path = 10;
+
+  // TLS key path (optional)
+  string tls_key_path = 11;
+
+  // TLS CA certificate path (optional)
+  string tls_ca_path = 12;
+}
+
+// Channel message envelope
+message ChannelMessage {
+  // Unique message ID (ULID)
+  string id = 1;
+
+  // Channel name/topic
+  string channel = 2;
+
+  // Sender actor ID (optional)
+  string sender_id = 3;
+
+  // Message payload (opaque bytes)
+  bytes payload = 4;
+
+  // Message headers (metadata)
+  map<string, string> headers = 5;
+
+  // Message timestamp
+  google.protobuf.Timestamp timestamp = 6;
+
+  // Partition key (for Kafka/Redis)
+  string partition_key = 7;
+
+  // Correlation ID (for request/reply)
+  string correlation_id = 8;
+
+  // Reply-to channel (for RPC pattern)
+  string reply_to = 9;
+
+  // Delivery count (for retry tracking)
+  uint32 delivery_count = 10;
+}
+
+// Channel statistics
+message ChannelStats {
+  // Channel name
+  string name = 1;
+
+  // Backend type
+  ChannelBackend backend = 2;
+
+  // Total messages sent
+  uint64 messages_sent = 3;
+
+  // Total messages received
+  uint64 messages_received = 4;
+
+  // Messages pending (in queue)
+  uint64 messages_pending = 5;
+
+  // Messages failed
+  uint64 messages_failed = 6;
+
+  // Average latency (microseconds)
+  uint64 avg_latency_us = 7;
+
+  // Current throughput (messages/second)
+  double throughput = 8;
+
+  // Backend-specific stats
+  map<string, string> backend_stats = 9;
+}
+
+// Channel service for managing channels
+service ChannelService {
+  // Create a new channel
+  rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels"
+      body: "*"
+    };
+  }
+
+  // Send message to channel
+  rpc Send(SendRequest) returns (SendResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel_id}:send"
+      body: "*"
+    };
+  }
+
+  // Receive message from channel
+  rpc Receive(ReceiveRequest) returns (ReceiveResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel_id}:receive"
+      body: "*"
+    };
+  }
+
+  // Subscribe to channel (streaming)
+  rpc Subscribe(SubscribeRequest) returns (stream ChannelMessage) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel_id}:subscribe"
+      body: "*"
+    };
+  }
+
+  // Publish to channel (for pub/sub pattern)
+  rpc Publish(PublishRequest) returns (PublishResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel_id}:publish"
+      body: "*"
+    };
+  }
+
+  // Acknowledge message (for at-least-once delivery)
+  rpc Ack(AckRequest) returns (AckResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel_id}/messages/{message_id}:ack"
+      body: "*"
+    };
+  }
+
+  // Negative acknowledge (requeue message)
+  rpc Nack(NackRequest) returns (NackResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel_id}/messages/{message_id}:nack"
+      body: "*"
+    };
+  }
+
+  // Get channel statistics
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
+    option (google.api.http) = {
+      get: "/v1/channels/{channel_id}/stats"
+    };
+  }
+
+  // Delete channel
+  rpc DeleteChannel(DeleteChannelRequest) returns (DeleteChannelResponse) {
+    option (google.api.http) = {
+      delete: "/v1/channels/{channel_id}"
+    };
+  }
+}
+
+// CreateChannel request
+message CreateChannelRequest {
+  ChannelConfig config = 1;
+}
+
+// CreateChannel response
+message CreateChannelResponse {
+  string channel_id = 1;
+}
+
+// Send request
+message SendRequest {
+  string channel = 1;
+  ChannelMessage message = 2;
+  google.protobuf.Duration timeout = 3;
+}
+
+// Send response
+message SendResponse {
+  string message_id = 1;
+  bool sent = 2;
+}
+
+// Receive request
+message ReceiveRequest {
+  string channel = 1;
+  google.protobuf.Duration timeout = 2;
+  uint32 max_messages = 3; // For batch receives
+}
+
+// Receive response
+message ReceiveResponse {
+  repeated ChannelMessage messages = 1;
+}
+
+// Subscribe request (streaming)
+message SubscribeRequest {
+  string channel = 1;
+  string consumer_group = 2; // For load-balanced consumption
+  map<string, string> filters = 3; // Header-based filtering
+}
+
+// Publish request (pub/sub)
+message PublishRequest {
+  string channel = 1;
+  ChannelMessage message = 2;
+}
+
+// Publish response
+message PublishResponse {
+  string message_id = 1;
+  uint32 subscriber_count = 2;
+}
+
+// Ack request
+message AckRequest {
+  string channel = 1;
+  string message_id = 2;
+}
+
+// Ack response
+message AckResponse {
+  bool acknowledged = 1;
+}
+
+// Nack request
+message NackRequest {
+  string channel = 1;
+  string message_id = 2;
+  bool requeue = 3;
+}
+
+// Nack response
+message NackResponse {
+  bool requeued = 1;
+}
+
+// GetStats request
+message GetStatsRequest {
+  string channel = 1;
+}
+
+// GetStats response
+message GetStatsResponse {
+  ChannelStats stats = 1;
+}
+
+// DeleteChannel request
+message DeleteChannelRequest {
+  string channel = 1;
+}
+
+// DeleteChannel response
+message DeleteChannelResponse {
+  bool deleted = 1;
+}

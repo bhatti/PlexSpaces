@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# WASM Calculator - Node 1 (Coordinator) - Localhost Configuration
+#
+# Role: Orchestrates calculator operations
+# Components:
+#   - CoordinatorActor (1 instance)
+#   - WASM runtime for calculator modules
+#
+# Dependencies: Requires nodes 2, 3 to be running
+
+[release]
+name = "wasm-calculator-coordinator"
+version = "0.1.0"
+description = "WASM Calculator Coordinator Node"
+
+[node]
+id = "calc-coordinator"
+listen_address = "0.0.0.0:9201"
+cluster_seed_nodes = [
+    "localhost:9202",
+    "localhost:9203"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9201"
+max_connections = 100
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "calc-coordinator"
+sampling_rate = 1.0
+
+[[runtime.grpc.middleware]]
+type = "compression"
+enabled = true
+priority = 50
+[runtime.grpc.middleware.config.compression]
+min_compression_size_bytes = 1024
+algorithm = "gzip"
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+    "plexspaces-wasm-runtime",
+]
+
+[[applications]]
+name = "wasm-calculator"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 30
+shutdown_strategy = "graceful"
+dependencies = []
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "coordinator"
+# Coordinator settings
+COORDINATOR_COUNT = "1"
+# WASM runtime settings
+WASM_MODULE_CACHE_SIZE = "100"
+WASM_MAX_MEMORY_MB = "16"
+WASM_MAX_FUEL = "10000000000"
+# Cluster configuration (LOCALHOST for testing)
+CLUSTER_MODE = "distributed"
+CALCULATOR_WORKER_1_ADDRESS = "localhost:9202"
+CALCULATOR_WORKER_2_ADDRESS = "localhost:9203"
+
+# Resource limits
+[resources]
+max_memory_mb = 256
+max_cpu_percent = 50
+
+[shutdown]
+global_timeout_seconds = 60
+grace_period_seconds = 5
+grpc_drain_timeout_seconds = 15

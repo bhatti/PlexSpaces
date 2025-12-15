@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Finance Risk Assessment - Node 2 (Data Collection Workers)
+#
+# Role: External API integration for credit, bank, employment data
+# Components:
+#   - CreditCheckWorkerPool (5 workers)
+#   - BankAnalysisWorkerPool (5 workers)
+#   - EmploymentWorkerPool (3 workers)
+#
+# Dependencies: None (workers wait for coordinator requests)
+# Note: Pool sizes match external API rate limits
+
+[release]
+name = "finance-risk-data-collection"
+version = "0.1.0"
+description = "Finance Risk Assessment Data Collection Workers"
+
+[node]
+id = "finance-data-collection"
+listen_address = "0.0.0.0:9102"
+cluster_seed_nodes = [
+    "finance-coordinator:9101",
+    "finance-risk-scoring:9103",
+    "finance-post-decision:9104"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9102"
+max_connections = 300  # 5 + 5 + 3 workers = 13, with overhead
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "finance-risk-secret-key"
+allow_unauthenticated = true
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 150  # Match worker pool capacity
+burst_size = 30
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "finance-data-collection"
+sampling_rate = 1.0
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+[[applications]]
+name = "finance-data-workers"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 60
+shutdown_strategy = "graceful"
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "worker"
+# Credit Check Worker Pool (5 workers)
+CREDIT_CHECK_POOL_SIZE = "5"
+CREDIT_CHECK_POOL_ENABLED = "true"
+# Bank Analysis Worker Pool (5 workers)
+BANK_ANALYSIS_POOL_SIZE = "5"
+BANK_ANALYSIS_POOL_ENABLED = "true"
+# Employment Worker Pool (3 workers)
+EMPLOYMENT_POOL_SIZE = "3"
+EMPLOYMENT_POOL_ENABLED = "true"
+# All other workers disabled
+RISK_SCORING_ENABLED = "false"
+NOTIFICATION_POOL_ENABLED = "false"
+# Coordinator address
+COORDINATOR_ADDRESS = "finance-coordinator:9101"
+# External API configuration
+EQUIFAX_API_URL = "https://api.equifax.com/v1"
+EXPERIAN_API_URL = "https://api.experian.com/v1"
+TRANSUNION_API_URL = "https://api.transunion.com/v1"
+PLAID_API_URL = "https://api.plaid.com/v1"
+THE_WORK_NUMBER_API_URL = "https://api.theworknumber.com/v1"
+# API rate limits (requests per second)
+CREDIT_BUREAU_RATE_LIMIT = "10"
+PLAID_RATE_LIMIT = "10"
+THE_WORK_NUMBER_RATE_LIMIT = "5"
+# API timeout settings
+API_TIMEOUT_SECONDS = "30"
+API_RETRY_ATTEMPTS = "3"
+API_RETRY_BACKOFF_MS = "1000"
+
+# Resource limits (API I/O bound)
+[resources]
+max_memory_mb = 1024
+max_cpu_percent = 40
+
+[shutdown]
+global_timeout_seconds = 120
+grace_period_seconds = 15  # Allow API calls to complete
+grpc_drain_timeout_seconds = 30

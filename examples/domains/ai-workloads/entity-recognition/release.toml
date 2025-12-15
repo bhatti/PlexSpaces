@@ -1,0 +1,50 @@
+# Entity Recognition Release Configuration
+
+[release]
+name = "entity-recognition"
+version = "0.1.0"
+
+[[applications]]
+name = "entity-recognition"
+version = "0.1.0"
+
+[entity_recognition]
+# Number of loader actors (CPU-intensive)
+loader_count = 2
+
+# Number of processor actors (GPU-intensive)
+processor_count = 1
+
+# Number of aggregator actors (CPU-intensive)
+aggregator_count = 1
+
+# Backend type: "memory" or "redis"
+backend = "memory"
+
+# Redis URL (if backend is redis)
+redis_url = "redis://localhost:6379"
+
+# Node configuration
+[node]
+# Node ID (auto-generated if not specified)
+node_id = ""
+
+# Listen address
+listen_addr = "0.0.0.0:9000"
+
+# Node labels (comma-separated key=value pairs)
+# Example: "workload=cpu-intensive,service=loader"
+labels = ""
+
+# Resource capacity
+[capacity]
+cpu_cores = 4.0
+memory_bytes = 8589934592  # 8GB
+disk_bytes = 107374182400  # 100GB
+gpu_count = 0
+gpu_type = ""
+
+
+
+
+

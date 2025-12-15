@@ -1,0 +1,43 @@
+# PlexSpaces Release Configuration for Financial Risk Assessment
+#
+# This file demonstrates how to deploy the loan application workflow as a
+# PlexSpaces Application using the Release framework (Erlang/OTP-inspired).
+
+[release]
+name = "finance-risk"
+version = "0.1.0"
+description = "Financial Risk Assessment Workflow with Durable Actors"
+
+[node]
+id = "finance-risk-node"
+listen_address = "0.0.0.0:9000"
+cluster_seed_nodes = []
+
+# Finance Risk application configuration
+[finance_risk]
+[finance_risk.worker_pools]
+credit_check = 5
+bank_analysis = 5
+employment = 3
+risk_scoring = 2
+decision_engine = 1
+document = 2
+notification = 3
+audit = 1
+
+[finance_risk.node]
+node_id = "finance-risk-node"
+listen_addr = "0.0.0.0:9000"
+
+[finance_risk.node.capacity]
+cpu_cores = 4.0
+memory_gb = 8.0
+gpu_count = 0
+
+# Backend configuration
+backend = "memory"  # Options: memory, redis, sqlite
+redis_url = ""  # Set if backend is redis
+
+# Environment variables (can override config above)
+[env]
+LOG_LEVEL = "info"

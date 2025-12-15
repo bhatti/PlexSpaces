@@ -1,0 +1,1026 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces TupleSpace API
+//
+// ## Purpose
+// Implements Linda-style tuple space coordination for decoupled actor communication.
+// TupleSpaces provide spatial and temporal decoupling - actors communicate through
+// shared tuple space without knowing about each other or being active simultaneously.
+//
+// ## Architecture Context
+// This proto file implements **Pillar 1 (TupleSpace - Linda Model)** of PlexSpaces.
+// It provides the foundational coordination mechanism that enables:
+// - Decoupled actor communication (write/read/take tuples)
+// - Pattern matching for tuple retrieval
+// - Blocking/non-blocking operations
+// - Spatial queries for geo-distributed systems
+// - Event subscriptions for reactive patterns
+// - Transactional operations for consistency
+//
+// ### Integration with Other Pillars
+// - **Pillar 2 (Erlang/OTP)**: Actors use TupleSpace for coordination without tight coupling
+// - **Pillar 3 (Durability)**: Tuple operations are journaled for replay after failures
+// - **Pillar 4 (WASM)**: WASM actors can access TupleSpace through host bindings
+// - **Pillar 5 (Firecracker)**: TupleSpaces can span multiple VMs for isolation
+//
+// ## Component Interactions
+// - **Used by**: Actors for coordination, workflows for state sharing, mobile agents for handoff
+// - **Depends on**: common.proto (Metadata, QoSLevel), google.protobuf types
+// - **Provides**: Universal coordination primitive for all PlexSpaces components
+//
+// ## Design Decisions
+// - **Why tuple-based instead of key-value**:
+//   - Pattern matching enables flexible queries (e.g., ("sensor", ?, ?) matches any sensor data)
+//   - Order matters: tuples are sequences, not unordered sets
+//   - Linda model is proven for distributed coordination (30+ years of research)
+//   - Supports both data exchange and synchronization (barriers, semaphores)
+//
+// - **Why support both blocking and non-blocking**:
+//   - Blocking: Simplifies coordination (wait for tuple to appear)
+//   - Non-blocking: Enables polling patterns, avoids deadlocks
+//   - Timeout-based blocking: Best of both (wait with deadline)
+//
+// - **Why spatial coordinates (SpatialLocation)**:
+//   - Geo-distributed systems need location-aware tuple placement
+//   - Mobile agents need to find tuples "nearby" for efficiency
+//   - Enables range queries (find all tuples in region)
+//
+// - **Why transactions**:
+//   - Atomic multi-tuple operations (read tuple X, write tuple Y atomically)
+//   - Isolation levels for consistency vs performance tradeoff
+//   - 2PC for distributed coordination across nodes
+//
+// - **Why subscriptions instead of polling**:
+//   - Push model more efficient than continuous polling
+//   - Reactive patterns (event-driven architectures)
+//   - QoS levels ensure delivery guarantees
+//
+// ## TupleSpace as Universal Coordination
+// TupleSpaces aren't just for messaging - they enable multiple patterns:
+//
+// ### 1. Configuration Management (Orbit-inspired)
+// ```protobuf
+// Write: ("config", "timeout", "30s")
+// Read:  ("config", "timeout", ?)  // Returns "30s"
+// Watch: Subscribe to ("config", ?, ?) for live updates
+// ```
+//
+// ### 2. Service Discovery
+// ```protobuf
+// Write: ("service", "payment-api", "http://node-3:8080")
+// Read:  ("service", "payment-api", ?)  // Find endpoint
+// ```
+//
+// ### 3. Distributed Barriers (N actors wait for each other)
+// ```protobuf
+// Each actor: Write("barrier", "checkpoint-1", actor_id)
+// Coordinator: Count("barrier", "checkpoint-1", ?) == N  // All arrived
+// ```
+//
+// ### 4. Work Queues
+// ```protobuf
+// Producer: Write("job", task_data, "pending")
+// Worker:   Take("job", ?, "pending")  // Claim and remove
+// ```
+//
+// ### 5. Pub/Sub
+// ```protobuf
+// Publisher: Write("event", "user-login", event_data)
+// Subscriber: Subscribe to ("event", "user-login", ?)
+// ```
+
+syntax = "proto3";
+
+package plexspaces.tuplespace.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/tuplespace/tuplespace_storage.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.tuplespace.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpace TuplePlexSpace API";
+    version: "1.0";
+    description: "API for Linda-style tuplespace operations";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// Tuple field value
+message TupleField {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Tuple Field"
+      description: "A field value in a tuple"
+    }
+  };
+
+  oneof value {
+    int64 integer = 1;
+    double float = 2;
+    string string = 3;
+    bool boolean = 4;
+    bytes binary = 5;
+    bool null = 6;
+    bool wildcard = 7; // For template matching
+  }
+}
+
+// Pattern field for tuple matching
+//
+// ## Purpose
+// Enables flexible pattern matching beyond exact value comparison.
+// Supports wildcards, type constraints, and range queries.
+//
+// ## Design Decisions
+// - **Wildcard**: Match any value (Linda "?" operator)
+// - **Type**: Match by type (e.g., any string) without knowing value
+// - **Exact**: Match specific value
+// - **Range**: Future support for numeric ranges
+message PatternField {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Pattern Field"
+      description: "A field pattern for tuple matching"
+    }
+  };
+
+  oneof matcher {
+    TupleField exact = 1;      // Exact value match
+    bool wildcard = 2;         // Match any value
+    FieldType type = 3;        // Match by type
+  }
+}
+
+// Field type for type-based matching
+enum FieldType {
+  FIELD_TYPE_UNSPECIFIED = 0;
+  FIELD_TYPE_INTEGER = 1;
+  FIELD_TYPE_FLOAT = 2;
+  FIELD_TYPE_STRING = 3;
+  FIELD_TYPE_BOOLEAN = 4;
+  FIELD_TYPE_BINARY = 5;
+  FIELD_TYPE_NULL = 6;
+}
+
+// Lease for automatic tuple expiry
+//
+// ## Purpose
+// Manages tuple lifetime with TTL and renewal capabilities.
+// Prevents tuple accumulation and enables resource cleanup.
+//
+// ## Design Decisions
+// - **Renewable**: Allows lease extension without tuple recreation
+// - **Owner**: Identifies lease holder for access control
+// - **TTL**: Time-to-live for automatic expiry
+message Lease {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Lease"
+      description: "Lease for automatic tuple expiry"
+    }
+  };
+
+  google.protobuf.Duration ttl = 1 [(buf.validate.field).duration.lte.seconds = 2592000];  // Max 30 days
+  string owner = 2 [(buf.validate.field).string.max_len = 255];
+  bool renewable = 3;
+  google.protobuf.Timestamp expires_at = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Tuple for tuplespace operations
+message Tuple {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Tuple"
+      description: "A tuple in the tuplespace"
+      required: ["fields"]
+    }
+  };
+
+  string id = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (buf.validate.field).string.max_len = 255
+  ];
+  repeated TupleField fields = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {min_items: 1, max_items: 1000}  // At least 1 field, max 1000
+  ];
+  google.protobuf.Timestamp timestamp = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  Lease lease = 4;  // Optional lease for automatic expiry
+  map<string, google.protobuf.Value> metadata = 5;
+  SpatialLocation location = 6;
+}
+
+// Spatial location for geo-distributed tuples
+message SpatialLocation {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Spatial Location"
+      description: "Spatial coordinates for tuple location"
+    }
+  };
+
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+
+// Spatial region for range queries
+message SpatialRegion {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Spatial Region"
+      description: "Spatial region for range queries"
+    }
+  };
+
+  double min_x = 1;
+  double min_y = 2;
+  double max_x = 3;
+  double max_y = 4;
+  double min_z = 5;
+  double max_z = 6;
+}
+
+// Action types for subscriptions
+enum ActionType {
+  ACTION_TYPE_UNSPECIFIED = 0;
+  ACTION_TYPE_READ = 1;
+  ACTION_TYPE_WRITE = 2;
+  ACTION_TYPE_DELETE = 4;
+  ACTION_TYPE_CLEAR = 8;
+  ACTION_TYPE_ALL = 15; // READ | WRITE | DELETE | CLEAR
+}
+
+// Subscription to tuplespace events
+message Subscription {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Subscription"
+      description: "Subscription to tuplespace events"
+      required: ["id", "template"]
+    }
+  };
+
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+  Tuple template = 2 [(google.api.field_behavior) = REQUIRED];
+  plexspaces.common.v1.QoSLevel qos = 3;
+  ActionType actions = 4;
+  google.protobuf.Timestamp created_at = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string callback_url = 6 [(buf.validate.field).string.max_len = 512];
+}
+
+// Tuple event for notifications
+message TupleEvent {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Tuple Event"
+      description: "Event notification for tuple operations"
+    }
+  };
+
+  string id = 1 [(buf.validate.field).string.max_len = 255];
+  TupleEventType event_type = 2;
+  Tuple tuple = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  string space_id = 5 [(buf.validate.field).string.max_len = 255];
+  string subscription_id = 6 [(buf.validate.field).string.max_len = 255];
+}
+
+// Tuple event types
+enum TupleEventType {
+  TUPLE_EVENT_TYPE_UNSPECIFIED = 0;
+  TUPLE_EVENT_TYPE_ADDED = 1;
+  TUPLE_EVENT_TYPE_REMOVED = 2;
+  TUPLE_EVENT_TYPE_READ = 3;
+  TUPLE_EVENT_TYPE_UPDATED = 4;
+}
+
+// Transaction for atomic operations
+message Transaction {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Transaction"
+      description: "Transaction for atomic tuplespace operations"
+    }
+  };
+
+  string id = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (buf.validate.field).string.max_len = 255
+  ];
+  IsolationLevel isolation_level = 2;
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  google.protobuf.Timestamp created_at = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  TransactionState state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Transaction isolation levels
+enum IsolationLevel {
+  ISOLATION_LEVEL_UNSPECIFIED = 0;
+  ISOLATION_LEVEL_READ_UNCOMMITTED = 1;
+  ISOLATION_LEVEL_READ_COMMITTED = 2;
+  ISOLATION_LEVEL_REPEATABLE_READ = 3;
+  ISOLATION_LEVEL_SERIALIZABLE = 4;
+}
+
+// Transaction states
+enum TransactionState {
+  TRANSACTION_STATE_UNSPECIFIED = 0;
+  TRANSACTION_STATE_ACTIVE = 1;
+  TRANSACTION_STATE_PREPARING = 2;
+  TRANSACTION_STATE_COMMITTED = 3;
+  TRANSACTION_STATE_ABORTED = 4;
+}
+
+// Requests and responses
+
+message WriteRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Write Request"
+      description: "Request to write tuples to tuplespace"
+      required: ["tuples"]
+    }
+  };
+
+  repeated Tuple tuples = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {min_items: 1, max_items: 10000}  // At least 1, max 10K tuples
+  ];
+  string transaction_id = 2 [(buf.validate.field).string.max_len = 255];
+}
+
+message WriteResponse {
+  repeated string tuple_ids = 1;
+}
+
+message ReadRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Read Request"
+      description: "Request to read tuples from tuplespace"
+      required: ["template"]
+    }
+  };
+
+  Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  bool blocking = 3;
+  bool take = 4; // true for take operations
+  int32 max_results = 5 [(buf.validate.field).int32 = {gte: 1, lte: 10000}];  // 1 to 10K results
+  string transaction_id = 6 [(buf.validate.field).string.max_len = 255];
+  SpatialRegion spatial_filter = 7;
+}
+
+message ReadResponse {
+  repeated Tuple tuples = 1;
+  bool has_more = 2;
+}
+
+message CountRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Count Request"
+      description: "Request to count matching tuples"
+      required: ["template"]
+    }
+  };
+
+  Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
+  string transaction_id = 2 [(buf.validate.field).string.max_len = 255];
+  SpatialRegion spatial_filter = 3;
+}
+
+message CountResponse {
+  int64 count = 1;
+}
+
+message ExistsRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Exists Request"
+      description: "Request to check if matching tuples exist"
+      required: ["template"]
+    }
+  };
+
+  Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
+  string transaction_id = 2 [(buf.validate.field).string.max_len = 255];
+}
+
+message ExistsResponse {
+  bool exists = 1;
+}
+
+// Barrier synchronization request
+//
+// ## Purpose
+// Enables distributed barrier synchronization for multi-actor coordination.
+// A barrier blocks until N actors have reached the same checkpoint.
+//
+// ## Use Case: Byzantine Generals
+// ```protobuf
+// // General 1 writes barrier tuple
+// Write("barrier", "vote-complete", "general-1")
+//
+// // Coordinator waits for all 4 generals
+// Barrier(barrier_name="vote-complete", expected_count=4, timeout=30s)
+// // Returns when all 4 have arrived or timeout
+// ```
+//
+// ## Design Notes
+// - Blocking operation: waits until expected_count actors arrive
+// - Timeout prevents indefinite waiting if some actors fail
+// - Uses tuple pattern ("barrier", barrier_name, actor_id) internally
+// - Distributed: works across nodes via shared backend (Redis/PostgreSQL)
+// NOTE: Barrier synchronization is now handled via TupleSpace primitives (write + count + watch)
+// instead of a dedicated gRPC RPC. See docs/BARRIER_REFACTORING_PLAN.md for rationale.
+//
+// Example barrier pattern using primitives:
+//   1. Write arrival tuple: space.write(("barrier", name, actor_id))
+//   2. Watch for changes: let watcher = space.watch(("barrier", name, _))
+//   3. Count arrivals: let count = space.count(("barrier", name, _))
+//   4. Wait until count >= expected or timeout
+
+message SubscribeRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Subscribe Request"
+      description: "Request to subscribe to tuple events"
+      required: ["template"]
+    }
+  };
+
+  Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
+  plexspaces.common.v1.QoSLevel qos = 2;
+  ActionType actions = 3;
+  string callback_url = 4 [(buf.validate.field).string.max_len = 512];
+}
+
+message SubscribeResponse {
+  Subscription subscription = 1;
+}
+
+message UnsubscribeRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Unsubscribe Request"
+      description: "Request to unsubscribe from tuple events"
+      required: ["subscription_id"]
+    }
+  };
+
+  string subscription_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+}
+
+message BeginTransactionRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Begin Transaction Request"
+      description: "Request to begin a transaction"
+    }
+  };
+
+  IsolationLevel isolation_level = 1;
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+}
+
+message BeginTransactionResponse {
+  Transaction transaction = 1;
+}
+
+message CommitTransactionRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Commit Transaction Request"
+      description: "Request to commit a transaction"
+      required: ["transaction_id"]
+    }
+  };
+
+  string transaction_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+}
+
+message CommitTransactionResponse {
+  bool success = 1;
+}
+
+message AbortTransactionRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Abort Transaction Request"
+      description: "Request to abort a transaction"
+      required: ["transaction_id"]
+    }
+  };
+
+  string transaction_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+}
+
+message AbortTransactionResponse {
+  bool success = 1;
+}
+
+message RenewLeaseRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Renew Lease Request"
+      description: "Request to renew a tuple's lease"
+      required: ["tuple_id"]
+    }
+  };
+
+  string tuple_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+  google.protobuf.Duration new_ttl = 2 [(buf.validate.field).duration.lte.seconds = 2592000];  // Max 30 days
+}
+
+message RenewLeaseResponse {
+  bool success = 1;
+  google.protobuf.Timestamp new_expires_at = 2;
+}
+
+// Response message for GetStats RPC
+//
+// ## Purpose
+// Returns TupleSpace storage statistics for monitoring and performance analysis.
+//
+// ## Why This Exists
+// - Enables monitoring dashboards to track TupleSpace health
+// - Provides metrics for auto-scaling decisions
+// - Helps identify performance bottlenecks
+//
+// ## Design Notes
+// - Uses StorageStats from tuplespace_storage.proto
+// - All storage backends (Memory, Redis, PostgreSQL, SQLite) populate these stats
+message GetStatsResponse {
+  // Storage statistics (from tuplespace_storage.proto)
+  //
+  // Includes:
+  // - tuple_count: Number of tuples currently stored
+  // - memory_bytes: Memory usage (approximate for distributed backends)
+  // - total_operations: Total operations since start
+  // - read_operations: Count of read operations
+  // - write_operations: Count of write operations
+  // - take_operations: Count of take operations
+  // - avg_latency_ms: Average operation latency in milliseconds
+  plexspaces.tuplespace.v1.StorageStats stats = 1;
+}
+
+// Configuration messages for TupleSpace backend selection
+//
+// ## Purpose
+// Defines configuration for TupleSpace backend selection and connection settings.
+// Supports multiple storage backends (in-memory, SQLite, Redis, PostgreSQL) with
+// environment variable and file-based configuration.
+//
+// ## Design Decisions
+// - **Why oneof for backend**: Only one backend can be active at a time
+// - **Why separate backend config messages**: Each backend has unique connection parameters
+// - **Why pool_size**: SQL and Redis backends need connection pooling
+// - **Why default_ttl_seconds**: Global default for tuple leases
+
+// TupleSpace backend configuration
+//
+// ## Purpose
+// Main configuration structure for TupleSpace initialization.
+// Supports code-based, environment variable, and file-based configuration.
+//
+// ## Configuration Hierarchy
+// 1. CODE: Explicit TupleSpaceConfig in application code (highest priority)
+// 2. ENV: Environment variables (PLEXSPACES_TUPLESPACE_BACKEND, etc.)
+// 3. FILE: YAML/TOML configuration files
+// 4. DEFAULT: In-memory backend (lowest priority)
+//
+// ## Usage Examples
+//
+// ### In-Memory (Default)
+// ```yaml
+// backend:
+//   in_memory: {}
+// ```
+//
+// ### SQLite (Multi-Process, No External Dependencies)
+// ```yaml
+// backend:
+//   sqlite:
+//     path: "/tmp/plexspaces.db"
+// pool_size: 1
+// ```
+//
+// ### Redis (Distributed, Production)
+// ```yaml
+// backend:
+//   redis:
+//     url: "redis://localhost:6379"
+//     namespace: "plexspaces"
+// pool_size: 50
+// default_ttl_seconds: 3600
+// ```
+//
+// ### PostgreSQL (Distributed, ACID)
+// ```yaml
+// backend:
+//   postgres:
+//     connection_string: "postgres://localhost/plexspaces"
+//     table_name: "tuples"
+// pool_size: 20
+// ```
+message TupleSpaceConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "TupleSpace Configuration"
+      description: "Configuration for TupleSpace backend selection"
+    }
+  };
+
+  // Backend configuration (only one can be set)
+  oneof backend {
+    InMemoryBackend in_memory = 1;
+    SqliteBackend sqlite = 2;
+    RedisBackend redis = 3;
+    PostgresBackend postgres = 4;
+  }
+
+  // Connection pool size for SQL/Redis backends
+  // Default: 10 for SQL, 50 for Redis, ignored for in-memory
+  uint32 pool_size = 5 [(buf.validate.field).uint32 = {gte: 1, lte: 1000}];  // 1 to 1000 connections
+
+  // Default TTL in seconds for tuples with leases
+  // 0 = no default TTL (tuples must specify their own)
+  uint64 default_ttl_seconds = 6 [(buf.validate.field).uint64.lte = 2592000];  // Max 30 days
+
+  // Enable pattern matching optimizations (indexing)
+  bool enable_indexing = 7;
+}
+
+// In-memory backend configuration
+//
+// ## Purpose
+// Simple in-memory HashMap storage for testing and single-process use.
+//
+// ## Characteristics
+// - **Performance**: Fastest (no I/O)
+// - **Scope**: Single process only
+// - **Persistence**: None (lost on restart)
+// - **Use Cases**: Unit tests, development, single-node demos
+message InMemoryBackend {
+  // No configuration needed for in-memory backend
+}
+
+// SQLite backend configuration
+//
+// ## Purpose
+// Embedded SQL database for multi-process coordination without external services.
+//
+// ## Characteristics
+// - **Performance**: Fast (local file system)
+// - **Scope**: Multiple processes on same machine
+// - **Persistence**: Durable (survives restarts)
+// - **Use Cases**: E2E tests, embedded systems, single-machine multi-process
+//
+// ## Design Notes
+// - SQLite supports concurrent readers and one writer
+// - WAL mode enables better concurrency
+// - Ideal for tests that need multi-process coordination without Redis
+message SqliteBackend {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "SQLite Backend"
+      description: "SQLite backend configuration for multi-process coordination"
+    }
+  };
+
+  // Database file path or ":memory:" for in-memory SQLite
+  // Examples:
+  //   - "/tmp/plexspaces.db" (durable file)
+  //   - ":memory:" (in-memory, process-local)
+  //   - "/var/lib/plexspaces/tuples.db" (production)
+  string path = 1 [(buf.validate.field).string.max_len = 512];
+}
+
+// Redis backend configuration
+//
+// ## Purpose
+// Distributed coordination via Redis for production multi-node deployments.
+//
+// ## Characteristics
+// - **Performance**: Sub-millisecond latency
+// - **Scope**: Distributed across multiple machines
+// - **Persistence**: Durable (AOF + RDB)
+// - **Use Cases**: Production, distributed systems, high-throughput
+//
+// ## Design Notes
+// - Namespace prevents key collisions with other applications
+// - Supports Redis Cluster for horizontal scaling
+// - TTL implemented using Redis expiry mechanism
+message RedisBackend {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Redis Backend"
+      description: "Redis backend configuration for distributed coordination"
+    }
+  };
+
+  // Redis connection URL
+  // Examples:
+  //   - "redis://localhost:6379"
+  //   - "redis://:password@localhost:6379"
+  //   - "redis://localhost:6379/0" (database 0)
+  //   - "rediss://host:6380" (TLS)
+  string url = 1 [(buf.validate.field).string.max_len = 512];
+
+  // Key namespace prefix to avoid collisions
+  // All tuple keys will be prefixed with this namespace
+  // Example: namespace "plexspaces" -> keys "plexspaces:tuple:123"
+  string namespace = 2 [(buf.validate.field).string.max_len = 128];
+}
+
+// PostgreSQL backend configuration
+//
+// ## Purpose
+// Distributed coordination via PostgreSQL for ACID-compliant persistence.
+//
+// ## Characteristics
+// - **Performance**: Millisecond latency (slower than Redis)
+// - **Scope**: Distributed across multiple machines
+// - **Persistence**: Durable with ACID guarantees
+// - **Use Cases**: Enterprise, transactional workloads, strong consistency
+//
+// ## Design Notes
+// - Supports full SQL transactions with isolation levels
+// - Better for complex queries than Redis
+// - Can use LISTEN/NOTIFY for subscriptions
+message PostgresBackend {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "PostgreSQL Backend"
+      description: "PostgreSQL backend configuration for distributed coordination"
+    }
+  };
+
+  // PostgreSQL connection string
+  // Examples:
+  //   - "postgres://localhost/plexspaces"
+  //   - "postgres://user:pass@localhost:5432/plexspaces"
+  //   - "postgres://user@localhost/plexspaces?sslmode=require"
+  string connection_string = 1 [(buf.validate.field).string.max_len = 512];
+
+  // Table name for storing tuples
+  // Default: "tuples"
+  string table_name = 2 [(buf.validate.field).string.max_len = 128];
+}
+
+// TuplePlexSpace service
+service TuplePlexSpaceService {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Service for Linda-style tuplespace operations"
+  };
+
+  // Write tuples
+  rpc Write(WriteRequest) returns (WriteResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/tuples"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Write Tuples"
+      description: "Write tuples to the tuplespace"
+      tags: "Tuples"
+    };
+  }
+
+  // Read tuples (blocking and non-blocking)
+  rpc Read(ReadRequest) returns (ReadResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/read"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Read Tuples"
+      description: "Read tuples from the tuplespace"
+      tags: "Tuples"
+    };
+  }
+
+  // Take tuples (read and remove)
+  rpc Take(ReadRequest) returns (ReadResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/take"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Take Tuples"
+      description: "Take (read and remove) tuples from the tuplespace"
+      tags: "Tuples"
+    };
+  }
+
+  // Count matching tuples
+  rpc Count(CountRequest) returns (CountResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/count"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Count Tuples"
+      description: "Count tuples matching a template"
+      tags: "Tuples"
+    };
+  }
+
+  // Check if tuples exist
+  rpc Exists(ExistsRequest) returns (ExistsResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/exists"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Check Tuple Existence"
+      description: "Check if tuples matching a template exist"
+      tags: "Tuples"
+    };
+  }
+
+  // NOTE: Barrier() RPC removed - use TupleSpace primitives instead (write + count + watch)
+  // See docs/BARRIER_REFACTORING_PLAN.md for migration guide and pattern examples.
+
+  // Subscribe to tuple events
+  rpc Subscribe(SubscribeRequest) returns (SubscribeResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/subscriptions"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Subscribe to Events"
+      description: "Subscribe to tuple events"
+      tags: "Subscriptions"
+    };
+  }
+
+  // Unsubscribe from tuple events
+  rpc Unsubscribe(UnsubscribeRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/tuplespace/subscriptions/{subscription_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Unsubscribe from Events"
+      description: "Unsubscribe from tuple events"
+      tags: "Subscriptions"
+    };
+  }
+
+  // Begin transaction
+  rpc BeginTransaction(BeginTransactionRequest) returns (BeginTransactionResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/transactions"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Begin Transaction"
+      description: "Begin a new transaction"
+      tags: "Transactions"
+    };
+  }
+
+  // Commit transaction
+  rpc CommitTransaction(CommitTransactionRequest) returns (CommitTransactionResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/transactions/{transaction_id}/commit"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Commit Transaction"
+      description: "Commit a transaction"
+      tags: "Transactions"
+    };
+  }
+
+  // Abort transaction
+  rpc AbortTransaction(AbortTransactionRequest) returns (AbortTransactionResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/transactions/{transaction_id}/abort"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Abort Transaction"
+      description: "Abort a transaction"
+      tags: "Transactions"
+    };
+  }
+
+  // Clear tuplespace
+  rpc Clear(plexspaces.common.v1.Empty) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/tuplespace/tuples"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Clear TuplePlexSpace"
+      description: "Clear all tuples from the tuplespace"
+      tags: "Tuples"
+    };
+  }
+
+  // Renew tuple lease
+  rpc RenewLease(RenewLeaseRequest) returns (RenewLeaseResponse) {
+    option (google.api.http) = {
+      post: "/v1/tuplespace/tuples/{tuple_id}/renew-lease"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Renew Tuple Lease"
+      description: "Renew the lease for a tuple with renewable flag"
+      tags: "Tuples"
+    };
+  }
+
+  // Get storage statistics
+  //
+  // ## Purpose
+  // Retrieve performance and usage statistics from the TupleSpace storage backend.
+  //
+  // ## Why This Exists
+  // - **Monitoring**: Track tuple count, memory usage, operation counts
+  // - **Performance**: Measure average latency for optimization
+  // - **Capacity Planning**: Know when to scale storage
+  // - **Debugging**: Identify performance bottlenecks
+  //
+  // ## How It's Used
+  // - Called by monitoring dashboards (Prometheus, Grafana)
+  // - Used by auto-scaling logic to determine when to add nodes
+  // - Debugging tool for investigating slow TupleSpace operations
+  //
+  // ## Design Notes
+  // - Returns StorageStats message (defined in tuplespace_storage.proto)
+  // - Statistics include: tuple_count, memory_bytes, operation counts, avg_latency_ms
+  // - All storage backends (Memory, Redis, PostgreSQL, SQLite) implement this
+  //
+  // ## Examples
+  // ```
+  // GetStatsRequest {} -> GetStatsResponse {
+  //   stats: {
+  //     tuple_count: 10000,
+  //     memory_bytes: 5242880,
+  //     total_operations: 50000,
+  //     read_operations: 30000,
+  //     write_operations: 15000,
+  //     take_operations: 5000,
+  //     avg_latency_ms: 2.5
+  //   }
+  // }
+  // ```
+  rpc GetStats(plexspaces.common.v1.Empty) returns (GetStatsResponse) {
+    option (google.api.http) = {
+      get: "/v1/tuplespace/stats"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Storage Statistics"
+      description: "Retrieve TupleSpace storage performance and usage statistics"
+      tags: "Monitoring"
+    };
+  }
+}
+

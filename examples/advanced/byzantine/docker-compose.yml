@@ -1,0 +1,42 @@
+# Docker Compose for Byzantine Generals Integration Testing
+#
+# This sets up Redis for Phase 2 distributed consensus testing.
+#
+# Usage:
+#   docker-compose up -d          # Start Redis in background
+#   docker-compose down           # Stop and remove containers
+#   docker-compose logs redis     # View Redis logs
+#   docker-compose ps             # Check status
+
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: byzantine-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      # Persist Redis data across restarts (optional)
+      - redis-data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 60 1
+      --loglevel notice
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - byzantine-network
+
+networks:
+  byzantine-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local

@@ -1,0 +1,563 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Common Types API
+//
+// ## Purpose
+// Provides fundamental data types and utilities shared across all PlexSpaces services.
+// This is the foundation layer that all other proto files depend on, defining core
+// abstractions like actor identity, metadata, error handling, and the Facet system.
+//
+// ## Architecture Context
+// This proto file is foundational to ALL five PlexSpaces pillars:
+// - **Pillar 1 (TupleSpace)**: Uses Metadata for tuple annotations, QoSLevel for delivery guarantees
+// - **Pillar 2 (Erlang/OTP)**: Uses string actor IDs for identity, RetryPolicy for supervision
+// - **Pillar 3 (Durability)**: Uses Metadata timestamps for journal ordering, RetryPolicy for recovery
+// - **Pillar 4 (WASM)**: Uses Facets to dynamically add WASM execution capabilities
+// - **Pillar 5 (Firecracker)**: Uses ResourceState to track VM lifecycle
+//
+// ### Core Abstractions Provided
+// 1. **Actor IDs**: Plain strings for actor identity (format: "{namespace}/{actor_name}")
+// 2. **Metadata**: Standard resource metadata (creation time, labels, annotations)
+// 3. **ErrorDetail**: Structured error reporting with extensible details
+// 4. **RetryPolicy**: Configurable retry behavior for fault tolerance
+// 5. **QoSLevel**: Message delivery guarantees (none, best-effort, at-least-once, exactly-once)
+// 6. **ResourceState**: Lifecycle states for managed resources (creating, active, deleting, etc.)
+// 7. **Facet System**: Dynamic capability composition (THE key extensibility mechanism)
+//
+// ## Component Interactions
+// - **Used by**: ALL other proto files (actor_runtime.proto, tuplespace.proto, supervision.proto, etc.)
+// - **Depends on**: Only Google well-known types (Timestamp, Duration, Any, Struct)
+// - **Provides**: Core types that enable distributed actor communication and resource management
+//
+// ## Design Decisions
+// - **Why actor IDs are plain strings**:
+//   - Simplicity: No wrapper message, direct string usage
+//   - Human-readable: Easy debugging and logging
+//   - Wire efficiency: No extra message overhead
+//   - Flexibility: Can embed namespace, node_id in string format
+//
+// - **Why Metadata uses maps for labels and annotations**:
+//   - Labels: Simple string key-value pairs for filtering/grouping (Kubernetes-inspired)
+//   - Annotations: Complex structured data using google.protobuf.Any (arbitrary payloads)
+//   - Enables extensibility without proto changes
+//
+// - **Why separate QoSLevel and RetryPolicy**:
+//   - QoS: Message delivery semantics (fire-and-forget vs guaranteed)
+//   - RetryPolicy: Failure recovery behavior (backoff, max attempts)
+//   - Orthogonal concerns that compose independently
+//
+// - **Why ResourceState enum instead of bool flags**:
+//   - State machine validation: only valid transitions allowed
+//   - Clear semantics: CREATING vs ACTIVE vs DELETING are distinct
+//   - Enables supervision logic based on state
+//
+// - **Why Facet system in common.proto instead of facets.proto**:
+//   - CRITICAL DESIGN: Facets are THE extensibility mechanism
+//   - Must be available to all components without circular dependencies
+//   - Enables "Static for core, Dynamic for extensions" principle
+//   - Actors, workflows, nodes all use Facets for runtime composition
+//
+// ## Facet System (CRITICAL EXTENSIBILITY MECHANISM)
+// Facets provide dynamic capabilities to actors and resources WITHOUT changing core abstractions.
+// This is the key to PlexSpaces' "one powerful actor" philosophy instead of "20 specialized types".
+//
+// ### Philosophy
+// - **Core = Static**: Identity, state, behavior, mailbox, journal (always present, compiled in)
+// - **Extensions = Facets**: Mobility, metrics, tracing, security (optional, runtime-composed)
+// - **Pay for what you use**: Only actors that need a capability pay its cost
+//
+// ### Example: Virtual Actor = Actor + VirtualActorFacet
+// ```protobuf
+// Actor {
+//   id: "user-123"
+//   facets: [
+//     Facet {
+//       type: "virtual_actor"
+//       config: { "activation_strategy": "lazy", "deactivation_timeout": "5m" }
+//       priority: 100  // Higher priority = runs first in interceptor chain
+//     }
+//   ]
+// }
+// ```
+//
+// ### Example: Mobile Actor = Actor + MobilityFacet
+// ```protobuf
+// Actor {
+//   id: "agent-456"
+//   facets: [
+//     Facet {
+//       type: "mobility"
+//       config: { "migration_strategy": "eager", "state_transfer": "checkpoint" }
+//       priority: 50
+//     }
+//   ]
+// }
+// ```
+//
+// ### Common Facet Types (defined in facets.proto)
+// - **virtual_actor**: Automatic activation/deactivation (Orbit-inspired)
+// - **otp_genserver**: GenServer behavior with handle_call/cast/info
+// - **durable_execution**: Journaling and deterministic replay (Restate-inspired)
+// - **mobility**: Actor migration between nodes
+// - **metrics**: Prometheus metrics collection
+// - **tracing**: Distributed tracing (OpenTelemetry)
+// - **security**: Authorization and authentication
+// - **collaboration**: Multi-agent coordination
+//
+// ### Facet Priority Ranges
+// Priority determines execution order in the facet interceptor chain:
+// - **1000+**: Security/Auth facets (run first, can block execution)
+// - **900-999**: Logging/Tracing facets (capture all events)
+// - **800-899**: Metrics facets (measure performance)
+// - **100-500**: Domain logic facets (business capabilities)
+// - **1-99**: Persistence facets (run last, commit state)
+
+syntax = "proto3";
+
+package plexspaces.common.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/any.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.common.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpace Common Types";
+    version: "1.0";
+    description: "Common data types and utilities for the PlexSpace framework";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// NOTE: Actor IDs are represented as plain strings throughout PlexSpaces.
+// Format: "{namespace}/{actor_name}" or "{node_id}/{actor_name}"
+// - Simplifies API (no wrapper message needed)
+// - Human-readable for debugging
+// - Max length 255 chars, no whitespace
+// - Case-sensitive, supports full UTF-8
+
+// Empty message (replacement for plexspaces.common.v1.Empty)
+//
+// Used for RPC methods that don't return a meaningful value.
+// We define our own instead of using plexspaces.common.v1.Empty because
+// prost_types doesn't include it.
+message Empty {}
+
+// Standard metadata for resources
+message Metadata {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Metadata"
+      description: "Standard metadata fields for resources"
+    }
+  };
+
+  google.protobuf.Timestamp create_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp update_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string created_by = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string updated_by = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  map<string, string> labels = 5;
+  map<string, google.protobuf.Any> annotations = 6;
+}
+
+// Standard error details
+message ErrorDetail {
+  string code = 1 [(buf.validate.field).string = {min_len: 1, max_len: 64, pattern: "^[A-Z_]+$"}];
+  string message = 2 [(buf.validate.field).string = {min_len: 1, max_len: 1024}];
+  map<string, google.protobuf.Any> details = 3;
+}
+
+// Retry policy configuration
+message RetryPolicy {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Retry Policy"
+      description: "Configuration for retry behavior"
+    }
+  };
+
+  uint32 max_attempts = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).uint32 = {gte: 1, lte: 100}
+  ];
+  double backoff_multiplier = 2 [(buf.validate.field).double = {gte: 1.0, lte: 10.0}];
+  google.protobuf.Duration initial_delay = 3 [(buf.validate.field).duration.gte.nanos = 1000000]; // >= 1ms
+  google.protobuf.Duration max_delay = 4 [(buf.validate.field).duration.lte.seconds = 3600]; // <= 1 hour
+}
+
+// Quality of Service levels
+enum QoSLevel {
+  QOS_LEVEL_UNSPECIFIED = 0;
+  QOS_LEVEL_NONE = 1;
+  QOS_LEVEL_BEST_EFFORT = 2;
+  QOS_LEVEL_GUARANTEED = 3;
+}
+
+// Resource states
+enum ResourceState {
+  RESOURCE_STATE_UNSPECIFIED = 0;
+  RESOURCE_STATE_CREATING = 1;
+  RESOURCE_STATE_ACTIVE = 2;
+  RESOURCE_STATE_INACTIVE = 3;
+  RESOURCE_STATE_UPDATING = 4;
+  RESOURCE_STATE_DELETING = 5;
+  RESOURCE_STATE_FAILED = 6;
+  RESOURCE_STATE_UNKNOWN = 7;
+}
+
+// Standard pagination request
+message PageRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Page Request"
+      description: "Standard pagination parameters"
+    }
+  };
+
+  int32 page_size = 1 [(buf.validate.field).int32 = {gte: 1, lte: 1000}];
+  string page_token = 2 [(buf.validate.field).string.max_len = 1024];
+  string filter = 3 [(buf.validate.field).string.max_len = 2048];
+  string order_by = 4 [(buf.validate.field).string.max_len = 256];
+}
+
+// Standard pagination response
+message PageResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Page Response"
+      description: "Standard pagination response metadata"
+    }
+  };
+
+  string next_page_token = 1;
+  int32 total_size = 2;
+}
+
+// ============================================================================
+// FACET SYSTEM - Core Extensibility Mechanism
+// ============================================================================
+
+// Facet provides capabilities to actors and other resources
+// Philosophy: Facets augment core functionality without replacing it
+message Facet {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Facet"
+      description: "Composable capability that extends actor behavior"
+      required: ["type"]
+    }
+  };
+
+  // Facet type identifier (e.g., "virtual_actor", "otp_genserver", "durable_execution")
+  string type = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_]*$"}
+  ];
+
+  // Configuration as key-value pairs (all values are strings for simplicity)
+  map<string, string> config = 2;
+
+  // Priority for facet execution ordering (higher = runs first)
+  // Common ranges:
+  //   1000+: Security/Auth facets
+  //   900-999: Logging/Tracing facets
+  //   800-899: Metrics facets
+  //   100-500: Domain logic facets
+  //   1-99: Persistence facets
+  int32 priority = 3 [(buf.validate.field).int32 = {gte: 0, lte: 10000}];
+
+  // Facet state (for stateful facets)
+  map<string, google.protobuf.Any> state = 4;
+
+  // Metadata for facet instance
+  Metadata metadata = 5;
+}
+
+// Facet descriptor for registry/discovery
+message FacetDescriptor {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Facet Descriptor"
+      description: "Metadata describing a facet type"
+    }
+  };
+
+  string type = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_]*$"}];
+  string description = 2 [(buf.validate.field).string.max_len = 2048];
+  string category = 3 [(buf.validate.field).string.max_len = 128]; // e.g., "infrastructure", "virtual_actor", "otp", "workflow"
+  repeated ConfigOption config_options = 4;
+  repeated string dependencies = 5 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_]*$"}]; // Other facets this depends on
+}
+
+// Configuration option for a facet
+message ConfigOption {
+  string key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 128, pattern: "^[a-z][a-z0-9_]*$"}];
+  string description = 2 [(buf.validate.field).string.max_len = 1024];
+  string default_value = 3 [(buf.validate.field).string.max_len = 1024];
+  bool required = 4;
+  string value_type = 5 [(buf.validate.field).string = {min_len: 1, max_len: 64}]; // "string", "int", "bool", "duration", etc.
+}
+
+// ============================================================================
+// MULTI-TENANCY AND ISOLATION
+// ============================================================================
+//
+// ## Purpose
+// Provides tenant isolation and security boundaries for multi-tenant deployments.
+// Enables hosting multiple customers/organizations on shared infrastructure while
+// maintaining strict separation of resources, state, and access control.
+//
+// ## Design Philosophy
+// - **Tenant = Customer/Organization**: Each tenant gets isolated environment
+// - **Namespace = Sub-environment**: production, staging, dev within a tenant
+// - **SecurityPolicy = Per-tenant rules**: What each tenant is allowed to do
+// - **ResourceQuota = Per-tenant limits**: Prevent resource exhaustion
+//
+// ## Enforcement Points
+// All PlexSpaces components enforce isolation at these levels:
+// 1. **ActorRegistry**: Actors only visible within same IsolationContext
+// 2. **Messaging**: Messages cannot cross tenant boundaries (unless explicit policy)
+// 3. **TupleSpace**: Tuples isolated per tenant
+// 4. **Journal**: Events stored with tenant_id for GDPR compliance
+// 5. **Supervision**: Supervisors scoped to tenant
+//
+// ## Example Use Cases
+//
+// ### SaaS Multi-Tenancy
+// ```protobuf
+// IsolationContext {
+//   tenant_id: { tenant_id: "customer-acme-corp" }
+//   namespace: "production"
+//   security_policy: {
+//     allow_cross_namespace: false  // Production can't talk to staging
+//     allow_tuplespace_read: true
+//     allow_tuplespace_write: true
+//     allow_remote_calls: true
+//     max_message_size_bytes: 1048576  // 1MB max
+//   }
+//   resource_quota: {
+//     max_actors: 10000
+//     max_memory_mb: 8192  // 8GB
+//     max_cpu_percent: 50.0  // 50% of node CPU
+//     max_disk_mb: 10240  // 10GB
+//     rate_limit_msg_per_sec: 10000
+//   }
+// }
+// ```
+//
+// ### Development Environment Isolation
+// ```protobuf
+// IsolationContext {
+//   tenant_id: { tenant_id: "internal-dev" }
+//   namespace: "dev-alice"
+//   security_policy: {
+//     allow_cross_namespace: true  // Dev can talk to other dev environments
+//     allow_tuplespace_read: true
+//     allow_tuplespace_write: true
+//     allow_remote_calls: false  // No external calls from dev
+//     max_message_size_bytes: 10485760  // 10MB for testing
+//   }
+//   resource_quota: {
+//     max_actors: 100
+//     max_memory_mb: 512
+//     max_cpu_percent: 10.0
+//     max_disk_mb: 1024
+//     rate_limit_msg_per_sec: 100
+//   }
+// }
+// ```
+
+// Tenant identifier for multi-tenancy isolation
+message TenantId {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Tenant ID"
+      description: "Unique identifier for a customer or organization"
+      required: ["tenant_id"]
+    }
+  };
+
+  // Unique tenant identifier (e.g., "customer-acme", "org-123", "team-alpha")
+  // Format: lowercase alphanumeric + hyphens, max 64 chars
+  // Example: "customer-acme-corp", "internal-dev", "client-xyz"
+  string tenant_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 64, pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"}
+  ];
+}
+
+// Security policy for tenant isolation
+message SecurityPolicy {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Security Policy"
+      description: "Per-tenant security rules and permissions"
+    }
+  };
+
+  // Can actors in this tenant send messages to actors in different namespaces?
+  // Example: production=false (strict isolation), staging=true (allow cross-talk)
+  bool allow_cross_namespace = 1;
+
+  // Can actors in this tenant read from TupleSpace?
+  bool allow_tuplespace_read = 2;
+
+  // Can actors in this tenant write to TupleSpace?
+  bool allow_tuplespace_write = 3;
+
+  // Can actors in this tenant make remote calls to actors on other nodes?
+  bool allow_remote_calls = 4;
+
+  // Maximum message size this tenant can send (bytes)
+  // Prevents DoS attacks via large messages
+  uint64 max_message_size_bytes = 5 [(buf.validate.field).uint64 = {gte: 1024, lte: 104857600}]; // 1KB to 100MB
+
+  // Allowed facet types this tenant can use
+  // Empty = all facets allowed, Non-empty = whitelist only
+  repeated string allowed_facet_types = 6 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_]*$"}];
+
+  // Custom security rules as key-value pairs
+  // Example: {"allow_wasm": "true", "encryption_required": "true"}
+  map<string, string> custom_rules = 7;
+}
+
+// Per-tenant resource quotas
+message ResourceQuota {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Resource Quota"
+      description: "Per-tenant resource limits to prevent exhaustion"
+    }
+  };
+
+  // Maximum number of actors this tenant can create
+  // 0 = unlimited (use with caution!)
+  uint32 max_actors = 1 [(buf.validate.field).uint32.lte = 1000000]; // Max 1 million actors
+
+  // Maximum memory this tenant can consume (MB)
+  // Enforced at actor creation and runtime monitoring
+  uint64 max_memory_mb = 2 [(buf.validate.field).uint64.lte = 1048576]; // Max 1TB
+
+  // Maximum CPU percentage this tenant can consume (0-100)
+  // Example: 50.0 = tenant limited to 50% of node CPU
+  double max_cpu_percent = 3 [(buf.validate.field).double = {gte: 0.0, lte: 100.0}];
+
+  // Maximum disk space for journals/snapshots (MB)
+  uint64 max_disk_mb = 4 [(buf.validate.field).uint64.lte = 10485760]; // Max 10TB
+
+  // Maximum message throughput (messages per second)
+  // Enforced via rate limiting at message send
+  uint64 rate_limit_msg_per_sec = 5 [(buf.validate.field).uint64.lte = 1000000]; // Max 1M msgs/sec
+
+  // Maximum concurrent operations
+  // Limits concurrent handler executions across all actors
+  uint32 max_concurrent_operations = 6 [(buf.validate.field).uint32.lte = 100000]; // Max 100K concurrent
+
+  // Custom quota limits as key-value pairs
+  // Example: {"max_tuplespace_entries": "10000"}
+  map<string, string> custom_quotas = 7;
+}
+
+// Complete isolation context for multi-tenancy
+message IsolationContext {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Isolation Context"
+      description: "Complete isolation metadata for multi-tenant actor execution"
+      required: ["tenant_id"]
+    }
+  };
+
+  // Tenant identifier (REQUIRED)
+  TenantId tenant_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace within tenant (OPTIONAL)
+  // Common values: "production", "staging", "dev", "test"
+  // Format: lowercase alphanumeric + hyphens, max 32 chars
+  string namespace = 2 [(buf.validate.field).string = {max_len: 32, pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"}];
+
+  // Security policy for this isolation context
+  SecurityPolicy security_policy = 3;
+
+  // Resource quota for this isolation context
+  ResourceQuota resource_quota = 4;
+
+  // Additional metadata (labels, annotations)
+  Metadata metadata = 5;
+}
+
+// ============================================================================
+// RESOURCE SPECIFICATION
+// ============================================================================
+//
+// ## Purpose
+// Resource specification (CPU, memory, disk, GPU) shared by nodes, actors,
+// and scheduling components. Enables resource-aware scheduling and capacity
+// management.
+//
+// ## Usage
+// - **Nodes**: Total and available capacity
+// - **Actors**: Resource requirements for scheduling
+// - **Scheduling**: Matching actors to nodes based on resources
+//
+// ## Design Decisions
+// - **CPU as double**: Allows fractional cores (e.g., 0.5 = half core)
+// - **Memory/Disk as uint64**: Bytes for precision, supports large values
+// - **GPU as separate fields**: Count and type for heterogeneous clusters
+
+// Resource specification (CPU, memory, disk, GPU)
+// Shared by nodes, actors, and scheduling components
+message ResourceSpec {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Resource Specification"
+      description: "CPU, memory, disk, and GPU resource specification"
+    }
+  };
+
+  // CPU cores (fractional allowed, e.g., 0.5 = half core)
+  // Example: 2.5 = two and a half CPU cores
+  double cpu_cores = 1 [(buf.validate.field).double = {gte: 0.0}];
+
+  // Memory in bytes
+  // Example: 1073741824 = 1GB
+  uint64 memory_bytes = 2;
+
+  // Disk space in bytes
+  // Example: 10737418240 = 10GB
+  uint64 disk_bytes = 3;
+
+  // GPU count (0 = no GPU)
+  // Example: 1 = one GPU
+  uint32 gpu_count = 4;
+
+  // GPU type (e.g., "H100", "A100", "L4", "T4")
+  // Empty string = any GPU type
+  string gpu_type = 5 [(buf.validate.field).string.max_len = 64];
+}

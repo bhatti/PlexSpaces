@@ -1,0 +1,53 @@
+[package]
+name = "plexspaces-actor"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Core actor implementation for PlexSpaces"
+
+[dependencies]
+# Core types and dependencies
+plexspaces-core = { workspace = true }
+plexspaces-mailbox = { workspace = true }
+plexspaces-persistence = { workspace = true }
+plexspaces-behavior = { workspace = true }
+plexspaces-facet = { workspace = true }
+plexspaces-proto = { workspace = true }
+plexspaces-keyvalue = { workspace = true }
+plexspaces-tuplespace = { workspace = true }
+plexspaces-journaling = { path = "../journaling" }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+ulid = "1.1"
+futures = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+tonic = { workspace = true }
+
+# Observability (CRITICAL - production-ready observability)
+metrics = "0.23"
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+plexspaces-actor-service = { path = "../actor-service" }
+plexspaces-object-registry = { path = "../object-registry" }
+plexspaces-node = { path = "../node" }
+plexspaces-behavior = { path = "../behavior" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lib]
+name = "plexspaces_actor"
+path = "src/lib.rs"

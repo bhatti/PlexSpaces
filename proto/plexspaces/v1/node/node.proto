@@ -1,0 +1,510 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+
+syntax = "proto3";
+
+package plexspaces.node.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/any.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/actors/actor_runtime.proto";
+
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpace Node API";
+    version: "1.0";
+    description: "Internal API for node management (process/kubernetes/firecracker)";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// Node represents a runtime host for actors
+// Can be a simple process, Kubernetes pod, or Firecracker VM
+message Node {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Node"
+      description: "Runtime host for actors"
+      required: ["id", "node_type"]
+    }
+  };
+
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  NodeType node_type = 2 [(google.api.field_behavior) = REQUIRED];
+  NodeStatus status = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  NodeCapabilities capabilities = 4;
+  plexspaces.common.v1.Metadata metadata = 5;
+  google.protobuf.Timestamp created_at = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp last_heartbeat = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Type-specific configuration
+  oneof config {
+    ProcessConfig process_config = 10;
+    KubernetesConfig kubernetes_config = 11;
+    FirecrackerConfig firecracker_config = 12;
+  }
+
+  // Current actors hosted on this node
+  repeated string actor_ids = 20;
+
+  // Resource metrics
+  NodeMetrics metrics = 21;
+}
+
+// Node type enumeration
+enum NodeType {
+  NODE_TYPE_UNSPECIFIED = 0;
+  NODE_TYPE_PROCESS = 1;       // Simple OS process
+  NODE_TYPE_KUBERNETES = 2;    // Kubernetes pod
+  NODE_TYPE_FIRECRACKER = 3;   // Firecracker microVM
+}
+
+// Node status
+enum NodeStatus {
+  NODE_STATUS_UNSPECIFIED = 0;
+  NODE_STATUS_STARTING = 1;
+  NODE_STATUS_READY = 2;
+  NODE_STATUS_BUSY = 3;
+  NODE_STATUS_DRAINING = 4;
+  NODE_STATUS_STOPPED = 5;
+  NODE_STATUS_FAILED = 6;
+}
+
+// Node capabilities
+message NodeCapabilities {
+  uint32 max_actors = 1;
+  uint64 memory_bytes = 2;
+  uint32 cpu_millicores = 3;
+  bool supports_wasm = 4;
+  bool supports_isolation = 5;
+  repeated string supported_runtimes = 6;
+}
+
+// Node runtime configuration
+//
+// ## Purpose
+// Runtime configuration for a PlexSpaces node, including network settings,
+// clustering options, and operational parameters.
+//
+// ## Design
+// Proto-first design: All node configuration is defined in proto for:
+// - Wire compatibility (gRPC configuration APIs)
+// - Language-agnostic configuration
+// - Consistent configuration semantics across implementations
+//
+// ## Note
+// This is different from NodeConfig in release.proto which is for release/deployment.
+// This NodeRuntimeConfig is for runtime operational settings.
+message NodeRuntimeConfig {
+  // Listen address for gRPC server (e.g., "0.0.0.0:9000")
+  string listen_addr = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Maximum number of concurrent connections
+  uint32 max_connections = 2;
+
+  // Heartbeat interval in milliseconds
+  uint64 heartbeat_interval_ms = 3;
+
+  // Enable clustering (multi-node coordination)
+  bool clustering_enabled = 4;
+
+  // Node metadata (key-value pairs for extensibility)
+  map<string, string> metadata = 5;
+}
+
+// Process-based node configuration
+message ProcessConfig {
+  string pid = 1;
+  string working_directory = 2;
+  map<string, string> environment = 3;
+}
+
+// Kubernetes-based node configuration
+message KubernetesConfig {
+  string namespace = 1;
+  string pod_name = 2;
+  string service_account = 3;
+  map<string, string> labels = 4;
+  map<string, string> annotations = 5;
+}
+
+// Firecracker-based node configuration
+message FirecrackerConfig {
+  string vm_id = 1;
+  string socket_path = 2;
+  uint64 memory_size_mib = 3;
+  uint32 vcpu_count = 4;
+  string kernel_image_path = 5;
+  string rootfs_path = 6;
+  repeated NetworkInterface network_interfaces = 7;
+}
+
+// Network interface for Firecracker VM
+message NetworkInterface {
+  string iface_id = 1;
+  string host_dev_name = 2;
+  string guest_mac = 3;
+}
+
+// Node metrics (combined resource usage and operational metrics)
+//
+// ## Purpose
+// Comprehensive metrics for a PlexSpaces node, including both resource usage
+// (CPU, memory) and operational metrics (messages, actors, connections).
+//
+// ## Design
+// Proto-first design: All node metrics are defined in proto for:
+// - Wire compatibility (gRPC metrics APIs)
+// - Language-agnostic observability
+// - Consistent metrics semantics across implementations
+//
+// ## Metrics Categories
+// - Resource metrics: CPU, memory, uptime
+// - Operational metrics: Messages routed, actors, connections
+// - All combined in one message for efficient querying
+message NodeMetrics {
+  // Resource usage metrics
+  uint64 memory_used_bytes = 1;
+  uint64 memory_available_bytes = 2;
+  double cpu_usage_percent = 3;
+  uint64 uptime_seconds = 4;
+
+  // Operational metrics
+  // Total messages routed through this node
+  uint64 messages_routed = 5;
+  // Local message deliveries (same node)
+  uint64 local_deliveries = 6;
+  // Remote message deliveries (different node)
+  uint64 remote_deliveries = 7;
+  // Failed message deliveries
+  uint64 failed_deliveries = 8;
+  // Total messages processed (legacy field, kept for compatibility)
+  uint64 messages_processed = 9;
+
+  // Actor and connection metrics
+  // Active actors on this node
+  uint32 active_actors = 10;
+  // Total actor count (legacy field, kept for compatibility)
+  uint32 actor_count = 11;
+  // Connected nodes in cluster
+  uint32 connected_nodes = 12;
+}
+
+// Request to register a node
+message RegisterNodeRequest {
+  Node node = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Response for node registration
+message RegisterNodeResponse {
+  string node_id = 1;
+  google.protobuf.Timestamp registered_at = 2;
+}
+
+// Request to unregister a node
+message UnregisterNodeRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  bool force = 2;
+}
+
+// Request to get node status
+message GetNodeRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Request to list nodes
+message ListNodesRequest {
+  NodeType node_type = 1;
+  NodeStatus status = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+// Response for list nodes
+message ListNodesResponse {
+  repeated Node nodes = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+// Request to assign an actor to a node
+message AssignActorRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string actor_id = 2 [(google.api.field_behavior) = REQUIRED];
+  plexspaces.actor.v1.ActorConfig config = 3;
+}
+
+// Response for actor assignment
+message AssignActorResponse {
+  string node_id = 1;
+  string actor_id = 2;
+  google.protobuf.Timestamp assigned_at = 3;
+}
+
+// Request to remove an actor from a node
+message RemoveActorRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string actor_id = 2 [(google.api.field_behavior) = REQUIRED];
+  bool graceful = 3;
+}
+
+// ============================================================================
+// ORBIT-INSPIRED: DISTRIBUTED ACTOR LOCK
+// ============================================================================
+// Ensures single activation guarantee across cluster
+
+// Distributed actor lock (Orbit-inspired)
+message ActorLock {
+  string actor_id = 1;
+  string node_id = 2;  // Node that holds the lock
+  google.protobuf.Timestamp acquired_at = 3;
+  google.protobuf.Duration lease_duration = 4;
+  string lock_token = 5;  // Unique token for this lock
+}
+
+message AcquireActorLockRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string requesting_node_id = 2 [(google.api.field_behavior) = REQUIRED];
+  google.protobuf.Duration lease_duration = 3;
+}
+
+message AcquireActorLockResponse {
+  bool success = 1;
+  ActorLock lock = 2;
+  string conflict_node_id = 3;  // If failed, who has it
+}
+
+message ReleaseActorLockRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string lock_token = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// ============================================================================
+// WASMCLOUD-INSPIRED: LATTICE MESH NETWORKING
+// ============================================================================
+// Self-forming, self-healing node discovery
+
+// Node discovery and mesh (wasmCloud-inspired)
+message NodeDiscovery {
+  string node_id = 1;
+  string node_address = 2;
+  map<string, string> capabilities = 3;
+  NodeHealth health = 4;
+  google.protobuf.Timestamp last_heartbeat = 5;
+}
+
+// Node health information
+message NodeHealth {
+  double cpu_usage = 1;
+  uint64 memory_usage_mb = 2;
+  uint32 active_actors = 3;
+  bool is_available = 4;
+}
+
+// Node registration for distributed node discovery
+// Used by NodeRegistry for node lookup and health tracking
+message NodeRegistration {
+  string node_id = 1;
+  string node_address = 2;  // gRPC address (e.g., "http://localhost:9001")
+  map<string, string> capabilities = 3;
+  NodeStatus status = 4;
+  google.protobuf.Timestamp last_heartbeat = 5;
+  uint64 actor_count = 6;
+  uint64 message_count = 7;
+  uint64 error_count = 8;
+  google.protobuf.Timestamp registered_at = 9;
+}
+
+// Node capacity for resource-aware scheduling
+message NodeCapacity {
+  // Total resources available on node
+  plexspaces.common.v1.ResourceSpec total = 1;
+  
+  // Allocated resources (currently in use)
+  plexspaces.common.v1.ResourceSpec allocated = 2;
+  
+  // Available resources (total - allocated)
+  plexspaces.common.v1.ResourceSpec available = 3;
+  
+  // Node labels (for label-based matching)
+  map<string, string> labels = 4;
+}
+
+// Node metadata for scheduling
+message NodeMetadata {
+  // Node labels (for label-based matching)
+  map<string, string> labels = 1;
+  
+  // Node annotations (for extensibility)
+  map<string, string> annotations = 2;
+}
+
+// Node health status
+enum NodeHealthStatus {
+  NODE_HEALTH_STATUS_UNSPECIFIED = 0;
+  NODE_HEALTH_STATUS_HEALTHY = 1;
+  NODE_HEALTH_STATUS_DEGRADED = 2;
+  NODE_HEALTH_STATUS_UNHEALTHY = 3;
+}
+
+// Heartbeat message
+message Heartbeat {
+  string node_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  NodeHealth health = 3;
+  // Node capacity for resource-aware scheduling
+  NodeCapacity capacity = 4;
+}
+
+// Lattice service requests
+message JoinLatticeRequest {
+  NodeDiscovery node = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message JoinLatticeResponse {
+  bool success = 1;
+  repeated NodeDiscovery existing_nodes = 2;
+}
+
+message LeaveLatticeRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DiscoverNodesRequest {
+  map<string, string> capability_filters = 1;
+}
+
+message DiscoverNodesResponse {
+  repeated NodeDiscovery nodes = 1;
+}
+
+// Node management service (internal use only)
+service NodeService {
+  // Register a new node
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {
+    option (google.api.http) = {
+      post: "/v1/nodes"
+      body: "*"
+    };
+  }
+
+  // Unregister a node
+  rpc UnregisterNode(UnregisterNodeRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/nodes/{node_id}"
+    };
+  }
+
+  // Get node information
+  rpc GetNode(GetNodeRequest) returns (Node) {
+    option (google.api.http) = {
+      get: "/v1/nodes/{node_id}"
+    };
+  }
+
+  // List all nodes
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse) {
+    option (google.api.http) = {
+      get: "/v1/nodes"
+    };
+  }
+
+  // Assign an actor to a node
+  rpc AssignActor(AssignActorRequest) returns (AssignActorResponse) {
+    option (google.api.http) = {
+      post: "/v1/nodes/{node_id}/actors"
+      body: "*"
+    };
+  }
+
+  // Remove an actor from a node
+  rpc RemoveActor(RemoveActorRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/nodes/{node_id}/actors/{actor_id.value}"
+    };
+  }
+
+  // ORBIT-INSPIRED: Actor lock operations
+  rpc AcquireActorLock(AcquireActorLockRequest) returns (AcquireActorLockResponse) {
+    option (google.api.http) = {
+      post: "/v1/locks/actors"
+      body: "*"
+    };
+  }
+
+  rpc ReleaseActorLock(ReleaseActorLockRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/locks/actors/{actor_id.value}"
+    };
+  }
+
+  // WASMCLOUD-INSPIRED: Lattice mesh operations
+  rpc JoinLattice(JoinLatticeRequest) returns (JoinLatticeResponse) {
+    option (google.api.http) = {
+      post: "/v1/lattice/join"
+      body: "*"
+    };
+  }
+
+  rpc LeaveLattice(LeaveLatticeRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      post: "/v1/lattice/leave"
+      body: "*"
+    };
+  }
+
+  rpc SendHeartbeat(Heartbeat) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      post: "/v1/lattice/heartbeat"
+      body: "*"
+    };
+  }
+
+  rpc DiscoverNodes(DiscoverNodesRequest) returns (DiscoverNodesResponse) {
+    option (google.api.http) = {
+      get: "/v1/nodes/discover"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Discover Nodes"
+      description: "Discover nodes in the cluster"
+      tags: "Node"
+    };
+  }
+
+  // Get node metrics
+  rpc GetNodeMetrics(GetNodeRequest) returns (NodeMetrics) {
+    option (google.api.http) = {
+      get: "/v1/nodes/{node_id}/metrics"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Node Metrics"
+      description: "Returns metrics for a specific node"
+      tags: "Node"
+    };
+  }
+}

@@ -1,0 +1,44 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/bhatti/plexspaces/gen
+    - file_option: java_multiple_files
+      value: true
+    - file_option: java_package_prefix
+      value: com.bhatti
+    - file_option: optimize_for
+      value: SPEED
+plugins:
+  # Rust code generation with prost
+  # NOTE: prost automatically adds Copy derive for "simple" types, even when they
+  # contain non-Copy fields like Duration/Timestamp. This causes compilation errors.
+  # Workaround: Makefile post-processes generated files to remove Copy (see make proto)
+  - remote: buf.build/community/neoeinstein-prost:v0.4.0
+    out: crates/proto/src/generated
+    opt:
+      - compile_well_known_types
+      - extern_path=.google.protobuf=::prost_types
+      # Use bytes::Bytes instead of Vec<u8> (not Copy, prevents Copy propagation)
+      - bytes=bytes
+      # Note: btree_map parameter not supported in v0.4.0
+      # Copy trait issues are handled by Makefile post-processing (see make proto)
+      # Retain enum prefix for better namespacing
+      - retain_enum_prefix
+
+  # Rust gRPC code generation with tonic
+  - remote: buf.build/community/neoeinstein-tonic:v0.4.0
+    out: crates/proto/src/generated
+    opt:
+      - compile_well_known_types
+      - extern_path=.google.protobuf=::prost_types
+
+
+  # OpenAPI/Swagger documentation (DISABLED - requires separate package directories)
+  # - remote: buf.build/grpc-ecosystem/openapiv2:v2.19.1
+  #   out: docs/openapi
+  #   opt:
+  #     - generate_unbound_methods=true
+  #     - allow_merge=true
+  #     - merge_file_name=plexspaces_api

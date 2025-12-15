@@ -1,0 +1,185 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Genomics Pipeline - Multi-Node Docker Compose
+#
+# This file defines a 4-node distributed deployment of the genomics pipeline:
+# - Node 1: Coordinator (orchestration)
+# - Node 2: QC + Alignment workers (I/O intensive)
+# - Node 3: Chromosome workers (CPU intensive, 24 workers)
+# - Node 4: Annotation + Reporting workers (moderate)
+#
+# Usage:
+#   docker-compose up -d                # Start all nodes
+#   docker-compose ps                   # Check status
+#   docker-compose logs -f coordinator  # Follow coordinator logs
+#   docker-compose down                 # Stop all nodes
+
+services:
+  # Node 1: Coordinator
+  coordinator:
+    image: plexspaces/genomics-pipeline:latest
+    container_name: genomics-coordinator
+    hostname: genomics-coordinator
+    networks:
+      - genomics-network
+    ports:
+      - "9001:9001"  # gRPC
+    volumes:
+      - genomics-data:/data/genomics
+      - ./config/node1.toml:/config/node.toml:ro
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_CONFIG=/config/node.toml
+      # Worker pool configuration (minimal on coordinator)
+      - QC_POOL_SIZE=0
+      - ALIGNMENT_POOL_SIZE=0
+      - VARIANT_POOL_SIZE=0
+    command: ["genomics-node", "--config", "/config/node.toml"]
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9001"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    restart: unless-stopped
+
+  # Node 2: QC + Alignment Workers
+  qc-alignment:
+    image: plexspaces/genomics-pipeline:latest
+    container_name: genomics-qc-alignment
+    hostname: genomics-qc-alignment
+    networks:
+      - genomics-network
+    ports:
+      - "9002:9002"
+    volumes:
+      - genomics-data:/data/genomics
+      - ./config/node2.toml:/config/node.toml:ro
+      - ./reference_data:/reference_data:ro  # Reference genome, indices
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_CONFIG=/config/node.toml
+      # Worker pool configuration (QC + Alignment)
+      - QC_POOL_SIZE=3
+      - ALIGNMENT_POOL_SIZE=3
+      - VARIANT_POOL_SIZE=0
+    command: ["genomics-node", "--config", "/config/node.toml"]
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9002"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4096M
+        reservations:
+          cpus: '2.0'
+          memory: 2048M
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Node 3: Chromosome Workers (Most CPU-intensive)
+  chromosomes:
+    image: plexspaces/genomics-pipeline:latest
+    container_name: genomics-chromosomes
+    hostname: genomics-chromosomes
+    networks:
+      - genomics-network
+    ports:
+      - "9003:9003"
+    volumes:
+      - genomics-data:/data/genomics
+      - ./config/node3.toml:/config/node.toml:ro
+      - ./reference_data:/reference_data:ro
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_CONFIG=/config/node.toml
+      # Worker pool configuration (Variant calling - 24 chromosome workers)
+      - QC_POOL_SIZE=0
+      - ALIGNMENT_POOL_SIZE=0
+      - VARIANT_POOL_SIZE=24
+    command: ["genomics-node", "--config", "/config/node.toml"]
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9003"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '8.0'
+          memory: 8192M
+        reservations:
+          cpus: '4.0'
+          memory: 4096M
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Node 4: Annotation + Reporting Workers
+  annotation:
+    image: plexspaces/genomics-pipeline:latest
+    container_name: genomics-annotation
+    hostname: genomics-annotation
+    networks:
+      - genomics-network
+    ports:
+      - "9004:9004"
+    volumes:
+      - genomics-data:/data/genomics
+      - ./config/node4.toml:/config/node.toml:ro
+      - ./annotation_databases:/data:ro  # ClinVar, dbSNP, gnomAD
+      - ./report_templates:/templates:ro
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_CONFIG=/config/node.toml
+      # Worker pool configuration (Annotation + Reporting - TODO: add these worker types)
+      - QC_POOL_SIZE=0
+      - ALIGNMENT_POOL_SIZE=0
+      - VARIANT_POOL_SIZE=0
+    command: ["genomics-node", "--config", "/config/node.toml"]
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9004"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '1.0'
+          memory: 1024M
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  genomics-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+
+volumes:
+  genomics-data:
+    driver: local

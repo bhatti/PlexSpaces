@@ -1,0 +1,51 @@
+# Build artifacts
+target/
+**/target/
+!examples/genomic-workflow-pipeline/target/release/genomic-workflow-pipeline
+*.profdata
+*.profraw
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Tests
+tests/
+**/tests/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+*.old
+
+# Archives
+*.zip
+*.tar.gz
+*.tgz
+
+# Large data files
+examples/byzantine/data/
+examples/*/data/
+cobertura.xml
+tarpaulin-report.html
+
+# Node modules (if any)
+node_modules/

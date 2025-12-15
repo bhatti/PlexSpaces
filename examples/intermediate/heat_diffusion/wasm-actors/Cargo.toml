@@ -1,0 +1,37 @@
+# Heat Diffusion WASM Actor - Compiled to WASM
+#
+# This crate contains the WASM-compilable heat diffusion grid cell actor.
+# Each cell performs Jacobi iteration for 2D heat equation.
+#
+# Build: cargo build --target wasm32-unknown-unknown --release
+
+# Empty workspace to prevent inheriting from parent
+[workspace]
+
+[package]
+name = "heat-diffusion-wasm-actor"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+
+[lib]
+crate-type = ["cdylib"]  # Required for WASM
+
+[dependencies]
+# Minimal dependencies for WASM (keep binary small)
+serde = { version = "1.0", features = ["derive", "alloc"], default-features = false }
+serde_json = { version = "1.0", features = ["alloc"], default-features = false }
+serde-json-core = "0.5"  # no_std JSON serialization
+wee_alloc = "0.4"  # Small allocator for WASM
+
+# WASI support
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Empty - we're using no_std for now
+
+[profile.release]
+# Optimize for size
+opt-level = "z"     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Better optimization
+strip = true        # Remove debug symbols

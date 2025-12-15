@@ -1,0 +1,512 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Facet System API
+//
+// ## Purpose
+// Implements dynamic capability composition for actors - THE key extensibility mechanism
+// in PlexSpaces. Facets allow actors to acquire new capabilities at runtime without
+// changing the core actor abstraction, embodying the "Static for core, Dynamic for
+// extensions" principle.
+//
+// ## Architecture Context
+// Facets are foundational to ALL five PlexSpaces pillars - they enable runtime extensibility:
+// - **Pillar 1 (TupleSpace)**: Facets can add tuple coordination capabilities
+// - **Pillar 2 (Erlang/OTP)**: GenServer, GenEvent facets add OTP behaviors
+// - **Pillar 3 (Durability)**: Durable execution facet adds journaling/replay
+// - **Pillar 4 (WASM)**: WASM runtime facet enables portable execution
+// - **Pillar 5 (Firecracker)**: VM isolation facet adds security boundaries
+//
+// ### The Facet Philosophy
+// **Problem**: How to support specialized actor types (Virtual Actors, Mobile Agents,
+// OTP GenServers, Workflows) WITHOUT creating 20 different actor implementations?
+//
+// **Solution**: ONE powerful Actor type + composable Facets
+// ```
+// VirtualActor = Actor + VirtualActorFacet
+// MobileAgent = Actor + MobilityFacet + ItineraryFacet
+// GenServer = Actor + OTPGenServerFacet
+// DurableWorkflow = Actor + DurableExecutionFacet + WorkflowFacet
+// ```
+//
+// ## Component Interactions
+// - **Used by**: All actors (core abstraction), nodes (facet registry), applications (custom facets)
+// - **Depends on**: common.proto (Facet, FacetDescriptor defined there for circular dependency avoidance)
+// - **Provides**: Facet lifecycle management (register, attach, detach, configure)
+//
+// ## Design Decisions
+// - **Why facets in common.proto but service here**:
+//   - Facet message must be available to ALL proto files (actors, workflows, etc.)
+//   - Putting in common.proto avoids circular dependencies
+//   - This file provides the management service (attach/detach/etc.)
+//
+// - **Why priority-based execution**:
+//   - Facets form an interceptor chain (process messages in priority order)
+//   - Security facets run first (can block execution)
+//   - Persistence facets run last (commit after business logic)
+//   - Priority ranges: 1000+ (security), 900-999 (tracing), 800-899 (metrics), 100-500 (domain), 1-99 (persistence)
+//
+// - **Why config as map<string, string>**:
+//   - Simplicity: No complex schemas, just key-value pairs
+//   - Flexibility: Each facet defines its own config keys
+//   - Compatibility: Works across all languages (WASM, native)
+//   - Evolution: Add new config keys without proto changes
+//
+// - **Why facet state separate from config**:
+//   - Config: Immutable settings (set at attach time)
+//   - State: Mutable runtime data (e.g., request count for metrics facet)
+//   - State uses google.protobuf.Any for flexibility
+//
+// ## Common Facet Types
+//
+// ### Infrastructure Facets (Always Available)
+// - **virtual_actor**: Automatic activation/deactivation (Orbit-inspired)
+//   - Config: `activation_strategy=lazy`, `deactivation_timeout=5m`
+//   - Use: Stateful actors with millions of instances
+//
+// - **durable_execution**: Journaling and deterministic replay (Restate-inspired)
+//   - Config: `journal_backend=kafka`, `replay_on_restart=true`
+//   - Use: Workflows, sagas, critical business logic
+//
+// - **mobility**: Actor migration between nodes (under review - see docs/MOBILITY_RECOMMENDATION.md)
+//   - Config: `migration_strategy=eager`, `state_transfer=checkpoint`
+//   - Use: Mobile agents, load balancing, node maintenance
+//   - Note: WASM migration may replace this (state-only transfer, code cached)
+//
+// ### Capability Facets (I/O Operations)
+// - **http_client**: HTTP client for outbound requests
+//   - Config: `base_url`, `timeout`, `retry_policy`
+//   - Use: External API calls, webhooks
+//
+// - **keyvalue**: Key-value store access
+//   - Config: `store_type=memory|redis|dynamodb`, `connection_string`
+//   - Use: Caching, session storage, configuration
+//
+// ## Important: Behaviors vs Facets
+//
+// **Behaviors** (compile-time, Rust traits):
+// - `GenServerBehavior`: Request-reply pattern (defined in behaviors.proto)
+// - `GenEventBehavior`: Event bus pattern (defined in behaviors.proto)
+// - `WorkflowBehavior`: Durable workflow execution (defined in workflow.proto)
+//
+// **Facets** (runtime, dynamic attachment):
+// - Infrastructure: Durability, VirtualActor, Mobility
+// - Capabilities: HTTP, KeyValue, etc.
+// - Operational: Metrics, Tracing, Logging
+//
+// **Key Difference**: Behaviors are compile-time patterns (zero overhead),
+// while Facets are runtime capabilities (small interception overhead).
+//
+// ### Observability Facets
+// - **metrics**: Prometheus metrics collection
+//   - Config: `namespace=plexspaces`, `push_interval=10s`
+//   - Use: Monitoring, alerting, capacity planning
+//
+// - **tracing**: Distributed tracing (OpenTelemetry)
+//   - Config: `sampler=always`, `exporter=jaeger`
+//   - Use: Performance debugging, request flow analysis
+//
+// - **logging**: Structured logging with levels
+//   - Config: `level=info`, `format=json`
+//   - Use: Debugging, audit trails
+//
+// ### Security Facets
+// - **authentication**: Identity verification
+//   - Config: `provider=oauth2`, `issuer=https://auth.example.com`
+//   - Use: Verify caller identity
+//
+// - **authorization**: Permission checking
+//   - Config: `policy=rbac`, `roles=admin,user`
+//   - Use: Enforce access control
+//
+// - **encryption**: Message encryption
+//   - Config: `algorithm=aes256`, `key_rotation=daily`
+//   - Use: Protect sensitive data
+//
+// ## Facet Lifecycle
+//
+// ### 1. Register (System Startup)
+// ```protobuf
+// RegisterFacet {
+//   facet_type: "virtual_actor"
+//   definition: {
+//     description: "Automatic activation/deactivation"
+//     category: "infrastructure"
+//     config_options: [
+//       { key: "activation_strategy", default: "lazy", required: false },
+//       { key: "deactivation_timeout", default: "5m", required: false }
+//     ]
+//   }
+// }
+// ```
+//
+// ### 2. Attach (Actor Creation or Runtime)
+// ```protobuf
+// AttachFacet {
+//   actor_id: "user-123"
+//   facet_type: "virtual_actor"
+//   priority: 100
+//   config: {
+//     "activation_strategy": "lazy",
+//     "deactivation_timeout": "5m"
+//   }
+// }
+// ```
+//
+// ### 3. Detach (Runtime)
+// ```protobuf
+// DetachFacet {
+//   actor_id: "user-123"
+//   facet_type: "virtual_actor"
+// }
+// ```
+//
+// ## Custom Facet Example
+//
+// Users can create custom facets for domain-specific capabilities:
+//
+// ```protobuf
+// RegisterFacet {
+//   facet_type: "fraud_detection"
+//   definition: {
+//     description: "Real-time fraud scoring"
+//     category: "domain"
+//     config_options: [
+//       { key: "ml_model", required: true },
+//       { key: "threshold", default: "0.8" }
+//     ]
+//   }
+// }
+//
+// // Later, attach to payment actors
+// AttachFacet {
+//   actor_id: "payment-456"
+//   facet_type: "fraud_detection"
+//   priority: 200  // Run after auth (1000+), before persistence (1-99)
+//   config: {
+//     "ml_model": "fraud-v2.onnx",
+//     "threshold": "0.95"
+//   }
+// }
+// ```
+
+syntax = "proto3";
+
+package plexspaces.facets.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
+
+// Facet definition
+message FacetDefinition {
+  // Unique facet type identifier
+  string facet_type = 1;
+
+  // Human-readable name
+  string name = 2;
+
+  // Description of facet functionality
+  string description = 3;
+
+  // Version
+  string version = 4;
+
+  // Methods this facet intercepts (empty = all methods)
+  repeated string intercepted_methods = 5;
+
+  // Configuration schema (JSON schema)
+  string config_schema = 6;
+
+  // Is this facet transient (Voyager-inspired)
+  // If true, facet can be GC'd when idle
+  bool is_transient = 7;
+
+  // Metadata
+  map<string, string> metadata = 8;
+}
+
+// Facet attachment
+message FacetAttachment {
+  // Unique attachment ID
+  string attachment_id = 1;
+
+  // Actor this facet is attached to
+  string actor_id = 2;
+
+  // Facet type
+  string facet_type = 3;
+
+  // Priority (higher = earlier in chain)
+  int32 priority = 4;
+
+  // Facet-specific configuration
+  google.protobuf.Struct config = 5;
+
+  // When attached
+  google.protobuf.Timestamp attached_at = 6;
+
+  // Last accessed (for transient facets)
+  google.protobuf.Timestamp last_accessed = 7;
+
+  // Is currently active
+  bool is_active = 8;
+}
+
+// Facet lifecycle hook results
+message FacetLifecycleEvent {
+  // Attachment ID
+  string attachment_id = 1;
+
+  // Actor ID
+  string actor_id = 2;
+
+  // Facet type
+  string facet_type = 3;
+
+  // Event type
+  LifecycleEventType event_type = 4;
+
+  // When event occurred
+  google.protobuf.Timestamp timestamp = 5;
+
+  // Success or error
+  bool success = 6;
+
+  // Error message if failed
+  string error_message = 7;
+}
+
+enum LifecycleEventType {
+  LIFECYCLE_EVENT_TYPE_UNSPECIFIED = 0;
+  ATTACHED = 1;
+  DETACHED = 2;
+  ACTIVATED = 3;
+  DEACTIVATED = 4;
+  AUTO_DETACHED = 5;
+}
+
+// Facet interception point
+enum InterceptionPoint {
+  INTERCEPTION_POINT_UNSPECIFIED = 0;
+  BEFORE_METHOD = 1;
+  AFTER_METHOD = 2;
+  ON_ERROR = 3;
+}
+
+// Facet registry entry
+message FacetRegistryEntry {
+  // Facet definition
+  FacetDefinition definition = 1;
+
+  // Number of active attachments
+  uint32 active_attachments = 2;
+
+  // When registered
+  google.protobuf.Timestamp registered_at = 3;
+
+  // Is this facet available
+  bool is_available = 4;
+}
+
+// Facet service
+service FacetService {
+  // Register a new facet type
+  rpc RegisterFacet(RegisterFacetRequest) returns (RegisterFacetResponse) {
+    option (google.api.http) = {
+      post: "/v1/facets/registry"
+      body: "*"
+    };
+  }
+
+  // Unregister a facet type
+  rpc UnregisterFacet(UnregisterFacetRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/facets/registry/{facet_type}"
+    };
+  }
+
+  // Attach a facet to an actor
+  rpc AttachFacet(AttachFacetRequest) returns (AttachFacetResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id}/facets"
+      body: "*"
+    };
+  }
+
+  // Detach a facet from an actor
+  rpc DetachFacet(DetachFacetRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/actors/{actor_id}/facets/{facet_type}"
+    };
+  }
+
+  // List facets attached to an actor
+  rpc ListActorFacets(ListActorFacetsRequest) returns (ListActorFacetsResponse) {
+    option (google.api.http) = {
+      get: "/v1/actors/{actor_id}/facets"
+    };
+  }
+
+  // List all available facet types
+  rpc ListAvailableFacets(ListAvailableFacetsRequest) returns (ListAvailableFacetsResponse) {
+    option (google.api.http) = {
+      get: "/v1/facets/registry"
+    };
+  }
+
+  // Get facet definition
+  rpc GetFacetDefinition(GetFacetDefinitionRequest) returns (GetFacetDefinitionResponse) {
+    option (google.api.http) = {
+      get: "/v1/facets/registry/{facet_type}/definition"
+    };
+  }
+
+  // Update facet configuration
+  rpc UpdateFacetConfig(UpdateFacetConfigRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      patch: "/v1/facets/attachments/{attachment_id}/config"
+      body: "*"
+    };
+  }
+
+  // Auto-attach facet if needed (Voyager-inspired)
+  rpc EnsureFacet(EnsureFacetRequest) returns (EnsureFacetResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id}/facets:ensure"
+      body: "*"
+    };
+  }
+}
+
+message RegisterFacetRequest {
+  FacetDefinition definition = 1;
+}
+
+message RegisterFacetResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message UnregisterFacetRequest {
+  string facet_type = 1;
+}
+
+message AttachFacetRequest {
+  string actor_id = 1;
+  string facet_type = 2;
+  int32 priority = 3;
+  google.protobuf.Struct config = 4;
+}
+
+message AttachFacetResponse {
+  bool success = 1;
+  string attachment_id = 2;
+  string error_message = 3;
+}
+
+message DetachFacetRequest {
+  string actor_id = 1;
+  string facet_type = 2;
+}
+
+message ListActorFacetsRequest {
+  string actor_id = 1;
+}
+
+message ListActorFacetsResponse {
+  repeated FacetAttachment facets = 1;
+}
+
+message ListAvailableFacetsRequest {
+  // Optional filter
+  string filter = 1;
+}
+
+message ListAvailableFacetsResponse {
+  repeated FacetRegistryEntry facets = 1;
+}
+
+message GetFacetDefinitionRequest {
+  string facet_type = 1;
+}
+
+message GetFacetDefinitionResponse {
+  FacetDefinition definition = 1;
+  bool found = 2;
+}
+
+message UpdateFacetConfigRequest {
+  string attachment_id = 1;
+  google.protobuf.Struct config = 2;
+}
+
+message EnsureFacetRequest {
+  string actor_id = 1;
+  string facet_type = 2;
+  google.protobuf.Struct config = 3;
+}
+
+message EnsureFacetResponse {
+  bool was_attached = 1;
+  string attachment_id = 2;
+  string error_message = 3;
+}
+
+// Built-in facet types (for reference)
+enum BuiltInFacetType {
+  BUILT_IN_FACET_TYPE_UNSPECIFIED = 0;
+
+  // Mobility facet (Voyager-inspired)
+  MOBILITY = 1;
+
+  // Event emitter facet
+  EVENT_EMITTER = 2;
+
+  // Key-value storage facet
+  KEY_VALUE = 3;
+
+  // Timer facet (Orleans-inspired)
+  TIMER = 4;
+
+  // Reminder facet (Orleans-inspired)
+  REMINDER = 5;
+
+  // HTTP client facet (wasmCloud-inspired)
+  HTTP_CLIENT = 6;
+
+  // Blob storage facet (wasmCloud-inspired)
+  BLOB_STORAGE = 7;
+
+  // Secrets facet (wasmCloud-inspired)
+  SECRETS = 8;
+
+  // Streaming facet (Orleans-inspired)
+  STREAMING = 9;
+
+  // Transaction facet (Orleans-inspired)
+  TRANSACTION = 10;
+
+  // Stateless worker facet (Orleans-inspired)
+  STATELESS_WORKER = 11;
+
+  // Virtual actor facet (Orleans-inspired)
+  // Enables automatic activation/deactivation for always-addressable actors
+  VIRTUAL_ACTOR = 12;
+}

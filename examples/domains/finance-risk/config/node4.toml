@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Finance Risk Assessment - Node 4 (Post-Decision Services)
+#
+# Role: Document generation, e-signature, notifications, audit
+# Components:
+#   - NotificationWorkerPool (2 workers)
+#   - (Future: DocumentGenerator, DocuSignService, AuditLogger)
+#
+# Dependencies: None (workers wait for coordinator requests)
+
+[release]
+name = "finance-risk-post-decision"
+version = "0.1.0"
+description = "Finance Risk Assessment Post-Decision Services"
+
+[node]
+id = "finance-post-decision"
+listen_address = "0.0.0.0:9104"
+cluster_seed_nodes = [
+    "finance-coordinator:9101",
+    "finance-data-collection:9102",
+    "finance-risk-scoring:9103"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9104"
+max_connections = 100
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "finance-risk-secret-key"
+allow_unauthenticated = true
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 50
+burst_size = 10
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "finance-post-decision"
+sampling_rate = 1.0
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+[[applications]]
+name = "finance-post-decision-workers"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 60
+shutdown_strategy = "graceful"
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "worker"
+# Notification Worker Pool
+NOTIFICATION_WORKERS = "2"
+NOTIFICATION_POOL_ENABLED = "true"
+# All other workers disabled
+CREDIT_CHECK_POOL_ENABLED = "false"
+BANK_ANALYSIS_POOL_ENABLED = "false"
+EMPLOYMENT_POOL_ENABLED = "false"
+RISK_SCORING_ENABLED = "false"
+# Coordinator address
+COORDINATOR_ADDRESS = "finance-coordinator:9101"
+# Email service configuration
+EMAIL_SERVICE = "sendgrid"  # sendgrid, ses, smtp
+SENDGRID_API_KEY = "${SENDGRID_API_KEY}"
+AWS_SES_REGION = "us-east-1"
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = "587"
+# Email templates
+EMAIL_TEMPLATE_APPROVAL = "/templates/approval_email.html"
+EMAIL_TEMPLATE_REJECTION = "/templates/rejection_email.html"
+EMAIL_TEMPLATE_MANUAL_REVIEW = "/templates/manual_review_email.html"
+EMAIL_FROM_ADDRESS = "noreply@finance-app.example.com"
+EMAIL_FROM_NAME = "Finance Risk Assessment"
+# Document generation (future)
+DOCUMENT_SERVICE_ENABLED = "false"
+DOCUSIGN_SERVICE_ENABLED = "false"
+AUDIT_LOGGER_ENABLED = "false"
+
+# Resource limits (I/O bound)
+[resources]
+max_memory_mb = 512
+max_cpu_percent = 30
+
+[shutdown]
+global_timeout_seconds = 120
+grace_period_seconds = 10
+grpc_drain_timeout_seconds = 30

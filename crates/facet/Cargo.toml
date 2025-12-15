@@ -1,0 +1,36 @@
+[package]
+name = "plexspaces-facet"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Dynamic behavior composition via facets"
+
+[dependencies]
+# Facet has minimal dependencies
+plexspaces-proto = { workspace = true }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+hex = "0.4"
+
+# Observability (CRITICAL - production-ready observability)
+metrics = "0.23"
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+
+[lib]
+name = "plexspaces_facet"
+path = "src/lib.rs"

@@ -1,0 +1,18 @@
+# Node 2: GPU node for processors
+
+node_id = "node-2"
+listen_addr = "0.0.0.0:9001"
+backend = "redis"
+redis_url = "redis://localhost:6379"
+
+[labels]
+workload = "gpu-intensive"
+tier = "gpu"
+
+[capacity]
+cpu_cores = 4.0
+memory_bytes = 32000000000  # 32GB
+disk_bytes = 100000000000   # 100GB
+gpu_count = 1
+gpu_type = "H100"
+

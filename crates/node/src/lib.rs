@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+//! Node management and distribution for PlexSpaces
+//!
+//! Provides location transparency and distribution capabilities,
+//! inspired by Erlang's node system but elevated for modern needs.
+
+#![warn(missing_docs)]
+#![warn(clippy::all)]
+
+// Main node module
+mod r#mod;
+pub use r#mod::*;
+
+// Application manager for Erlang/OTP-style application lifecycle
+pub mod application_manager;
+
+// gRPC service for remote actor communication
+pub mod grpc_service;
+
+// gRPC client for remote actor communication
+pub mod grpc_client;
+
+// gRPC service for distributed TupleSpace operations (Phase 3)
+pub mod tuplespace_service;
+
+// HTTP router for custom HTTP routes alongside gRPC
+// TODO: Temporarily disabled - see BLOB_SERVICE_COMPILATION_ISSUES.md
+// pub mod http_router;
+
+// Node registry removed - replaced by object-registry
+
+// Health service for K8s probes (Phase 5)
+pub mod health_service;
+
+// Health checker trait for dependency checks
+pub mod health_checker;
+
+// Metrics service for Prometheus export (Phase 5)
+pub mod metrics_service;
+
+// OpenTelemetry tracing setup (Phase 5)
+pub mod tracing_setup;
+
+// Standard gRPC Health Service implementation (Phase 5)
+pub mod standard_health_service;
+
+// gRPC health service with dependency checks
+pub mod grpc_health_service;
+
+// System service implementation
+pub mod system_service;
+
+// Automatic dependency registration (includes built-in dependencies)
+pub mod dependency_registration;
+
+// Application service for application-level deployment
+pub mod application_service;
+pub mod application_impl;
+pub mod wasm_application;
+
+// Firecracker VM service for VM management and application deployment
+#[cfg(feature = "firecracker")]
+pub mod firecracker_service;
+
+// Graceful shutdown coordinator (Phase 5)
+pub mod shutdown_coordinator;
+
+// Actor builder for fluent actor creation API
+
+// Node builder for fluent node creation API
+pub mod node_builder;
+pub mod service_wrappers;
+pub mod virtual_actor_wrapper;
+pub mod regular_actor_wrapper;
+pub use node_builder::NodeBuilder;
+
+// Make Node implement Service trait for ServiceLocator
+impl plexspaces_core::Service for Node {}
+
+// Configuration bootstrap (Erlang/OTP-inspired)
+pub mod config_bootstrap;
+pub mod metrics_helper;
+pub use config_bootstrap::{ConfigBootstrap, ConfigError};
+pub use metrics_helper::CoordinationComputeTracker;

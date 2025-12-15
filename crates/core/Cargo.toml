@@ -1,0 +1,55 @@
+[package]
+name = "plexspaces-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Core types and traits for PlexSpaces actor system"
+
+[dependencies]
+# Core depends on mailbox, journal, and tuplespace
+plexspaces-proto = { workspace = true }
+plexspaces-mailbox = { workspace = true }
+plexspaces-persistence = { workspace = true }
+plexspaces-tuplespace = { workspace = true }
+plexspaces-facet = { workspace = true }
+
+# Service adapters (optional feature to avoid circular dependencies)
+# Note: These will be added when we integrate Node with ActorContext
+# For now, wrappers are stubbed out
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }  # For metadata serialization
+uuid = { workspace = true }
+metrics = "0.23"  # For observability
+chrono = { workspace = true }  # For lease timestamps
+prost-types = "0.12"  # For proto Duration/Timestamp types
+tracing = { workspace = true }  # Always enabled, feature kept for compatibility
+futures = "0.3"  # For BoxStream in ChannelService
+tonic = { workspace = true }  # For gRPC client in ServiceLocator
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+plexspaces-channel = { workspace = true }  # For integration tests
+plexspaces-object-registry = { workspace = true }  # For ServiceLocator tests
+plexspaces-keyvalue = { workspace = true }  # For ServiceLocator tests
+chrono = { workspace = true }  # For timestamp in integration tests
+prost-types = "0.12"  # For proto types in integration tests
+async-trait = { workspace = true }  # For trait implementations in tests
+
+[features]
+# Keep tracing feature for backward compatibility, but tracing is always enabled
+tracing = []
+# service-adapters feature will be enabled when Node integration is complete
+# service-adapters = ["dep:plexspaces-actor-service", "dep:plexspaces-object-registry", "dep:plexspaces-node"]
+
+[lib]
+name = "plexspaces_core"
+path = "src/lib.rs"

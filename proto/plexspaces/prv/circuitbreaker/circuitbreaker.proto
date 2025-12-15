@@ -1,0 +1,450 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Circuit Breaker API
+//
+// ## Purpose
+// Provides fault tolerance and resilience patterns for microservices through
+// the circuit breaker pattern, preventing cascading failures in distributed systems.
+//
+// ## Architecture Context
+// CircuitBreaker is essential for resilient microservices in PlexSpaces:
+// - **Fault Isolation**: Prevent failing services from bringing down the whole system
+// - **Fast Failure**: Fail fast instead of waiting for timeouts
+// - **Automatic Recovery**: Self-healing through half-open state testing
+// - **Resource Protection**: Prevent resource exhaustion from repeated failures
+//
+// ## Use Cases
+// - **External Service Calls**: Protect against flaky third-party APIs
+// - **Database Connections**: Prevent connection pool exhaustion
+// - **Actor Communication**: Protect against failing remote actors
+// - **Elastic Pools**: Integrate with pool health monitoring
+//
+// ## Design Decisions
+// - **Why three states**: Standard circuit breaker pattern (Closed → Open → Half-Open)
+// - **Why failure thresholds**: Configurable sensitivity to service degradation
+// - **Why half-open testing**: Gradual recovery without overwhelming failed service
+// - **Why metrics integration**: Circuit state drives scaling and routing decisions
+
+syntax = "proto3";
+
+package plexspaces.circuitbreaker.prv;
+
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Circuit breaker state
+enum CircuitState {
+  // Closed: Normal operation, requests pass through
+  CIRCUIT_STATE_CLOSED = 0;
+
+  // Open: Circuit is tripped, requests fail fast
+  CIRCUIT_STATE_OPEN = 1;
+
+  // Half-Open: Testing if service recovered, limited requests allowed
+  CIRCUIT_STATE_HALF_OPEN = 2;
+
+  // Disabled: Circuit breaker disabled, all requests pass
+  CIRCUIT_STATE_DISABLED = 3;
+}
+
+// Failure detection strategy
+enum FailureStrategy {
+  // Count consecutive failures
+  FAILURE_STRATEGY_CONSECUTIVE = 0;
+
+  // Count failures in sliding window
+  FAILURE_STRATEGY_SLIDING_WINDOW = 1;
+
+  // Error rate percentage
+  FAILURE_STRATEGY_ERROR_RATE = 2;
+
+  // Custom strategy
+  FAILURE_STRATEGY_CUSTOM = 3;
+}
+
+// Circuit breaker configuration
+message CircuitBreakerConfig {
+  // Circuit breaker name (unique identifier)
+  string name = 1;
+
+  // Failure detection strategy
+  FailureStrategy failure_strategy = 2;
+
+  // Failure threshold to open circuit
+  // - For CONSECUTIVE: Number of consecutive failures
+  // - For SLIDING_WINDOW: Number of failures in window
+  // - For ERROR_RATE: Percentage (0.0 to 1.0)
+  uint32 failure_threshold = 3;
+
+  // Success threshold to close circuit from half-open
+  uint32 success_threshold = 4;
+
+  // Timeout before transitioning to half-open
+  google.protobuf.Duration timeout = 5;
+
+  // Half-open state configuration
+  HalfOpenConfig half_open_config = 6;
+
+  // Sliding window configuration (for SLIDING_WINDOW strategy)
+  SlidingWindowConfig sliding_window = 7;
+
+  // Request timeout (how long to wait before marking as failure)
+  google.protobuf.Duration request_timeout = 8;
+
+  // Maximum concurrent requests in half-open state
+  uint32 max_half_open_requests = 9;
+}
+
+// Half-open state configuration
+message HalfOpenConfig {
+  // Maximum requests to allow through in half-open state
+  uint32 max_requests = 1;
+
+  // Duration to stay in half-open state before re-evaluating
+  google.protobuf.Duration duration = 2;
+
+  // Strategy for selecting requests in half-open
+  enum SelectionStrategy {
+    SELECTION_STRATEGY_FIRST_N = 0;    // First N requests
+    SELECTION_STRATEGY_SAMPLE = 1;     // Random sampling
+    SELECTION_STRATEGY_PERCENTAGE = 2; // Allow X% of requests
+  }
+
+  SelectionStrategy selection_strategy = 3;
+
+  // Percentage for PERCENTAGE strategy (0.0 to 1.0)
+  double sample_percentage = 4;
+}
+
+// Sliding window configuration
+message SlidingWindowConfig {
+  // Window size (number of requests to track)
+  uint32 window_size = 1;
+
+  // Window duration (time-based window)
+  google.protobuf.Duration window_duration = 2;
+
+  // Minimum requests before circuit can trip
+  uint32 minimum_requests = 3;
+}
+
+// Circuit breaker metrics
+message CircuitBreakerMetrics {
+  // Circuit breaker name
+  string name = 1;
+
+  // Current state
+  CircuitState state = 2;
+
+  // Total requests
+  uint64 total_requests = 3;
+
+  // Successful requests
+  uint64 successful_requests = 4;
+
+  // Failed requests
+  uint64 failed_requests = 5;
+
+  // Rejected requests (circuit open)
+  uint64 rejected_requests = 6;
+
+  // Current error rate (0.0 to 1.0)
+  double error_rate = 7;
+
+  // Consecutive failures
+  uint32 consecutive_failures = 8;
+
+  // Consecutive successes (in half-open)
+  uint32 consecutive_successes = 9;
+
+  // Time circuit opened
+  google.protobuf.Timestamp last_opened = 10;
+
+  // Time circuit closed
+  google.protobuf.Timestamp last_closed = 11;
+
+  // Duration in current state
+  google.protobuf.Duration time_in_state = 12;
+
+  // Number of times circuit has opened
+  uint64 trip_count = 13;
+
+  // Average response time (milliseconds)
+  uint64 avg_response_time_ms = 14;
+
+  // Sliding window metrics (if applicable)
+  SlidingWindowMetrics sliding_window_metrics = 15;
+}
+
+// Sliding window metrics
+message SlidingWindowMetrics {
+  // Requests in current window
+  uint32 window_requests = 1;
+
+  // Failures in current window
+  uint32 window_failures = 2;
+
+  // Window start time
+  google.protobuf.Timestamp window_start = 3;
+
+  // Window end time
+  google.protobuf.Timestamp window_end = 4;
+}
+
+// Request result for circuit breaker tracking
+message RequestResult {
+  // Request ID (for tracking)
+  string request_id = 1;
+
+  // Success or failure
+  bool success = 2;
+
+  // Error message (if failed)
+  string error_message = 3;
+
+  // Response time (milliseconds)
+  uint64 response_time_ms = 4;
+
+  // Request timestamp
+  google.protobuf.Timestamp timestamp = 5;
+
+  // Custom metadata
+  map<string, string> metadata = 6;
+}
+
+// Circuit breaker event
+message CircuitBreakerEvent {
+  enum EventType {
+    EVENT_TYPE_STATE_CHANGED = 0;
+    EVENT_TYPE_THRESHOLD_EXCEEDED = 1;
+    EVENT_TYPE_RECOVERY_STARTED = 2;
+    EVENT_TYPE_RECOVERY_SUCCEEDED = 3;
+    EVENT_TYPE_RECOVERY_FAILED = 4;
+  }
+
+  EventType event_type = 1;
+  string circuit_name = 2;
+  CircuitState previous_state = 3;
+  CircuitState new_state = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  string reason = 6;
+  CircuitBreakerMetrics metrics = 7;
+}
+
+// Circuit breaker service
+service CircuitBreakerService {
+  // Create a circuit breaker
+  rpc CreateCircuitBreaker(CreateCircuitBreakerRequest) returns (CreateCircuitBreakerResponse) {
+    option (google.api.http) = {
+      post: "/v1/circuit-breakers"
+      body: "*"
+    };
+  }
+
+  // Execute request through circuit breaker
+  rpc ExecuteRequest(ExecuteRequestRequest) returns (ExecuteRequestResponse) {
+    option (google.api.http) = {
+      post: "/v1/circuit-breakers/{circuit_name}:execute"
+      body: "*"
+    };
+  }
+
+  // Record request result
+  rpc RecordResult(RecordResultRequest) returns (RecordResultResponse) {
+    option (google.api.http) = {
+      post: "/v1/circuit-breakers/{circuit_name}/results"
+      body: "*"
+    };
+  }
+
+  // Manually trip circuit (for testing/maintenance)
+  rpc TripCircuit(TripCircuitRequest) returns (TripCircuitResponse) {
+    option (google.api.http) = {
+      post: "/v1/circuit-breakers/{circuit_name}:trip"
+      body: "*"
+    };
+  }
+
+  // Manually reset circuit
+  rpc ResetCircuit(ResetCircuitRequest) returns (ResetCircuitResponse) {
+    option (google.api.http) = {
+      post: "/v1/circuit-breakers/{circuit_name}:reset"
+      body: "*"
+    };
+  }
+
+  // Get circuit breaker state
+  rpc GetState(GetStateRequest) returns (GetStateResponse) {
+    option (google.api.http) = {
+      get: "/v1/circuit-breakers/{circuit_name}/state"
+    };
+  }
+
+  // Get circuit breaker metrics
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {
+    option (google.api.http) = {
+      get: "/v1/circuit-breakers/{circuit_name}/metrics"
+    };
+  }
+
+  // Watch circuit breaker events (streaming)
+  rpc WatchEvents(WatchEventsRequest) returns (stream CircuitBreakerEvent) {
+    option (google.api.http) = {
+      get: "/v1/circuit-breakers/events/stream"
+    };
+  }
+
+  // List all circuit breakers
+  rpc ListCircuitBreakers(ListCircuitBreakersRequest) returns (ListCircuitBreakersResponse) {
+    option (google.api.http) = {
+      get: "/v1/circuit-breakers"
+    };
+  }
+
+  // Delete circuit breaker
+  rpc DeleteCircuitBreaker(DeleteCircuitBreakerRequest) returns (DeleteCircuitBreakerResponse) {
+    option (google.api.http) = {
+      delete: "/v1/circuit-breakers/{circuit_name}"
+    };
+  }
+}
+
+// CreateCircuitBreaker request
+message CreateCircuitBreakerRequest {
+  CircuitBreakerConfig config = 1;
+}
+
+// CreateCircuitBreaker response
+message CreateCircuitBreakerResponse {
+  string circuit_name = 1;
+  CircuitState initial_state = 2;
+}
+
+// ExecuteRequest request
+message ExecuteRequestRequest {
+  string circuit_name = 1;
+  string request_id = 2;
+  google.protobuf.Duration timeout = 3;
+}
+
+// ExecuteRequest response
+message ExecuteRequestResponse {
+  oneof result {
+    bool allowed = 1;
+    CircuitOpenError circuit_open = 2;
+  }
+}
+
+// Circuit open error
+message CircuitOpenError {
+  string message = 1;
+  google.protobuf.Timestamp retry_after = 2;
+  CircuitBreakerMetrics metrics = 3;
+}
+
+// RecordResult request
+message RecordResultRequest {
+  string circuit_name = 1;
+  RequestResult result = 2;
+}
+
+// RecordResult response
+message RecordResultResponse {
+  CircuitState new_state = 1;
+  bool state_changed = 2;
+}
+
+// TripCircuit request
+message TripCircuitRequest {
+  string circuit_name = 1;
+  string reason = 2;
+}
+
+// TripCircuit response
+message TripCircuitResponse {
+  bool tripped = 1;
+  CircuitState previous_state = 2;
+}
+
+// ResetCircuit request
+message ResetCircuitRequest {
+  string circuit_name = 1;
+}
+
+// ResetCircuit response
+message ResetCircuitResponse {
+  bool reset = 1;
+  CircuitState previous_state = 2;
+}
+
+// GetState request
+message GetStateRequest {
+  string circuit_name = 1;
+}
+
+// GetState response
+message GetStateResponse {
+  CircuitState state = 1;
+  google.protobuf.Timestamp state_since = 2;
+}
+
+// GetMetrics request
+message GetMetricsRequest {
+  string circuit_name = 1;
+}
+
+// GetMetrics response
+message GetMetricsResponse {
+  CircuitBreakerMetrics metrics = 1;
+}
+
+// WatchEvents request
+message WatchEventsRequest {
+  string circuit_name = 1; // Empty for all circuits
+}
+
+// ListCircuitBreakers request
+message ListCircuitBreakersRequest {
+  // Optional filter by state
+  repeated CircuitState states = 1;
+}
+
+// ListCircuitBreakers response
+message ListCircuitBreakersResponse {
+  repeated CircuitBreakerInfo circuits = 1;
+}
+
+// Circuit breaker info
+message CircuitBreakerInfo {
+  string name = 1;
+  CircuitState state = 2;
+  CircuitBreakerConfig config = 3;
+  CircuitBreakerMetrics metrics = 4;
+}
+
+// DeleteCircuitBreaker request
+message DeleteCircuitBreakerRequest {
+  string circuit_name = 1;
+}
+
+// DeleteCircuitBreaker response
+message DeleteCircuitBreakerResponse {
+  bool deleted = 1;
+}

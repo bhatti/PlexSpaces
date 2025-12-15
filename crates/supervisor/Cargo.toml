@@ -1,0 +1,36 @@
+[package]
+name = "plexspaces-supervisor"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Supervision tree implementation"
+
+[dependencies]
+# Core types and dependencies
+plexspaces-core = { workspace = true }
+plexspaces-actor = { workspace = true }
+plexspaces-mailbox = { workspace = true }
+plexspaces-proto = { workspace = true }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { version = "2.0", features = ["serde"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+plexspaces-behavior = { workspace = true }
+plexspaces-persistence = { workspace = true }
+tokio-test = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+
+[lib]
+name = "plexspaces_supervisor"
+path = "src/lib.rs"

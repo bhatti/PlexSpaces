@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Finance Risk Assessment - Node 1 (Coordinator)
+#
+# Role: Orchestrates loan application workflow
+# Components:
+#   - LoanCoordinator (1 instance)
+#   - SQLite durability backend
+#   - API call cache
+#
+# Dependencies: Requires nodes 2, 3, 4 to be running
+
+[release]
+name = "finance-risk-coordinator"
+version = "0.1.0"
+description = "Finance Risk Assessment Coordinator Node"
+
+[node]
+id = "finance-coordinator"
+listen_address = "0.0.0.0:9101"
+cluster_seed_nodes = [
+    "finance-data-collection:9102",
+    "finance-risk-scoring:9103",
+    "finance-post-decision:9104"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9101"
+max_connections = 100
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "finance-risk-secret-key"
+allow_unauthenticated = true  # Development mode
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 50  # Loan applications per second
+burst_size = 10
+
+[[runtime.grpc.middleware]]
+type = "compression"
+enabled = true
+priority = 50
+[runtime.grpc.middleware.config.compression]
+min_compression_size_bytes = 1024
+algorithm = "gzip"
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "finance-coordinator"
+sampling_rate = 1.0
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+[[applications]]
+name = "finance-coordinator"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 60
+shutdown_strategy = "graceful"
+dependencies = []
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "coordinator"
+# Coordinator settings
+COORDINATOR_COUNT = "1"
+# Durability backend
+DURABILITY_BACKEND = "sqlite"
+SQLITE_PATH = "/data/finance/coordinator.db"
+CHECKPOINT_INTERVAL = "10"
+# Business logic thresholds
+AUTO_APPROVE_THRESHOLD = "750"
+AUTO_REJECT_THRESHOLD = "600"
+MANUAL_REVIEW_TIMEOUT_HOURS = "24"
+# Cluster configuration
+CLUSTER_MODE = "distributed"
+CREDIT_CHECK_POOL_ADDRESS = "finance-data-collection:9102"
+BANK_ANALYSIS_POOL_ADDRESS = "finance-data-collection:9102"
+EMPLOYMENT_POOL_ADDRESS = "finance-data-collection:9102"
+RISK_SCORING_ADDRESS = "finance-risk-scoring:9103"
+NOTIFICATION_POOL_ADDRESS = "finance-post-decision:9104"
+
+# Resource limits
+[resources]
+max_memory_mb = 512
+max_cpu_percent = 50
+
+[shutdown]
+global_timeout_seconds = 120
+grace_period_seconds = 10
+grpc_drain_timeout_seconds = 30

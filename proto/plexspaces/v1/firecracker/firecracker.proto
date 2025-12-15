@@ -1,0 +1,590 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Firecracker MicroVM API
+//
+// ## Purpose
+// Defines the Firecracker microVM management API for PlexSpaces applications,
+// enabling strong isolation with < 200ms boot time.
+//
+// ## Architecture Context
+// This proto file implements Firecracker as the **application-level isolation layer**
+// (like AWS Lambda). It defines:
+// - VM configuration (vCPU, memory, kernel, rootfs)
+// - VM lifecycle operations (create, boot, pause, stop)
+// - Network setup (TAP devices, bridges)
+// - Application deployment to VMs (entire applications, not individual actors)
+//
+// ## Design Principles
+// - **Firecracker = Application Container**: One VM per application/tenant
+// - **VM contains**: PlexSpaces framework + application actors
+// - **NOT**: One VM per actor (too much overhead)
+// - **Actor deployment**: Belongs in application deployment layer, not VM management
+//
+// ## Component Interactions
+// - Used by: FirecrackerVmService (this file)
+// - Depends on: common.proto (Metadata), application.proto (Application deployment)
+//
+// ## Design Decisions
+// - Why separate from microvm_host.proto: Firecracker-specific API
+// - Why gRPC service: Enable remote VM management across nodes
+// - Why proto messages for config: Type-safe, version-compatible VM specs
+// - Why VmState enum: Clear state machine for VM lifecycle
+
+syntax = "proto3";
+
+package plexspaces.firecracker.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+
+// ============================================================================
+// VM Management Service
+// ============================================================================
+
+// Firecracker VM Management Service
+//
+// ## Purpose
+// Provides gRPC interface for managing Firecracker microVMs across nodes.
+//
+// ## Why This Exists
+// - Enables remote VM creation and management
+// - Centralizes VM lifecycle operations
+// - Supports multi-tenant actor deployments
+// - Provides VM discovery and monitoring
+//
+// ## How It's Used
+// - Nodes call CreateVm() to spawn new microVMs for applications
+// - Applications deployed via DeployApplication() (entire application, not individual actors)
+// - VM state monitored via GetVmState()
+// - VMs stopped via StopVm()
+service FirecrackerVmService {
+  // Create new microVM with specified configuration
+  rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
+
+  // Boot existing VM (start kernel execution)
+  rpc BootVm(BootVmRequest) returns (BootVmResponse);
+
+  // Pause VM execution (can be resumed)
+  rpc PauseVm(PauseVmRequest) returns (PauseVmResponse);
+
+  // Resume paused VM
+  rpc ResumeVm(ResumeVmRequest) returns (ResumeVmResponse);
+
+  // Stop VM and release resources
+  rpc StopVm(StopVmRequest) returns (StopVmResponse);
+
+  // Get VM state and metadata
+  rpc GetVmState(GetVmStateRequest) returns (GetVmStateResponse);
+
+  // List all VMs on this node
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
+
+  // Deploy application to VM (entire application, not individual actors)
+  //
+  // ## Purpose
+  // Deploys a complete PlexSpaces application (framework + actors) to a VM.
+  // This aligns with AWS Lambda model: one VM per application/tenant.
+  //
+  // ## Design Notes
+  // - Application includes: framework runtime, WASM modules, configuration
+  // - VM contains entire application, not individual actors
+  // - Actor deployment is handled by application layer, not VM layer
+  rpc DeployApplication(DeployApplicationRequest) returns (DeployApplicationResponse);
+
+  // Undeploy application from VM
+  //
+  // ## Purpose
+  // Removes application from VM, stopping all actors and cleaning up resources.
+  rpc UndeployApplication(UndeployApplicationRequest) returns (UndeployApplicationResponse);
+}
+
+// ============================================================================
+// VM Configuration Messages
+// ============================================================================
+
+// VM configuration specification
+//
+// ## Purpose
+// Defines complete configuration for a Firecracker microVM including
+// resources, boot parameters, and networking.
+//
+// ## Why This Exists
+// - Type-safe VM specification
+// - Version-compatible VM configs
+// - Enables VM templates
+// - Supports resource quotas
+//
+// ## Design Notes
+// - vm_id uses ULID for sortability
+// - vcpu_count limited to 1-32 (Firecracker limit)
+// - mem_size_mib limited to 128-32768 (practical limits)
+message VmConfig {
+  // VM identifier (ULID format)
+  string vm_id = 1;
+
+  // Number of vCPUs (1-32)
+  uint32 vcpu_count = 2;
+
+  // Memory size in MiB (128-32768)
+  uint32 mem_size_mib = 3;
+
+  // Kernel configuration
+  BootSource boot_source = 4;
+
+  // Root filesystem drive
+  Drive rootfs = 5;
+
+  // Additional drives (data, logs, etc.)
+  repeated Drive drives = 6;
+
+  // Network interfaces
+  repeated NetworkInterface network_interfaces = 7;
+
+  // VM metadata (labels, annotations)
+  plexspaces.common.v1.Metadata metadata = 8;
+
+  // Resource limits and quotas
+  ResourceLimits limits = 9;
+
+  // Enable SMT (Simultaneous Multithreading)
+  bool smt = 10;
+
+  // Track dirty pages for live migration
+  bool track_dirty_pages = 11;
+}
+
+// Boot source configuration (kernel + initrd)
+//
+// ## Purpose
+// Specifies kernel image and boot parameters for VM.
+//
+// ## Why This Exists
+// - Different VMs may use different kernels
+// - Boot args customize VM behavior
+// - Initrd optional for faster boot
+message BootSource {
+  // Path to kernel image on host
+  string kernel_image_path = 1;
+
+  // Kernel boot arguments
+  string boot_args = 2;
+
+  // Path to initrd image (optional)
+  string initrd_path = 3;
+}
+
+// Drive configuration (rootfs, data drives)
+//
+// ## Purpose
+// Defines disk drives attached to VM (root filesystem, data volumes).
+//
+// ## Why This Exists
+// - VMs need persistent storage
+// - Separate system (rootfs) from data drives
+// - Support read-only drives (immutable infrastructure)
+// - Enable drive snapshots
+message Drive {
+  // Drive identifier
+  string drive_id = 1;
+
+  // Path to drive image on host
+  string path_on_host = 2;
+
+  // Is this the root device?
+  bool is_root_device = 3;
+
+  // Is drive read-only?
+  bool is_read_only = 4;
+
+  // Rate limiter for I/O throttling
+  RateLimiter rate_limiter = 5;
+}
+
+// Network interface configuration
+//
+// ## Purpose
+// Defines TAP device attachment for VM networking.
+//
+// ## Why This Exists
+// - VMs need network connectivity
+// - TAP devices provide L2 bridging
+// - MAC address for ARP/DHCP
+// - Rate limiting for fair sharing
+message NetworkInterface {
+  // Interface identifier (e.g., "eth0")
+  string iface_id = 1;
+
+  // TAP device name on host (e.g., "tap-vm001")
+  string host_dev_name = 2;
+
+  // Guest MAC address (e.g., "AA:FC:00:00:00:01")
+  string guest_mac = 3;
+
+  // RX rate limiter
+  RateLimiter rx_rate_limiter = 4;
+
+  // TX rate limiter
+  RateLimiter tx_rate_limiter = 5;
+}
+
+// Rate limiter configuration (token bucket algorithm)
+//
+// ## Purpose
+// Implements token bucket rate limiting for network/disk I/O.
+//
+// ## Why This Exists
+// - Prevent noisy neighbor problems
+// - Fair resource sharing
+// - QoS guarantees
+message RateLimiter {
+  // Bandwidth limit (bytes/second)
+  TokenBucket bandwidth = 1;
+
+  // Operations limit (ops/second)
+  TokenBucket ops = 2;
+}
+
+// Token bucket for rate limiting
+//
+// ## Purpose
+// Defines token bucket parameters for rate limiting.
+//
+// ## Why This Exists
+// - Industry standard algorithm (used by Linux tc)
+// - Allows bursts while limiting average rate
+message TokenBucket {
+  // Bucket size (maximum burst)
+  uint64 size = 1;
+
+  // Refill rate (tokens per millisecond)
+  uint64 refill_time = 2;
+}
+
+// Resource limits and quotas
+//
+// ## Purpose
+// Enforces resource limits on VMs to prevent resource exhaustion.
+//
+// ## Why This Exists
+// - Multi-tenancy requires isolation
+// - Prevent single VM from consuming all resources
+// - Enable capacity planning
+message ResourceLimits {
+  // Maximum memory (MiB)
+  uint32 max_memory_mib = 1;
+
+  // Maximum vCPUs
+  uint32 max_vcpus = 2;
+
+  // Maximum network bandwidth (MB/s)
+  uint32 max_network_bandwidth_mbps = 3;
+
+  // Maximum disk I/O (MB/s)
+  uint32 max_disk_io_mbps = 4;
+
+  // VM idle timeout (stop if idle)
+  google.protobuf.Duration idle_timeout = 5;
+}
+
+// ============================================================================
+// VM State and Lifecycle
+// ============================================================================
+
+// VM state enumeration
+//
+// ## Purpose
+// Tracks VM lifecycle state for management and monitoring.
+//
+// ## State Transitions
+// Created -> Booting -> Running -> [Paused -> Running]
+//                                -> [Stopping -> Stopped]
+//                                -> [Failed]
+enum VmState {
+  VM_STATE_UNSPECIFIED = 0;
+  VM_STATE_CREATED = 1;      // VM created, not yet booted
+  VM_STATE_BOOTING = 2;      // Kernel loading
+  VM_STATE_RUNNING = 3;      // Fully operational
+  VM_STATE_PAUSED = 4;       // Execution paused (can resume)
+  VM_STATE_STOPPING = 5;     // Shutdown in progress
+  VM_STATE_STOPPED = 6;      // Fully stopped
+  VM_STATE_FAILED = 7;       // Failed to boot or crashed
+}
+
+// VM instance metadata
+//
+// ## Purpose
+// Represents a running or stopped VM instance with full state.
+//
+// ## Why This Exists
+// - Track VM lifecycle
+// - Monitor resource usage
+// - Enable VM discovery
+// - Support debugging
+message VmInstance {
+  // VM identifier (ULID)
+  string vm_id = 1;
+
+  // Current VM state
+  VmState state = 2;
+
+  // VM configuration
+  VmConfig config = 3;
+
+  // Creation timestamp
+  google.protobuf.Timestamp created_at = 4;
+
+  // Boot timestamp
+  google.protobuf.Timestamp booted_at = 5;
+
+  // Node hosting this VM
+  string node_id = 6;
+
+  // Process ID of Firecracker process
+  uint32 process_id = 7;
+
+  // Socket path for Firecracker API
+  string socket_path = 8;
+
+  // Application deployed to this VM (if any)
+  //
+  // ## Purpose
+  // Tracks which application is running in this VM.
+  // VMs contain entire applications, not individual actors.
+  string application_id = 9;
+
+  // Resource usage
+  ResourceUsage resource_usage = 10;
+
+  // Last error (if state == FAILED)
+  string error_message = 11;
+}
+
+// Resource usage metrics
+//
+// ## Purpose
+// Tracks actual resource consumption by VM.
+//
+// ## Why This Exists
+// - Capacity planning
+// - Cost allocation
+// - Anomaly detection
+// - Scaling decisions
+message ResourceUsage {
+  // Memory used (MiB)
+  uint32 memory_used_mib = 1;
+
+  // CPU utilization (0-100%)
+  float cpu_utilization = 2;
+
+  // Network RX bytes
+  uint64 network_rx_bytes = 3;
+
+  // Network TX bytes
+  uint64 network_tx_bytes = 4;
+
+  // Disk read bytes
+  uint64 disk_read_bytes = 5;
+
+  // Disk write bytes
+  uint64 disk_write_bytes = 6;
+
+  // Uptime
+  google.protobuf.Duration uptime = 7;
+}
+
+// ============================================================================
+// gRPC Request/Response Messages
+// ============================================================================
+
+// CreateVm request
+message CreateVmRequest {
+  VmConfig config = 1;
+}
+
+// CreateVm response
+message CreateVmResponse {
+  bool success = 1;
+  string vm_id = 2;
+  string socket_path = 3;
+  FirecrackerError error = 4;
+}
+
+// BootVm request
+message BootVmRequest {
+  string vm_id = 1;
+}
+
+// BootVm response
+message BootVmResponse {
+  bool success = 1;
+  VmState state = 2;
+  FirecrackerError error = 3;
+}
+
+// PauseVm request
+message PauseVmRequest {
+  string vm_id = 1;
+}
+
+// PauseVm response
+message PauseVmResponse {
+  bool success = 1;
+  VmState state = 2;
+  FirecrackerError error = 3;
+}
+
+// ResumeVm request
+message ResumeVmRequest {
+  string vm_id = 1;
+}
+
+// ResumeVm response
+message ResumeVmResponse {
+  bool success = 1;
+  VmState state = 2;
+  FirecrackerError error = 3;
+}
+
+// StopVm request
+message StopVmRequest {
+  string vm_id = 1;
+  bool force = 2;  // Force kill if graceful shutdown fails
+}
+
+// StopVm response
+message StopVmResponse {
+  bool success = 1;
+  FirecrackerError error = 2;
+}
+
+// GetVmState request
+message GetVmStateRequest {
+  string vm_id = 1;
+}
+
+// GetVmState response
+message GetVmStateResponse {
+  bool success = 1;
+  VmInstance vm = 2;
+  FirecrackerError error = 3;
+}
+
+// ListVms request
+message ListVmsRequest {
+  // Filter by state (empty = all)
+  repeated VmState states = 1;
+
+  // Filter by node
+  string node_id = 2;
+
+  // Pagination
+  uint32 page_size = 3;
+  string page_token = 4;
+}
+
+// ListVms response
+message ListVmsResponse {
+  repeated VmInstance vms = 1;
+  string next_page_token = 2;
+  uint32 total_count = 3;
+}
+
+// DeployApplication request
+//
+// ## Purpose
+// Deploys a complete PlexSpaces application to a VM.
+// Application includes framework runtime, WASM modules, and configuration.
+message DeployApplicationRequest {
+  // VM identifier
+  string vm_id = 1;
+
+  // Application identifier
+  string application_id = 2;
+
+  // Application bundle (framework + actors + config)
+  //
+  // Contains:
+  // - Framework runtime binary
+  // - WASM modules (actor implementations)
+  // - Application configuration
+  // - Dependencies
+  bytes application_bundle = 3;
+
+  // Application configuration (optional, can be in bundle)
+  string application_config_json = 4;
+}
+
+// DeployApplication response
+message DeployApplicationResponse {
+  bool success = 1;
+  string application_id = 2;
+  string vm_id = 3;
+  FirecrackerError error = 4;
+}
+
+// UndeployApplication request
+message UndeployApplicationRequest {
+  string vm_id = 1;
+  string application_id = 2;
+  bool force = 3;  // Force undeploy even if actors are running
+}
+
+// UndeployApplication response
+message UndeployApplicationResponse {
+  bool success = 1;
+  FirecrackerError error = 2;
+}
+
+// ============================================================================
+// Error Messages
+// ============================================================================
+
+// Firecracker error
+//
+// ## Purpose
+// Structured error information for VM operations.
+//
+// ## Why This Exists
+// - Type-safe error handling
+// - Localized error messages
+// - Error categorization
+// - Debugging context
+message FirecrackerError {
+  FirecrackerErrorCode code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+// Firecracker error codes
+enum FirecrackerErrorCode {
+  FIRECRACKER_ERROR_CODE_OK = 0;
+  FIRECRACKER_ERROR_CODE_VM_CREATION_FAILED = 1;
+  FIRECRACKER_ERROR_CODE_VM_BOOT_FAILED = 2;
+  FIRECRACKER_ERROR_CODE_VM_OPERATION_FAILED = 3;
+  FIRECRACKER_ERROR_CODE_VM_NOT_FOUND = 4;
+  FIRECRACKER_ERROR_CODE_NETWORK_SETUP_FAILED = 5;
+  FIRECRACKER_ERROR_CODE_CONFIGURATION_ERROR = 6;
+  FIRECRACKER_ERROR_CODE_API_ERROR = 7;
+  FIRECRACKER_ERROR_CODE_RESOURCE_EXHAUSTED = 8;
+  FIRECRACKER_ERROR_CODE_PERMISSION_DENIED = 9;
+  FIRECRACKER_ERROR_CODE_TIMEOUT = 10;
+}

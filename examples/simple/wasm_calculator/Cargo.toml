@@ -1,0 +1,35 @@
+[workspace]
+
+[package]
+name = "wasm-calculator"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+license = "LGPL-2.1-or-later"
+description = "Simple WASM calculator example demonstrating polyglot actor support"
+
+[dependencies]
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-wasm-runtime = { path = "../../../crates/wasm-runtime" }
+plexspaces-mailbox = { path = "../../../crates/mailbox" }
+plexspaces-proto = { path = "../../../crates/proto" }
+plexspaces-tuplespace = { path = "../../../crates/tuplespace" }
+
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.4", features = ["derive"] }
+tonic = "0.10"
+tonic-build = "0.10"
+wat = "1.242.0"
+
+[[bin]]
+name = "wasm_calculator"
+path = "src/main.rs"
+

@@ -1,0 +1,583 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Blob Storage Service API
+//
+// ## Purpose
+// Provides S3-compatible object storage for blobs (files, artifacts, etc.) with metadata
+// management. Supports multiple backends: S3, MinIO, GCP Cloud Storage, Azure Blob Storage.
+//
+// ## Architecture Context
+// This service provides the infrastructure layer for storing large binary objects:
+// - **Blob Storage**: Actual binary data stored in S3-compatible backend
+// - **Metadata Storage**: BlobMetadata stored in SQL (SQLite/PostgreSQL) for querying
+// - **Multi-tenancy**: Isolation via tenant_id and namespace
+// - **Path Structure**: /plexspaces/{tenant_id}/{namespace}/{blob_id}
+//
+// ## Design Decisions
+// - **Separate metadata from blob**: Metadata in SQL for querying, blob in object store
+// - **SHA256 for deduplication**: Same content = same blob_id
+// - **Tenant/Namespace isolation**: All operations scoped to tenant_id + namespace
+// - **Presigned URLs**: For direct client-to-storage uploads/downloads
+
+syntax = "proto3";
+
+package plexspaces.storage.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.storage.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpaces Blob Storage Service";
+    version: "1.0";
+    description: "S3-compatible blob storage with metadata management";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// BlobMetadata represents metadata about a stored blob
+message BlobMetadata {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Blob Metadata"
+      description: "Metadata about a stored blob"
+      required: ["blob_id", "tenant_id", "namespace", "name", "sha256", "content_length"]
+    }
+  };
+
+  // Unique blob identifier (ULID or SHA256-based)
+  string blob_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+
+  // Tenant identifier for multi-tenancy isolation
+  string tenant_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 64, pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"}
+  ];
+
+  // Namespace within tenant (e.g., "production", "staging", "dev")
+  string namespace = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 32, pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"}
+  ];
+
+  // Display name for the blob
+  string name = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 512}
+  ];
+
+  // SHA256 hash of blob contents (for deduplication)
+  string sha256 = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {len: 64, pattern: "^[a-f0-9]{64}$"}
+  ];
+
+  // Content type (MIME type)
+  string content_type = 6 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Content length in bytes
+  int64 content_length = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int64 = {gte: 0}
+  ];
+
+  // ETag from object store
+  string etag = 8 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Blob group/category (optional grouping)
+  string blob_group = 9 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Blob kind/type (e.g., "LOGS", "ARTIFACTS", "CACHE", "USER_UPLOADED")
+  string kind = 10 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  // Custom metadata (key-value pairs)
+  map<string, string> metadata = 11;
+
+  // Custom tags (key-value pairs)
+  map<string, string> tags = 12;
+
+  // Expiration time (when blob should be deleted)
+  google.protobuf.Timestamp expires_at = 13;
+
+  // Creation time
+  google.protobuf.Timestamp created_at = 14 [
+    (google.api.field_behavior) = OUTPUT_ONLY
+  ];
+
+  // Last update time
+  google.protobuf.Timestamp updated_at = 15 [
+    (google.api.field_behavior) = OUTPUT_ONLY
+  ];
+}
+
+// Blob storage configuration
+//
+// ## Purpose
+// Configuration for S3-compatible blob storage backend (S3, MinIO, GCP, Azure).
+// Used for storing large binary objects with metadata management.
+//
+// ## Usage
+// This config is typically included in RuntimeConfig for node-level configuration,
+// but can also be used standalone for service-specific configuration.
+message BlobConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Blob Storage Configuration"
+      description: "Configuration for blob storage backend"
+    }
+  };
+
+  // Backend type (s3, minio, gcp, azure)
+  string backend = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {in: ["s3", "minio", "gcp", "azure"]}
+  ];
+
+  // Bucket name
+  string bucket = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+
+  // Endpoint URL (for MinIO or custom S3-compatible)
+  string endpoint = 3 [
+    (buf.validate.field).string = {max_len: 512}
+  ];
+
+  // Region (for S3/GCP/Azure)
+  string region = 4 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  // Access key ID
+  string access_key_id = 5 [
+    (buf.validate.field).string = {max_len: 256}
+  ];
+
+  // Secret access key (should be from env var, not config file)
+  string secret_access_key = 6 [
+    (buf.validate.field).string = {max_len: 256}
+  ];
+
+  // Use SSL/TLS
+  bool use_ssl = 7;
+
+  // Path prefix for all blobs (default: /plexspaces)
+  string prefix = 8 [
+    (buf.validate.field).string = {max_len: 512}
+  ];
+
+  // GCP-specific: Service account JSON (base64 encoded)
+  string gcp_service_account_json = 9 [
+    (buf.validate.field).string = {max_len: 16384}
+  ];
+
+  // Azure-specific: Account name
+  string azure_account_name = 10 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Azure-specific: Account key
+  string azure_account_key = 11 [
+    (buf.validate.field).string = {max_len: 256}
+  ];
+}
+
+// Upload blob request (HTTP multipart/form-data or raw body)
+message UploadBlobRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Upload Blob Request"
+      description: "Request to upload a blob"
+      required: ["tenant_id", "namespace", "name"]
+    }
+  };
+
+  // Tenant ID
+  string tenant_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 64}
+  ];
+
+  // Namespace
+  string namespace = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 32}
+  ];
+
+  // Blob name
+  string name = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 512}
+  ];
+
+  // Content type (optional, will be detected if not provided)
+  string content_type = 4 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Blob group (optional)
+  string blob_group = 5 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Blob kind (optional)
+  string kind = 6 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  // Custom metadata
+  map<string, string> metadata = 7;
+
+  // Custom tags
+  map<string, string> tags = 8;
+
+  // Expiration duration (optional)
+  google.protobuf.Duration expires_after = 9;
+
+  // Blob data (for gRPC streaming or HTTP body)
+  bytes data = 10;
+}
+
+// Upload blob response
+message UploadBlobResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Upload Blob Response"
+      description: "Response after uploading a blob"
+    }
+  };
+
+  BlobMetadata metadata = 1;
+}
+
+// Download blob request
+message DownloadBlobRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Download Blob Request"
+      description: "Request to download a blob"
+      required: ["blob_id"]
+    }
+  };
+
+  // Blob ID
+  string blob_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+
+  // Tenant ID (for authorization)
+  string tenant_id = 2 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  // Namespace (for authorization)
+  string namespace = 3 [
+    (buf.validate.field).string = {max_len: 32}
+  ];
+}
+
+// Download blob response (streaming)
+message DownloadBlobResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Download Blob Response"
+      description: "Response containing blob data (streaming)"
+    }
+  };
+
+  // Blob metadata (sent first)
+  BlobMetadata metadata = 1;
+
+  // Blob data chunks (streamed)
+  bytes data = 2;
+}
+
+// Get blob metadata request
+message GetBlobMetadataRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Blob Metadata Request"
+      description: "Request to get blob metadata"
+      required: ["blob_id"]
+    }
+  };
+
+  string blob_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+
+  string tenant_id = 2 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  string namespace = 3 [
+    (buf.validate.field).string = {max_len: 32}
+  ];
+}
+
+// Get blob metadata response
+message GetBlobMetadataResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Blob Metadata Response"
+      description: "Response containing blob metadata"
+    }
+  };
+
+  BlobMetadata metadata = 1;
+}
+
+// List blobs request
+message ListBlobsRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "List Blobs Request"
+      description: "Request to list blobs with filtering"
+      required: ["tenant_id", "namespace"]
+    }
+  };
+
+  string tenant_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 64}
+  ];
+
+  string namespace = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 32}
+  ];
+
+  // Filter by name (prefix match)
+  string name_prefix = 3 [
+    (buf.validate.field).string = {max_len: 512}
+  ];
+
+  // Filter by blob_group
+  string blob_group = 4 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Filter by kind
+  string kind = 5 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  // Filter by SHA256
+  string sha256 = 6 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page = 7;
+}
+
+// List blobs response
+message ListBlobsResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "List Blobs Response"
+      description: "Response containing list of blob metadata"
+    }
+  };
+
+  repeated BlobMetadata blobs = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// Delete blob request
+message DeleteBlobRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Delete Blob Request"
+      description: "Request to delete a blob"
+      required: ["blob_id"]
+    }
+  };
+
+  string blob_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+
+  string tenant_id = 2 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  string namespace = 3 [
+    (buf.validate.field).string = {max_len: 32}
+  ];
+}
+
+// Delete blob response
+message DeleteBlobResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Delete Blob Response"
+      description: "Response after deleting a blob"
+    }
+  };
+}
+
+// Generate presigned URL request
+message GeneratePresignedUrlRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Generate Presigned URL Request"
+      description: "Request to generate a presigned URL for direct access"
+      required: ["blob_id", "operation"]
+    }
+  };
+
+  string blob_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+
+  // Operation: "GET" or "PUT"
+  string operation = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {in: ["GET", "PUT"]}
+  ];
+
+  // Expiration duration (default: 1 hour)
+  google.protobuf.Duration expires_after = 3;
+
+  string tenant_id = 4 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  string namespace = 5 [
+    (buf.validate.field).string = {max_len: 32}
+  ];
+}
+
+// Generate presigned URL response
+message GeneratePresignedUrlResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Generate Presigned URL Response"
+      description: "Response containing presigned URL"
+    }
+  };
+
+  string url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+// Blob Storage Service
+service BlobService {
+  // Upload a blob (HTTP: POST /api/v1/blobs)
+  rpc UploadBlob(UploadBlobRequest) returns (UploadBlobResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/blobs"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Upload a blob"
+      description: "Uploads a blob and returns its metadata"
+      tags: "Blob Storage"
+    };
+  }
+
+  // Download a blob (HTTP: GET /api/v1/blobs/{blob_id}/download)
+  rpc DownloadBlob(DownloadBlobRequest) returns (stream DownloadBlobResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/blobs/{blob_id}/download"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Download a blob"
+      description: "Downloads a blob by ID (streaming)"
+      tags: "Blob Storage"
+    };
+  }
+
+  // Get blob metadata (HTTP: GET /api/v1/blobs/{blob_id})
+  rpc GetBlobMetadata(GetBlobMetadataRequest) returns (GetBlobMetadataResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/blobs/{blob_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get blob metadata"
+      description: "Retrieves metadata for a blob by ID"
+      tags: "Blob Storage"
+    };
+  }
+
+  // List blobs (HTTP: GET /api/v1/blobs)
+  rpc ListBlobs(ListBlobsRequest) returns (ListBlobsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/blobs"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List blobs"
+      description: "Lists blobs with filtering and pagination"
+      tags: "Blob Storage"
+    };
+  }
+
+  // Delete a blob (HTTP: DELETE /api/v1/blobs/{blob_id})
+  rpc DeleteBlob(DeleteBlobRequest) returns (DeleteBlobResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/blobs/{blob_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Delete a blob"
+      description: "Deletes a blob and its metadata"
+      tags: "Blob Storage"
+    };
+  }
+
+  // Generate presigned URL (HTTP: POST /api/v1/blobs/{blob_id}/presigned-url)
+  rpc GeneratePresignedUrl(GeneratePresignedUrlRequest) returns (GeneratePresignedUrlResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/blobs/{blob_id}/presigned-url"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Generate presigned URL"
+      description: "Generates a presigned URL for direct blob access"
+      tags: "Blob Storage"
+    };
+  }
+}

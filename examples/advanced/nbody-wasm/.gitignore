@@ -1,0 +1,17 @@
+# WASM build outputs
+wasm-modules/*.wasm
+!wasm-modules/.gitkeep
+!wasm-modules/*.md
+
+# TypeScript build outputs
+ts-actors/dist/
+ts-actors/node_modules/
+
+# Rust build outputs
+target/
+Cargo.lock
+
+# Logs
+*.log
+/tmp/nbody-node.log
+

@@ -1,0 +1,179 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Docker Compose for Byzantine Generals Example
+# Runs PlexSpaces nodes in containers and deploys Byzantine Generals application
+#
+# Usage:
+#   docker-compose -f docker-compose.containers.yml up -d    # Start all services
+#   ./scripts/test_docker_consensus.sh                      # Run consensus test
+#   docker-compose -f docker-compose.containers.yml down   # Stop all services
+
+version: '3.8'
+
+services:
+  # Redis for distributed TupleSpace backend
+  redis:
+    image: redis:7-alpine
+    container_name: byzantine-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 60 1
+      --loglevel notice
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - byzantine-network
+
+  # PlexSpaces Node 1 - runs Byzantine Generals application
+  plexspaces-node1:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+    container_name: byzantine-node1
+    hostname: node1
+    ports:
+      - "9001:9001"
+    environment:
+      - PLEXSPACES_NODE_ID=node1
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      - PLEXSPACES_CLUSTER_SEED_NODES=node2:9001,node3:9001,node4:9001
+      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
+      - RUST_LOG=info
+      - PLEXSPACES_TUPLESPACE_BACKEND=redis
+      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
+    volumes:
+      - ../../../config:/app/config:ro
+      - node1-data:/app/data
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - byzantine-network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # PlexSpaces Node 2
+  plexspaces-node2:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+    container_name: byzantine-node2
+    hostname: node2
+    ports:
+      - "9002:9001"
+    environment:
+      - PLEXSPACES_NODE_ID=node2
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node3:9001,node4:9001
+      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
+      - RUST_LOG=info
+      - PLEXSPACES_TUPLESPACE_BACKEND=redis
+      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
+    volumes:
+      - ../../../config:/app/config:ro
+      - node2-data:/app/data
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - byzantine-network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # PlexSpaces Node 3
+  plexspaces-node3:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+    container_name: byzantine-node3
+    hostname: node3
+    ports:
+      - "9003:9001"
+    environment:
+      - PLEXSPACES_NODE_ID=node3
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001,node4:9001
+      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
+      - RUST_LOG=info
+      - PLEXSPACES_TUPLESPACE_BACKEND=redis
+      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
+    volumes:
+      - ../../../config:/app/config:ro
+      - node3-data:/app/data
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - byzantine-network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # PlexSpaces Node 4 (for 4 generals)
+  plexspaces-node4:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+    container_name: byzantine-node4
+    hostname: node4
+    ports:
+      - "9004:9001"
+    environment:
+      - PLEXSPACES_NODE_ID=node4
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001,node3:9001
+      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
+      - RUST_LOG=info
+      - PLEXSPACES_TUPLESPACE_BACKEND=redis
+      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
+    volumes:
+      - ../../../config:/app/config:ro
+      - node4-data:/app/data
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - byzantine-network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
+    driver: local
+  node1-data:
+    driver: local
+  node2-data:
+    driver: local
+  node3-data:
+    driver: local
+  node4-data:
+    driver: local
+
+networks:
+  byzantine-network:
+    driver: bridge

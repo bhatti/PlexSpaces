@@ -1,0 +1,47 @@
+[package]
+name = "plexspaces-firecracker"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Firecracker microVM integration"
+
+[dependencies]
+plexspaces-proto = { workspace = true }
+plexspaces-wasm-runtime = { path = "../wasm-runtime" }
+plexspaces-object-registry = { path = "../object-registry" }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP client for Firecracker API
+reqwest = { version = "0.11", features = ["json"] }
+hyper = { version = "0.14", features = ["client", "http1", "http2", "tcp", "stream"] }
+hyperlocal = "0.8"  # Unix socket support for Firecracker API
+
+# Networking (TAP devices)
+nix = { version = "0.27", features = ["net"] }
+
+# Process management
+tempfile = "3.8"
+
+# ID generation (ULID - CLAUDE.md Core Principle 0)
+ulid = { version = "1.1", features = ["serde"] }
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+plexspaces-keyvalue = { path = "../keyvalue" }
+
+[lib]
+name = "plexspaces_firecracker"
+path = "src/lib.rs"

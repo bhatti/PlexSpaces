@@ -1,0 +1,577 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// PlexSpaces Actor Interface (WebAssembly Component Model)
+//
+// ## Purpose
+// Defines the typed interface between WASM actors and the PlexSpaces runtime
+// using the WebAssembly Component Model. This is the canonical contract for
+// all WASM actors regardless of source language (Rust, JavaScript, Go).
+//
+// ## Why WIT (WebAssembly Interface Types)
+// - **Type Safety**: Compile-time checks for host function signatures
+// - **Language Agnostic**: Same interface works for Rust, JS, Go, Python
+// - **Composability**: Components can import other components
+// - **Versioning**: Explicit version management (semver)
+//
+// ## Architecture
+// This interface defines TWO sides:
+// 1. **Imports** (host functions): What runtime provides TO actors
+// 2. **Exports** (actor functions): What actors provide TO runtime
+//
+// ## Component Model vs Legacy ABI
+// Component Model is chosen (User Decision A2) because:
+// - Type-safe (no manual pointer arithmetic)
+// - Future-proof (standard evolving with WASI)
+// - Better tooling (wit-bindgen, componentize-*)
+// - Composable (actors can import other actors)
+//
+// ## Usage
+// ```bash
+// # Generate Rust bindings
+// wit-bindgen rust --world plexspaces-actor
+//
+// # Generate JavaScript bindings (via Javy)
+// jco transpile actor.wasm --wit plexspaces-actor
+//
+// # Generate Go bindings (via TinyGo)
+// wit-bindgen tiny-go --world plexspaces-actor
+// ```
+
+package plexspaces:actor@0.1.0;
+
+/// Core types used across the interface
+interface types {
+    /// Actor identifier (ULID format for sortability)
+    type actor-id = string;
+
+    /// Message payload (opaque bytes)
+    type payload = list<u8>;
+
+    /// Tuple field value (sum type for heterogeneous tuples)
+    variant tuple-field {
+        string-value(string),
+        integer-value(s64),
+        float-value(float64),
+        bytes-value(list<u8>),
+        boolean-value(bool),
+    }
+
+    /// Tuple (ordered list of fields)
+    type tuple = list<tuple-field>;
+
+    /// Pattern field for matching tuples
+    variant pattern-field {
+        /// Match exact value
+        exact(tuple-field),
+        /// Match any value (wildcard)
+        wildcard,
+        /// Match by type only
+        type-match(field-type),
+    }
+
+    /// Field types for pattern matching
+    enum field-type {
+        string-type,
+        integer-type,
+        float-type,
+        bytes-type,
+        boolean-type,
+    }
+
+    /// Pattern for tuple matching
+    type pattern = list<pattern-field>;
+
+    /// Result type for operations that can fail
+    variant actor-result {
+        ok(payload),
+        err(string),
+    }
+}
+
+/// Host functions provided BY PlexSpaces runtime TO WASM actors
+///
+/// These are IMPORTS from the actor's perspective - the runtime provides
+/// these functions for actors to call.
+interface host {
+    use types.{actor-id, payload, tuple, pattern, actor-result};
+
+    /// Send message to another actor (fire-and-forget)
+    ///
+    /// # Arguments
+    /// - `to`: Destination actor ID
+    /// - `message-type`: Message type for behavior dispatch (e.g., "call", "cast")
+    /// - `payload`: Opaque message bytes
+    ///
+    /// # Returns
+    /// - `ok(unit)`: Message sent successfully
+    /// - `err(string)`: Failed to send (actor not found, mailbox full, etc.)
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// host::send_message("actor-123", "cast", b"hello".to_vec())?;
+    /// ```
+    send-message: func(to: actor-id, message-type: string, payload: payload) -> result<_, string>;
+
+    /// Spawn new actor from WASM module
+    ///
+    /// # Arguments
+    /// - `module-ref`: Module name or hash (e.g., "counter-actor@1.2.3")
+    /// - `initial-state`: Opaque state bytes passed to actor's init()
+    ///
+    /// # Returns
+    /// - `ok(actor-id)`: New actor ID
+    /// - `err(string)`: Failed to spawn (module not found, resource limits, etc.)
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// let child_id = host::spawn_actor("worker-actor@1.0.0", vec![])?;
+    /// ```
+    spawn-actor: func(module-ref: string, initial-state: payload) -> result<actor-id, string>;
+
+    /// Write tuple to TupleSpace
+    ///
+    /// # Arguments
+    /// - `tuple`: Tuple to write (persisted until taken or TTL expires)
+    ///
+    /// # Returns
+    /// - `ok(unit)`: Tuple written
+    /// - `err(string)`: Failed to write
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// use plexspaces::types::*;
+    /// let tuple = vec![
+    ///     TupleField::StringValue("config".to_string()),
+    ///     TupleField::StringValue("timeout".to_string()),
+    ///     TupleField::IntegerValue(30),
+    /// ];
+    /// host::tuplespace_write(tuple)?;
+    /// ```
+    ///
+    /// # Example (Python)
+    /// ```python
+    /// from plexspaces import host, types
+    /// 
+    /// # Create tuple with result
+    /// tuple_fields = [
+    ///     types.TupleField.string_value("calculator_result"),
+    ///     types.TupleField.string_value(operation),
+    ///     types.TupleField.float_value(result),
+    /// ]
+    /// 
+    /// # Write to tuplespace
+    /// result = host.tuplespace_write(tuple_fields)
+    /// if result.is_err():
+    ///     return None, result.err()
+    /// ```
+    tuplespace-write: func(tuple: tuple) -> result<_, string>;
+
+    /// Read tuple from TupleSpace (non-destructive)
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match against tuples
+    ///
+    /// # Returns
+    /// - `ok(some(tuple))`: Matching tuple found
+    /// - `ok(none)`: No matching tuple
+    /// - `err(string)`: Failed to read
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// let pattern = vec![
+    ///     PatternField::Exact(TupleField::StringValue("config".to_string())),
+    ///     PatternField::Wildcard,  // Match any second field
+    ///     PatternField::Wildcard,  // Match any third field
+    /// ];
+    /// if let Some(tuple) = host::tuplespace_read(pattern)? {
+    ///     // Process tuple
+    /// }
+    /// ```
+    ///
+    /// # Example (Python)
+    /// ```python
+    /// from plexspaces import host, types
+    /// 
+    /// # Create pattern to match calculator results
+    /// pattern = [
+    ///     types.PatternField.exact(types.TupleField.string_value("calculator_result")),
+    ///     types.PatternField.wildcard(),  # Match any operation
+    ///     types.PatternField.wildcard(),  # Match any result
+    /// ]
+    /// 
+    /// # Read from tuplespace
+    /// result = host.tuplespace_read(pattern)
+    /// if result.is_ok():
+    ///     maybe_tuple = result.ok()
+    ///     if maybe_tuple is not None:
+    ///         # Process tuple
+    ///         pass
+    /// ```
+    tuplespace-read: func(pattern: pattern) -> result<option<tuple>, string>;
+
+    /// Take tuple from TupleSpace (destructive read)
+    ///
+    /// Like read, but removes the tuple from the space.
+    tuplespace-take: func(pattern: pattern) -> result<option<tuple>, string>;
+
+    /// Count matching tuples in TupleSpace
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match against tuples
+    ///
+    /// # Returns
+    /// - `ok(count)`: Number of matching tuples
+    /// - `err(string)`: Failed to count
+    tuplespace-count: func(pattern: pattern) -> result<u64, string>;
+
+    /// Emit log message
+    ///
+    /// # Arguments
+    /// - `level`: Log level ("trace", "debug", "info", "warn", "error")
+    /// - `message`: Log message
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// host::log("info", "Processing payment");
+    /// host::log("error", &format!("Payment failed: {}", err));
+    /// ```
+    log: func(level: string, message: string);
+
+    /// Get current timestamp (milliseconds since Unix epoch)
+    ///
+    /// Requires `allow_clocks` capability (WASI clocks interface).
+    ///
+    /// # Returns
+    /// - Milliseconds since 1970-01-01 00:00:00 UTC
+    now-millis: func() -> u64;
+
+    /// Sleep for duration (milliseconds)
+    ///
+    /// Yields control back to runtime. Actor will be resumed after duration.
+    ///
+    /// # Arguments
+    /// - `millis`: Duration to sleep in milliseconds
+    sleep-millis: func(millis: u64);
+
+    /// Send message to queue (load-balanced to one consumer)
+    ///
+    /// # Arguments
+    /// - `queue-name`: Name of the queue
+    /// - `message-type`: Message type for routing
+    /// - `payload`: Opaque message bytes
+    ///
+    /// # Returns
+    /// - `ok(message-id)`: Message ID if successful
+    /// - `err(string)`: Failed to send
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// let msg_id = host::send_to_queue("orders", "order_created", order_bytes)?;
+    /// ```
+    send-to-queue: func(queue-name: string, message-type: string, payload: payload) -> result<string, string>;
+
+    /// Publish message to topic (all subscribers receive)
+    ///
+    /// # Arguments
+    /// - `topic-name`: Name of the topic
+    /// - `message-type`: Message type for routing
+    /// - `payload`: Opaque message bytes
+    ///
+    /// # Returns
+    /// - `ok(message-id)`: Message ID if successful
+    /// - `err(string)`: Failed to publish
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// let msg_id = host::publish_to_topic("events", "user_registered", user_bytes)?;
+    /// ```
+    publish-to-topic: func(topic-name: string, message-type: string, payload: payload) -> result<string, string>;
+
+    /// Receive message from queue (blocking until message available)
+    ///
+    /// # Arguments
+    /// - `queue-name`: Name of the queue
+    /// - `timeout-ms`: Optional timeout in milliseconds (0 = no timeout)
+    ///
+    /// # Returns
+    /// - `ok(some(message))`: Message received (tuple: message-type, payload)
+    /// - `ok(none)`: Timeout or queue empty
+    /// - `err(string)`: Failed to receive
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// if let Some((msg_type, payload)) = host::receive-from-queue("orders", 5000)? {
+    ///     // Process message
+    /// }
+    /// ```
+    receive-from-queue: func(queue-name: string, timeout-ms: u64) -> result<option<tuple<string, payload>>, string>;
+
+    /// Create a checkpoint for durable actors
+    ///
+    /// Forces a checkpoint to be created immediately, saving the current actor state.
+    /// This is useful for actors that want explicit control over when checkpoints
+    /// are created (e.g., after critical operations).
+    ///
+    /// # Returns
+    /// - `ok(sequence-number)`: Journal sequence number of the checkpoint
+    /// - `err(string)`: Failed to create checkpoint (durability not enabled, etc.)
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// // After processing a critical transaction
+    /// let seq = host::checkpoint()?;
+    /// host::log("info", &format!("Checkpoint created at sequence {}", seq));
+    /// ```
+    checkpoint: func() -> result<u64, string>;
+
+    /// Get current journal sequence number
+    ///
+    /// Returns the current sequence number in the actor's journal. This is useful
+    /// for tracking progress and determining how many messages have been processed.
+    ///
+    /// # Returns
+    /// - `ok(sequence-number)`: Current journal sequence number (0 if no journal)
+    /// - `err(string)`: Failed to get sequence number
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// let seq = host::get-journal-sequence()?;
+    /// if seq % 100 == 0 {
+    ///     host::checkpoint()?; // Checkpoint every 100 messages
+    /// }
+    /// ```
+    get-journal-sequence: func() -> result<u64, string>;
+
+    /// Check if actor is currently in replay mode
+    ///
+    /// Returns true if the actor is currently replaying journal entries (e.g., after
+    /// a crash recovery). Actors can use this to skip side effects during replay.
+    ///
+    /// # Returns
+    /// - `ok(is-replaying)`: True if in replay mode, false otherwise
+    /// - `err(string)`: Failed to check replay status
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// let is_replaying = host::is-replay-mode()?;
+    /// if !is_replaying {
+    ///     // Only send email during normal execution, not during replay
+    ///     send_email_notification()?;
+    /// }
+    /// ```
+    is-replay-mode: func() -> result<bool, string>;
+}
+
+/// Actor functions provided BY WASM actors TO PlexSpaces runtime
+///
+/// These are EXPORTS from the actor's perspective - actors implement
+/// these functions for the runtime to call.
+interface actor {
+    use types.{payload, actor-result};
+
+    /// Initialize actor with state
+    ///
+    /// Called once when actor is instantiated. Actor should deserialize
+    /// `initial-state` and set up its internal state.
+    ///
+    /// # Arguments
+    /// - `initial-state`: Opaque state bytes (empty for new actors, snapshot for restored actors)
+    ///
+    /// # Returns
+    /// - `ok(unit)`: Initialization successful
+    /// - `err(string)`: Initialization failed (actor will be terminated)
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// #[export_name = "init"]
+    /// fn init(initial_state: Vec<u8>) -> Result<(), String> {
+    ///     let state = if initial_state.is_empty() {
+    ///         MyState::default()
+    ///     } else {
+    ///         serde_json::from_slice(&initial_state)
+    ///             .map_err(|e| format!("Failed to deserialize state: {}", e))?
+    ///     };
+    ///     // Store state in actor-local storage
+    ///     Ok(())
+    /// }
+    /// ```
+    init: func(initial-state: payload) -> result<_, string>;
+
+    /// Handle incoming message
+    ///
+    /// Called when actor receives a message. Actor should process the message
+    /// and optionally return a response (for request-reply patterns).
+    ///
+    /// # Arguments
+    /// - `from`: Sender actor ID
+    /// - `message-type`: Message type (e.g., "call", "cast", "info")
+    /// - `payload`: Opaque message bytes
+    ///
+    /// # Returns
+    /// - `ok(response)`: Message processed, optional response payload
+    /// - `err(string)`: Message processing failed
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// #[export_name = "handle_message"]
+    /// fn handle_message(from: String, msg_type: String, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+    ///     match msg_type.as_str() {
+    ///         "increment" => {
+    ///             // Update counter state
+    ///             Ok(vec![]) // No response
+    ///         }
+    ///         "get_count" => {
+    ///             // Serialize current count
+    ///             Ok(count.to_le_bytes().to_vec())
+    ///         }
+    ///         _ => Err(format!("Unknown message type: {}", msg_type))
+    ///     }
+    /// }
+    /// ```
+    handle-message: func(from: string, message-type: string, payload: payload) -> actor-result;
+
+    /// Snapshot actor state for persistence
+    ///
+    /// Called periodically by runtime to checkpoint actor state. Actor should
+    /// serialize its current state into opaque bytes.
+    ///
+    /// # Returns
+    /// - `ok(state)`: Serialized state bytes
+    /// - `err(string)`: Snapshot failed
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// #[export_name = "snapshot_state"]
+    /// fn snapshot_state() -> Result<Vec<u8>, String> {
+    ///     // Get actor state from actor-local storage
+    ///     let state = get_state();
+    ///     serde_json::to_vec(&state)
+    ///         .map_err(|e| format!("Failed to serialize state: {}", e))
+    /// }
+    /// ```
+    snapshot-state: func() -> result<payload, string>;
+
+    /// Graceful shutdown
+    ///
+    /// Called before actor is terminated (e.g., node shutdown, migration).
+    /// Actor should clean up resources and flush pending work.
+    ///
+    /// # Returns
+    /// - `ok(unit)`: Shutdown successful
+    /// - `err(string)`: Shutdown failed (runtime will force-terminate)
+    shutdown: func() -> result<_, string>;
+
+    /// Handle synchronous request (GenServer behavior)
+    ///
+    /// Called when actor receives a "call" message (request-reply pattern).
+    /// Actor MUST return a response payload.
+    ///
+    /// # Arguments
+    /// - `from`: Sender actor ID
+    /// - `message-type`: Message type for routing
+    /// - `payload`: Opaque request bytes
+    ///
+    /// # Returns
+    /// - `ok(response)`: Response payload (MUST be provided)
+    /// - `err(string)`: Request processing failed
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// fn handle_request(from: String, msg_type: String, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+    ///     match msg_type.as_str() {
+    ///         "get_count" => Ok(count.to_le_bytes().to_vec()),
+    ///         _ => Err(format!("Unknown request: {}", msg_type))
+    ///     }
+    /// }
+    /// ```
+    handle-request: func(from: string, message-type: string, payload: payload) -> actor-result;
+
+    /// Handle event notification (GenEvent behavior)
+    ///
+    /// Called when actor receives a "cast" or "info" message (fire-and-forget).
+    /// Actor does NOT return a response.
+    ///
+    /// # Arguments
+    /// - `from`: Sender actor ID
+    /// - `message-type`: Message type for routing
+    /// - `payload`: Opaque event bytes
+    ///
+    /// # Returns
+    /// - `ok(unit)`: Event processed successfully
+    /// - `err(string)`: Event processing failed
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// fn handle_event(from: String, msg_type: String, payload: Vec<u8>) -> Result<(), String> {
+    ///     match msg_type.as_str() {
+    ///         "notify" => {
+    ///             // Process event (no response needed)
+    ///             Ok(())
+    ///         }
+    ///         _ => Err(format!("Unknown event: {}", msg_type))
+    ///     }
+    /// }
+    /// ```
+    handle-event: func(from: string, message-type: string, payload: payload) -> result<_, string>;
+
+    /// Handle state transition (GenFSM behavior)
+    ///
+    /// Called when actor receives a message that triggers a state transition.
+    /// Actor returns the new state name.
+    ///
+    /// # Arguments
+    /// - `from`: Sender actor ID
+    /// - `message-type`: Message type for routing
+    /// - `payload`: Opaque event bytes
+    ///
+    /// # Returns
+    /// - `ok(new-state)`: New state name (empty if no transition)
+    /// - `err(string)`: Transition failed
+    ///
+    /// # Example (Rust)
+    /// ```rust,ignore
+    /// fn handle_transition(from: String, msg_type: String, payload: Vec<u8>) -> Result<String, String> {
+    ///     match (current_state, msg_type.as_str()) {
+    ///         ("idle", "start") => Ok("processing".to_string()),
+    ///         ("processing", "complete") => Ok("done".to_string()),
+    ///         _ => Ok("".to_string()) // No transition
+    ///     }
+    /// }
+    /// ```
+    handle-transition: func(from: string, message-type: string, payload: payload) -> result<string, string>;
+}
+
+/// PlexSpaces Actor World
+///
+/// Combines imports (host functions) and exports (actor functions) into
+/// a complete actor component.
+///
+/// ## Usage
+/// This is the "world" that WASM actors target when compiling:
+/// ```bash
+/// # Rust
+/// cargo component build --target wasm32-wasip2 --release
+///
+/// # JavaScript (via Javy + componentize-js)
+/// javy compile actor.js -o actor.wasm
+/// componentize actor.wasm --wit plexspaces-actor
+///
+/// # Go (via TinyGo)
+/// tinygo build -target=wasip2 -o actor.wasm actor.go
+/// ```
+world plexspaces-actor {
+    /// Import host functions (provided by runtime)
+    import host;
+
+    /// Export actor functions (implemented by actor)
+    /// 
+    /// Note: Actors can export either:
+    /// - `handle-message` (generic, for backward compatibility)
+    /// - Behavior-specific methods: `handle-request`, `handle-event`, `handle-transition`
+    /// 
+    /// The runtime will call the appropriate method based on:
+    /// - Message type ("call" → handle-request, "cast"/"info" → handle-event)
+    /// - Actor behavior type (GenServer → handle-request, GenEvent → handle-event, GenFSM → handle-transition)
+    export actor;
+}

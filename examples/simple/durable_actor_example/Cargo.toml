@@ -1,0 +1,25 @@
+[package]
+name = "durable-actor-example"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+plexspaces-journaling = { path = "../../../crates/journaling", features = ["sqlite-backend"] }
+plexspaces-facet = { path = "../../../crates/facet" }
+plexspaces-proto = { path = "../../../crates/proto" }
+tokio = { version = "1.0", features = ["full"] }
+serde_json = "1.0"
+prost = "0.12"
+prost-types = "0.12"
+ulid = "1.1"
+
+[[bin]]
+name = "durable_actor_example"
+path = "src/main.rs"
+
+[features]
+default = []
+sqlite-backend = ["plexspaces-journaling/sqlite-backend"]
+

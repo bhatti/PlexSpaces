@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Genomics Pipeline - Node 2 (QC + Alignment Workers)
+#
+# Role: Quality control and genome alignment processing
+# Components:
+#   - QCWorkerPool (3 workers)
+#   - AlignmentWorkerPool (4 workers)
+#
+# Dependencies: None (workers wait for coordinator requests)
+
+[release]
+name = "genomics-pipeline-qc-alignment"
+version = "0.1.0"
+description = "Genomics Pipeline QC and Alignment Workers"
+
+[node]
+id = "genomics-qc-alignment"
+listen_address = "0.0.0.0:9002"
+cluster_seed_nodes = [
+    "genomics-coordinator:9001",
+    "genomics-chromosomes:9003",
+    "genomics-annotation:9004"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9002"
+max_connections = 200
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "genomics-coordinator-secret-key"
+allow_unauthenticated = true
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 200
+burst_size = 50
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "genomics-qc-alignment"
+sampling_rate = 1.0
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+[[applications]]
+name = "genomics-workers"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 60
+shutdown_strategy = "graceful"
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "worker"
+# QC Worker Pool
+QC_POOL_SIZE = "3"
+QC_POOL_ENABLED = "true"
+# Alignment Worker Pool
+ALIGNMENT_POOL_SIZE = "4"
+ALIGNMENT_POOL_ENABLED = "true"
+# Chromosome workers disabled on this node
+CHROMOSOME_POOL_ENABLED = "false"
+# Annotation/Report workers disabled on this node
+ANNOTATION_POOL_ENABLED = "false"
+REPORT_POOL_ENABLED = "false"
+# Coordinator address
+COORDINATOR_ADDRESS = "genomics-coordinator:9001"
+
+# Resource limits (I/O intensive)
+[resources]
+max_memory_mb = 4096  # QC and alignment need more RAM
+max_cpu_percent = 80
+
+[shutdown]
+global_timeout_seconds = 120
+grace_period_seconds = 15  # Allow current samples to finish
+grpc_drain_timeout_seconds = 30

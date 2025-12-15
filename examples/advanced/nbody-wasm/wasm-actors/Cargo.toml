@@ -1,0 +1,25 @@
+# WASM Actor - Rust fallback for testing
+# This is a simple Rust-based WASM actor that can be used for testing
+# when TypeScript/Javy is not available
+
+[workspace]
+
+[package]
+name = "nbody-wasm-actor"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+

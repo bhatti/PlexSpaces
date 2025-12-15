@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces TupleSpace Storage Configuration
+//
+// ## Purpose
+// Defines storage provider configurations for TupleSpace backends.
+// Enables pluggable persistence: in-memory, Redis, PostgreSQL, SQLite.
+//
+// ## Architecture Context
+// Part of **Pillar 1 (TupleSpace)**. Storage abstraction enables:
+// - Development: In-memory (fast, no setup)
+// - Production: Redis/PostgreSQL (durable, distributed)
+// - Edge: SQLite (embedded, low-resource)
+//
+// ## Design Decisions
+//
+// **Why Multiple Storage Providers?**
+// - Different environments have different needs
+// - Proto-defined config = type-safe + documented
+// - Implementation flexibility (TupleSpace, HashMap, SQL, etc.)
+//
+// **Storage Selection Guide**:
+//
+// | Provider   | Latency | Durability | Distribution | Use Case |
+// |------------|---------|------------|--------------|----------|
+// | Memory     | < 1μs   | None       | Single-node  | Dev/Test |
+// | Redis      | < 1ms   | Optional   | Multi-node   | Prod     |
+// | PostgreSQL | < 5ms   | Strong     | Single-node  | ACID     |
+// | SQLite     | < 2ms   | Strong     | Single-node  | Embedded |
+
+syntax = "proto3";
+
+package plexspaces.tuplespace.v1;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.tuplespace.v1";
+option java_multiple_files = true;
+
+// Storage provider types
+enum StorageProvider {
+  STORAGE_PROVIDER_UNSPECIFIED = 0;
+  STORAGE_PROVIDER_MEMORY = 1;       // In-memory HashMap
+  STORAGE_PROVIDER_REDIS = 2;        // Redis with pub/sub
+  STORAGE_PROVIDER_POSTGRES = 3;     // PostgreSQL with JSONB
+  STORAGE_PROVIDER_SQLITE = 4;       // SQLite embedded
+}
+
+// TupleSpace storage configuration
+message TupleSpaceStorageConfig {
+  // Storage provider type
+  StorageProvider provider = 1;
+
+  // Provider-specific configuration
+  oneof config {
+    MemoryStorageConfig memory = 2;
+    RedisStorageConfig redis = 3;
+    PostgresStorageConfig postgres = 4;
+    SqliteStorageConfig sqlite = 5;
+  }
+
+  // Common settings
+  bool enable_metrics = 10;
+  google.protobuf.Duration cleanup_interval = 11;
+}
+
+// In-memory storage configuration
+message MemoryStorageConfig {
+  uint32 initial_capacity = 1;
+  uint64 cleanup_interval_ms = 2;
+}
+
+// Redis storage configuration
+message RedisStorageConfig {
+  string connection_string = 1;
+  uint32 pool_size = 2;
+  string key_prefix = 3;
+  bool enable_pubsub = 4;
+}
+
+// PostgreSQL storage configuration
+message PostgresStorageConfig {
+  string connection_string = 1;
+  uint32 pool_size = 2;
+  string table_name = 3;
+}
+
+// SQLite storage configuration
+message SqliteStorageConfig {
+  string database_path = 1;
+  bool enable_wal = 2;
+  uint32 cache_size_kb = 3;
+}
+
+// Storage statistics
+message StorageStats {
+  uint64 tuple_count = 1;
+  uint64 memory_bytes = 2;
+  uint64 total_operations = 3;
+  uint64 read_operations = 4;
+  uint64 write_operations = 5;
+  uint64 take_operations = 6;
+  float avg_latency_ms = 7;
+}

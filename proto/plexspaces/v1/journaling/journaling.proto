@@ -1,0 +1,1216 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Journaling API
+//
+// ## Purpose
+// Defines the journaling and durable execution infrastructure for PlexSpaces,
+// enabling actors to survive crashes through event sourcing and deterministic replay.
+//
+// ## Architecture Context
+// This proto file is part of Pillar 3 (Durability) inspired by Restate and Azure Durable Functions.
+// It defines:
+// - Journal entry types (message received/processed, side effects, state changes)
+// - Journal backend configurations (PostgreSQL, Redis, SQLite, Memory)
+// - DurabilityFacet configuration (100% optional durability)
+// - Checkpoint configuration for fast recovery
+// - gRPC service for distributed journaling
+//
+// ## Why This Exists (Proto-First Design)
+// User requirement: "journaling/other data model should be defined in proto"
+// Benefits:
+// - Language-agnostic configuration
+// - Type-safe backend selection
+// - Versioned schema for stability
+// - gRPC service for distributed journaling
+//
+// ## Component Interactions
+// - Used by: DurabilityFacet (facet-based durability)
+// - Backends: PostgreSQL (production), Redis (distributed), SQLite (edge), Memory (testing)
+// - No dependency on prv package (v1 public API)
+//
+// ## Design Decisions
+// - **Facet-Based**: Durability is 100% optional via DurabilityFacet (not core)
+// - **Multiple Backends**: PostgreSQL (production), Redis (distributed), SQLite (edge), Memory (testing)
+// - **Auto-Migration**: sqlx::migrate! for schema management (user requirement)
+// - **Schema Stability**: JSONB columns for extensibility without ALTER TABLE (user requirement)
+// - **Compression**: zstd for checkpoints (3-5x), snappy for journal (fast)
+// - **Batch Writes**: Buffer 1000 entries or 1s for performance
+// - **Checkpoint Manager**: Periodic snapshots (90%+ faster replay)
+//
+// ## RESTATE Patterns Implemented
+// - Deterministic replay (exactly-once execution)
+// - Side effect caching (external calls cached during replay)
+// - Durable promises (promises survive actor crashes)
+// - Execution context (track replay vs normal mode)
+// - Checkpoint manager (interval-based snapshots)
+
+syntax = "proto3";
+package plexspaces.journaling.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+import "plexspaces/v1/common.proto";
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.journaling.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpaces Journaling API";
+    version: "1.0";
+    description: "Event sourcing and durable execution infrastructure";
+    contact: {
+      name: "PlexSpaces";
+      url: "https://github.com/bhatti/plexspaces";
+    };
+  };
+  schemes: HTTPS;
+  schemes: HTTP;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// ============================================================================
+// Core Journal Types (RESTATE-Inspired)
+// ============================================================================
+
+/// Journal entry for durable actor execution
+///
+/// ## Purpose
+/// Records all operations performed by an actor for deterministic replay.
+///
+/// ## Why This Exists
+/// - Enables exactly-once execution semantics (Restate-inspired)
+/// - Supports time-travel debugging (replay to any point in history)
+/// - Provides complete audit trail of actor behavior
+///
+/// ## Entry Types
+/// - **MessageReceived**: Record incoming message before processing
+/// - **MessageProcessed**: Record processing result (success/failure)
+/// - **StateChanged**: Record actor state mutations
+/// - **SideEffectExecuted**: Record external call results (for caching during replay)
+/// - **TimerScheduled**: Record timer creation
+/// - **TimerFired**: Record timer execution
+/// - **PromiseCreated**: Record durable promise creation
+/// - **PromiseResolved**: Record promise resolution
+///
+/// ## Design Notes
+/// - sequence: Monotonically increasing per actor (for ordering)
+/// - timestamp: Wall-clock time (not used for ordering, only observability)
+/// - actor_id: Partitioning key for storage (all entries for same actor together)
+/// - correlation_id: Link related entries (e.g., message received -> processed)
+message JournalEntry {
+  // Unique entry ID (ULID for sortability)
+  string id = 1;
+
+  // Actor this entry belongs to
+  string actor_id = 2;
+
+  // Sequence number (monotonic, per-actor)
+  uint64 sequence = 3;
+
+  // Timestamp (observability only, not for ordering)
+  google.protobuf.Timestamp timestamp = 4;
+
+  // Correlation ID (link related entries)
+  string correlation_id = 5;
+
+  // Entry payload (oneof for type safety)
+  oneof entry {
+    MessageReceived message_received = 10;
+    MessageProcessed message_processed = 11;
+    StateChanged state_changed = 12;
+    SideEffectExecuted side_effect_executed = 13;
+    TimerScheduled timer_scheduled = 14;
+    TimerFired timer_fired = 15;
+    PromiseCreated promise_created = 16;
+    PromiseResolved promise_resolved = 17;
+  }
+}
+
+/// Message received by actor (before processing)
+message MessageReceived {
+  string message_id = 1;
+  string sender_id = 2;
+  string message_type = 3;
+  bytes payload = 4;
+  map<string, string> metadata = 5;
+}
+
+/// Message processing result
+message MessageProcessed {
+  string message_id = 1;
+  ProcessingResult result = 2;
+  string error_message = 3;
+  bytes response_payload = 4;
+}
+
+/// Processing result enum
+enum ProcessingResult {
+  PROCESSING_RESULT_UNSPECIFIED = 0;
+  PROCESSING_RESULT_SUCCESS = 1;
+  PROCESSING_RESULT_ERROR = 2;
+  PROCESSING_RESULT_RETRY = 3;
+}
+
+/// Actor state mutation
+message StateChanged {
+  bytes old_state = 1;
+  bytes new_state = 2;
+  string change_type = 3;  // e.g., "counter_incremented", "status_updated"
+}
+
+/// Side effect execution (external call, cached during replay)
+message SideEffectExecuted {
+  string effect_id = 1;  // Unique ID for caching
+  SideEffectType effect_type = 2;
+  bytes request = 3;
+  bytes response = 4;
+  string error = 5;
+}
+
+/// Side effect type
+enum SideEffectType {
+  SIDE_EFFECT_TYPE_UNSPECIFIED = 0;
+  SIDE_EFFECT_TYPE_EXTERNAL_CALL = 1;  // HTTP/gRPC call
+  SIDE_EFFECT_TYPE_DATABASE_QUERY = 2;
+  SIDE_EFFECT_TYPE_FILE_IO = 3;
+  SIDE_EFFECT_TYPE_RANDOM_GENERATION = 4;  // RNG calls (must be cached!)
+}
+
+/// Timer scheduled
+message TimerScheduled {
+  string timer_id = 1;
+  google.protobuf.Duration delay = 2;
+  bytes timer_data = 3;
+}
+
+/// Timer fired
+message TimerFired {
+  string timer_id = 1;
+}
+
+/// Promise created (durable promise)
+message PromiseCreated {
+  string promise_id = 1;
+  google.protobuf.Duration timeout = 2;
+}
+
+/// Promise resolved
+message PromiseResolved {
+  string promise_id = 1;
+  bytes result = 2;
+  string error = 3;
+}
+
+/// Checkpoint for fast recovery
+///
+/// ## Purpose
+/// Snapshot of actor state at a specific sequence number for fast replay.
+///
+/// ## Why This Exists
+/// - Performance: Replay from checkpoint instead of full journal (90%+ faster)
+/// - Cleanup: Truncate old journal entries after checkpoint
+/// - Compression: Reduce storage size (3-5x with zstd)
+///
+/// ## Design Notes
+/// - sequence: Checkpoint at this sequence number (replay starts from here)
+/// - state_data: Serialized actor state (compressed with zstd)
+/// - metadata: Custom key-value data (e.g., actor type, version)
+/// - compression: Algorithm used (affects deserialization)
+/// - state_schema_version: Version of state_data format for evolution
+///
+/// ## Schema Versioning Strategy
+/// The `state_schema_version` field enables checkpoint format evolution:
+///
+/// ### Version Compatibility Rules
+/// - **Same Version**: Load checkpoint directly
+/// - **Newer Version**: Reject with error (forward compatibility not guaranteed)
+/// - **Older Version**: Attempt migration or reject based on compatibility matrix
+///
+/// ### Migration Strategy
+/// ```
+/// Version 1 → 2: Add new field with default value (backward compatible)
+/// Version 2 → 3: Remove deprecated field (backward compatible)
+/// Version 3 → 4: Change field type (BREAKING - requires migration)
+/// ```
+///
+/// ### Example Usage
+/// ```rust
+/// // Write checkpoint with current schema version
+/// let checkpoint = Checkpoint {
+///     actor_id: "actor-123".to_string(),
+///     sequence: 100,
+///     state_data: serialized_state,
+///     state_schema_version: 2, // Current actor state schema version
+///     // ...
+/// };
+///
+/// // Load checkpoint with version check
+/// if checkpoint.state_schema_version > CURRENT_SCHEMA_VERSION {
+///     return Err(IncompatibleSchemaVersion { ... });
+/// }
+/// ```
+///
+/// ## Usage
+/// ```
+/// Create checkpoint every 100 messages:
+/// - Actor processes message #100 → create checkpoint
+/// - Journal entries 1-99 can be truncated
+/// - On replay: load checkpoint #100, replay entries 101+
+/// ```
+message Checkpoint {
+  // Actor this checkpoint belongs to
+  string actor_id = 1;
+
+  // Sequence number at checkpoint
+  uint64 sequence = 2;
+
+  // Checkpoint creation timestamp
+  google.protobuf.Timestamp timestamp = 3;
+
+  // Serialized actor state (possibly compressed)
+  bytes state_data = 4;
+
+  // Compression type used
+  CompressionType compression = 5;
+
+  // Custom metadata (actor type, version, etc.)
+  map<string, string> metadata = 6;
+
+  // Schema version of state_data for checkpoint format evolution
+  //
+  // ## Purpose
+  // Enables safe checkpoint loading across different actor schema versions.
+  //
+  // ## Why This Exists
+  // - Actor state schemas evolve over time (new fields, removed fields, type changes)
+  // - Loading old checkpoint into new actor version must be safe
+  // - Prevents corrupt state from schema mismatches
+  //
+  // ## Version Rules
+  // - Version 0 = unversioned (legacy checkpoints, assume version 1)
+  // - Version >= 1 = explicit schema version
+  // - Reject checkpoints with version > current actor schema version
+  //
+  // ## Example
+  // Actor v1: state_schema_version = 1 (initial schema)
+  // Actor v2: state_schema_version = 2 (added new field with default)
+  // Actor v3: state_schema_version = 3 (breaking change, requires migration)
+  uint32 state_schema_version = 7;
+}
+
+// ============================================================================
+// Configuration Messages (Proto-First)
+// ============================================================================
+
+/// Journal backend provider
+///
+/// ## Purpose
+/// Defines which storage backend to use for journal persistence.
+///
+/// ## Why This Exists
+/// - Flexibility: Choose backend based on deployment environment
+/// - Testing: Use Memory backend for unit tests (no external dependencies)
+/// - Production: Use PostgreSQL for durability and ACID guarantees
+/// - Distributed: Use Redis for multi-node journaling
+/// - Edge: Use SQLite for single-node edge deployments
+///
+/// ## Design Notes
+/// - Memory: In-process HashMap, no persistence (testing only)
+/// - PostgreSQL: ACID transactions, auto-migration via sqlx::migrate!
+/// - Redis: Distributed, eventually consistent, TTL support
+/// - SQLite: Embedded, WAL mode, single-node
+enum JournalBackend {
+  JOURNAL_BACKEND_UNSPECIFIED = 0;
+  JOURNAL_BACKEND_MEMORY = 1;      // In-memory (testing)
+  JOURNAL_BACKEND_POSTGRES = 2;    // PostgreSQL (production)
+  JOURNAL_BACKEND_REDIS = 3;       // Redis (distributed)
+  JOURNAL_BACKEND_SQLITE = 4;      // SQLite (edge)
+}
+
+/// Durability configuration (used by DurabilityFacet)
+///
+/// ## Purpose
+/// Configures the DurabilityFacet for optional actor durability.
+///
+/// ## Why This Exists
+/// - User requirement: "journaling can be its own crate" (100% optional)
+/// - Facet-based design: Durability attached dynamically, not in core
+/// - Flexibility: Different actors can have different durability configs
+/// - Testing: Disable durability for fast tests, enable for integration tests
+///
+/// ## Design Notes
+/// - checkpoint_interval = 0 disables checkpointing (pure journal replay)
+/// - cache_side_effects = false disables caching (every replay re-executes)
+/// - replay_on_activation = false skips replay (fresh start)
+/// - backend_config is oneof for type safety (cannot mix configs)
+///
+/// ## Usage
+/// ```rust
+/// let config = DurabilityConfig {
+///     backend: JournalBackend::Postgres,
+///     checkpoint_interval: 100,  // Checkpoint every 100 messages
+///     replay_on_activation: true,  // Replay journal on actor restart
+///     cache_side_effects: true,  // Cache external calls during replay
+///     compression: CompressionType::Zstd,
+///     backend_config: Some(postgres_config),
+/// };
+/// actor.attach_facet(DurabilityFacet::new(config));
+/// ```
+message DurabilityConfig {
+  // Backend type
+  JournalBackend backend = 1;
+
+  // Checkpoint interval (every N messages, 0 = disabled)
+  uint64 checkpoint_interval = 2;
+
+  // Checkpoint timeout
+  google.protobuf.Duration checkpoint_timeout = 3;
+
+  // Enable replay on activation
+  bool replay_on_activation = 4;
+
+  // Cache side effects for replay
+  bool cache_side_effects = 5;
+
+  // Compression type for checkpoints
+  CompressionType compression = 6;
+
+  // State schema version for checkpoint compatibility checking
+  // Default: 1 (initial schema version)
+  // Increment when actor state format changes (breaking changes)
+  uint32 state_schema_version = 7;
+
+  // Backend-specific config (oneof for type safety)
+  oneof backend_config {
+    PostgresJournalConfig postgres = 10;
+    RedisJournalConfig redis = 11;
+    SqliteJournalConfig sqlite = 12;
+  }
+}
+
+/// PostgreSQL journal configuration
+///
+/// ## Purpose
+/// Configures PostgreSQL backend for durable journaling.
+///
+/// ## Why This Exists
+/// User requirements:
+/// - "we need to make sure db schema doesn't require much changes"
+/// - "framework is smart enough to apply migrations"
+///
+/// ## Design Notes
+/// - auto_migrate: Use sqlx::migrate! for compile-time checked migrations
+/// - batch_size: Buffer N entries before COPY bulk insert (performance)
+/// - flush_interval_ms: Max time to buffer before flush (latency vs throughput)
+/// - pool_size: Connection pool for concurrent actors
+///
+/// ## Schema Stability Strategy
+/// - JSONB columns for extensible data (add fields without ALTER TABLE)
+/// - Immutable entries (append-only, never UPDATE)
+/// - Migrations only for new tables/indexes, not field additions
+///
+/// ## Performance
+/// - Batch writes: 1000 entries/batch or 1s flush = 100K+ writes/sec
+/// - Connection pooling: Reuse connections across actors
+/// - COPY protocol: 10x faster than INSERT for bulk data
+message PostgresJournalConfig {
+  string connection_string = 1;
+  uint32 pool_size = 2;
+  uint32 batch_size = 3;          // Default: 1000
+  uint32 flush_interval_ms = 4;   // Default: 1000
+  bool auto_migrate = 5;          // Default: true
+}
+
+/// Redis journal configuration
+///
+/// ## Purpose
+/// Configures Redis backend for distributed journaling.
+///
+/// ## Why This Exists
+/// - Distributed systems: Multiple nodes share journal state
+/// - Fast reads: Redis in-memory performance
+/// - TTL support: Automatic cleanup of old journal entries
+/// - Cluster mode: Scale across multiple Redis nodes
+///
+/// ## Design Notes
+/// - cluster_mode: Use Redis Cluster for horizontal scaling
+/// - key_prefix: Namespace journal keys (e.g., "journal:actor:")
+/// - ttl: Auto-expire old entries after duration
+///
+/// ## Trade-offs
+/// - ✅ Fast: In-memory, low latency
+/// - ✅ Distributed: Multi-node shared state
+/// - ❌ Not ACID: Eventually consistent
+/// - ❌ Data loss risk: In-memory (use persistence if needed)
+message RedisJournalConfig {
+  repeated string nodes = 1;      // Redis nodes
+  bool cluster_mode = 2;
+  string key_prefix = 3;
+  google.protobuf.Duration ttl = 4;
+}
+
+/// SQLite journal configuration
+///
+/// ## Purpose
+/// Configures SQLite backend for edge deployments.
+///
+/// ## Why This Exists
+/// - Edge computing: Single-node deployments (IoT, mobile, edge servers)
+/// - Embedded: No separate database process needed
+/// - Zero config: Single file, no setup
+/// - ACID: Full transaction support despite being embedded
+///
+/// ## Design Notes
+/// - wal_mode: Write-ahead logging for concurrency (recommended: true)
+/// - synchronous: NORMAL (default), FULL (safer), OFF (faster but risky)
+/// - db_path: File path for database (":memory:" for in-memory SQLite)
+///
+/// ## Performance
+/// - WAL mode: Concurrent reads + single writer
+/// - NORMAL synchronous: Balance safety vs speed
+/// - Batch transactions: Group 100s of entries in single transaction
+message SqliteJournalConfig {
+  string db_path = 1;
+  bool wal_mode = 2;
+  string synchronous = 3;         // NORMAL, FULL, OFF
+}
+
+/// Checkpoint configuration
+///
+/// ## Purpose
+/// Configures periodic snapshots for fast replay.
+///
+/// ## Why This Exists
+/// - Performance: Replay from checkpoint instead of full journal (90%+ faster)
+/// - Cleanup: Truncate old journal entries after checkpoint
+/// - Compression: Reduce checkpoint size (3-5x with zstd)
+///
+/// ## Design Notes
+/// - interval: Checkpoint every N messages (100-1000 recommended)
+/// - timeout: Abort checkpoint if takes too long
+/// - keep_count: Keep last N checkpoints for safety (2-3 recommended)
+/// - compression: zstd for high compression, snappy for speed
+///
+/// ## Example
+/// ```
+/// CheckpointConfig {
+///   interval: 100,  // Checkpoint every 100 messages
+///   timeout: 10s,   // Abort if takes > 10s
+///   compression: ZSTD,
+///   keep_count: 2,  // Keep last 2 checkpoints
+/// }
+/// ```
+/// Actor processes 1000 messages:
+/// - 10 checkpoints created (every 100 messages)
+/// - Only 2 most recent kept (cleanup after checkpoint)
+/// - Replay only needs last checkpoint + 0-99 journal entries
+///
+/// ## Additional Configuration (Phase 3)
+/// - entry_interval: Checkpoint every N journal entries
+/// - time_interval: Checkpoint every T seconds (whichever comes first)
+/// - auto_truncate: Automatically delete old journal entries after checkpoint
+/// - async_checkpointing: Run checkpointing in background (don't block actor)
+message CheckpointConfig {
+  /// Enable automatic checkpointing
+  bool enabled = 1;
+
+  /// Checkpoint interval (number of journal entries)
+  /// Replaces: interval (renamed for clarity)
+  uint64 entry_interval = 2;
+
+  /// Time-based checkpoint interval (optional)
+  /// Replaces: timeout (renamed for clarity)
+  google.protobuf.Duration time_interval = 3;
+
+  /// Compression type for checkpoint state data
+  CompressionType compression = 4;
+
+  /// Number of old checkpoints to retain (0 = keep all)
+  /// Replaces: keep_count (renamed for clarity)
+  uint32 retention_count = 5;
+
+  /// Automatically truncate journal entries after checkpoint
+  bool auto_truncate = 6;
+
+  /// Run checkpoint creation in background (don't block actor)
+  bool async_checkpointing = 7;
+
+  /// Metadata for debugging
+  map<string, string> metadata = 8;
+}
+
+/// Compression type
+///
+/// ## Purpose
+/// Defines compression algorithm for checkpoints and journal entries.
+///
+/// ## Why This Exists
+/// - Checkpoints: Large state, compress with zstd (3-5x smaller)
+/// - Journal entries: Many small entries, compress with snappy (fast)
+/// - None: No compression for testing or small payloads
+///
+/// ## Performance
+/// - ZSTD: 3-5x compression, slower (use for checkpoints)
+/// - Snappy: 1.5-2x compression, very fast (use for journal)
+/// - None: No CPU overhead (use for testing)
+enum CompressionType {
+  COMPRESSION_TYPE_UNSPECIFIED = 0;
+  COMPRESSION_TYPE_NONE = 1;
+  COMPRESSION_TYPE_ZSTD = 2;     // High compression (checkpoints)
+  COMPRESSION_TYPE_SNAPPY = 3;   // Fast compression (journal)
+}
+
+// ============================================================================
+// gRPC Service Definition (Proto Behavior)
+// ============================================================================
+
+/// Journal service for distributed journaling
+///
+/// ## Purpose
+/// Provides gRPC API for remote journal operations (Restate-style distributed journaling).
+///
+/// ## Why This Exists
+/// - Distributed actors: Actors on different nodes share journal
+/// - Remote replay: Replay journal from remote storage
+/// - Centralized journaling: Dedicated journal service for multiple nodes
+///
+/// ## Design Notes
+/// - Streaming: ReplayFrom uses streaming for large journals
+/// - Batching: AppendBatch for atomic multi-entry writes
+/// - Statistics: GetStats for observability
+///
+/// ## Usage
+/// ```rust
+/// // Local journaling (single node)
+/// let storage = PostgresJournalStorage::new(config);
+/// let facet = DurabilityFacet::new_local(storage);
+///
+/// // Distributed journaling (multi-node)
+/// let client = JournalServiceClient::connect("http://journal-service:9090");
+/// let facet = DurabilityFacet::new_remote(client);
+/// ```
+service JournalService {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Event sourcing and journaling for durable actor execution"
+  };
+
+  // Append single journal entry
+  rpc Append(AppendRequest) returns (AppendResponse) {
+    option (google.api.http) = {
+      post: "/v1/journal/append"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Append Entry"
+      description: "Append a single journal entry for an actor"
+      tags: "Journal"
+    };
+  }
+
+  // Append batch of entries (atomic)
+  rpc AppendBatch(AppendBatchRequest) returns (AppendBatchResponse) {
+    option (google.api.http) = {
+      post: "/v1/journal/append-batch"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Append Batch"
+      description: "Atomically append multiple journal entries"
+      tags: "Journal"
+    };
+  }
+
+  // Replay entries from sequence (streaming for large journals)
+  rpc ReplayFrom(ReplayFromRequest) returns (stream JournalEntry) {
+    option (google.api.http) = {
+      get: "/v1/journal/{actor_id}/replay"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Replay Journal"
+      description: "Stream journal entries from specified sequence for replay"
+      tags: "Replay"
+    };
+  }
+
+  // Get latest checkpoint
+  rpc GetLatestCheckpoint(GetLatestCheckpointRequest) returns (Checkpoint) {
+    option (google.api.http) = {
+      get: "/v1/journal/{actor_id}/checkpoint"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Latest Checkpoint"
+      description: "Retrieve the most recent checkpoint for an actor"
+      tags: "Checkpoints"
+    };
+  }
+
+  // Save checkpoint
+  rpc SaveCheckpoint(SaveCheckpointRequest) returns (SaveCheckpointResponse) {
+    option (google.api.http) = {
+      post: "/v1/journal/checkpoint"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Save Checkpoint"
+      description: "Save a snapshot of actor state for faster recovery"
+      tags: "Checkpoints"
+    };
+  }
+
+  // Truncate journal to sequence (cleanup after checkpoint)
+  rpc TruncateTo(TruncateToRequest) returns (TruncateToResponse) {
+    option (google.api.http) = {
+      delete: "/v1/journal/{actor_id}/truncate"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Truncate Journal"
+      description: "Delete journal entries up to specified sequence (cleanup after checkpoint)"
+      tags: "Journal"
+    };
+  }
+
+  // Get journal statistics
+  rpc GetStats(GetStatsRequest) returns (JournalStats) {
+    option (google.api.http) = {
+      get: "/v1/journal/stats"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Statistics"
+      description: "Retrieve journal metrics and statistics"
+      tags: "Monitoring"
+    };
+  }
+
+  // ==================== Event Sourcing RPCs ====================
+
+  /// Append a single event to the event log
+  rpc AppendEvent(AppendEventRequest) returns (AppendEventResponse) {
+    option (google.api.http) = {
+      post: "/v1/journal/events/append"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Append Event"
+      description: "Append a single event to the actor's event log"
+      tags: "Event Sourcing"
+    };
+  }
+
+  /// Replay events from a specific sequence (paginated)
+  rpc ReplayEventsFrom(ReplayEventsFromRequest) returns (ReplayEventsFromResponse) {
+    option (google.api.http) = {
+      get: "/v1/journal/{actor_id}/events/replay"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Replay Events"
+      description: "Stream events from specified sequence for replay (paginated)"
+      tags: "Event Sourcing"
+    };
+  }
+
+  /// Get actor history (paginated)
+  rpc GetActorHistory(GetActorHistoryRequest) returns (ActorHistory) {
+    option (google.api.http) = {
+      get: "/v1/journal/{actor_id}/history"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Actor History"
+      description: "Retrieve paginated actor event history"
+      tags: "Event Sourcing"
+    };
+  }
+}
+
+// Request/Response messages
+
+/// Append single journal entry request
+message AppendRequest {
+  JournalEntry entry = 1;
+}
+
+/// Append single journal entry response
+message AppendResponse {
+  uint64 sequence = 1;
+}
+
+/// Append batch of journal entries request (atomic operation)
+message AppendBatchRequest {
+  repeated JournalEntry entries = 1;
+}
+
+/// Append batch of journal entries response
+message AppendBatchResponse {
+  uint64 first_sequence = 1;
+  uint64 last_sequence = 2;
+  uint32 count = 3;
+}
+
+/// Replay journal entries from sequence request
+message ReplayFromRequest {
+  string actor_id = 1;
+  uint64 from_sequence = 2;
+}
+
+/// Get latest checkpoint for actor request
+message GetLatestCheckpointRequest {
+  string actor_id = 1;
+}
+
+/// Save checkpoint request
+message SaveCheckpointRequest {
+  Checkpoint checkpoint = 1;
+}
+
+/// Save checkpoint response
+message SaveCheckpointResponse {
+  bool success = 1;
+}
+
+/// Truncate journal to sequence request (cleanup after checkpoint)
+message TruncateToRequest {
+  string actor_id = 1;
+  uint64 sequence = 2;
+}
+
+/// Truncate journal to sequence response
+message TruncateToResponse {
+  uint64 deleted_count = 1;
+}
+
+/// Get journal statistics request
+message GetStatsRequest {
+  string actor_id = 1;  // Optional: stats for specific actor
+}
+
+// ==================== Event Sourcing Request/Response Messages ====================
+
+/// Append event request
+message AppendEventRequest {
+  ActorEvent event = 1;
+}
+
+/// Append event response
+message AppendEventResponse {
+  uint64 sequence = 1;
+}
+
+/// Replay events from sequence request (paginated)
+message ReplayEventsFromRequest {
+  string actor_id = 1;
+  uint64 from_sequence = 2;
+  plexspaces.common.v1.PageRequest page_request = 3;
+}
+
+/// Replay events from sequence response (paginated)
+message ReplayEventsFromResponse {
+  repeated ActorEvent events = 1;
+  plexspaces.common.v1.PageResponse page_response = 2;
+}
+
+/// Get actor history request (paginated)
+message GetActorHistoryRequest {
+  string actor_id = 1;
+  plexspaces.common.v1.PageRequest page_request = 2;
+}
+
+/// Journal statistics
+///
+/// ## Purpose
+/// Provides observability metrics for journal health and performance.
+///
+/// ## Why This Exists
+/// - Monitoring: Track journal growth and performance
+/// - Capacity planning: Know when to cleanup or scale storage
+/// - Debugging: Find actors with large journals
+///
+/// ## Metrics
+/// - total_entries: All journal entries across all actors
+/// - total_checkpoints: All checkpoints across all actors
+/// - storage_bytes: Total disk/memory usage
+/// - entries_by_actor: Per-actor entry counts for debugging
+/// - oldest_entry: Age of oldest entry (cleanup indicator)
+/// - newest_entry: Most recent activity timestamp
+message JournalStats {
+  uint64 total_entries = 1;
+  uint64 total_checkpoints = 2;
+  uint64 storage_bytes = 3;
+  map<string, uint64> entries_by_actor = 4;
+  google.protobuf.Timestamp oldest_entry = 5;
+  google.protobuf.Timestamp newest_entry = 6;
+}
+
+// ==================== Execution Context (RESTATE-Inspired) ====================
+
+/// Execution context for deterministic replay
+///
+/// ## Purpose
+/// Tracks side effects during actor execution to enable deterministic replay.
+/// When replaying from journal, cached results are returned instead of re-executing
+/// side effects (external API calls, random number generation, etc.).
+///
+/// ## Why This Exists (RESTATE Pattern)
+/// - **Deterministic Replay**: Actors must produce same result given same inputs
+/// - **Side Effect Deduplication**: Don't re-execute HTTP calls, DB writes on replay
+/// - **Idempotency**: Multiple replays produce identical state
+/// - **Time-Travel Debugging**: Step through execution with cached side effects
+///
+/// ## Architecture Context
+/// Used by DurabilityFacet to wrap actor message processing:
+/// - Normal mode: Execute side effects, cache results
+/// - Replay mode: Return cached results, don't re-execute
+///
+/// ## Example Flow
+/// ```
+/// Normal Execution:
+/// 1. Actor receives message
+/// 2. ExecutionContext in NORMAL mode
+/// 3. Actor calls external API via context.record_side_effect("api_call", ...)
+/// 4. Context executes API call, caches result in journal
+/// 5. Returns result to actor
+///
+/// Replay After Crash:
+/// 1. Actor restarts, replays journal
+/// 2. ExecutionContext in REPLAY mode
+/// 3. Actor calls context.record_side_effect("api_call", ...)
+/// 4. Context finds cached result in journal, returns it
+/// 5. API call NOT re-executed (idempotent)
+/// ```
+message ExecutionContext {
+  /// Actor ID this context belongs to
+  string actor_id = 1;
+
+  /// Current sequence number being executed
+  uint64 current_sequence = 2;
+
+  /// Execution mode (NORMAL or REPLAY)
+  ExecutionMode mode = 3;
+
+  /// Cached side effect results (keyed by side_effect_id)
+  ///
+  /// ## Structure
+  /// Key: side_effect_id (unique per side effect, e.g., "http_get_1", "random_1")
+  /// Value: Serialized result bytes
+  ///
+  /// ## Why Map
+  /// - Fast lookup during replay (O(1))
+  /// - Preserves execution order via keyed IDs
+  /// - Extensible (add any side effect type)
+  map<string, bytes> side_effect_cache = 4;
+
+  /// Metadata for debugging
+  map<string, string> metadata = 5;
+}
+
+/// Execution mode for ExecutionContext
+///
+/// ## Purpose
+/// Determines whether to execute side effects or return cached results.
+///
+/// ## States
+/// - NORMAL: Execute side effects, cache results
+/// - REPLAY: Return cached results, don't re-execute
+enum ExecutionMode {
+  EXECUTION_MODE_UNSPECIFIED = 0;
+
+  /// Normal execution mode: execute side effects and cache results
+  EXECUTION_MODE_NORMAL = 1;
+
+  /// Replay mode: return cached side effect results without re-execution
+  EXECUTION_MODE_REPLAY = 2;
+}
+
+/// Side effect entry (recorded in journal during normal execution)
+///
+/// ## Purpose
+/// Represents a single side effect execution and its cached result.
+/// Stored in journal as SideEffectExecuted entry.
+///
+/// ## Why This Exists
+/// - Enables replay without re-executing side effects
+/// - Captures input/output for debugging
+/// - Preserves execution determinism
+///
+/// ## Example
+/// HTTP GET request:
+/// - side_effect_id: "http_get_1"
+/// - side_effect_type: "http_request"
+/// - input_data: {"url": "https://api.example.com/user/123", "method": "GET"}
+/// - output_data: {"status": 200, "body": "{\"name\": \"Alice\"}"}
+message SideEffectEntry {
+  /// Unique ID for this side effect within the actor's execution
+  ///
+  /// ## Format
+  /// Recommended: "{type}_{sequence}" (e.g., "http_get_1", "db_write_2")
+  ///
+  /// ## Why Unique
+  /// Multiple side effects of same type need distinct IDs for cache lookup
+  string side_effect_id = 1;
+
+  /// Side effect type (e.g., "http_request", "db_query", "random", "timestamp")
+  string side_effect_type = 2;
+
+  /// Input to the side effect (serialized, format depends on type)
+  bytes input_data = 3;
+
+  /// Output from the side effect (cached result)
+  bytes output_data = 4;
+
+  /// Timestamp when side effect was executed (for debugging)
+  google.protobuf.Timestamp executed_at = 5;
+
+  /// Metadata (HTTP headers, DB connection info, etc.)
+  map<string, string> metadata = 6;
+}
+
+// ==================== Checkpoint Manager ====================
+
+/// Checkpoint manager runtime statistics
+///
+/// ## Purpose
+/// Observability metrics for checkpoint manager performance and health.
+/// Complements CheckpointConfig with runtime metrics.
+///
+/// ## Why This Exists
+/// - Monitor checkpoint performance in production
+/// - Track storage usage from checkpoints
+/// - Detect checkpoint failures or slowness
+/// - Capacity planning for storage
+///
+/// ## Metrics
+/// - checkpoints_created: Total checkpoints created (lifetime counter)
+/// - avg_checkpoint_duration: Average time to create checkpoint
+/// - last_checkpoint_size: Size of most recent checkpoint (bytes, compressed)
+/// - entries_truncated: Journal entries deleted after checkpoint (storage savings)
+/// - last_checkpoint_at: Timestamp of most recent checkpoint (for alerting)
+message CheckpointManagerStats {
+  uint64 checkpoints_created = 1;
+  google.protobuf.Duration avg_checkpoint_duration = 2;
+  uint64 last_checkpoint_size = 3;
+  uint64 entries_truncated = 4;
+  google.protobuf.Timestamp last_checkpoint_at = 5;
+}
+
+// ==================== Event Sourcing (Temporal-Inspired) ====================
+
+/// Actor event history for event sourcing (paginated)
+///
+/// ## Purpose
+/// Paginated event log for an actor, enabling event sourcing and time-travel debugging.
+/// Events represent state changes (not messages), allowing state to be reconstructed
+/// by replaying events.
+///
+/// ## Why This Exists
+/// - **Event Sourcing**: State derived from events (events are source of truth)
+/// - **Time-Travel Debugging**: Replay to any point in time
+/// - **Audit Trail**: Complete history of state changes
+/// - **Causal Tracking**: Link events to messages that caused them
+/// - **Performance**: Pagination enables efficient retrieval of large event logs
+///
+/// ## Design Notes
+/// - Events are separate from journal entries (journal = messages, events = state changes)
+/// - Events are immutable (append-only)
+/// - Events can be replayed to reconstruct state at any point
+/// - Shared snapshots with journaling (efficiency)
+/// - **Pagination**: Cursor-based pagination for efficient retrieval (O(1) per page)
+///
+/// ## Architecture Context
+/// Part of Phase 8.5 Event Sourcing Enhancement. Builds on DurabilityFacet:
+/// - Journaling: Messages → State (state is source of truth)
+/// - Event Sourcing: Events → State (events are source of truth)
+/// - Hybrid: Both messages AND events tracked (enhancement, not replacement)
+///
+/// ## Example Flow
+/// ```
+/// Message → Journal Entry → Event → Event Log
+///                          ↓
+///                    State Snapshot (shared)
+/// ```
+///
+/// ## Pagination
+/// Use `page_token` from `PageResponse` to fetch next page:
+/// ```rust
+/// let mut page_token = String::new();
+/// loop {
+///     let history = storage.get_actor_history_paginated(actor_id, page_token, 100).await?;
+///     // Process events...
+///     if history.page_response.next_page_token.is_empty() {
+///         break; // No more pages
+///     }
+///     page_token = history.page_response.next_page_token;
+/// }
+/// ```
+message ActorHistory {
+  /// Actor ID this history belongs to
+  string actor_id = 1;
+
+  /// Events for this page (ordered by sequence)
+  /// Note: For complete history, use pagination (see PageResponse)
+  repeated ActorEvent events = 2;
+
+  /// Latest sequence number (for fast access)
+  uint64 latest_sequence = 3;
+
+  /// Creation timestamp (when first event was recorded)
+  google.protobuf.Timestamp created_at = 4;
+
+  /// Last update timestamp (when last event was recorded)
+  google.protobuf.Timestamp updated_at = 5;
+
+  /// Metadata (actor type, version, etc.)
+  map<string, string> metadata = 6;
+
+  /// Pagination response (if paginated request)
+  plexspaces.common.v1.PageResponse page_response = 7;
+}
+
+/// Single event in actor history (state change)
+///
+/// ## Purpose
+/// Represents a single state change event. Events are the source of truth
+/// for event sourcing - state is derived by replaying events.
+///
+/// ## Why This Exists
+/// - **Event Sourcing Pattern**: State = f(events) instead of storing state directly
+/// - **Time-Travel**: Replay events up to any sequence to get state at that point
+/// - **Audit**: Complete history of what happened (not just current state)
+/// - **Causal Tracking**: Link events to messages/causes
+///
+/// ## Design Notes
+/// - sequence: Monotonically increasing per actor (for ordering)
+/// - event_type: Type of state change (e.g., "counter_incremented", "user_created")
+/// - event_data: Serialized event payload (format depends on event_type)
+/// - caused_by: Link to journal entry that caused this event (correlation)
+/// - timestamp: Wall-clock time (observability, not for ordering)
+///
+/// ## Event Types
+/// Common event types:
+/// - `state_changed`: Generic state mutation
+/// - `counter_incremented`: Counter increased by N
+/// - `user_created`: User entity created
+/// - `order_placed`: Order entity created
+/// - `payment_processed`: Payment completed
+///
+/// ## Example
+/// ```rust
+/// // Counter actor receives Increment message
+/// // Journal entry: MessageReceived { message_id: "msg-1", ... }
+/// // Event: ActorEvent {
+/// //   sequence: 1,
+/// //   event_type: "counter_incremented",
+/// //   event_data: b"{\"amount\": 5}",
+/// //   caused_by: "msg-1",
+/// //   ...
+/// // }
+/// ```
+message ActorEvent {
+  /// Unique event ID (ULID for sortability)
+  string id = 1;
+
+  /// Actor ID this event belongs to
+  string actor_id = 2;
+
+  /// Sequence number (monotonic, per-actor)
+  uint64 sequence = 3;
+
+  /// Event type (e.g., "counter_incremented", "user_created")
+  string event_type = 4;
+
+  /// Event payload (serialized, format depends on event_type)
+  bytes event_data = 5;
+
+  /// Timestamp when event occurred
+  google.protobuf.Timestamp timestamp = 6;
+
+  /// Correlation ID linking to journal entry that caused this event
+  ///
+  /// ## Purpose
+  /// Links events to messages (causal tracking). Enables answering:
+  /// - "Which message caused this event?"
+  /// - "What events were caused by this message?"
+  ///
+  /// ## Example
+  /// Journal entry has correlation_id = "corr-1"
+  /// Event has caused_by = "corr-1"
+  /// → This event was caused by that journal entry
+  string caused_by = 7;
+
+  /// Metadata (custom key-value data)
+  map<string, string> metadata = 8;
+}
+
+/// Event sourcing configuration (used by EventSourcingFacet)
+///
+/// ## Purpose
+/// Configures event sourcing behavior for actors with EventSourcingFacet.
+/// Event sourcing is opt-in (via facet) and builds on DurabilityFacet.
+///
+/// ## Why This Exists
+/// - User requirement: Event sourcing as enhancement to journaling (not replacement)
+/// - Facet-based design: Event sourcing attached dynamically, not in core
+/// - Flexibility: Different actors can have different event sourcing configs
+/// - Performance: Can disable event sourcing for performance-critical actors
+///
+/// ## Design Notes
+/// - Requires DurabilityFacet (event sourcing builds on journaling)
+/// - event_log_enabled: Enable event log (default: true)
+/// - auto_replay: Automatically replay events on activation (default: true)
+/// - snapshot_interval: Create snapshot every N events (0 = disabled)
+/// - time_travel_enabled: Enable time-travel debugging (default: true)
+///
+/// ## Usage
+/// ```rust
+/// let config = EventSourcingConfig {
+///     event_log_enabled: true,
+///     auto_replay: true,
+///     snapshot_interval: 100,  // Snapshot every 100 events
+///     time_travel_enabled: true,
+///     metadata: Default::default(),
+/// };
+/// actor.attach_facet(EventSourcingFacet::new(config));
+/// ```
+message EventSourcingConfig {
+  /// Enable event log (if false, only journaling, no events)
+  bool event_log_enabled = 1;
+
+  /// Automatically replay events on actor activation
+  bool auto_replay = 2;
+
+  /// Snapshot interval (every N events, 0 = disabled)
+  /// Shared with DurabilityFacet checkpointing (efficiency)
+  uint64 snapshot_interval = 3;
+
+  /// Enable time-travel debugging (replay to any sequence)
+  bool time_travel_enabled = 4;
+
+  /// Metadata for debugging
+  map<string, string> metadata = 5;
+
+  /// Default page size for paginated queries (0 = use system default, typically 100)
+  int32 default_page_size = 6;
+
+  /// Maximum page size (enforced limit, default: 1000)
+  int32 max_page_size = 7;
+}

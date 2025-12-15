@@ -1,0 +1,341 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Release Configuration
+//
+// ## Purpose
+// Defines the release specification for PlexSpaces nodes, following Erlang/OTP
+// release patterns. A release is a complete packaged system containing multiple
+// applications, runtime configuration, and deployment settings.
+//
+// ## Architecture Context
+// This proto file is central to the PlexSpaces node/release design (PLEXSPACES_RELEASE_DESIGN.md).
+// It defines:
+// - Release metadata and versioning
+// - Node configuration (identity, clustering)
+// - Runtime configuration (gRPC, middleware, health)
+// - Application bundle (system + user applications)
+// - Shutdown behavior (graceful, timeouts)
+//
+// ## Component Interactions
+// - Used by: PlexSpacesNode (node startup/shutdown)
+// - Depends on: application.proto (ApplicationConfig)
+//
+// ## Design Decisions
+// - Why TOML mapping: Human-friendly configuration (release.toml)
+// - Why separate Node/Runtime/Shutdown: Clear separation of concerns
+// - Why middleware as list: Order matters for middleware stack
+
+syntax = "proto3";
+package plexspaces.node.v1;
+
+import "google/protobuf/duration.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/security/security.proto";
+import "plexspaces/v1/storage/blob.proto";
+
+// Release specification (Erlang/OTP-inspired)
+//
+// ## Purpose
+// Complete system definition for a PlexSpaces node. Analogous to
+// Erlang .rel files, defines which applications to include and
+// how to configure the runtime.
+//
+// ## Why This Exists
+// - Single source of truth for node configuration
+// - Supports multiple applications per node (Erlang model)
+// - Enables declarative deployment (Docker, k8s)
+// - Provides graceful shutdown specifications
+message ReleaseSpec {
+  // Release metadata
+  string name = 1;         // e.g., "plexspaces-cluster"
+  string version = 2;      // Semantic version (e.g., "1.0.0")
+  string description = 3;  // Human-readable description
+
+  // Node configuration
+  NodeConfig node = 4;
+
+  // Runtime configuration (gRPC, middleware, health)
+  RuntimeConfig runtime = 5;
+
+  // System applications (always included)
+  repeated string system_applications = 6;
+
+  // User applications (business logic)
+  repeated ApplicationConfig applications = 7;
+
+  // Environment variables for all applications
+  map<string, string> env = 8;
+
+  // Shutdown configuration (Erlang/OTP-inspired)
+  ShutdownConfig shutdown = 9;
+}
+
+// Node configuration
+//
+// ## Purpose
+// Defines node identity and cluster membership settings.
+message NodeConfig {
+  // Node ID (unique in cluster)
+  // Can be environment variable like "${NODE_ID}"
+  string id = 1;
+
+  // Address this node listens on (e.g., "0.0.0.0:9001")
+  string listen_address = 2;
+
+  // Cluster seed nodes for discovery
+  // e.g., ["node1.cluster.local:9001", "node2.cluster.local:9001"]
+  repeated string cluster_seed_nodes = 3;
+}
+
+// Runtime configuration
+//
+// ## Purpose
+// Defines runtime services (gRPC, middleware, health monitoring, security, blob storage).
+message RuntimeConfig {
+  // gRPC server configuration
+  GrpcConfig grpc = 1;
+
+  // Health monitoring configuration
+  HealthConfig health = 2;
+
+  // Security configuration (authentication/authorization)
+  SecurityConfig security = 3;
+
+  // Blob storage configuration (S3-compatible object storage)
+  plexspaces.storage.v1.BlobConfig blob = 4;
+}
+
+// gRPC server configuration
+message GrpcConfig {
+  // Enable gRPC server
+  bool enabled = 1;
+
+  // gRPC listen address (e.g., "0.0.0.0:9001")
+  string address = 2;
+
+  // Maximum concurrent connections
+  uint32 max_connections = 3;
+
+  // Keepalive interval (seconds)
+  uint64 keepalive_interval_seconds = 4;
+
+  // Middleware stack (order matters!)
+  repeated MiddlewareConfig middleware = 5;
+}
+
+// Middleware configuration
+//
+// ## Purpose
+// Declarative middleware configuration for gRPC server.
+// Middleware executes in the order specified.
+//
+// ## Supported Middleware Types
+// - "metrics": Prometheus metrics collection
+// - "tracing": OpenTelemetry distributed tracing
+// - "mtls": Mutual TLS authentication
+// - "compression": gzip/brotli compression
+// - "rate_limiting": Request rate limiting
+message MiddlewareConfig {
+  // Middleware type (e.g., "metrics", "tracing", "mtls")
+  string type = 1;
+
+  // Enable this middleware
+  bool enabled = 2;
+
+  // Middleware-specific configuration (JSON or map)
+  map<string, string> config = 3;
+}
+
+// Health monitoring configuration
+message HealthConfig {
+  // Heartbeat interval (seconds)
+  uint64 heartbeat_interval_seconds = 1;
+
+  // Heartbeat timeout (seconds)
+  uint64 heartbeat_timeout_seconds = 2;
+
+  // Registry URL for heartbeat reporting
+  string registry_url = 3;
+}
+
+// Security configuration
+//
+// ## Purpose
+// Defines authentication and authorization settings for the node.
+// Each node can have its own security configuration (secrets/keys).
+//
+// ## Design
+// - Service-to-service: mTLS with X.509 certificates
+// - Public APIs: JWT authentication
+// - Service credentials: API keys
+//
+// ## Security Best Practices
+// - Store secrets in environment variables or secret management systems
+// - Use file paths for certificates (not inline in config)
+// - Rotate certificates regularly
+message SecurityConfig {
+  // Service identity for this node (mTLS)
+  //
+  // Used for service-to-service authentication.
+  // Each node should have its own service identity.
+  plexspaces.security.v1.ServiceIdentity service_identity = 1;
+
+  // mTLS configuration
+  //
+  // Configures mutual TLS for service-to-service communication.
+  // Required if mTLS is enabled in middleware.
+  plexspaces.security.v1.MtlsConfig mtls = 2;
+
+  // JWT configuration for public APIs
+  //
+  // Configures JWT authentication for external/public APIs.
+  // Required if JWT authentication is enabled in middleware.
+  plexspaces.security.v1.JwtConfig jwt = 3;
+
+  // API keys for service authentication
+  //
+  // List of API keys this node can use for authentication.
+  // Keys are service-scoped (not user-scoped).
+  repeated plexspaces.security.v1.ApiKey api_keys = 4;
+}
+
+// Application configuration (in release)
+//
+// ## Purpose
+// Defines which applications to load and their startup/shutdown behavior.
+//
+// ## Dependency Resolution
+// Applications with dependencies will start AFTER their dependencies.
+// Uses topological sort (Kahn's algorithm) to determine startup order.
+message ApplicationConfig {
+  // Application name (must match .app.toml)
+  string name = 1;
+
+  // Application version
+  string version = 2;
+
+  // Path to application config file (e.g., "apps/byzantine/byzantine.app.toml")
+  string config_path = 3;
+
+  // Enable this application
+  bool enabled = 4;
+
+  // Auto-start on node boot
+  bool auto_start = 5;
+
+  // Shutdown timeout (seconds)
+  // 0 = immediate (brutal_kill)
+  // >0 = graceful with timeout
+  // Special value -1 = infinity (wait forever)
+  int64 shutdown_timeout_seconds = 6;
+
+  // Shutdown strategy
+  ShutdownStrategy shutdown_strategy = 7;
+
+  // Dependencies (other application names)
+  // This application will start AFTER all dependencies have started.
+  // Used for topological sort during node startup.
+  //
+  // ## Examples
+  // - ["tuplespace-service"] - Requires TupleSpace to be running first
+  // - ["actor-registry", "node-registry"] - Requires both registries
+  repeated string dependencies = 8;
+}
+
+// Shutdown strategy (Erlang/OTP-inspired)
+enum ShutdownStrategy {
+  // Unspecified (default to graceful)
+  SHUTDOWN_STRATEGY_UNSPECIFIED = 0;
+
+  // Graceful shutdown with cleanup
+  // Equivalent to Erlang's `shutdown: Timeout`
+  SHUTDOWN_STRATEGY_GRACEFUL = 1;
+
+  // Immediate termination (no cleanup)
+  // Equivalent to Erlang's `shutdown: brutal_kill`
+  SHUTDOWN_STRATEGY_BRUTAL_KILL = 2;
+
+  // Wait indefinitely for graceful shutdown
+  // Equivalent to Erlang's `shutdown: infinity`
+  SHUTDOWN_STRATEGY_INFINITY = 3;
+}
+
+// Shutdown configuration (node-level)
+//
+// ## Purpose
+// Global shutdown settings for the entire node.
+message ShutdownConfig {
+  // Global shutdown timeout (seconds)
+  // If node shutdown exceeds this, force-kill all remaining processes
+  uint64 global_timeout_seconds = 1;
+
+  // Grace period after deregistration (seconds)
+  // Allows time for cluster to route work away from this node
+  uint64 grace_period_seconds = 2;
+
+  // gRPC drain timeout (seconds)
+  // How long to wait for in-flight gRPC requests to complete
+  uint64 grpc_drain_timeout_seconds = 3;
+}
+
+// Release error types
+//
+// ## Purpose
+// Defines all error conditions that can occur during release
+// loading, dependency resolution, and application lifecycle.
+enum ReleaseErrorCode {
+  // Unknown error
+  RELEASE_ERROR_CODE_UNSPECIFIED = 0;
+
+  // IO error reading release file
+  RELEASE_ERROR_CODE_IO_ERROR = 1;
+
+  // TOML parsing error
+  RELEASE_ERROR_CODE_TOML_PARSE_ERROR = 2;
+
+  // Circular dependency detected in application dependencies
+  // e.g., app-a depends on app-b, app-b depends on app-a
+  RELEASE_ERROR_CODE_CIRCULAR_DEPENDENCY = 3;
+
+  // Missing dependency: application depends on another application
+  // that is not included in the release
+  RELEASE_ERROR_CODE_MISSING_DEPENDENCY = 4;
+
+  // Application not found in release
+  RELEASE_ERROR_CODE_APPLICATION_NOT_FOUND = 5;
+
+  // Invalid configuration (malformed or conflicting settings)
+  RELEASE_ERROR_CODE_INVALID_CONFIG = 6;
+}
+
+// Release error message
+//
+// ## Purpose
+// Structured error information for release operations.
+// Used in gRPC responses and internal error handling.
+message ReleaseError {
+  // Error code
+  ReleaseErrorCode code = 1;
+
+  // Human-readable error message
+  string message = 2;
+
+  // Additional context (e.g., application name, dependency name)
+  map<string, string> context = 3;
+}

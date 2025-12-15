@@ -1,0 +1,15 @@
+{
+  "name": "nbody-wasm-actors",
+  "version": "0.1.0",
+  "description": "N-Body simulation TypeScript actors for WASM deployment",
+  "type": "module",
+  "scripts": {
+    "build": "tsc body.ts --target ES2020 --module commonjs --outDir dist",
+    "build:wasm": "npm run build && javy build dist/body.js -o ../wasm-modules/nbody-application.wasm"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
+

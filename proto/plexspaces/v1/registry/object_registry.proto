@@ -1,0 +1,640 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Unified Object Registry API
+//
+// ## Purpose
+// Provides unified registration and discovery for ALL distributed objects in PlexSpaces:
+// - **Actors**: Stateful computation units (actor model)
+// - **TupleSpaces**: Coordination primitives (Linda model)
+// - **Services**: Microservices and gRPC endpoints
+//
+// ## Why Unified Registry?
+//
+// **Problem**: Having separate ActorRegistry, TupleSpaceRegistry, and ServiceRegistry creates:
+// - Code duplication (3x registration logic)
+// - API inconsistency (different filtering/pagination patterns)
+// - Operational complexity (3 registries to monitor/manage)
+// - Conceptual overhead (all are just "objects with metadata and grpc_address")
+//
+// **Solution**: Single ObjectRegistry with ObjectType enum
+// - **ONE implementation**: Uses KeyValueStore backend (just like ActorRegistry)
+// - **ONE API**: Consistent register/unregister/discover/lookup across all types
+// - **ONE data model**: ObjectRegistration with type-specific `object_category` field
+// - **Type-safe filtering**: Filter by ObjectType, capabilities, labels, etc.
+//
+// ## Core Insight
+//
+// At the heart of it, ALL registries are just:
+// ```
+// ObjectID → (grpc_address, metadata, capabilities, health)
+// ```
+//
+// The **primary purpose** is to answer: *"What is the gRPC address to connect to this object?"*
+//
+// ## Object Types
+//
+// 1. **ACTOR**: Stateful computation units
+//    - `object_category`: "GenServer", "Workflow", "VirtualActor", "Supervisor", etc.
+//    - `grpc_address`: Node's ActorService endpoint (e.g., "http://node-1:9001")
+//    - Use case: Route messages to remote actors
+//
+// 2. **TUPLESPACE**: Coordination primitives
+//    - `object_category`: "redis", "postgresql", "sqlite", "memory"
+//    - `grpc_address`: TupleSpaceService endpoint (e.g., "http://ts-node:9002")
+//    - Use case: Discover distributed tuple spaces by backend type
+//
+// 3. **SERVICE**: Microservices and gRPC endpoints
+//    - `object_category`: "order-service", "payment-service", "custom-api", etc.
+//    - `grpc_address`: Service's gRPC endpoint (e.g., "http://svc:50051")
+//    - Use case: Service discovery and load balancing
+//
+// ## Design Principles
+//
+// ### 1. Proto-First Design
+// All data models AND behavioral contracts defined in Protocol Buffers first.
+// - **Data Model**: ObjectRegistration (unified for all types)
+// - **Behavioral Contract**: ObjectRegistry service (unified API)
+// - **Implementation**: Uses KeyValueStore backend (proto: key_value_store.proto)
+//
+// ### 2. Type Safety
+// - `object_type` is REQUIRED (Actor, TupleSpace, Service)
+// - `object_category` provides sub-type (e.g., "GenServer", "redis", "order-service")
+// - Compiler enforces type checks, no stringly-typed queries
+//
+// ### 3. Location Transparency
+// - Primary purpose: Get `grpc_address` to connect to object
+// - Once you have gRPC address, use object-specific service:
+//   - Actor → ActorService.send_message()
+//   - TupleSpace → TuplePlexSpaceService.write()
+//   - Service → CustomService.your_rpc_method()
+//
+// ### 4. KeyValueStore Backend
+// Implementation uses KeyValueStore (InMemory, SQLite, Redis, PostgreSQL):
+// - Key format: `{tenant_id}:{namespace}:{object_type}:{object_id}`
+// - Value: ObjectRegistration (protobuf serialized)
+// - Filtering: Scan with prefix + deserialize + filter
+// - Pagination: Continuation tokens for large result sets
+//
+// ## Migration from Existing Registries
+//
+// **Before** (3 separate registries):
+// ```rust
+// // Actor
+// actor_registry.register_actor(actor_id, node_id, address, metadata).await?;
+// let actor_loc = actor_registry.lookup_actor(actor_id).await?;
+//
+// // TupleSpace
+// ts_registry.register_provider(ts_id, tenant, namespace, address, caps).await?;
+// let providers = ts_registry.discover_providers(tenant, namespace, caps).await?;
+//
+// // Service
+// svc_registry.register_service(instance_id, name, version, address, health).await?;
+// let instances = svc_registry.discover_services(name, health_filter).await?;
+// ```
+//
+// **After** (unified registry):
+// ```rust
+// // Actor
+// object_registry.register(ObjectRegistration {
+//     object_type: ObjectType::Actor,
+//     object_id: "counter@node1",
+//     object_category: "GenServer",
+//     grpc_address: "http://node1:9001",
+//     ...
+// }).await?;
+// let obj = object_registry.lookup("counter@node1", ObjectType::Actor).await?;
+//
+// // TupleSpace
+// object_registry.register(ObjectRegistration {
+//     object_type: ObjectType::TupleSpace,
+//     object_id: "ts-redis-acme-prod",
+//     object_category: "redis",
+//     grpc_address: "http://ts-node:9002",
+//     capabilities: vec!["persistent", "distributed"],
+//     ...
+// }).await?;
+// let tuplespaces = object_registry.discover(DiscoverRequest {
+//     object_type: Some(ObjectType::TupleSpace),
+//     object_category: Some("redis"),
+//     ...
+// }).await?;
+//
+// // Service
+// object_registry.register(ObjectRegistration {
+//     object_type: ObjectType::Service,
+//     object_id: "order-svc-instance-1",
+//     object_category: "order-service",
+//     grpc_address: "http://order-pod:50051",
+//     health_status: HealthStatus::Healthy,
+//     ...
+// }).await?;
+// let services = object_registry.discover(DiscoverRequest {
+//     object_type: Some(ObjectType::Service),
+//     object_category: Some("order-service"),
+//     health_status: Some(HealthStatus::Healthy),
+//     ...
+// }).await?;
+// ```
+//
+// ## Benefits
+//
+// 1. **Simplicity**: ONE registry to learn, implement, test, deploy, monitor
+// 2. **Consistency**: Same API patterns across all object types
+// 3. **Efficiency**: ONE KeyValueStore scan instead of 3 separate lookups
+// 4. **Extensibility**: Add new object types without new registries
+// 5. **Operator-Friendly**: Single registry to configure/debug
+
+syntax = "proto3";
+
+package plexspaces.object_registry.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/object_registry/v1;object_registryv1";
+option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.object_registry.v1";
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpaces Unified Object Registry API"
+    version: "1.0"
+    description: "Unified registry for actors, tuple spaces, and services"
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+};
+
+// ============================================================================
+// CORE ENUMS
+// ============================================================================
+
+// Object type enum (mandatory for all registrations)
+enum ObjectType {
+  // Unspecified - not allowed, must specify type
+  OBJECT_TYPE_UNSPECIFIED = 0;
+
+  // Actor: Stateful computation unit (actor model)
+  // Examples: GenServer, Workflow, VirtualActor, Supervisor
+  OBJECT_TYPE_ACTOR = 1;
+
+  // TupleSpace: Coordination primitive (Linda model)
+  // Examples: Redis-backed, PostgreSQL-backed, in-memory
+  OBJECT_TYPE_TUPLESPACE = 2;
+
+  // Service: Microservice or gRPC endpoint
+  // Examples: order-service, payment-service, custom APIs
+  OBJECT_TYPE_SERVICE = 3;
+
+  // VM: Firecracker microVM instance
+  // Examples: firecracker-vm-001, vm-tenant-a
+  // object_category: "firecracker", "qemu", etc.
+  // grpc_address: VM's API socket path or management endpoint
+  OBJECT_TYPE_VM = 4;
+}
+
+// Health status (common across all object types)
+enum HealthStatus {
+  HEALTH_STATUS_UNKNOWN = 0;
+  HEALTH_STATUS_HEALTHY = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_UNHEALTHY = 3;
+  HEALTH_STATUS_STARTING = 4;
+  HEALTH_STATUS_STOPPING = 5;
+}
+
+// ============================================================================
+// CORE DATA MODEL
+// ============================================================================
+
+// Unified object registration
+//
+// This message represents ANY registered object in PlexSpaces (actor, tuplespace, service).
+// Type-specific fields use `object_category` and `capabilities` for differentiation.
+message ObjectRegistration {
+  // ==================== IDENTITY ====================
+
+  // Unique object identifier (ULID for sortability)
+  // Format varies by type:
+  // - Actor: "actor_name@node_id" (e.g., "counter@node1")
+  // - TupleSpace: "ts-{backend}-{tenant}-{namespace}" (e.g., "ts-redis-acme-prod")
+  // - Service: "{service_name}-{instance_id}" (e.g., "order-svc-a1b2c3")
+  string object_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Human-readable name (optional, for display)
+  // Examples: "Counter Actor", "Production TupleSpace", "Order Service"
+  string object_name = 2;
+
+  // Object type (REQUIRED - Actor, TupleSpace, Service)
+  ObjectType object_type = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Version string (semantic versioning recommended)
+  // Examples: "1.0.0", "2.1.3-beta", "latest"
+  string version = 4;
+
+  // ==================== MULTI-TENANCY ====================
+
+  // Tenant identifier for multi-tenancy
+  // Examples: "acme-corp", "globex-inc", "user-123", "default"
+  string tenant_id = 5;
+
+  // Namespace for logical grouping within tenant
+  // Examples: "production", "staging", "test", "feature-x"
+  string namespace = 6;
+
+  // ==================== LOCATION ====================
+
+  // Node identifier hosting this object
+  // Examples: "node1", "k8s-pod-abc123", "vm-instance-5"
+  string node_id = 7;
+
+  // gRPC address to connect to this object (PRIMARY PURPOSE!)
+  // Format: "http://host:port" or "https://host:port"
+  // Examples:
+  // - Actor: "http://node1:9001" (ActorService endpoint)
+  // - TupleSpace: "http://ts-node:9002" (TuplePlexSpaceService endpoint)
+  // - Service: "http://order-pod:50051" (Custom service endpoint)
+  string grpc_address = 8 [(google.api.field_behavior) = REQUIRED];
+
+  // ==================== TYPE-SPECIFIC CLASSIFICATION ====================
+
+  // Object category (sub-type, implementation-specific)
+  //
+  // For Actor:
+  // - "GenServer", "Workflow", "VirtualActor", "Supervisor", "StateMachine", "Custom"
+  //
+  // For TupleSpace:
+  // - "redis", "postgresql", "sqlite", "memory", "custom"
+  //
+  // For Service:
+  // - Service name: "order-service", "payment-service", "auth-service", "custom-api"
+  string object_category = 9;
+
+  // Capabilities list (type-specific features)
+  //
+  // For Actor:
+  // - "persistent", "supervised", "mobile", "auto-activate", "keyed"
+  //
+  // For TupleSpace:
+  // - "persistent", "distributed", "barriers", "transactions", "watch"
+  //
+  // For Service:
+  // - "grpc", "http", "websocket", "streaming", "batch"
+  repeated string capabilities = 10;
+
+  // ==================== METADATA & CONFIGURATION ====================
+
+  // Additional metadata (key-value pairs)
+  plexspaces.common.v1.Metadata metadata = 11;
+
+  // Health status
+  HealthStatus health_status = 12;
+
+  // Labels for discovery and filtering (tag cloud)
+  // Examples: "prod", "us-west-2", "gpu-enabled", "high-memory", "experimental"
+  repeated string labels = 13;
+
+  // Performance metrics (type-specific)
+  // Examples:
+  // - Actor: "message_rate", "cpu_usage", "memory_mb"
+  // - TupleSpace: "tuple_count", "query_latency_ms", "throughput"
+  // - Service: "request_rate", "error_rate", "latency_p99"
+  map<string, double> metrics = 14;
+
+  // ==================== LIFECYCLE & MONITORING ====================
+
+  // Last heartbeat timestamp (for health monitoring)
+  google.protobuf.Timestamp last_heartbeat = 15;
+
+  // Registration creation timestamp
+  google.protobuf.Timestamp created_at = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Registration update timestamp
+  google.protobuf.Timestamp updated_at = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // NOTE: Lease-related fields intentionally omitted (per user requirement)
+  // Lease management is handled separately via TTL on KeyValueStore backend
+}
+
+// ============================================================================
+// UNIFIED OBJECT REGISTRY SERVICE
+// ============================================================================
+
+service ObjectRegistry {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {description: "Unified object discovery and registration"};
+
+  // Register object (actor, tuplespace, or service)
+  rpc Register(RegisterRequest) returns (RegisterResponse) {
+    option (google.api.http) = {
+      post: "/v1/registry/objects"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Register Object"
+      description: "Register any object type (actor, tuplespace, service) with unified API"
+      tags: "Registry"
+    };
+  }
+
+  // Unregister object
+  rpc Unregister(UnregisterRequest) returns (UnregisterResponse) {
+    option (google.api.http) = {delete: "/v1/registry/objects/{object_id}"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Unregister Object"
+      description: "Remove object from registry"
+      tags: "Registry"
+    };
+  }
+
+  // Lookup single object by ID and type
+  rpc Lookup(LookupRequest) returns (LookupResponse) {
+    option (google.api.http) = {get: "/v1/registry/objects/{object_id}"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Lookup Object"
+      description: "Get object registration by ID"
+      tags: "Registry"
+    };
+  }
+
+  // Discover objects by filters (with pagination)
+  rpc Discover(DiscoverRequest) returns (DiscoverResponse) {
+    option (google.api.http) = {
+      get: "/v1/registry/objects"
+      additional_bindings {post: "/v1/registry/objects:discover"}
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Discover Objects"
+      description: "Find objects by type, capabilities, labels, health, etc. with pagination"
+      tags: "Registry"
+    };
+  }
+
+  // Update object health (heartbeat mechanism)
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {
+    option (google.api.http) = {
+      post: "/v1/registry/objects/{object_id}/heartbeat"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Send Heartbeat"
+      description: "Update object health and last_heartbeat timestamp"
+      tags: "Registry"
+    };
+  }
+
+  // Batch heartbeat for multiple objects (efficiency)
+  rpc BatchHeartbeat(BatchHeartbeatRequest) returns (BatchHeartbeatResponse) {
+    option (google.api.http) = {
+      post: "/v1/registry/heartbeat"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Batch Heartbeat"
+      description: "Update health for multiple objects in one call"
+      tags: "Registry"
+    };
+  }
+
+  // List all object types (admin/debug)
+  rpc ListObjectTypes(ListObjectTypesRequest) returns (ListObjectTypesResponse) {
+    option (google.api.http) = {get: "/v1/registry/types"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List Object Types"
+      description: "Get all registered object types with counts"
+      tags: "Registry"
+    };
+  }
+}
+
+// ============================================================================
+// REQUEST/RESPONSE MESSAGES
+// ============================================================================
+
+// Register object request
+message RegisterRequest {
+  // Object registration to create/update
+  ObjectRegistration registration = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // TTL for auto-expiry (optional, default: no expiry)
+  // If specified, object auto-unregisters after TTL expires
+  google.protobuf.Duration ttl = 2;
+}
+
+message RegisterResponse {
+  // Registered object (with generated timestamps)
+  ObjectRegistration registration = 1;
+
+  // Whether this was a new registration (true) or update (false)
+  bool created = 2;
+}
+
+// Unregister object request
+message UnregisterRequest {
+  // Object ID to unregister
+  string object_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Object type (for key construction)
+  ObjectType object_type = 2;
+
+  // Tenant ID (for multi-tenancy)
+  string tenant_id = 3;
+
+  // Namespace (for logical grouping)
+  string namespace = 4;
+}
+
+message UnregisterResponse {
+  // Whether object was found and unregistered
+  bool unregistered = 1;
+}
+
+// Lookup single object request
+message LookupRequest {
+  // Object ID to lookup
+  string object_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Object type (optional - if not specified, searches all types)
+  ObjectType object_type = 2;
+
+  // Tenant ID (for multi-tenancy)
+  string tenant_id = 3;
+
+  // Namespace (for logical grouping)
+  string namespace = 4;
+}
+
+message LookupResponse {
+  // Object registration (null if not found)
+  ObjectRegistration registration = 1;
+
+  // Whether object was found
+  bool found = 2;
+}
+
+// Discover objects request (with extensive filtering)
+message DiscoverRequest {
+  // ==================== TYPE FILTERING ====================
+
+  // Filter by object type (optional - if not specified, returns ALL types)
+  ObjectType object_type = 1;
+
+  // Filter by object category (exact match)
+  // Examples: "GenServer", "redis", "order-service"
+  string object_category = 2;
+
+  // ==================== LOCATION FILTERING ====================
+
+  // Filter by node ID
+  string node_id = 3;
+
+  // Filter by tenant ID
+  string tenant_id = 4;
+
+  // Filter by namespace
+  string namespace = 5;
+
+  // ==================== CAPABILITY FILTERING ====================
+
+  // Filter by capabilities (ALL must be present)
+  // Example: ["persistent", "distributed"] → only objects with BOTH capabilities
+  repeated string capabilities = 6;
+
+  // Filter by labels (ANY can match)
+  // Example: ["prod", "us-west-2"] → objects with "prod" OR "us-west-2"
+  repeated string labels = 7;
+
+  // ==================== HEALTH FILTERING ====================
+
+  // Filter by health status
+  HealthStatus health_status = 8;
+
+  // Filter by minimum health age (exclude stale objects)
+  // Example: last_heartbeat < (now - max_age) → excluded
+  google.protobuf.Duration max_heartbeat_age = 9;
+
+  // ==================== PAGINATION ====================
+
+  // Maximum results per page (default: 100, max: 1000)
+  int32 page_size = 10;
+
+  // Pagination token from previous response (opaque)
+  string page_token = 11;
+
+  // ==================== SORTING ====================
+
+  // Sort field (default: "created_at")
+  // Options: "object_id", "created_at", "updated_at", "last_heartbeat"
+  string sort_by = 12;
+
+  // Sort order (default: ascending)
+  bool descending = 13;
+}
+
+message DiscoverResponse {
+  // Matching objects (paginated)
+  repeated ObjectRegistration registrations = 1;
+
+  // Total count of matching objects (before pagination)
+  int64 total_count = 2;
+
+  // Next page token (empty if no more results)
+  string next_page_token = 3;
+
+  // Whether there are more results
+  bool has_more = 4;
+}
+
+// Heartbeat request
+message HeartbeatRequest {
+  // Object ID sending heartbeat
+  string object_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Object type
+  ObjectType object_type = 2;
+
+  // Tenant ID
+  string tenant_id = 3;
+
+  // Namespace
+  string namespace = 4;
+
+  // Updated health status (optional)
+  HealthStatus health_status = 5;
+
+  // Updated metrics (optional)
+  map<string, double> metrics = 6;
+}
+
+message HeartbeatResponse {
+  // Whether heartbeat was accepted
+  bool accepted = 1;
+
+  // Updated registration
+  ObjectRegistration registration = 2;
+}
+
+// Batch heartbeat request
+message BatchHeartbeatRequest {
+  // Multiple heartbeats
+  repeated HeartbeatRequest heartbeats = 1;
+}
+
+message BatchHeartbeatResponse {
+  // Results for each heartbeat (same order as request)
+  repeated HeartbeatResponse results = 1;
+
+  // Number of successful heartbeats
+  int32 success_count = 2;
+
+  // Number of failed heartbeats
+  int32 failure_count = 3;
+}
+
+// List object types request
+message ListObjectTypesRequest {
+  // Filter by tenant (optional)
+  string tenant_id = 1;
+
+  // Filter by namespace (optional)
+  string namespace = 2;
+}
+
+// Object type summary
+message ObjectTypeSummary {
+  // Object type
+  ObjectType object_type = 1;
+
+  // Count of registered objects
+  int64 count = 2;
+
+  // Count by health status
+  map<string, int64> health_counts = 3;
+}
+
+message ListObjectTypesResponse {
+  // Summary for each object type
+  repeated ObjectTypeSummary summaries = 1;
+
+  // Total registered objects across all types
+  int64 total_count = 2;
+}

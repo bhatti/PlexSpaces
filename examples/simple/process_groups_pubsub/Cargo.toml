@@ -1,0 +1,17 @@
+[package]
+name = "process_groups_pubsub"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone example - not part of workspace
+[workspace]
+
+[[bin]]
+name = "process_groups_pubsub"
+path = "src/main.rs"
+
+[dependencies]
+plexspaces-process-groups = { path = "../../../crates/process-groups" }
+plexspaces-keyvalue = { path = "../../../crates/keyvalue" }
+tokio = { version = "1", features = ["full"] }
+

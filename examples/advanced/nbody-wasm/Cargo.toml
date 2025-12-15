@@ -1,0 +1,30 @@
+[workspace]
+
+[package]
+name = "nbody-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+description = "N-Body simulation with TypeScript WASM actors - Application-level deployment"
+
+[[bin]]
+name = "nbody-wasm"
+path = "src/main.rs"
+
+[[bin]]
+name = "node-starter"
+path = "src/node_starter.rs"
+
+[dependencies]
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-wasm-runtime = { path = "../../../crates/wasm-runtime" }
+plexspaces-proto = { path = "../../../crates/proto" }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+clap = { version = "4.0", features = ["derive"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tonic = "0.11"
+

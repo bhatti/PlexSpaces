@@ -1,0 +1,19 @@
+# Simple Dockerfile that copies pre-built binary
+# Build the binary first: cargo build --release
+# Then build this image: docker build -f Dockerfile.local -t plexspaces/genomic-workflow-pipeline:latest .
+
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy pre-built binary from host
+COPY examples/genomic-workflow-pipeline/target/release/genomic-workflow-pipeline /usr/local/bin/
+
+# Set working directory
+WORKDIR /app
+
+# Default command with 10K reads
+CMD ["genomic-workflow-pipeline", "10000"]

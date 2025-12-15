@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# WASM Calculator - Node 3 (Calculator Worker 2)
+#
+# Role: Executes WASM calculator operations
+# Components:
+#   - CalculatorActor instances (pool of 5)
+#   - WASM runtime with Component Model
+#
+# Dependencies: Coordinator node (node 1)
+
+[release]
+name = "wasm-calculator-worker-2"
+version = "0.1.0"
+description = "WASM Calculator Worker Node 2"
+
+[node]
+id = "calc-worker-2"
+listen_address = "0.0.0.0:9203"
+cluster_seed_nodes = [
+    "calc-coordinator:9201",
+    "calc-worker-1:9202"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9203"
+max_connections = 100
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "calc-worker-2"
+sampling_rate = 1.0
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 100
+burst_size = 20
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+    "plexspaces-wasm-runtime",
+]
+
+[[applications]]
+name = "wasm-calculator"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 30
+shutdown_strategy = "graceful"
+dependencies = []
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "worker"
+# Worker pool settings
+CALCULATOR_POOL_SIZE = "5"
+# WASM runtime settings
+WASM_MODULE_CACHE_SIZE = "50"
+WASM_MAX_MEMORY_MB = "16"
+WASM_MAX_FUEL = "10000000000"
+WASM_ENABLE_POOLING = "true"
+WASM_POOLED_INSTANCES = "10"
+# Cluster configuration
+CLUSTER_MODE = "distributed"
+COORDINATOR_ADDRESS = "calc-coordinator:9201"
+
+# Resource limits
+[resources]
+max_memory_mb = 512
+max_cpu_percent = 75
+
+[shutdown]
+global_timeout_seconds = 60
+grace_period_seconds = 5
+grpc_drain_timeout_seconds = 15

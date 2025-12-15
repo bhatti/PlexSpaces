@@ -1,0 +1,84 @@
+[package]
+name = "plexspaces-wasm-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+description = "WebAssembly runtime for PlexSpaces actors - polyglot, sandboxed, portable"
+keywords = ["wasm", "webassembly", "actor", "runtime", "component-model"]
+categories = ["wasm", "concurrency"]
+
+[lib]
+name = "plexspaces_wasm_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+# Core dependencies
+plexspaces-core = { path = "../core" }
+plexspaces-proto = { path = "../proto" }
+plexspaces-actor = { path = "../actor" }
+plexspaces-tuplespace = { path = "../tuplespace" }
+plexspaces-mailbox = { path = "../mailbox" }
+
+# WASM runtime (User Decision A1: wasmtime)
+wasmtime = { version = "25", features = ["async", "pooling-allocator", "component-model", "cranelift"] }
+wasmtime-wasi = { version = "25" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+
+# Metrics/observability
+metrics = "0.23"
+
+# Crypto (for module hash verification)
+sha2 = "0.10"
+hex = "0.4"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# ID generation (ULID - CLAUDE.md Core Principle 0)
+ulid = { version = "1.1", features = ["serde"] }
+
+[dev-dependencies]
+# Testing
+tokio-test = "0.4"
+tokio-stream = { version = "0.1", features = ["net"] }  # For gRPC integration tests
+futures = "0.3"  # For concurrent test utilities
+tempfile = "3.8"
+wat = "1.0"  # WebAssembly Text format for inline WASM tests
+plexspaces-mailbox = { path = "../mailbox" }
+plexspaces-core = { path = "../core" }
+
+# Metrics/observability (for testing)
+prometheus = "0.13"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+
+[features]
+default = ["component-model"]
+
+# WebAssembly Component Model support (User Decision A2)
+component-model = []
+
+[[bench]]
+name = "wasm_benchmarks"
+harness = false

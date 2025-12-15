@@ -1,0 +1,8 @@
+target/
+.git/
+*.md
+scripts/
+tests/
+*.log
+Cargo.lock
+

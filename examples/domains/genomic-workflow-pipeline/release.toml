@@ -1,0 +1,9 @@
+# Genomic Workflow Pipeline Configuration
+# Uses ConfigBootstrap for Erlang/OTP-style configuration
+
+[genomic_pipeline]
+target_granularity_ratio = 100.0
+
+[genomic_pipeline.node]
+id = "genomic-pipeline-node"
+listen_address = "0.0.0.0:9000"

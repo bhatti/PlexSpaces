@@ -1,0 +1,23 @@
+# Rust build artifacts
+target/
+Cargo.lock
+*.sh
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test coverage
+tarpaulin-report.html
+cobertura.xml
+node_modules
+# Documentation
+/target/doc/
+*.db
+# Generated proto files are tracked, but build artifacts are not
+**/generated/*.rs.bk
+.claude/
+.cursorrules

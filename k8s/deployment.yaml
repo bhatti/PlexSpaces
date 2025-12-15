@@ -1,0 +1,188 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Kubernetes Deployment for PlexSpaces Node
+# Demonstrates cloud-native deployment with health checks, graceful shutdown, and observability
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plexspaces-node
+  labels:
+    app: plexspaces
+    component: node
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: plexspaces
+      component: node
+  template:
+    metadata:
+      labels:
+        app: plexspaces
+        component: node
+    spec:
+      # Graceful shutdown period (matches drain timeout)
+      terminationGracePeriodSeconds: 30
+      
+      containers:
+      - name: plexspaces
+        image: plexspaces:latest
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - name: grpc
+          containerPort: 9001
+          protocol: TCP
+        
+        env:
+        - name: PLEXSPACES_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PLEXSPACES_LISTEN_ADDR
+          value: "0.0.0.0:9001"
+        - name: RUST_LOG
+          value: "info"
+        - name: PLEXSPACES_CLUSTER_SEED_NODES
+          value: "plexspaces-node-0.plexspaces-headless:9001"
+        
+        # Health checks using gRPC health protocol
+        # Requires grpc_health_probe binary (included in image or sidecar)
+        startupProbe:
+          exec:
+            command:
+            - grpc_health_probe
+            - -addr=:9001
+            - -service=startup
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30  # 150 seconds total
+        
+        livenessProbe:
+          exec:
+            command:
+            - grpc_health_probe
+            - -addr=:9001
+            - -service=liveness
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          exec:
+            command:
+            - grpc_health_probe
+            - -addr=:9001
+            - -service=readiness
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /app/data
+        
+        # Security context (non-root user)
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # May need write access for data
+      
+      volumes:
+      - name: config
+        configMap:
+          name: plexspaces-config
+      - name: data
+        emptyDir: {}
+      
+      # Pod disruption budget (optional)
+      # affinity:
+      #   podAntiAffinity:
+      #     preferredDuringSchedulingIgnoredDuringExecution:
+      #     - weight: 100
+      #       podAffinityTerm:
+      #         labelSelector:
+      #           matchExpressions:
+      #           - key: app
+      #             operator: In
+      #             values:
+      #             - plexspaces
+      #         topologyKey: kubernetes.io/hostname
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: plexspaces
+  labels:
+    app: plexspaces
+    component: node
+spec:
+  type: ClusterIP
+  ports:
+  - name: grpc
+    port: 9001
+    targetPort: 9001
+    protocol: TCP
+  selector:
+    app: plexspaces
+    component: node
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: plexspaces-headless
+  labels:
+    app: plexspaces
+    component: node
+spec:
+  clusterIP: None  # Headless service for stateful pods
+  ports:
+  - name: grpc
+    port: 9001
+    targetPort: 9001
+    protocol: TCP
+  selector:
+    app: plexspaces
+    component: node
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: plexspaces-config
+  labels:
+    app: plexspaces
+data:
+  release.toml: |
+    [node]
+    id = "plexspaces-node"
+    listen_address = "0.0.0.0:9001"
+    
+    [runtime.grpc]
+    enabled = true
+    address = "0.0.0.0:9001"
+    max_connections = 100
+    
+    [runtime.health]
+    heartbeat_interval_seconds = 5
+    heartbeat_timeout_seconds = 10
+

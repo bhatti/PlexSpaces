@@ -1,0 +1,650 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces gRPC Middleware API
+//
+// ## Purpose
+// Defines middleware (interceptors) for production-ready gRPC services with
+// observability, security, and reliability features.
+//
+// ## Architecture Context
+// This proto file implements **Phase 3.5 (Production-Ready gRPC Middleware)** of PlexSpaces.
+// It provides the middleware foundation that enables:
+// - Observability: Metrics, tracing, logging
+// - Security: mTLS, authentication, authorization
+// - Reliability: Circuit breaking, retries, rate limiting, compression
+// - Health monitoring: Readiness/liveness probes
+//
+// ### Integration with Other Components
+// - **PlexSpacesNode**: Loads middleware chain from ReleaseSpec configuration
+// - **gRPC Services**: ActorService, TupleSpaceService, SupervisionService all use middleware
+// - **Metrics**: Prometheus/StatsD/OpenTelemetry exporters
+// - **Tracing**: Distributed tracing across nodes
+//
+// ## Design Decisions
+// - **Proto-First**: All middleware configuration defined in proto (type-safe, documented)
+// - **Composable**: Middleware can be chained in any order
+// - **Zero-Cost When Disabled**: Feature flags prevent overhead when not needed
+// - **Order Enforcement**: Middleware execution order defined in configuration
+//
+// ## Middleware Chain Example
+// ```
+// Request → [Metrics] → [Tracing] → [Auth] → [RateLimit] → [Compression] → Service
+// Response ← [Metrics] ← [Tracing] ← [Auth] ← [RateLimit] ← [Compression] ← Service
+// ```
+
+syntax = "proto3";
+
+package plexspaces.grpc.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Middleware configuration for gRPC interceptor chain
+//
+// ## Purpose
+// Defines the complete middleware stack for a gRPC server, including
+// execution order and per-middleware configuration.
+//
+// ## Design Notes
+// - Order matters: Middleware executes in the order listed
+// - Each middleware is independently configurable
+// - Middleware can be enabled/disabled via `enabled` flag
+message MiddlewareConfig {
+  // Ordered list of middleware to apply
+  //
+  // Execution order:
+  // 1. Request flows top-to-bottom (first middleware sees request first)
+  // 2. Response flows bottom-to-top (last middleware sees response first)
+  repeated MiddlewareSpec middleware = 1;
+}
+
+// Individual middleware specification
+//
+// ## Purpose
+// Configures a single middleware interceptor with type-specific settings.
+//
+// ## Design Notes
+// - `middleware_type` determines which config field is used
+// - `enabled` allows runtime enable/disable
+// - `priority` can override default order (lower = earlier execution)
+message MiddlewareSpec {
+  // Middleware type (determines which config to use)
+  MiddlewareType middleware_type = 1;
+
+  // Whether this middleware is enabled
+  bool enabled = 2;
+
+  // Execution priority (lower = earlier, default = 100)
+  int32 priority = 3;
+
+  // Type-specific configuration (one of):
+  oneof config {
+    MetricsMiddlewareConfig metrics = 10;
+    TracingMiddlewareConfig tracing = 11;
+    MtlsMiddlewareConfig mtls = 12;
+    CompressionMiddlewareConfig compression = 13;
+    RateLimitMiddlewareConfig rate_limit = 14;
+    AuthMiddlewareConfig auth = 15;
+    CircuitBreakerMiddlewareConfig circuit_breaker = 16;
+    RetryMiddlewareConfig retry = 17;
+    LoggingMiddlewareConfig logging = 18;
+  }
+}
+
+// Middleware types
+enum MiddlewareType {
+  MIDDLEWARE_TYPE_UNSPECIFIED = 0;
+  MIDDLEWARE_TYPE_METRICS = 1;        // Prometheus/StatsD metrics
+  MIDDLEWARE_TYPE_TRACING = 2;        // OpenTelemetry distributed tracing
+  MIDDLEWARE_TYPE_MTLS = 3;           // Mutual TLS authentication
+  MIDDLEWARE_TYPE_COMPRESSION = 4;    // gzip/brotli compression
+  MIDDLEWARE_TYPE_RATE_LIMIT = 5;     // Token bucket rate limiting
+  MIDDLEWARE_TYPE_AUTH = 6;           // Authentication/authorization
+  MIDDLEWARE_TYPE_CIRCUIT_BREAKER = 7; // Circuit breaker pattern
+  MIDDLEWARE_TYPE_RETRY = 8;          // Exponential backoff retries
+  MIDDLEWARE_TYPE_LOGGING = 9;        // Structured logging
+}
+
+// Metrics middleware configuration
+//
+// ## Purpose
+// Exports gRPC metrics to Prometheus, StatsD, or OpenTelemetry.
+//
+// ## Metrics Exported
+// - `grpc_requests_total`: Counter of requests by service/method/status
+// - `grpc_request_duration_seconds`: Histogram of request latency
+// - `grpc_active_requests`: Gauge of in-flight requests
+// - `grpc_request_size_bytes`: Histogram of request payload size
+// - `grpc_response_size_bytes`: Histogram of response payload size
+//
+// ## Design Notes
+// - Prometheus format is default (can export to multiple backends)
+// - Metrics endpoint exposed at `/metrics` by default
+message MetricsMiddlewareConfig {
+  // Metrics backend type
+  MetricsBackend backend = 1;
+
+  // Prometheus HTTP endpoint (e.g., "/metrics")
+  string prometheus_endpoint = 2;
+
+  // StatsD server address (e.g., "localhost:8125")
+  string statsd_address = 3;
+
+  // Histogram buckets for latency (seconds)
+  repeated double latency_buckets = 4;
+
+  // Whether to include detailed method-level metrics
+  bool detailed_metrics = 5;
+}
+
+// Metrics backend type
+enum MetricsBackend {
+  METRICS_BACKEND_UNSPECIFIED = 0;
+  METRICS_BACKEND_PROMETHEUS = 1;   // Prometheus pull model
+  METRICS_BACKEND_STATSD = 2;       // StatsD push model
+  METRICS_BACKEND_OPENTELEMETRY = 3; // OpenTelemetry protocol
+}
+
+// Tracing middleware configuration
+//
+// ## Purpose
+// Enables distributed tracing across nodes using OpenTelemetry.
+//
+// ## Trace Propagation
+// - Injects trace context into outgoing gRPC metadata
+// - Extracts trace context from incoming gRPC metadata
+// - Creates spans for each RPC call
+//
+// ## Design Notes
+// - Trace IDs propagate across the entire request path
+// - Integrates with Jaeger, Zipkin, or other OTLP backends
+message TracingMiddlewareConfig {
+  // Tracing backend (e.g., "jaeger", "zipkin", "otlp")
+  string backend = 1;
+
+  // Backend endpoint (e.g., "http://jaeger:14268/api/traces")
+  string endpoint = 2;
+
+  // Service name for traces
+  string service_name = 3;
+
+  // Sampling rate (0.0 = none, 1.0 = all)
+  double sampling_rate = 4;
+
+  // Whether to trace request/response payloads
+  bool trace_payloads = 5;
+}
+
+// Mutual TLS middleware configuration
+//
+// ## Purpose
+// Enforces mutual TLS authentication between nodes.
+//
+// ## Security
+// - Client cert verification
+// - Server cert verification
+// - Optional client cert requirement
+//
+// ## Design Notes
+// - Certificate paths should be absolute or relative to node working directory
+// - Supports PEM format certificates
+message MtlsMiddlewareConfig {
+  // Path to server certificate (PEM)
+  string server_cert_path = 1;
+
+  // Path to server private key (PEM)
+  string server_key_path = 2;
+
+  // Path to CA certificate for client verification (PEM)
+  string ca_cert_path = 3;
+
+  // Whether client certificates are required
+  bool require_client_cert = 4;
+
+  // Allowed client certificate subjects (CNs)
+  repeated string allowed_subjects = 5;
+}
+
+// Compression middleware configuration
+//
+// ## Purpose
+// Compresses gRPC payloads using gzip or brotli.
+//
+// ## Design Notes
+// - Only compresses if payload size exceeds threshold
+// - Supports content negotiation (client can disable)
+message CompressionMiddlewareConfig {
+  // Compression algorithm
+  CompressionAlgorithm algorithm = 1;
+
+  // Minimum payload size to compress (bytes)
+  uint32 min_size_bytes = 2;
+
+  // Compression level (1=fastest, 9=best compression)
+  int32 compression_level = 3;
+}
+
+// Compression algorithm
+enum CompressionAlgorithm {
+  COMPRESSION_ALGORITHM_UNSPECIFIED = 0;
+  COMPRESSION_ALGORITHM_GZIP = 1;
+  COMPRESSION_ALGORITHM_BROTLI = 2;
+}
+
+// Rate limiting middleware configuration
+//
+// ## Purpose
+// Limits request rate using token bucket algorithm.
+//
+// ## Design Notes
+// - Per-client limits based on remote address
+// - Refill rate controls sustained throughput
+// - Burst size allows temporary spikes
+message RateLimitMiddlewareConfig {
+  // Tokens refilled per second (sustained rate)
+  double refill_rate = 1;
+
+  // Maximum burst size (tokens)
+  uint32 burst_size = 2;
+
+  // Whether to rate limit per client IP
+  bool per_client = 3;
+
+  // HTTP status code for rate limit exceeded (429)
+  int32 status_code = 4;
+}
+
+// JWT Claims
+//
+// ## Purpose
+// Standard JWT claims structure for token validation.
+//
+// ## Design Notes
+// - Follows RFC 7519 (JSON Web Token)
+// - Standard claims: sub (subject), exp (expiration), iat (issued at)
+// - Custom claims: roles (for RBAC), tenant_id (for multi-tenancy)
+message JwtClaims {
+  // Subject (user ID)
+  string sub = 1;
+
+  // Expiration time (Unix timestamp)
+  int64 exp = 2;
+
+  // Issued at time (Unix timestamp)
+  int64 iat = 3;
+
+  // Issuer (who issued the token)
+  string iss = 4;
+
+  // Audience (who the token is intended for)
+  repeated string aud = 5;
+
+  // User roles (for RBAC)
+  repeated string roles = 6;
+
+  // Tenant ID (for multi-tenancy)
+  string tenant_id = 7;
+
+  // Custom claims (extensible)
+  map<string, string> custom_claims = 8;
+}
+
+// Authentication middleware configuration
+//
+// ## Purpose
+// Authenticates requests using tokens, certificates, or RBAC.
+//
+// ## Design Notes
+// - Supports multiple auth methods (can be combined)
+// - Token validation can be JWT or custom
+message AuthMiddlewareConfig {
+  // Authentication method
+  AuthMethod method = 1;
+
+  // JWT secret or public key path (for JWT method)
+  string jwt_key = 2;
+
+  // RBAC policy configuration
+  RbacConfig rbac = 3;
+
+  // Whether to allow unauthenticated requests (permissive mode)
+  bool allow_unauthenticated = 4;
+
+  // mTLS configuration (for AUTH_METHOD_MTLS)
+  // References security.proto MtlsConfig for service-to-service authentication
+  string mtls_ca_certificate = 5;  // CA certificate path or PEM content for validation
+
+  // Trusted services for mTLS (service IDs allowed to connect)
+  // If empty, all services with valid certificates are allowed
+  repeated string mtls_trusted_services = 6;
+}
+
+// Authentication method
+enum AuthMethod {
+  AUTH_METHOD_UNSPECIFIED = 0;
+  AUTH_METHOD_JWT = 1;          // JSON Web Token
+  AUTH_METHOD_MTLS = 2;         // Mutual TLS (use MtlsMiddleware)
+  AUTH_METHOD_RBAC = 3;         // Role-Based Access Control
+  AUTH_METHOD_TOKEN = 4;        // Bearer token
+}
+
+// RBAC configuration
+message RbacConfig {
+  // Role definitions (role name → permissions)
+  map<string, RolePermissions> roles = 1;
+
+  // User-to-role assignments (user ID → role names)
+  map<string, RoleAssignments> user_roles = 2;
+}
+
+// Role permissions
+message RolePermissions {
+  // Allowed gRPC services (e.g., "ActorService")
+  repeated string allowed_services = 1;
+
+  // Allowed gRPC methods (e.g., "SpawnActor")
+  repeated string allowed_methods = 2;
+}
+
+// Role assignments for a user
+message RoleAssignments {
+  // Role names assigned to this user
+  repeated string roles = 1;
+}
+
+// Circuit breaker middleware configuration
+//
+// ## Purpose
+// Fails fast when downstream service is unhealthy.
+//
+// ## States
+// - CLOSED: Requests pass through normally
+// - OPEN: Requests fail immediately (circuit "open")
+// - HALF_OPEN: Test requests to check if service recovered
+//
+// ## Design Notes
+// - Threshold determines when to open circuit
+// - Timeout determines when to try recovery
+message CircuitBreakerMiddlewareConfig {
+  // Failure threshold to open circuit
+  uint32 failure_threshold = 1;
+
+  // Success threshold to close circuit (in half-open state)
+  uint32 success_threshold = 2;
+
+  // Timeout before trying recovery (duration in half-open state)
+  google.protobuf.Duration timeout = 3;
+
+  // Time window for counting failures
+  google.protobuf.Duration window = 4;
+}
+
+// Retry middleware configuration
+//
+// ## Purpose
+// Automatically retries failed requests with exponential backoff.
+//
+// ## Design Notes
+// - Only retries idempotent methods by default
+// - Backoff prevents overwhelming downstream service
+message RetryMiddlewareConfig {
+  // Maximum retry attempts
+  uint32 max_retries = 1;
+
+  // Initial retry delay
+  google.protobuf.Duration initial_delay = 2;
+
+  // Maximum retry delay
+  google.protobuf.Duration max_delay = 3;
+
+  // Backoff multiplier (2.0 = exponential)
+  double backoff_factor = 4;
+
+  // Retryable gRPC status codes
+  repeated int32 retryable_status_codes = 5;
+}
+
+// Logging middleware configuration
+//
+// ## Purpose
+// Logs gRPC requests/responses in structured JSON format.
+//
+// ## Design Notes
+// - Can log to stdout, file, or syslog
+// - Log level controls verbosity
+message LoggingMiddlewareConfig {
+  // Log level
+  LogLevel level = 1;
+
+  // Log destination
+  LogDestination destination = 2;
+
+  // Log file path (if destination = FILE)
+  string log_file_path = 3;
+
+  // Whether to log request/response payloads
+  bool log_payloads = 4;
+
+  // Whether to log headers/metadata
+  bool log_headers = 5;
+}
+
+// Log level
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+// Log destination
+enum LogDestination {
+  LOG_DESTINATION_UNSPECIFIED = 0;
+  LOG_DESTINATION_STDOUT = 1;
+  LOG_DESTINATION_FILE = 2;
+  LOG_DESTINATION_SYSLOG = 3;
+}
+
+// ============================================================================
+// Interceptor Service - Proto-First Design
+// ============================================================================
+
+// Interceptor request context
+//
+// ## Purpose
+// Provides context about the incoming gRPC request for interceptors to inspect/modify.
+//
+// ## Design Notes
+// - Contains request metadata, path, headers
+// - Interceptors can add/remove headers
+// - Allows request rejection before handler execution
+// - Includes TLS certificate information for mTLS authentication
+message InterceptorRequest {
+  // gRPC method full path (e.g., "/plexspaces.actor.v1.ActorService/SpawnActor")
+  string method = 1;
+
+  // Request headers/metadata
+  map<string, string> headers = 2;
+
+  // Remote client address
+  string remote_addr = 3;
+
+  // Request timestamp
+  google.protobuf.Timestamp timestamp = 4;
+
+  // Request ID for correlation
+  string request_id = 5;
+
+  // TLS peer certificate (PEM format) for mTLS authentication
+  // Extracted from TLS connection during handshake
+  // Empty if connection is not using TLS or mTLS is not enabled
+  string peer_certificate = 6;
+
+  // Service identity extracted from peer certificate (CN or SAN)
+  // Set by TLS layer after certificate validation
+  // Used by mTLS interceptor for service-to-service authentication
+  string peer_service_id = 7;
+}
+
+// Interceptor response context
+//
+// ## Purpose
+// Provides context about the gRPC response for interceptors to inspect/modify.
+//
+// ## Design Notes
+// - Contains response metadata, status, headers
+// - Interceptors can add response headers
+message InterceptorResponse {
+  // Response status code
+  int32 status_code = 1;
+
+  // Response headers/metadata
+  map<string, string> headers = 2;
+
+  // Response timestamp
+  google.protobuf.Timestamp timestamp = 3;
+
+  // Request duration (calculated by interceptor chain)
+  google.protobuf.Duration duration = 4;
+}
+
+// Interceptor decision
+//
+// ## Purpose
+// Represents the decision made by an interceptor (allow, deny, modify).
+//
+// ## Design Notes
+// - ALLOW: Continue to next interceptor or handler
+// - DENY: Reject request immediately
+// - MODIFY: Continue with modified request
+enum InterceptorDecision {
+  INTERCEPTOR_DECISION_UNSPECIFIED = 0;
+  INTERCEPTOR_DECISION_ALLOW = 1;   // Allow request to proceed
+  INTERCEPTOR_DECISION_DENY = 2;    // Reject request (short-circuit chain)
+  INTERCEPTOR_DECISION_MODIFY = 3;  // Modify request and proceed
+}
+
+// Interceptor result
+//
+// ## Purpose
+// Result of interceptor execution (decision + optional modifications).
+//
+// ## Design Notes
+// - If decision=DENY, error_message must be set
+// - If decision=MODIFY, modified headers can be provided
+message InterceptorResult {
+  // Interceptor decision
+  InterceptorDecision decision = 1;
+
+  // Error message if denied
+  string error_message = 2;
+
+  // Modified headers (if decision=MODIFY)
+  map<string, string> modified_headers = 3;
+
+  // Metrics emitted by this interceptor
+  repeated MetricSample metrics = 4;
+}
+
+// Metric sample emitted by interceptor
+//
+// ## Purpose
+// Represents a single metric observation from an interceptor.
+//
+// ## Examples
+// - Counter: grpc_requests_total{service="ActorService", method="SpawnActor"} 1
+// - Histogram: grpc_request_duration_seconds{service="ActorService"} 0.042
+message MetricSample {
+  // Metric name
+  string name = 1;
+
+  // Metric type
+  MetricType type = 2;
+
+  // Metric value
+  double value = 3;
+
+  // Metric labels
+  map<string, string> labels = 4;
+
+  // Timestamp
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+// Metric type
+enum MetricType {
+  METRIC_TYPE_UNSPECIFIED = 0;
+  METRIC_TYPE_COUNTER = 1;
+  METRIC_TYPE_GAUGE = 2;
+  METRIC_TYPE_HISTOGRAM = 3;
+  METRIC_TYPE_SUMMARY = 4;
+}
+
+// ============================================================================
+// Interceptor Service (Optional - for custom interceptor plugins)
+// ============================================================================
+
+// Interceptor service
+//
+// ## Purpose
+// Defines the gRPC service interface for custom interceptor plugins.
+// This allows external services to act as interceptors in the middleware chain.
+//
+// ## Use Cases
+// - Custom authentication service
+// - External policy enforcement
+// - Third-party security scanners
+//
+// ## Design Notes
+// - Most interceptors will be built-in (not external services)
+// - This service is for advanced use cases requiring external logic
+// - Performance overhead: Each external interceptor adds network latency
+service InterceptorService {
+  // Intercept request before handler
+  //
+  // ## Purpose
+  // Called before request reaches gRPC handler.
+  // Interceptor can allow, deny, or modify the request.
+  //
+  // ## Returns
+  // InterceptorResult with decision (ALLOW, DENY, MODIFY)
+  rpc BeforeRequest(InterceptorRequest) returns (InterceptorResult) {
+    option (google.api.http) = {
+      post: "/v1/interceptor/before"
+      body: "*"
+    };
+  }
+
+  // Intercept response after handler
+  //
+  // ## Purpose
+  // Called after gRPC handler produces response.
+  // Interceptor can modify response headers.
+  //
+  // ## Returns
+  // InterceptorResult with optional modified headers
+  rpc AfterResponse(InterceptorResponse) returns (InterceptorResult) {
+    option (google.api.http) = {
+      post: "/v1/interceptor/after"
+      body: "*"
+    };
+  }
+}

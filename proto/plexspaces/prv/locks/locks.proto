@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Distributed Lock/Lease API (Private/Internal)
+//
+// ## Purpose
+// Provides distributed lock/lease coordination for background schedulers and
+// other coordination tasks. Uses version-based optimistic locking for atomic
+// operations, similar to db-locks implementation pattern.
+//
+// ## Architecture Context
+// This proto file is used internally by:
+// - **Background Scheduler**: Lease-based coordination to ensure only one
+//   scheduler processes requests at a time
+// - **Future Coordination Tasks**: Any component that needs distributed locking
+//
+// ## Design Decisions
+// - **Version-based optimistic locking**: Prevents lost updates in concurrent scenarios
+// - **Timestamp-based expiration**: Stale lock detection for fault tolerance
+// - **Heartbeat mechanism**: Renews lease expiration timestamp periodically
+// - **Backend-agnostic**: Supports SQL (PostgreSQL/SQLite) or Redis backends
+
+syntax = "proto3";
+
+package plexspaces.locks.prv;
+
+import "google/protobuf/timestamp.proto";
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/prv;plexspacesprv";
+option java_package = "com.bhatti.plexspaces.locks.prv";
+option java_multiple_files = true;
+
+// Distributed lock/lease for coordination
+message Lock {
+  // Lock key (unique identifier)
+  string lock_key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Node/process ID holding the lock
+  string holder_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Lock version (for optimistic locking)
+  // Format: ULID or UUID (monotonically increasing for ordering)
+  string version = 3 [(buf.validate.field).string = {min_len: 1, max_len: 64}];
+  
+  // Lock expiration timestamp
+  google.protobuf.Timestamp expires_at = 4;
+  
+  // Lease duration (seconds)
+  uint32 lease_duration_secs = 5 [(buf.validate.field).uint32 = {gte: 1, lte: 3600}];
+  
+  // Last heartbeat timestamp
+  google.protobuf.Timestamp last_heartbeat = 6;
+  
+  // Lock metadata (optional)
+  map<string, string> metadata = 7;
+  
+  // Whether lock is currently held
+  bool locked = 8;
+}
+
+// Lock acquisition options
+message AcquireLockOptions {
+  // Lock key (unique identifier)
+  string lock_key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Holder ID (node/process ID requesting the lock)
+  string holder_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Lease duration (seconds)
+  uint32 lease_duration_secs = 3 [(buf.validate.field).uint32 = {gte: 1, lte: 3600}];
+  
+  // Total wait time for acquisition (milliseconds)
+  // 0 = try once, no retry
+  uint32 additional_wait_time_ms = 4;
+  
+  // Polling interval for retry (milliseconds)
+  // Used when additional_wait_time_ms > 0
+  uint32 refresh_period_ms = 5 [(buf.validate.field).uint32 = {gte: 100, lte: 60000}];
+  
+  // Lock metadata (optional)
+  map<string, string> metadata = 6;
+}
+
+// Lock renewal options (heartbeat)
+message RenewLockOptions {
+  // Lock key (unique identifier)
+  string lock_key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Holder ID (must match current holder)
+  string holder_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Current version (must match for optimistic locking)
+  string version = 3 [(buf.validate.field).string = {min_len: 1, max_len: 64}];
+  
+  // Lease duration (seconds) - extends expiration
+  uint32 lease_duration_secs = 4 [(buf.validate.field).uint32 = {gte: 1, lte: 3600}];
+  
+  // Lock metadata (optional, updates existing)
+  map<string, string> metadata = 5;
+}
+
+// Lock release options
+message ReleaseLockOptions {
+  // Lock key (unique identifier)
+  string lock_key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Holder ID (must match current holder)
+  string holder_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  
+  // Current version (must match for optimistic locking)
+  string version = 3 [(buf.validate.field).string = {min_len: 1, max_len: 64}];
+  
+  // Delete lock entry after release
+  // false = keep entry (for audit trail)
+  // true = remove entry completely
+  bool delete_lock = 4;
+}
+

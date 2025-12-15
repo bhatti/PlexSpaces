@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+[package]
+name = "plexspaces-workflow"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+description = "Simple, durable workflow orchestration for PlexSpaces"
+repository = "https://github.com/bhatti/plexspaces"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+keywords = ["workflow", "orchestration", "actors", "durability", "step-functions"]
+categories = ["concurrency", "database"]
+
+[dependencies]
+# Core PlexSpaces dependencies
+plexspaces-core = { path = "../core" }
+plexspaces-actor = { path = "../actor" }
+plexspaces-behavior = { path = "../behavior" }
+plexspaces-persistence = { path = "../persistence" }
+plexspaces-proto = { path = "../proto" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Database (for workflow metadata)
+sqlx = { workspace = true }
+
+# IDs
+ulid = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+[dev-dependencies]
+# Testing
+tokio-test = { workspace = true }
+tempfile = { workspace = true }
+
+[features]
+default = []
+sqlite = ["sqlx/sqlite"]
+postgres = ["sqlx/postgres"]

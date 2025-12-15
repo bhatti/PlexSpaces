@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Finance Risk Assessment - Node 3 (Risk Scoring)
+#
+# Role: ML-based risk scoring and decision logic
+# Components:
+#   - RiskScoringWorker (1 worker with ML model loaded)
+#
+# Dependencies: None (worker waits for coordinator requests)
+# Note: Single worker due to large ML model footprint (GPU-bound)
+
+[release]
+name = "finance-risk-scoring"
+version = "0.1.0"
+description = "Finance Risk Assessment ML Risk Scoring Worker"
+
+[node]
+id = "finance-risk-scoring"
+listen_address = "0.0.0.0:9103"
+cluster_seed_nodes = [
+    "finance-coordinator:9101",
+    "finance-data-collection:9102",
+    "finance-post-decision:9104"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9103"
+max_connections = 50
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "finance-risk-secret-key"
+allow_unauthenticated = true
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 20  # ML inference rate limit
+burst_size = 5
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "finance-risk-scoring"
+sampling_rate = 1.0
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+[[applications]]
+name = "finance-risk-scoring-worker"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 60
+shutdown_strategy = "graceful"
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "worker"
+# Risk Scoring Worker (1 worker)
+RISK_SCORING_WORKERS = "1"
+RISK_SCORING_ENABLED = "true"
+# All other workers disabled
+CREDIT_CHECK_POOL_ENABLED = "false"
+BANK_ANALYSIS_POOL_ENABLED = "false"
+EMPLOYMENT_POOL_ENABLED = "false"
+NOTIFICATION_POOL_ENABLED = "false"
+# Coordinator address
+COORDINATOR_ADDRESS = "finance-coordinator:9101"
+# ML Model configuration
+ML_MODEL_PATH = "/models/risk_scoring_model.onnx"
+ML_MODEL_TYPE = "onnx"  # onnx, tensorflow, pytorch
+ML_FRAMEWORK = "onnx-runtime"
+# GPU settings (if available)
+ML_USE_GPU = "false"
+ML_GPU_DEVICE_ID = "0"
+# Model inference settings
+ML_BATCH_SIZE = "1"  # Single application at a time
+ML_INFERENCE_THREADS = "4"
+# Feature engineering
+FEATURE_NORMALIZATION = "standard"
+FEATURE_SCALING = "minmax"
+
+# Resource limits (ML inference - CPU or GPU bound)
+[resources]
+max_memory_mb = 4096  # ML model loaded in memory
+max_cpu_percent = 90  # High CPU for inference
+
+[shutdown]
+global_timeout_seconds = 120
+grace_period_seconds = 10
+grpc_drain_timeout_seconds = 30

@@ -1,0 +1,263 @@
+[workspace]
+members = [
+    ".",
+    "crates/proto",
+    "crates/lattice",
+    "crates/mailbox",
+    "crates/persistence",
+    "crates/journaling",
+    "crates/tuplespace",
+    "crates/tuplespace-service",
+    "crates/keyvalue",
+    "crates/facet",
+    "crates/core",
+    "crates/behavior",
+    "crates/actor",
+    "crates/actor-service",
+    "crates/node",
+    "crates/supervisor",
+    "crates/grpc-middleware",
+    "crates/wasm-runtime",
+    "crates/firecracker",
+    "crates/workflow",
+    "crates/process-groups",
+    "crates/channel",
+    "crates/object-registry",
+    "crates/elastic-pool",
+    "crates/circuit-breaker",
+    "crates/locks",
+    "crates/scheduler",
+    "crates/cli",
+]
+exclude = [
+    "examples/*",  # Examples are standalone, not part of workspace
+]
+resolver = "2"
+
+# Main package definition
+[package]
+name = "plexspaces"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Distributed actor framework with 5 foundational pillars"
+
+[dependencies]
+# Core crates - TEMPORARILY COMMENTED OUT during re-export migration
+# During migration, crates depend on root (not the other way around)
+# Once migration is complete, we'll restore these or make root just re-export
+# plexspaces-proto = { path = "crates/proto" }
+# plexspaces-actor = { path = "crates/actor" }
+# plexspaces-mailbox = { path = "crates/mailbox" }
+# plexspaces-tuplespace = { path = "crates/tuplespace" }
+# plexspaces-supervisor = { path = "crates/supervisor" }
+# plexspaces-persistence = { path = "crates/persistence" }
+
+# Independent crates - no circular dependencies
+plexspaces-proto = { path = "crates/proto" }
+plexspaces-lattice = { path = "crates/lattice" }
+plexspaces-mailbox = { path = "crates/mailbox" }
+plexspaces-persistence = { path = "crates/persistence" }
+plexspaces-tuplespace = { path = "crates/tuplespace" }
+plexspaces-facet = { path = "crates/facet" }
+plexspaces-core = { path = "crates/core" }
+plexspaces-behavior = { path = "crates/behavior" }
+plexspaces-actor = { path = "crates/actor" }
+plexspaces-supervisor = { path = "crates/supervisor" }
+plexspaces-node = { path = "crates/node" }
+plexspaces-keyvalue = { path = "crates/keyvalue" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+ulid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# For testing framework
+tokio-test = "0.4"
+
+# Additional dependencies needed
+rand = "0.8"
+md5 = "0.7"
+hex = "0.4"
+
+[dev-dependencies]
+env_logger = { workspace = true }
+
+# Examples disabled - need to fix API mismatches
+# [[example]]
+# name = "simple_test"
+# path = "examples/simple_test.rs"
+#
+# [[example]]
+# name = "byzantine_testable"
+# path = "examples/byzantine_testable.rs"
+#
+# [[example]]
+# name = "byzantine_simple"
+# path = "examples/byzantine_simple.rs"
+
+[lib]
+name = "plexspaces"
+path = "src/lib.rs"
+
+[features]
+default = []
+redis-backend = ["plexspaces-tuplespace/redis-backend", "plexspaces-keyvalue/redis-backend"]
+sql-backend = ["plexspaces-tuplespace/sql-backend", "plexspaces-keyvalue/sql-backend"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bhatti/plexspaces"
+keywords = ["actors", "distributed", "microvm", "workflow", "tuplespace"]
+categories = ["concurrency", "distributed-systems", "web-programming"]
+
+[workspace.dependencies]
+# Core async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+futures = "0.3"
+async-trait = "0.1"
+async-stream = "0.3"
+
+# gRPC and HTTP
+tonic = { version = "0.10", features = ["gzip", "tls"] }
+tonic-reflection = "0.10"
+tonic-health = "0.10"
+tonic-web = "0.10"
+prost = "0.12"
+prost-types = "0.12"
+prost-build = "0.12"
+
+# HTTP gateway
+axum = { version = "0.7", features = ["ws", "headers", "multipart"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip"] }
+hyper = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+toml = "0.8"
+bytes = "1.7"
+bincode = "1.3"
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "v7", "serde"] }
+ulid = { version = "1.1", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+color-eyre = "0.6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.22"
+
+
+# Database
+sqlx = { version = "0.7", features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "sqlite",
+    "chrono",
+    "json",
+    "migrate"
+] }
+
+# Actor system
+#mongodb = { version = "2.8", features = ["tokio-runtime"] }
+# Database and persistence
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager", "aio"] }
+
+# WebAssembly runtime
+wasmtime = { version = "16.0", features = ["async", "pooling-allocator"] }
+wasmtime-wasi = "16.0"
+
+# Security and crypto
+jsonwebtoken = "9.2"
+argon2 = "0.5"
+ring = "0.17"
+rustls = "0.22"
+rustls-pemfile = "2.0"
+
+# Configuration and CLI
+clap = { version = "4.4", features = ["derive", "env"] }
+config = "0.14"
+dotenv = "0.15"
+
+# System and OS
+sysinfo = "0.30"
+nix = "0.27"
+
+# Development and testing
+env_logger = "0.11"
+
+# Internal crates
+plexspaces-proto = { path = "crates/proto" }
+plexspaces-lattice = { path = "crates/lattice" }
+plexspaces-mailbox = { path = "crates/mailbox" }
+plexspaces-persistence = { path = "crates/persistence" }
+plexspaces-tuplespace = { path = "crates/tuplespace" }
+plexspaces-keyvalue = { path = "crates/keyvalue" }
+plexspaces-facet = { path = "crates/facet" }
+plexspaces-core = { path = "crates/core" }
+plexspaces-behavior = { path = "crates/behavior" }
+plexspaces-actor = { path = "crates/actor" }
+plexspaces-node = { path = "crates/node" }
+plexspaces-supervisor = { path = "crates/supervisor" }
+plexspaces-wasm-runtime = { path = "crates/wasm-runtime" }
+plexspaces-firecracker = { path = "crates/firecracker" }
+plexspaces-workflow = { path = "crates/workflow" }
+plexspaces-channel = { path = "crates/channel" }
+plexspaces-elastic-pool = { path = "crates/elastic-pool" }
+plexspaces-circuit-breaker = { path = "crates/circuit-breaker" }
+plexspaces-locks = { path = "crates/locks" }
+plexspaces-scheduler = { path = "crates/scheduler" }
+plexspaces-object-registry = { path = "crates/object-registry" }
+plexspaces-process-groups = { path = "crates/process-groups" }
+plexspaces-journaling = { path = "crates/journaling" }
+plexspaces-actor-service = { path = "crates/actor-service" }
+
+# Add more workspace dependencies
+pretty_assertions = "1.4"
+tokio-test = "0.4"
+tempfile = "3.8"
+testcontainers = "0.15"
+wiremock = "0.5"
+proptest = "1.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.dev]
+opt-level = 0
+debug = true
+overflow-checks = true
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+inherits = "release"
+debug = true

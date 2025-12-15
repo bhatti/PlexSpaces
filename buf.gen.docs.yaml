@@ -1,0 +1,16 @@
+version: v1
+plugins:
+  # Generate markdown documentation
+  - plugin: doc
+    out: docs/proto
+    opt:
+      - markdown,docs.md
+
+  # Generate OpenAPI/Swagger specs
+  - plugin: openapiv2
+    out: docs/openapi
+    opt:
+      - generate_unbound_methods=true
+      - allow_merge=true
+      - merge_file_name=plexspaces_api
+      - simple_operation_ids=true

@@ -1,0 +1,18 @@
+# Node 1: CPU node for loaders and aggregators
+
+node_id = "node-1"
+listen_addr = "0.0.0.0:9000"
+backend = "redis"
+redis_url = "redis://localhost:6379"
+
+[labels]
+workload = "cpu-intensive"
+tier = "standard"
+
+[capacity]
+cpu_cores = 8.0
+memory_bytes = 16000000000  # 16GB
+disk_bytes = 100000000000   # 100GB
+gpu_count = 0
+gpu_type = ""
+

@@ -1,0 +1,911 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+
+syntax = "proto3";
+
+package plexspaces.persistence.prv;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/empty.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/prv;plexspacesprv";
+option java_package = "com.bhatti.plexspaces.persistence.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpace Persistence API";
+    version: "1.0";
+    description: "API for event sourcing and state persistence";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// Event for event sourcing
+message Event {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Event"
+      description: "Domain event for event sourcing"
+      required: ["id", "actor_id", "event_type", "data"]
+    }
+  };
+
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string actor_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string event_type = 3 [(google.api.field_behavior) = REQUIRED];
+  bytes data = 4 [(google.api.field_behavior) = REQUIRED];
+  uint64 sequence_number = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp timestamp = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  map<string, string> metadata = 7;
+  string correlation_id = 8;
+  string causation_id = 9;
+}
+
+// State snapshot
+//
+// ## DEPRECATION NOTICE
+// This message is part of the legacy persistence API (prv package).
+// For new implementations, use `Checkpoint` from plexspaces.journaling.v1 instead.
+//
+// ## Why Checkpoint is Preferred
+// - Checkpoint uses uint32 state_schema_version (clearer semantics)
+// - Checkpoint has compression support (3-5x smaller)
+// - Checkpoint has comprehensive versioning documentation
+// - Checkpoint is part of the public v1 API (not prv)
+//
+// ## Migration Path
+// If you're using Snapshot, consider migrating to Checkpoint:
+// ```rust
+// // Old: Snapshot (prv)
+// let snapshot = Snapshot {
+//     actor_id: "actor-123",
+//     data: state_bytes,
+//     version: "1",  // String version (unclear semantics)
+//     // ...
+// };
+//
+// // New: Checkpoint (v1)
+// let checkpoint = Checkpoint {
+//     actor_id: "actor-123",
+//     state_data: state_bytes,
+//     state_schema_version: 1,  // uint32 version (clear semantics)
+//     compression: CompressionType::Zstd,
+//     // ...
+// };
+// ```
+message Snapshot {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Snapshot"
+      description: "State snapshot for an actor (DEPRECATED: use Checkpoint from journaling.v1)"
+      required: ["actor_id", "data"]
+    }
+  };
+
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  bytes data = 2 [(google.api.field_behavior) = REQUIRED];
+  uint64 sequence_number = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp timestamp = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Snapshot version (DEPRECATED: semantics unclear)
+  //
+  // ## Purpose
+  // Intended to track snapshot format version, but semantics are ambiguous.
+  //
+  // ## Issues with This Field
+  // - **Unclear semantics**: Is this snapshot version, state version, or API version?
+  // - **String type**: Hard to compare versions (is "v2" > "1.0" > "2"?)
+  // - **No versioning strategy**: No documentation on compatibility rules
+  // - **No migration examples**: Unclear how to handle version mismatches
+  //
+  // ## Recommended Alternative
+  // Use `Checkpoint.state_schema_version` from plexspaces.journaling.v1:
+  // - Clear semantics: Version of serialized state_data format
+  // - uint32 type: Easy to compare (1 < 2 < 3)
+  // - Documented compatibility rules (Same/Older/Newer)
+  // - Migration examples provided
+  //
+  // ## If You Must Use This Field
+  // Recommended interpretation:
+  // - Use semantic versioning format: "1.0.0", "1.1.0", "2.0.0"
+  // - Parse and compare major.minor.patch components
+  // - Reject newer major versions (breaking changes)
+  // - Accept older major versions with migration
+  //
+  // ## See Also
+  // - `proto/plexspaces/v1/journaling.proto` - Checkpoint.state_schema_version (lines 241-321)
+  // - `docs/SCHEMA_VERSIONING_REVIEW.md` - Section 1.4 for details on this field
+  string version = 5;
+
+  map<string, string> metadata = 6;
+}
+
+// Message record for journaling
+//
+// ## Purpose
+// Records actor messages in the journal for deterministic replay.
+//
+// ## Why This Exists
+// - Enables message replay after actor crashes (Restate-inspired)
+// - Supports exactly-once message processing semantics
+// - Provides audit trail of all actor communications
+//
+// ## How It's Used
+// - Actor runtime calls RecordMessageReceived before processing
+// - On recovery, messages are replayed in order from journal
+// - Message IDs prevent duplicate processing
+message MessageRecord {
+  // Unique message identifier (ULID for time-based ordering)
+  string id = 1;
+
+  // Serialized message payload (opaque bytes)
+  bytes payload = 2;
+
+  // Message metadata (headers, correlation IDs, etc.)
+  map<string, string> metadata = 3;
+}
+
+// Processing result for journaled messages
+//
+// ## Purpose
+// Records the outcome of message processing for replay decisions.
+//
+// ## Why This Exists
+// - Deterministic replay requires knowing if processing succeeded or failed
+// - Retry logic needs to distinguish between retriable and non-retriable errors
+// - Audit trail for debugging failed message processing
+//
+// ## How It's Used
+// - Actor runtime records result after handle_message() completes
+// - On replay, successful messages are skipped (idempotent)
+// - Failed messages can be retried or sent to dead letter queue
+enum ProcessingResult {
+  PROCESSING_RESULT_UNSPECIFIED = 0;
+
+  // Message processed successfully (skip on replay)
+  PROCESSING_RESULT_SUCCESS = 1;
+
+  // Processing failed with non-retriable error
+  PROCESSING_RESULT_ERROR = 2;
+
+  // Processing failed but should be retried
+  PROCESSING_RESULT_RETRY = 3;
+}
+
+// Side effect for journaling external interactions
+//
+// ## Purpose
+// Records non-deterministic operations for deterministic replay.
+//
+// ## Why This Exists
+// - External calls (HTTP, database) are non-deterministic
+// - Timers/clocks/random numbers need to replay with same values
+// - Ensures replay produces identical results
+//
+// ## How It's Used
+// - Actor wraps external calls with journal.record_side_effect()
+// - On first execution, side effect is performed and result journaled
+// - On replay, journaled result is returned without re-executing
+//
+// ## Design Decisions
+// - Uses oneof for different side effect types (extensible)
+// - Response is optional (some side effects like timers have no response)
+message SideEffect {
+  oneof effect {
+    ExternalCall external_call = 1;
+    TimerScheduled timer_scheduled = 2;
+    TimerFired timer_fired = 3;
+    Sleep sleep = 4;
+    RandomGenerated random_generated = 5;
+    TimeAccessed time_accessed = 6;
+  }
+}
+
+// External service call side effect
+//
+// ## Purpose
+// Records external HTTP/gRPC/database calls for replay.
+//
+// ## Why Needed
+// - Network calls are non-deterministic (latency, failures, data changes)
+// - Must cache response to replay identical behavior
+//
+// ## How It Works
+// - First execution: Call service, journal request + response
+// - Replay: Return journaled response without calling service
+message ExternalCall {
+  // Service being called (e.g., "payment-api", "user-db")
+  string service = 1;
+
+  // Method/endpoint being invoked (e.g., "charge", "get_user")
+  string method = 2;
+
+  // Serialized request payload
+  bytes request = 3;
+
+  // Serialized response payload (empty if call failed)
+  bytes response = 4;
+}
+
+// Timer scheduled side effect
+//
+// ## Purpose
+// Records timer creation for deterministic replay.
+//
+// ## Why Needed
+// - Timers are scheduled at specific wall-clock times
+// - Replay must fire timers at same logical points
+message TimerScheduled {
+  // Timer name/identifier
+  string name = 1;
+
+  // Duration in milliseconds
+  uint64 duration_ms = 2;
+}
+
+// Timer fired side effect
+//
+// ## Purpose
+// Records when timer actually fired for replay.
+message TimerFired {
+  // Timer name that fired
+  string name = 1;
+}
+
+// Sleep/delay side effect
+//
+// ## Purpose
+// Records sleep duration for deterministic replay.
+//
+// ## Why Needed
+// - Sleep advances logical time in replay
+// - Ensures timing-dependent logic replays correctly
+message Sleep {
+  // Sleep duration in milliseconds
+  uint64 duration_ms = 1;
+}
+
+// Random value generation side effect
+//
+// ## Purpose
+// Records random values for deterministic replay.
+//
+// ## Why Needed
+// - Random number generation must replay with same values
+// - Ensures randomized algorithms produce identical results
+message RandomGenerated {
+  // Random bytes generated
+  bytes value = 1;
+}
+
+// Time access side effect
+//
+// ## Purpose
+// Records wall-clock time reads for deterministic replay.
+//
+// ## Why Needed
+// - Current time is non-deterministic
+// - Business logic using timestamps must replay with same values
+message TimeAccessed {
+  // Timestamp when current time was accessed
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+// Promise metadata (Restate-inspired durable promises)
+//
+// ## Purpose
+// Metadata for creating durable promises that survive actor crashes.
+//
+// ## Why This Exists
+// - Promises enable async coordination between actors
+// - Must survive crashes (unlike in-memory futures)
+// - Supports exactly-once delivery with idempotency keys
+//
+// ## How It's Used
+// - Actor creates promise with journal.record_promise_created()
+// - Promise persists across crashes/restarts
+// - Completion triggers dependent actors
+message PromiseMetadata {
+  // Actor ID that created the promise
+  string creator_id = 1;
+
+  // Optional timeout in milliseconds (0 = no timeout)
+  uint64 timeout_ms = 2;
+
+  // Optional idempotency key for deduplication
+  string idempotency_key = 3;
+}
+
+// Promise result (fulfilled, rejected, or timed out)
+//
+// ## Purpose
+// Records the outcome of a durable promise.
+//
+// ## Why This Exists
+// - Promises can succeed (fulfilled) or fail (rejected/timeout)
+// - Result must be journaled for replay
+// - Dependent actors need to know outcome
+//
+// ## How It's Used
+// - Promise resolver calls journal.record_promise_resolved()
+// - Result is persisted and broadcast to waiters
+// - On replay, promise completes with same result
+message PromiseResult {
+  oneof result {
+    // Promise fulfilled with value
+    bytes fulfilled = 1;
+
+    // Promise rejected with error message
+    string rejected = 2;
+
+    // Promise timed out (true if timed out)
+    bool timeout = 3;
+  }
+}
+
+// Journal entry combining events and snapshots
+message JournalEntry {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Journal Entry"
+      description: "Entry in the event journal"
+    }
+  };
+
+  oneof entry {
+    Event event = 1;
+    Snapshot snapshot = 2;
+  }
+}
+
+// Request to append events
+message AppendEventsRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Append Events Request"
+      description: "Request to append events to the journal"
+      required: ["actor_id", "events"]
+    }
+  };
+
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated Event events = 2 [(google.api.field_behavior) = REQUIRED];
+  uint64 expected_sequence = 3; // Optimistic concurrency control
+}
+
+message AppendEventsResponse {
+  repeated uint64 sequence_numbers = 1;
+}
+
+// Request to read events
+message ReadEventsRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Read Events Request"
+      description: "Request to read events from the journal"
+      required: ["actor_id"]
+    }
+  };
+
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  uint64 from_sequence = 2;
+  uint64 to_sequence = 3;
+  int32 max_events = 4;
+}
+
+message ReadEventsResponse {
+  repeated Event events = 1;
+  bool has_more = 2;
+  uint64 last_sequence = 3;
+}
+
+// Request to save snapshot
+message SaveSnapshotRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Save Snapshot Request"
+      description: "Request to save a state snapshot"
+      required: ["snapshot"]
+    }
+  };
+
+  Snapshot snapshot = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message SaveSnapshotResponse {
+  uint64 sequence_number = 1;
+}
+
+// Request to load snapshot
+message LoadSnapshotRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Load Snapshot Request"
+      description: "Request to load the latest snapshot"
+      required: ["actor_id"]
+    }
+  };
+
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message LoadSnapshotResponse {
+  Snapshot snapshot = 1;
+}
+
+// Request to create checkpoint
+message CreateCheckpointRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Create Checkpoint Request"
+      description: "Request to create a checkpoint"
+      required: ["actor_id", "sequence_number"]
+    }
+  };
+
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  uint64 sequence_number = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message CreateCheckpointResponse {
+  google.protobuf.Timestamp checkpoint_time = 1;
+}
+
+// Request to record message received
+//
+// ## Purpose
+// Records that an actor received a message (before processing).
+//
+// ## Why This Exists
+// - First step in exactly-once message processing
+// - Enables replay to skip already-processed messages
+// - Provides audit trail of all incoming messages
+//
+// ## How It's Used
+// - Called by actor runtime before invoking handle_message()
+// - On replay, runtime checks if message was already processed
+message RecordMessageReceivedRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  MessageRecord message = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RecordMessageReceivedResponse {
+  uint64 sequence_number = 1;
+}
+
+// Request to record message processed
+//
+// ## Purpose
+// Records the outcome of message processing.
+//
+// ## Why This Exists
+// - Completes exactly-once processing cycle
+// - Records success/failure for retry logic
+// - Enables time-travel debugging of message handling
+message RecordMessageProcessedRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string message_id = 2 [(google.api.field_behavior) = REQUIRED];
+  ProcessingResult result = 3;
+  string error_message = 4; // Populated if result is ERROR or RETRY
+}
+
+message RecordMessageProcessedResponse {
+  uint64 sequence_number = 1;
+}
+
+// Request to record state change
+//
+// ## Purpose
+// Journals actor state mutations for recovery.
+//
+// ## Why This Exists
+// - Enables state reconstruction from journal
+// - Supports incremental state updates between snapshots
+// - Provides state change audit trail
+//
+// ## How It's Used
+// - Called after actor state is modified
+// - On recovery, state changes are replayed in sequence
+// - Snapshots periodically created to speed recovery
+message RecordStateChangeRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  bytes old_state = 2; // Hash or full state for verification
+  bytes new_state = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RecordStateChangeResponse {
+  uint64 sequence_number = 1;
+}
+
+// Request to record side effect
+//
+// ## Purpose
+// Journals non-deterministic operations for deterministic replay.
+//
+// ## Why This Exists
+// - External calls, timers, random numbers are non-deterministic
+// - Replay must use cached results instead of re-executing
+// - Ensures identical behavior on recovery
+//
+// ## How It's Used
+// - Actor wraps non-deterministic operations with this RPC
+// - First execution performs operation and journals result
+// - Replay returns journaled result without re-execution
+message RecordSideEffectRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  SideEffect effect = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RecordSideEffectResponse {
+  uint64 sequence_number = 1;
+}
+
+// Request to record promise created
+//
+// ## Purpose
+// Creates a durable promise that survives actor crashes.
+//
+// ## Why This Exists
+// - Promises enable async actor coordination
+// - Must persist across failures (Restate-inspired)
+// - Supports idempotent promise creation
+//
+// ## How It's Used
+// - Actor calls this when creating async operation
+// - Promise ID used to track completion
+// - Timeout ensures promises don't hang forever
+message RecordPromiseCreatedRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string promise_id = 2 [(google.api.field_behavior) = REQUIRED];
+  PromiseMetadata metadata = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RecordPromiseCreatedResponse {
+  uint64 sequence_number = 1;
+}
+
+// Request to record promise resolved
+//
+// ## Purpose
+// Records promise completion (fulfilled or rejected).
+//
+// ## Why This Exists
+// - Notifies waiting actors of promise outcome
+// - Result is journaled for replay
+// - Enables promise-based workflows
+//
+// ## How It's Used
+// - Called when async operation completes
+// - Wakes up actors waiting on promise
+// - On replay, promise completes immediately with cached result
+message RecordPromiseResolvedRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string promise_id = 2 [(google.api.field_behavior) = REQUIRED];
+  PromiseResult result = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RecordPromiseResolvedResponse {
+  uint64 sequence_number = 1;
+}
+
+// Request to truncate journal
+//
+// ## Purpose
+// Removes old journal entries after snapshot is created.
+//
+// ## Why This Exists
+// - Prevents journal from growing unbounded
+// - Snapshots make old entries redundant
+// - Improves recovery performance
+//
+// ## How It's Used
+// - Called after successful snapshot creation
+// - Removes entries up to snapshot sequence number
+// - Keeps recent entries for incremental recovery
+message TruncateJournalRequest {
+  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
+  uint64 up_to_sequence = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message TruncateJournalResponse {
+  uint64 entries_removed = 1;
+}
+
+// Persistence service
+service PersistenceService {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Service for event sourcing and state persistence"
+  };
+
+  // Append events to journal
+  rpc AppendEvents(AppendEventsRequest) returns (AppendEventsResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/events"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Append Events"
+      description: "Append events to an actor's event journal"
+      tags: "Events"
+    };
+  }
+
+  // Read events from journal
+  rpc ReadEvents(ReadEventsRequest) returns (ReadEventsResponse) {
+    option (google.api.http) = {
+      get: "/v1/actors/{actor_id.id}/events"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Read Events"
+      description: "Read events from an actor's event journal"
+      tags: "Events"
+    };
+  }
+
+  // Save state snapshot
+  rpc SaveSnapshot(SaveSnapshotRequest) returns (SaveSnapshotResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{snapshot.actor_id.id}/snapshots"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Save Snapshot"
+      description: "Save a state snapshot for an actor"
+      tags: "Snapshots"
+    };
+  }
+
+  // Load state snapshot
+  rpc LoadSnapshot(LoadSnapshotRequest) returns (LoadSnapshotResponse) {
+    option (google.api.http) = {
+      get: "/v1/actors/{actor_id.id}/snapshots/latest"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Load Snapshot"
+      description: "Load the latest state snapshot for an actor"
+      tags: "Snapshots"
+    };
+  }
+
+  // Create checkpoint
+  rpc CreateCheckpoint(CreateCheckpointRequest) returns (CreateCheckpointResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/checkpoints"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create Checkpoint"
+      description: "Create a checkpoint for an actor"
+      tags: "Checkpoints"
+    };
+  }
+
+  // Record message received
+  //
+  // ## Purpose
+  // Journal that a message was received by an actor (before processing).
+  //
+  // ## Why This RPC Exists
+  // - First step in exactly-once message processing guarantee
+  // - Enables deduplication on replay (skip already-seen messages)
+  // - Provides complete message audit trail
+  //
+  // ## How It's Used
+  // - Called by actor runtime immediately upon message arrival
+  // - Message is journaled BEFORE handle_message() is invoked
+  // - On recovery, runtime checks journal to skip duplicate messages
+  rpc RecordMessageReceived(RecordMessageReceivedRequest) returns (RecordMessageReceivedResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/journal/messages/received"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Message Received"
+      description: "Record that an actor received a message"
+      tags: "Journal"
+    };
+  }
+
+  // Record message processed
+  //
+  // ## Purpose
+  // Journal the outcome of message processing (success/failure).
+  //
+  // ## Why This RPC Exists
+  // - Completes exactly-once processing cycle
+  // - Records whether processing succeeded or failed
+  // - Enables retry logic for failed messages
+  //
+  // ## How It's Used
+  // - Called after handle_message() completes (successfully or with error)
+  // - On replay, successful messages are skipped (already processed)
+  // - Failed messages can be retried or sent to dead letter queue
+  rpc RecordMessageProcessed(RecordMessageProcessedRequest) returns (RecordMessageProcessedResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/journal/messages/processed"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Message Processed"
+      description: "Record the outcome of message processing"
+      tags: "Journal"
+    };
+  }
+
+  // Record state change
+  //
+  // ## Purpose
+  // Journal actor state mutations for recovery.
+  //
+  // ## Why This RPC Exists
+  // - Enables state reconstruction without full snapshots
+  // - Provides incremental state updates between snapshots
+  // - Audit trail for debugging state corruption
+  //
+  // ## How It's Used
+  // - Called after actor modifies its internal state
+  // - On recovery, state changes are replayed to reconstruct current state
+  // - Periodic snapshots reduce replay time
+  rpc RecordStateChange(RecordStateChangeRequest) returns (RecordStateChangeResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/journal/state-changes"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record State Change"
+      description: "Record an actor state mutation"
+      tags: "Journal"
+    };
+  }
+
+  // Record side effect
+  //
+  // ## Purpose
+  // Journal non-deterministic operations for deterministic replay.
+  //
+  // ## Why This RPC Exists
+  // - External calls/timers/random numbers are non-deterministic
+  // - Replay must use cached results to ensure identical behavior
+  // - Prevents duplicate external calls on recovery
+  //
+  // ## How It's Used
+  // - Actor wraps non-deterministic operations with this call
+  // - First execution: Perform operation, journal request + response
+  // - Replay: Return journaled response without re-executing
+  //
+  // ## Examples
+  // - HTTP call to payment gateway (journal response to avoid double-charging)
+  // - Random number generation (replay uses cached value)
+  // - Current time access (replay uses journaled timestamp)
+  rpc RecordSideEffect(RecordSideEffectRequest) returns (RecordSideEffectResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/journal/side-effects"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Side Effect"
+      description: "Record a non-deterministic operation for replay"
+      tags: "Journal"
+    };
+  }
+
+  // Record promise created
+  //
+  // ## Purpose
+  // Create a durable promise that survives actor crashes (Restate-inspired).
+  //
+  // ## Why This RPC Exists
+  // - Promises enable async actor coordination
+  // - Must persist across crashes (unlike in-memory futures)
+  // - Supports idempotent creation with idempotency keys
+  //
+  // ## How It's Used
+  // - Actor creates promise for async operation (e.g., waiting for external event)
+  // - Promise persists in journal
+  // - Completion wakes up waiting actors
+  // - On crash, promise is restored from journal
+  //
+  // ## Examples
+  // - Waiting for user approval (promise resolved when user clicks button)
+  // - Aggregating results from multiple actors (promise resolves when all respond)
+  // - Timeout-based workflows (promise rejects after duration)
+  rpc RecordPromiseCreated(RecordPromiseCreatedRequest) returns (RecordPromiseCreatedResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/journal/promises"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Promise Created"
+      description: "Create a durable promise"
+      tags: "Journal"
+    };
+  }
+
+  // Record promise resolved
+  //
+  // ## Purpose
+  // Record promise completion (fulfilled or rejected).
+  //
+  // ## Why This RPC Exists
+  // - Notifies waiting actors of outcome
+  // - Result is journaled for replay
+  // - Enables promise-based workflows
+  //
+  // ## How It's Used
+  // - Called when async operation completes
+  // - Wakes up actors waiting on promise
+  // - On replay, promise completes immediately with cached result
+  //
+  // ## Examples
+  // - User approved request -> promise fulfilled with approval data
+  // - External service failed -> promise rejected with error
+  // - Timeout occurred -> promise rejected with timeout
+  rpc RecordPromiseResolved(RecordPromiseResolvedRequest) returns (RecordPromiseResolvedResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/journal/promises/{promise_id}/resolve"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Promise Resolved"
+      description: "Record promise completion"
+      tags: "Journal"
+    };
+  }
+
+  // Truncate journal
+  //
+  // ## Purpose
+  // Remove old journal entries after snapshot creation.
+  //
+  // ## Why This RPC Exists
+  // - Prevents journal from growing unbounded
+  // - Snapshots make old entries redundant
+  // - Improves recovery performance (less to replay)
+  //
+  // ## How It's Used
+  // - Called after successful snapshot creation
+  // - Removes entries up to snapshot sequence number
+  // - Keeps recent entries for incremental recovery
+  //
+  // ## Safety
+  // - Only truncates up to snapshot point (never loses data)
+  // - Atomic operation (all or nothing)
+  // - Can be safely called concurrently with other journal ops
+  rpc TruncateJournal(TruncateJournalRequest) returns (TruncateJournalResponse) {
+    option (google.api.http) = {
+      post: "/v1/actors/{actor_id.id}/journal/truncate"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Truncate Journal"
+      description: "Remove old journal entries after snapshot"
+      tags: "Journal"
+    };
+  }
+}
+

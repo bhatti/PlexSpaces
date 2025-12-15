@@ -1,0 +1,30 @@
+[workspace]
+
+[package]
+name = "supervision-tree"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+license = "LGPL-2.1-or-later"
+description = "Simple supervision tree example demonstrating Erlang/OTP-style fault tolerance"
+
+[dependencies]
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-supervisor = { path = "../../../crates/supervisor" }
+plexspaces-mailbox = { path = "../../../crates/mailbox" }
+plexspaces-behavior = { path = "../../../crates/behavior" }
+plexspaces-proto = { path = "../../../crates/proto" }
+
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.4", features = ["derive"] }
+
+[[bin]]
+name = "supervision_tree"
+path = "src/main.rs"

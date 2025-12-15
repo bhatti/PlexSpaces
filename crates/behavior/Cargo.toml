@@ -1,0 +1,39 @@
+[package]
+name = "plexspaces-behavior"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "OTP-style behaviors for PlexSpaces actor system"
+
+[dependencies]
+# Core types
+plexspaces-core = { workspace = true }
+plexspaces-mailbox = { workspace = true }
+plexspaces-persistence = { workspace = true }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+# Observability (CRITICAL - production-ready observability)
+metrics = "0.23"
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+
+[features]
+tracing = ["plexspaces-core/tracing"]
+
+[lib]
+name = "plexspaces_behavior"
+path = "src/lib.rs"

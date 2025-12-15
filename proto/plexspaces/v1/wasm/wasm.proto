@@ -1,0 +1,665 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces WebAssembly Runtime API
+//
+// ## Purpose
+// Defines the WebAssembly actor runtime for PlexSpaces, enabling polyglot
+// actors with sandboxed execution, dynamic deployment, and portable code.
+//
+// ## Architecture Context
+// This proto file implements WASM as the universal actor runtime:
+// - **Walking Skeleton Phase 6** (Week 11-12): WASM runtime foundation
+// - **Core Principle**: Compile all actors to WASM for portability
+// - **JavaNow Evolution**: Replaces mobile agents with code caching + state migration
+// - **Polyglot Support**: Rust, JavaScript (Javy), Go (TinyGo), Python (componentize-py)
+//
+// ## Integration Points
+// - **Actor System**: WASM actors implement ActorBehavior trait
+// - **Durability**: Integrates with existing journaling system (Priority 0)
+// - **TupleSpace**: WASM actors access TupleSpace via host functions
+// - **Firecracker**: Separate concern - launches entire applications in VMs (not actor-level)
+//
+// ## Component Interactions
+// - Used by: ActorService (spawn WASM actors), NodeService (module distribution)
+// - Depends on: actor.proto (ActorId, ActorBehavior), common.proto (Metadata)
+// - Provides: WasmRuntimeService (module deployment, instantiation)
+//
+// ## Design Decisions
+// 1. **wasmtime Runtime**: Production-ready, Component Model support (User Decision A1)
+// 2. **Component Model ABI**: Type-safe, composable, future-proof (User Decision A2)
+// 3. **Language Priority**: Rust → JavaScript → Go (User Decision A3)
+// 4. **Hybrid Distribution**: Pull with pre-warming (Design Question 4)
+// 5. **Basic Resource Limits**: Memory + fuel metering (User Decision A6)
+// 6. **WASI Capabilities**: Standard I/O model (User Decision A7)
+// 7. **Explicit Migration**: Simplest approach, aligns with core tenet (User Decision A8)
+// 8. **Balanced Performance**: Cold < 100ms, warm < 10ms (User Decision A10)
+//
+// ## Performance Targets
+// - **Cold Start**: < 100ms (module compilation + instantiation)
+// - **Warm Start**: < 10ms (instance from pool)
+// - **Migration**: < 10ms (state transfer only, code cached everywhere)
+// - **Memory Efficiency**: 2MB per actor (32x better than JavaNow's 64MB)
+// - **Throughput**: > 10,000 actors per node, > 100,000 messages/sec
+//
+// ## References
+// - Walking Skeleton Phase 6 (CLAUDE.md)
+// - JavaNow Modernization Roadmap (docs/WASM_DESIGN_QUESTIONS.md)
+// - WASI Preview 2: https://github.com/WebAssembly/WASI
+// - Component Model: https://github.com/WebAssembly/component-model
+
+syntax = "proto3";
+package plexspaces.wasm.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
+
+// WebAssembly module definition
+//
+// ## Purpose
+// Represents a compiled WebAssembly module that can be deployed to nodes
+// and instantiated as actors. Modules are immutable and content-addressed
+// for caching and deduplication.
+//
+// ## Why This Exists
+// - Enables dynamic code deployment (like Java classloader)
+// - Content-addressed hash allows efficient caching across nodes
+// - Metadata enables version management and dependency tracking
+// - Separation of code (module) and state (actor instance) enables fast migration
+//
+// ## Design Notes
+// - `module_bytes` is the compiled WASM binary (Component Model format)
+// - `module_hash` is SHA-256 for cache lookup and verification
+// - `wit_interface` is optional WIT definition for tooling/debugging
+// - Modules are immutable - updates create new versions with different hashes
+message WasmModule {
+  // Module name (e.g., "counter-actor", "chat-room-actor")
+  //
+  // Used for human-readable identification and registry lookups.
+  string name = 1;
+
+  // Module version (semantic versioning: "1.2.3")
+  //
+  // Enables gradual rollout and rollback of actor code.
+  string version = 2;
+
+  // Compiled WebAssembly Component Model bytes
+  //
+  // This is the actual WASM binary that will be loaded and instantiated.
+  // Must be a valid WASM Component Model module (not legacy WASM).
+  bytes module_bytes = 3;
+
+  // SHA-256 hash of module_bytes (for content-addressable caching)
+  //
+  // Format: hex-encoded 64-character string
+  // Example: "a1b2c3d4e5f6..."
+  //
+  // Why content-addressed:
+  // - Deduplication: Same module hash = same module, cache once
+  // - Verification: Ensure module integrity during distribution
+  // - Efficient lookup: Nodes can check cache before downloading
+  string module_hash = 4;
+
+  // WIT (WebAssembly Interface Types) interface definition (optional)
+  //
+  // Human-readable interface for tooling, debugging, and documentation.
+  // Not required for runtime (Component Model is self-describing).
+  string wit_interface = 5;
+
+  // Supported languages (e.g., "rust", "javascript", "go")
+  //
+  // Indicates source language for debugging and tooling.
+  repeated string source_languages = 6;
+
+  // Module metadata (tags, labels, annotations)
+  //
+  // Examples:
+  // - tags: ["production", "stateless", "compute-intensive"]
+  // - labels: {"team": "backend", "service": "payment"}
+  plexspaces.common.v1.Metadata metadata = 7;
+
+  // Upload timestamp (when module was first deployed to registry)
+  google.protobuf.Timestamp created_at = 8;
+
+  // Module size in bytes (uncompressed)
+  //
+  // Used for bandwidth estimation and pre-warming decisions.
+  uint64 size_bytes = 9;
+
+  // Schema version for forward/backward compatibility
+  uint32 version_number = 10;
+}
+
+// Resource limits for WASM actor instances
+//
+// ## Purpose
+// Defines resource constraints for WASM actors to prevent resource exhaustion
+// and ensure fair scheduling. Enforced by wasmtime runtime.
+//
+// ## Why This Exists
+// - Memory limits prevent OOM crashes (multi-tenant safety)
+// - Fuel metering prevents infinite loops (gas-style execution limits)
+// - Time limits prevent hung actors
+// - Stack limits prevent stack overflow
+//
+// ## Design Notes
+// - Limits are per-instance (each actor has own quota)
+// - Fuel is like Ethereum gas - metered during execution
+// - Defaults chosen for balanced workloads (can override per-actor)
+message ResourceLimits {
+  // Maximum linear memory size in bytes (default: 16MB)
+  //
+  // WASM linear memory is contiguous, growable.
+  // 16MB default balances:
+  // - Enough for most actors (2MB-8MB typical)
+  // - 64 actors per GB of RAM
+  // - 32x more efficient than JavaNow (64MB per actor)
+  uint64 max_memory_bytes = 1;
+
+  // Maximum stack size in bytes (default: 512KB)
+  //
+  // Stack overflow protection. Most actors use < 100KB.
+  uint64 max_stack_bytes = 2;
+
+  // Maximum fuel units (gas-style execution limit)
+  //
+  // Fuel is consumed during execution (ops, memory access, calls).
+  // Default: 10 billion units = ~1 second CPU time
+  // Zero = unlimited (not recommended for untrusted code)
+  uint64 max_fuel = 3;
+
+  // Maximum execution time per message (optional)
+  //
+  // If set, actor handler must complete within this duration.
+  // Default: None (rely on fuel metering instead)
+  google.protobuf.Duration max_execution_time = 4;
+
+  // Maximum table elements (for indirect calls)
+  //
+  // Default: 10,000 (enough for most actors)
+  uint32 max_table_elements = 5;
+
+  // Maximum number of instances in instance pool
+  //
+  // For warm start optimization. Default: 10 per actor type.
+  uint32 max_pooled_instances = 6;
+}
+
+// WASI capabilities for WASM actors
+//
+// ## Purpose
+// Defines what host resources a WASM actor can access. Based on WASI Preview 2
+// capability-based security model.
+//
+// ## Why This Exists
+// - **Principle of Least Privilege**: Actors only get capabilities they need
+// - **Facets Pattern Revival**: JavaNow-inspired capability composition
+// - **Security**: Sandboxed actors cannot access unauthorized resources
+// - **Auditing**: Capabilities are explicit and logged
+//
+// ## Design Notes
+// - Capabilities are granted at instantiation time (immutable per instance)
+// - WASI capabilities (filesystem, network, clocks) use WASI standard
+// - PlexSpaces capabilities (tuplespace, actors) are custom host functions
+// - Denied by default (opt-in model)
+message WasmCapabilities {
+  // Allow filesystem access (WASI filesystem interface)
+  //
+  // If true, actor can use WASI file operations (open, read, write).
+  // Paths are virtualized (actor cannot access arbitrary host paths).
+  bool allow_filesystem = 1;
+
+  // Filesystem root path (if filesystem access allowed)
+  //
+  // Actor's root is mapped to this host path (chroot-style).
+  // Example: "/actors/{actor_id}/data"
+  string filesystem_root = 2;
+
+  // Allow network access (WASI sockets interface)
+  //
+  // If true, actor can make outbound network connections.
+  // Inbound connections not supported (actors receive messages via mailbox).
+  bool allow_network = 3;
+
+  // Allow environment variables (WASI environment interface)
+  //
+  // If true, actor can read environment variables.
+  // Useful for configuration (but TupleSpace config preferred).
+  bool allow_env = 4;
+
+  // Allow random number generation (WASI random interface)
+  //
+  // If true, actor can use cryptographically secure random.
+  // Generally safe to allow.
+  bool allow_random = 5;
+
+  // Allow clock access (WASI clocks interface)
+  //
+  // If true, actor can read monotonic and wall-clock time.
+  // Required for timeouts, timestamps.
+  bool allow_clocks = 6;
+
+  // Allow TupleSpace operations (PlexSpaces-specific)
+  //
+  // If true, actor can call host functions: tuplespace_write, tuplespace_read, etc.
+  // Most actors need this for coordination.
+  bool allow_tuplespace = 7;
+
+  // Allow actor spawning (PlexSpaces-specific)
+  //
+  // If true, actor can spawn new actors via spawn_actor host function.
+  // Useful for supervisor actors, not needed for leaf actors.
+  bool allow_spawn_actors = 8;
+
+  // Allow message sending (PlexSpaces-specific)
+  //
+  // If true, actor can send messages to other actors via send_message host function.
+  // Almost all actors need this (inter-actor communication).
+  bool allow_send_messages = 9;
+
+  // Allow logging (PlexSpaces-specific)
+  //
+  // If true, actor can emit logs via log host function.
+  // Useful for debugging, not required for production actors.
+  bool allow_logging = 10;
+}
+
+// WASM actor configuration
+//
+// ## Purpose
+// Combines resource limits and capabilities into a complete configuration
+// for instantiating a WASM actor. Can be templated per actor type.
+//
+// ## Why This Exists
+// - **Reusable Profiles**: Define once, apply to many actors
+// - **Security Policies**: Enforce organizational security requirements
+// - **Resource Management**: Prevent resource exhaustion
+//
+// ## Design Notes
+// - Can create profiles: "untrusted" (minimal caps), "trusted" (full caps)
+// - Immutable after instantiation (cannot escalate privileges)
+message WasmConfig {
+  // Resource limits for this actor
+  ResourceLimits limits = 1;
+
+  // Capabilities granted to this actor
+  WasmCapabilities capabilities = 2;
+
+  // Configuration name (e.g., "default", "untrusted", "compute-intensive")
+  //
+  // Allows reusing configurations across actors.
+  string profile_name = 3;
+
+  // Enable instance pooling for warm starts
+  //
+  // If true, pre-instantiate instances for faster spawning.
+  // Trade-off: Memory usage vs latency.
+  bool enable_pooling = 4;
+
+  // Enable ahead-of-time (AOT) compilation
+  //
+  // If true, compile module to native code on deployment.
+  // Trade-off: Deployment time vs execution speed.
+  bool enable_aot = 5;
+}
+
+// Deploy WASM module request
+//
+// ## Purpose
+// Uploads a WASM module to the cluster registry and optionally pre-warms
+// nodes by pushing the module to their caches.
+//
+// ## Why This Exists
+// - **Hybrid Distribution**: Push announces availability, nodes can pull
+// - **Pre-warming**: Reduce cold start latency by pre-fetching modules
+// - **Version Management**: Deploy new versions without disrupting running actors
+//
+// ## Design Notes
+// - Module stored in cluster registry (e.g., S3, Redis, etcd)
+// - Nodes notified of new module (can pre-fetch if heuristics match)
+// - Idempotent: Re-deploying same module (same hash) is no-op
+message DeployWasmModuleRequest {
+  // WASM module to deploy
+  WasmModule module = 1;
+
+  // Pre-warm strategy
+  enum PreWarmStrategy {
+    // No pre-warming - nodes fetch on-demand (lazy)
+    NONE = 0;
+
+    // Announce to all nodes - they decide whether to pre-fetch
+    ANNOUNCE = 1;
+
+    // Push to all nodes immediately (eager)
+    PUSH_ALL = 2;
+
+    // Push to subset of nodes (e.g., based on tags)
+    PUSH_TAGGED = 3;
+  }
+
+  // How to distribute module to nodes
+  PreWarmStrategy pre_warm = 2;
+
+  // Node tags for PUSH_TAGGED strategy (e.g., ["us-east-1", "production"])
+  repeated string target_node_tags = 3;
+}
+
+// Deploy WASM module response
+message DeployWasmModuleResponse {
+  // Was deployment successful?
+  bool success = 1;
+
+  // Module hash (for cache lookup)
+  string module_hash = 2;
+
+  // Number of nodes that received the module (for pre-warming)
+  uint32 nodes_pre_warmed = 3;
+
+  // Error details if deployment failed (replaces error_message)
+  //
+  // If deployment succeeded, this field is not set (code = OK).
+  // If deployment failed, code indicates failure reason.
+  WasmError error = 4;
+}
+
+// Instantiate WASM actor request
+//
+// ## Purpose
+// Creates a new actor instance from a deployed WASM module. The instance
+// is initialized with provided state and configuration.
+//
+// ## Why This Exists
+// - **Dynamic Actor Creation**: Spawn actors at runtime (like erlang:spawn)
+// - **State Initialization**: Restore actor from snapshot or start fresh
+// - **Configuration Flexibility**: Each actor can have custom config
+//
+// ## Design Notes
+// - Module must be deployed first (or node will fetch on-demand)
+// - Initial state is opaque bytes (actor interprets based on module logic)
+// - Config can override module defaults (e.g., more memory for specific actor)
+message InstantiateActorRequest {
+  // Module name or hash to instantiate
+  //
+  // Supports both:
+  // - Name: "counter-actor@1.2.3" (fetches from registry)
+  // - Hash: "a1b2c3d4..." (direct cache lookup)
+  string module_ref = 1;
+
+  // Actor ID to assign to this instance
+  //
+  // Format: ULID for sortability (see CLAUDE.md Core Principle 0)
+  string actor_id = 2;
+
+  // Initial state bytes (opaque to runtime)
+  //
+  // Passed to WASM module's init() function.
+  // Can be:
+  // - Empty (new actor with default state)
+  // - Snapshot (restoring actor from checkpoint)
+  // - Migration state (actor moving to new node)
+  bytes initial_state = 3;
+
+  // Configuration overrides (optional)
+  //
+  // If not provided, uses module's default config or system defaults.
+  WasmConfig config = 4;
+
+  // Node ID to instantiate on (optional)
+  //
+  // If not provided, scheduler chooses node based on load balancing.
+  string target_node_id = 5;
+}
+
+// Instantiate WASM actor response
+message InstantiateActorResponse {
+  // Was instantiation successful?
+  bool success = 1;
+
+  // Actor ID of instantiated actor
+  string actor_id = 2;
+
+  // Node ID where actor is running
+  string node_id = 3;
+
+  // Instance creation time
+  google.protobuf.Timestamp created_at = 4;
+
+  // Error details if instantiation failed (replaces error_message)
+  //
+  // If instantiation succeeded, this field is not set (code = OK).
+  // If instantiation failed, code indicates failure reason.
+  WasmError error = 5;
+}
+
+// Migrate WASM actor request
+//
+// ## Purpose
+// Moves a running actor from one node to another. Only state migrates,
+// code (WASM module) is already cached on destination node.
+//
+// ## Why This Exists
+// - **Load Balancing**: Move actors to less loaded nodes
+// - **Node Shutdown**: Drain actors before maintenance
+// - **Locality Optimization**: Move actor closer to data
+//
+// ## Design Notes
+// - Explicit migration (user-initiated) - simplest approach (User Decision A8)
+// - Code cached everywhere - only state migrates (10ms vs 500ms)
+// - Atomic migration: Source actor paused until destination ready
+message MigrateActorRequest {
+  // Actor ID to migrate
+  string actor_id = 1;
+
+  // Source node ID (current location)
+  string source_node_id = 2;
+
+  // Destination node ID (target location)
+  string target_node_id = 3;
+
+  // Include journal entries (for durable actors)
+  //
+  // If true, migrate journal for replay on destination.
+  bool include_journal = 4;
+}
+
+// Migrate WASM actor response
+message MigrateActorResponse {
+  // Was migration successful?
+  bool success = 1;
+
+  // Migration duration (should be < 10ms for state-only)
+  google.protobuf.Duration migration_time = 2;
+
+  // Size of state transferred (bytes)
+  uint64 state_size_bytes = 3;
+
+  // Error details if migration failed
+  WasmError error = 4;
+}
+
+// WASM runtime error codes
+//
+// ## Purpose
+// Defines error categories for WASM operations. Used for gRPC status codes
+// and error reporting across language boundaries.
+//
+// ## Why This Exists
+// - **Proto-First**: Errors are part of the API contract (not Rust-only)
+// - **Multi-Language**: Error types available in all supported languages (TypeScript, Python SDKs)
+// - **gRPC Compatibility**: Maps to gRPC status codes for proper error handling
+// - **Structured Errors**: Clients can handle specific error types programmatically
+//
+// ## Design Notes
+// - Error codes are stable (don't reorder or change values)
+// - New error codes can be added at the end
+// - OK = 0 for consistency with gRPC conventions
+enum WasmErrorCode {
+  // Success (not an error)
+  WASM_ERROR_CODE_OK = 0;
+
+  // Module compilation failed
+  //
+  // Causes: Invalid WASM bytecode, unsupported features, syntax errors
+  // Recovery: Fix WASM module, use compatible toolchain
+  WASM_ERROR_CODE_COMPILATION_FAILED = 1;
+
+  // Module instantiation failed
+  //
+  // Causes: Import resolution errors, initialization errors, memory allocation failure
+  // Recovery: Check module dependencies, ensure host functions available
+  WASM_ERROR_CODE_INSTANTIATION_FAILED = 2;
+
+  // Resource limit exceeded (memory, fuel, CPU time)
+  //
+  // Causes: Actor exceeded memory/fuel/time quota
+  // Recovery: Increase limits or optimize actor code
+  WASM_ERROR_CODE_RESOURCE_LIMIT_EXCEEDED = 3;
+
+  // Capability denied (missing permission)
+  //
+  // Causes: Actor attempted unauthorized operation (filesystem, network, spawn)
+  // Recovery: Grant capability or remove unauthorized code
+  WASM_ERROR_CODE_CAPABILITY_DENIED = 4;
+
+  // Host function call failed
+  //
+  // Causes: Host function error (send_message failed, tuplespace_write failed)
+  // Recovery: Check host function arguments, retry
+  WASM_ERROR_CODE_HOST_FUNCTION_ERROR = 5;
+
+  // Actor function call failed
+  //
+  // Causes: Actor's exported function (init, handle_message) threw error or trapped
+  // Recovery: Fix actor code, check logs
+  WASM_ERROR_CODE_ACTOR_FUNCTION_ERROR = 6;
+
+  // Module cache error
+  //
+  // Causes: Cache lookup failed, eviction error, storage backend error
+  // Recovery: Retry, check cache backend health
+  WASM_ERROR_CODE_CACHE_ERROR = 7;
+
+  // Module hash mismatch (integrity check failed)
+  //
+  // Causes: Module bytes corrupted during transfer, malicious modification
+  // Recovery: Re-deploy module, check network integrity
+  WASM_ERROR_CODE_HASH_MISMATCH = 8;
+
+  // Module not found
+  //
+  // Causes: Module not deployed, evicted from cache, wrong name/version
+  // Recovery: Deploy module first, check name/version
+  WASM_ERROR_CODE_MODULE_NOT_FOUND = 9;
+
+  // Serialization/deserialization error
+  //
+  // Causes: Invalid protobuf, incompatible schema version
+  // Recovery: Check message format, ensure compatible versions
+  WASM_ERROR_CODE_SERIALIZATION_ERROR = 10;
+
+  // Internal wasmtime runtime error
+  //
+  // Causes: wasmtime internal error, runtime bug
+  // Recovery: Check logs, report bug, try different wasmtime version
+  WASM_ERROR_CODE_WASMTIME_ERROR = 11;
+}
+
+// WASM error details
+//
+// ## Purpose
+// Provides structured error information for debugging and error handling.
+// Replaces simple string error messages with typed, actionable error data.
+//
+// ## Why This Exists
+// - **Debugging**: Details map provides context (module name, actor ID, stack trace)
+// - **Client Handling**: Clients can programmatically handle specific error codes
+// - **Observability**: Error metrics can be tracked by code
+// - **Hash Mismatch**: Special fields for integrity check failures
+//
+// ## Design Notes
+// - Compatible with gRPC Status (code + message + details)
+// - Details map is extensible (add any key-value metadata)
+// - expected_hash/actual_hash only populated for HASH_MISMATCH errors
+//
+// ## Examples
+// ```
+// WasmError {
+//   code: RESOURCE_LIMIT_EXCEEDED,
+//   message: "Memory limit exceeded: 18MB > 16MB",
+//   details: {
+//     "actor_id": "calc-001@node2",
+//     "limit": "16777216",
+//     "actual": "18874368",
+//     "resource": "memory"
+//   }
+// }
+// ```
+message WasmError {
+  // Error code category
+  WasmErrorCode code = 1;
+
+  // Human-readable error message
+  //
+  // Format: Brief description suitable for logging and user display
+  // Example: "Module compilation failed: invalid opcode at offset 0x1234"
+  string message = 2;
+
+  // Additional context for debugging
+  //
+  // Common keys:
+  // - "actor_id": Actor that failed
+  // - "module_name": Module that failed
+  // - "module_hash": Module hash for integrity errors
+  // - "stack_trace": Stack trace if available
+  // - "resource": Resource type (memory, fuel, cpu_time)
+  // - "limit": Resource limit value
+  // - "actual": Actual resource usage
+  map<string, string> details = 3;
+
+  // For HASH_MISMATCH: expected hash (SHA-256 hex)
+  string expected_hash = 4;
+
+  // For HASH_MISMATCH: actual hash (SHA-256 hex)
+  string actual_hash = 5;
+}
+
+// WASM Runtime Service
+//
+// ## Purpose
+// gRPC service for WASM module deployment, actor instantiation, and migration.
+//
+// ## Why This Exists
+// - **Module Lifecycle**: Deploy, cache, evict modules
+// - **Actor Lifecycle**: Instantiate, migrate, terminate actors
+// - **Cluster Coordination**: Distributed module registry and actor placement
+//
+// ## Design Notes
+// - Service runs on every node (peer-to-peer, no central coordinator)
+// - Module registry can be backed by Redis, etcd, S3
+// - Actor placement can use consistent hashing or load-based scheduling
+service WasmRuntimeService {
+  // Deploy WASM module to cluster registry
+  rpc DeployModule(DeployWasmModuleRequest) returns (DeployWasmModuleResponse);
+
+  // Instantiate actor from deployed module
+  rpc InstantiateActor(InstantiateActorRequest) returns (InstantiateActorResponse);
+
+  // Migrate actor to different node
+  rpc MigrateActor(MigrateActorRequest) returns (MigrateActorResponse);
+}

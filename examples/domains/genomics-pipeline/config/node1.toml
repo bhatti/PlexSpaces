@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Genomics Pipeline - Node 1 (Coordinator)
+#
+# Role: Orchestrates the entire genomics workflow
+# Components:
+#   - GenomicsCoordinator (1 instance)
+#   - SQLite durability backend
+#
+# Dependencies: Requires nodes 2, 3, 4 to be running
+
+[release]
+name = "genomics-pipeline-coordinator"
+version = "0.1.0"
+description = "Genomics Pipeline Coordinator Node"
+
+[node]
+id = "genomics-coordinator"
+listen_address = "0.0.0.0:9001"
+# Cluster seed nodes (other nodes in the cluster)
+cluster_seed_nodes = [
+    "genomics-qc-alignment:9002",
+    "genomics-chromosomes:9003",
+    "genomics-annotation:9004"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9001"
+max_connections = 100
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "genomics-coordinator-secret-key"
+allow_unauthenticated = true  # Development mode
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 100
+burst_size = 20
+
+[[runtime.grpc.middleware]]
+type = "compression"
+enabled = true
+priority = 50
+[runtime.grpc.middleware.config.compression]
+min_compression_size_bytes = 1024
+algorithm = "gzip"
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "genomics-coordinator"
+sampling_rate = 1.0
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+# System applications
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+# Genomics Coordinator application
+[[applications]]
+name = "genomics-coordinator"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 60
+shutdown_strategy = "graceful"
+dependencies = []
+
+# Environment variables
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "coordinator"
+# Coordinator settings
+COORDINATOR_COUNT = "1"
+# Durability backend
+DURABILITY_BACKEND = "sqlite"
+SQLITE_PATH = "/data/genomics/coordinator.db"
+CHECKPOINT_INTERVAL = "10"
+# Cluster configuration
+CLUSTER_MODE = "distributed"
+QC_POOL_ADDRESS = "genomics-qc-alignment:9002"
+ALIGNMENT_POOL_ADDRESS = "genomics-qc-alignment:9002"
+CHROMOSOME_POOL_ADDRESS = "genomics-chromosomes:9003"
+ANNOTATION_POOL_ADDRESS = "genomics-annotation:9004"
+REPORT_POOL_ADDRESS = "genomics-annotation:9004"
+
+# Resource limits
+[resources]
+max_memory_mb = 512
+max_cpu_percent = 50
+
+# Graceful shutdown
+[shutdown]
+global_timeout_seconds = 120
+grace_period_seconds = 10
+grpc_drain_timeout_seconds = 30

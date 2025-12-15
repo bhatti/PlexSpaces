@@ -1,0 +1,48 @@
+[workspace]
+# This makes the example standalone, not part of PlexSpaces workspace
+
+[package]
+name = "genomic-workflow-pipeline"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# PlexSpaces workflow orchestration - THE KEY DEPENDENCY
+plexspaces-workflow = { path = "../../../crates/workflow" }
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-mailbox = { path = "../../../crates/mailbox" }
+plexspaces-behavior = { path = "../../../crates/behavior" }
+
+# CLI argument parsing
+clap = { version = "4.0", features = ["derive"] }
+
+# Configuration
+config = { version = "0.14", features = ["toml", "yaml"] }
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+ulid = { version = "1.1", features = ["serde"] }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bin]]
+name = "genomic-workflow-pipeline"
+path = "src/main.rs"

@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# PlexSpaces Release Configuration for Matrix Multiplication Example
+
+[release]
+name = "matrix-multiply"
+version = "0.1.0"
+description = "Distributed block-based matrix multiplication using TupleSpace"
+
+[node]
+id = "matrix-node-1"
+listen_address = "0.0.0.0:9001"
+cluster_seed_nodes = []
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9001"
+max_connections = 1000
+keepalive_interval_seconds = 30
+
+[runtime.health]
+heartbeat_interval_seconds = 2
+heartbeat_timeout_seconds = 10
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-tuplespace",
+]
+
+[[applications]]
+name = "matrix-multiply"
+version = "0.1.0"
+config_path = "examples/matrix_multiply/config.toml"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 30
+shutdown_strategy = "graceful"
+dependencies = []
+
+[env]
+LOG_LEVEL = "info"
+
+[matrix_multiply]
+matrix_size = 8
+block_size = 2
+num_workers = 4
+
+[shutdown]
+global_timeout_seconds = 60
+grace_period_seconds = 5
+grpc_drain_timeout_seconds = 10
+

@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Actor Behaviors API
+//
+// ## Purpose
+// Defines behavioral patterns for actors, inspired by:
+// - Erlang/OTP (GenServer, GenEvent, Supervision)
+// - Orleans (grain methods, task-based)
+// - Restate (shared/exclusive handlers, durable execution)
+// - Cloudflare Durable Objects (fetch/alarm pattern)
+//
+// ## Design Philosophy
+// We take INSPIRATION from these frameworks, not copy their implementations:
+// - **Type Safety**: Compiler enforces semantics (sync vs async)
+// - **Simplicity**: Fewer handlers, clearer mental model
+// - **Proto-First**: All behavior contracts defined here
+// - **Composability**: Traits can be combined
+
+syntax = "proto3";
+
+package plexspaces.behaviors.v1;
+
+import "google/protobuf/any.proto";
+import "plexspaces/v1/common.proto";
+
+// ============================================================================
+// GenServer Behavior (Request/Reply Pattern)
+// ============================================================================
+
+// GenServer behavior service
+//
+// ## Pattern
+// Inspired by Erlang gen_server but simplified to 2 handlers:
+// - Request: Synchronous, expects reply (like gen_server:call)
+// - Event: Asynchronous, fire-and-forget (like gen_server:cast + handle_info)
+//
+// ## Why 2 handlers instead of 3?
+// Erlang has handle_call, handle_cast, handle_info. We simplify:
+// - handle_cast and handle_info are both fire-and-forget
+// - In Rust, we have enums and match - don't need separate handlers
+// - Simpler mental model: "Does it need a reply or not?"
+service GenServerService {
+  // Handle synchronous request (expects reply)
+  rpc HandleRequest(HandleRequestRequest) returns (HandleRequestResponse);
+
+  // Handle asynchronous event (fire-and-forget)
+  rpc HandleEvent(HandleEventRequest) returns (plexspaces.common.v1.Empty);
+}
+
+message HandleRequestRequest {
+  string actor_id = 1;
+  google.protobuf.Any message = 2;
+  string correlation_id = 3;
+  string sender_id = 4;
+  map<string, string> metadata = 5;
+}
+
+message HandleRequestResponse {
+  google.protobuf.Any message = 1;
+  string correlation_id = 2;
+  map<string, string> metadata = 3;
+}
+
+message HandleEventRequest {
+  string actor_id = 1;
+  google.protobuf.Any message = 2;
+  string event_type = 3;
+  string sender_id = 4;
+  map<string, string> metadata = 5;
+}
+
+// ============================================================================
+// GenEvent Behavior (Event Bus Pattern)
+// ============================================================================
+
+service GenEventService {
+  rpc NotifyHandlers(NotifyHandlersRequest) returns (plexspaces.common.v1.Empty);
+  rpc AddHandler(AddHandlerRequest) returns (plexspaces.common.v1.Empty);
+  rpc RemoveHandler(RemoveHandlerRequest) returns (plexspaces.common.v1.Empty);
+}
+
+message NotifyHandlersRequest {
+  string actor_id = 1;
+  google.protobuf.Any event = 2;
+  map<string, string> metadata = 3;
+}
+
+message AddHandlerRequest {
+  string actor_id = 1;
+  string handler_id = 2;
+  string handler_type = 3;
+}
+
+message RemoveHandlerRequest {
+  string actor_id = 1;
+  string handler_id = 2;
+}
+
+// ============================================================================
+// Workflow Behavior
+// ============================================================================
+// Note: Workflow behavior is defined in workflow.proto (source of truth).
+// This file only defines GenServer and GenEvent behaviors.
+// WorkflowBehavior trait in Rust uses workflow.proto types.

@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Genomics Pipeline - Node 3 (Chromosome Workers)
+#
+# Role: Parallel variant calling across all chromosomes
+# Components:
+#   - ChromosomeWorkerPool (24 workers: chr1-22, X, Y)
+#
+# Dependencies: None (workers wait for coordinator requests)
+# Note: Most CPU-intensive node in the pipeline
+
+[release]
+name = "genomics-pipeline-chromosomes"
+version = "0.1.0"
+description = "Genomics Pipeline Chromosome Variant Calling Workers"
+
+[node]
+id = "genomics-chromosomes"
+listen_address = "0.0.0.0:9003"
+cluster_seed_nodes = [
+    "genomics-coordinator:9001",
+    "genomics-qc-alignment:9002",
+    "genomics-annotation:9004"
+]
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9003"
+max_connections = 500
+keepalive_interval_seconds = 30
+connection_timeout_seconds = 10
+
+# Middleware Stack
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "genomics-coordinator-secret-key"
+allow_unauthenticated = true
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 500
+burst_size = 100
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "genomics-chromosomes"
+sampling_rate = 0.1  # Lower sampling due to high volume
+
+[runtime.health]
+heartbeat_interval_seconds = 5
+heartbeat_timeout_seconds = 15
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+[[applications]]
+name = "genomics-chromosome-workers"
+version = "0.1.0"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 90  # Longer timeout for variant calling
+shutdown_strategy = "graceful"
+
+[env]
+LOG_LEVEL = "info"
+NODE_ROLE = "worker"
+# Chromosome Worker Pool (24 workers: chr1-22, X, Y)
+CHROMOSOME_POOL_SIZE = "24"
+CHROMOSOME_POOL_ENABLED = "true"
+# All other workers disabled on this node
+QC_POOL_ENABLED = "false"
+ALIGNMENT_POOL_ENABLED = "false"
+ANNOTATION_POOL_ENABLED = "false"
+REPORT_POOL_ENABLED = "false"
+# Coordinator address
+COORDINATOR_ADDRESS = "genomics-coordinator:9001"
+# Variant calling settings
+VARIANT_CALLER = "gatk"  # gatk or freebayes
+VARIANT_CALLING_THREADS_PER_WORKER = "2"
+
+# Resource limits (CPU-intensive)
+[resources]
+max_memory_mb = 8192  # Variant calling needs significant RAM
+max_cpu_percent = 95  # Use almost all CPU for parallel processing
+
+[shutdown]
+global_timeout_seconds = 180  # Allow variant calling to complete
+grace_period_seconds = 30
+grpc_drain_timeout_seconds = 45

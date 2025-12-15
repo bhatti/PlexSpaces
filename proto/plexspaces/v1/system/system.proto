@@ -1,0 +1,1145 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces System Management API
+//
+// ## Purpose
+// System administration and management operations (health, config, logs, backups, shutdown).
+// **Note**: System metrics are defined in metrics.proto (observability core).
+//
+// ## Design Principle: Separation of Concerns
+// - **System Management** (this file): Health checks, configuration, logs, backups, graceful shutdown
+// - **Observability** (metrics.proto): Metrics, traces, structured logging
+// - **Industry Standard**: Follows OpenTelemetry/Prometheus patterns for observability
+
+syntax = "proto3";
+
+package plexspaces.system.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/empty.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/metrics/metrics.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.system.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpace System Management API";
+    version: "1.0";
+    description: "API for system administration and management";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// System information
+message SystemInfo {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "System Info"
+      description: "Information about the system"
+    }
+  };
+
+  string version = 1;
+  string build_date = 2;
+  string git_commit = 3;
+  google.protobuf.Duration uptime = 4;
+  string hostname = 5;
+  string platform = 6;
+  string architecture = 7;
+  int32 cpu_cores = 8;
+  uint64 total_memory_mb = 9;
+  repeated string features = 10;
+}
+
+// Health check result
+message HealthCheck {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Health Check"
+      description: "Health check result for a component"
+    }
+  };
+
+  string component = 1;
+  HealthStatus status = 2;
+  string message = 3;
+  google.protobuf.Timestamp checked_at = 4;
+  google.protobuf.Duration response_time = 5;
+  map<string, google.protobuf.Value> details = 6;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_HEALTHY = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_UNHEALTHY = 3;
+  HEALTH_STATUS_UNKNOWN = 4;
+}
+
+// System metrics are now defined in metrics.proto (observability core)
+// Import and use: plexspaces.metrics.v1.SystemMetrics
+
+// Configuration setting
+message ConfigSetting {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Config Setting"
+      description: "A configuration setting"
+      required: ["key", "value"]
+    }
+  };
+
+  string key = 1 [(google.api.field_behavior) = REQUIRED];
+  google.protobuf.Value value = 2 [(google.api.field_behavior) = REQUIRED];
+  string description = 3;
+  bool is_secret = 4;
+  bool requires_restart = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  string updated_by = 7;
+}
+
+// Log entry
+message LogEntry {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Log Entry"
+      description: "A log entry from the system"
+    }
+  };
+
+  google.protobuf.Timestamp timestamp = 1;
+  LogLevel level = 2;
+  string component = 3;
+  string message = 4;
+  map<string, google.protobuf.Value> fields = 5;
+  string trace_id = 6;
+  string span_id = 7;
+}
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_TRACE = 1;
+  LOG_LEVEL_DEBUG = 2;
+  LOG_LEVEL_INFO = 3;
+  LOG_LEVEL_WARN = 4;
+  LOG_LEVEL_ERROR = 5;
+  LOG_LEVEL_FATAL = 6;
+}
+
+// Backup information
+message BackupInfo {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Backup Info"
+      description: "Information about a system backup"
+    }
+  };
+
+  string id = 1;
+  BackupType type = 2;
+  BackupStatus status = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp completed_at = 5;
+  uint64 size_bytes = 6;
+  string location = 7;
+  string checksum = 8;
+  repeated string components = 9;
+  string error = 10;
+}
+
+enum BackupType {
+  BACKUP_TYPE_UNSPECIFIED = 0;
+  BACKUP_TYPE_FULL = 1;
+  BACKUP_TYPE_INCREMENTAL = 2;
+  BACKUP_TYPE_DIFFERENTIAL = 3;
+}
+
+enum BackupStatus {
+  BACKUP_STATUS_UNSPECIFIED = 0;
+  BACKUP_STATUS_RUNNING = 1;
+  BACKUP_STATUS_COMPLETED = 2;
+  BACKUP_STATUS_FAILED = 3;
+  BACKUP_STATUS_CANCELLED = 4;
+}
+
+// Requests and responses
+
+message GetSystemInfoRequest {
+  bool include_details = 1;
+}
+
+message GetSystemInfoResponse {
+  SystemInfo system_info = 1;
+}
+
+message GetHealthRequest {
+  repeated string components = 1; // If empty, check all components
+}
+
+message GetHealthResponse {
+  HealthStatus overall_status = 1;
+  repeated HealthCheck checks = 2;
+}
+
+// Node Health State for Kubernetes-style probes
+//
+// ## Purpose
+// Tracks the current health state of a PlexSpaces node using Kubernetes
+// startup/liveness/readiness probe semantics.
+//
+// ## Why This Exists
+// - Kubernetes requires health probes to determine when to restart pods (liveness)
+//   and when to route traffic (readiness)
+// - Standard gRPC Health Protocol (grpc.health.v1.Health) provides the transport,
+//   but we need to track the internal state
+// - Enables graceful shutdown with request draining
+//
+// ## Design Notes
+// - This message is stored internally in PlexSpacesHealthReporter
+// - Not directly exposed via gRPC (use grpc.health.v1.Health.Check instead)
+// - Maps to ServingStatus: SERVING or NOT_SERVING
+//
+// ## Health State Machine
+// ```
+// NOT_SERVING (startup) → SERVING (ready) → NOT_SERVING (shutdown/overload)
+// ```
+message NodeHealthState {
+  // Current serving status (maps to grpc.health.v1.ServingStatus)
+  ServingStatus serving_status = 1;
+
+  // Why the node is in this state
+  string reason = 2;
+
+  // When this state was entered
+  google.protobuf.Timestamp state_entered_at = 3;
+
+  // Startup probe: Has initialization completed?
+  bool startup_complete = 4;
+
+  // Liveness probe: Is the node alive (or should it be restarted)?
+  bool is_alive = 5;
+
+  // Readiness probe: Is the node ready to accept requests?
+  bool is_ready = 6;
+
+  // Graceful shutdown in progress
+  bool shutdown_in_progress = 7;
+
+  // Number of in-flight requests being drained
+  uint64 in_flight_requests = 8;
+}
+
+// Serving status (matches grpc.health.v1.ServingStatus)
+//
+// ## Purpose
+// Simplified serving status compatible with standard gRPC Health Protocol.
+//
+// ## Values
+// - SERVING: Node is healthy and accepting requests
+// - NOT_SERVING: Node is not ready (startup, shutdown, overload, or dead)
+// - UNKNOWN: Health status cannot be determined
+enum ServingStatus {
+  SERVING_STATUS_UNSPECIFIED = 0;
+  SERVING_STATUS_SERVING = 1;      // Ready to serve requests
+  SERVING_STATUS_NOT_SERVING = 2;  // Not ready (various reasons)
+  SERVING_STATUS_UNKNOWN = 3;      // Cannot determine status
+}
+
+// Probe type (Kubernetes-style)
+//
+// ## Purpose
+// Distinguishes between the three types of health probes used in Kubernetes.
+//
+// ## Probe Types
+// - **STARTUP**: Is the application started? (NOT_SERVING → SERVING transition)
+// - **LIVENESS**: Is the application alive? (should Kubernetes restart the pod?)
+// - **READINESS**: Is the application ready? (should Kubernetes route traffic?)
+//
+// ## Design Notes
+// - All three probes use the same gRPC Health service
+// - Logic differs based on what each probe checks
+// - See https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+enum ProbeType {
+  PROBE_TYPE_UNSPECIFIED = 0;
+  PROBE_TYPE_STARTUP = 1;    // Checks if startup complete
+  PROBE_TYPE_LIVENESS = 2;   // Checks if node is alive (not deadlocked/crashed)
+  PROBE_TYPE_READINESS = 3;  // Checks if node is ready (not overloaded)
+}
+
+// Node readiness status (detailed)
+//
+// ## Purpose
+// Detailed breakdown of readiness checks to help diagnose why a node is not ready.
+//
+// ## Why This Exists
+// - Readiness probe just returns SERVING/NOT_SERVING
+// - This message explains WHY the node is not ready
+// - Useful for debugging and observability
+//
+// ## Usage
+// - Exposed via custom GetNodeReadiness RPC (optional)
+// - Not used by Kubernetes probes (those use standard Health service)
+message NodeReadinessStatus {
+  // Overall readiness
+  bool is_ready = 1;
+
+  // Reason if not ready
+  string not_ready_reason = 2;
+
+  // Individual readiness checks
+  bool liveness_passing = 3;          // Is node alive?
+  bool queue_depth_ok = 4;            // Queue depth < threshold?
+  bool tuplespace_healthy = 5;        // TupleSpace backend reachable?
+  bool required_nodes_connected = 6;  // Required nodes connected?
+
+  // Metrics
+  uint64 total_queue_depth = 7;
+  uint64 queue_depth_threshold = 8;
+  uint32 connected_nodes_count = 9;
+  repeated string required_nodes = 10;
+  repeated string missing_nodes = 11;  // Required nodes not connected
+}
+
+// Health probe configuration
+//
+// ## Purpose
+// Configuration for health probe behavior (thresholds, timeouts, etc.)
+//
+// ## Why This Exists
+// - Makes health probe behavior configurable
+// - Can be adjusted based on deployment environment
+// - Allows tuning for different workload characteristics
+message HealthProbeConfig {
+  // Monitoring interval (how often to check health)
+  google.protobuf.Duration monitoring_interval = 1;  // Default: 5 seconds
+
+  // Graceful shutdown drain timeout
+  google.protobuf.Duration drain_timeout = 2;  // Default: 30 seconds
+
+  // Queue depth threshold for readiness
+  uint64 queue_depth_threshold = 3;  // Default: 10000
+
+  // Required nodes for readiness (if empty, no requirement)
+  repeated string required_nodes = 4;
+
+  // Enable detailed health logging
+  bool enable_detailed_logging = 5;
+
+  // Automatic dependency registration configuration
+  //
+  // ## Purpose
+  // Configures automatic registration of health checkers for dependencies
+  // discovered via object-registry by name/type.
+  //
+  // ## Design Notes
+  // - Dependencies are registered automatically at startup
+  // - Uses object-registry to discover services by name/type
+  // - Supports both critical and non-critical dependencies
+  DependencyRegistrationConfig dependency_registration = 6;
+}
+
+// Dependency registration configuration
+//
+// ## Purpose
+// Configures automatic registration of health checkers for dependencies
+// discovered via object-registry.
+message DependencyRegistrationConfig {
+  // Whether to enable automatic dependency registration
+  bool enabled = 1;
+
+  // Dependencies to register automatically
+  // Format: "name:type:critical" (e.g., "database:service:true", "redis:service:false")
+  repeated string dependencies = 2;
+
+  // Default namespace for dependency lookup
+  string default_namespace = 3;
+
+  // Default tenant for dependency lookup
+  string default_tenant = 4;
+}
+
+// Dependency health check
+//
+// ## Purpose
+// Represents a health check for a specific dependency (database, external service, etc.)
+// Supports critical vs non-critical dependencies for partial failure scenarios.
+//
+// ## Design Notes
+// - Critical dependencies block readiness/startup if unhealthy
+// - Non-critical dependencies allow partial failure (circuit breaker fallback)
+// - Each dependency has a name and check function
+message DependencyCheck {
+  // Name of the dependency (e.g., "database", "redis", "external-api")
+  string name = 1;
+
+  // Whether this dependency is critical for readiness/startup
+  // - Critical: Node not ready if dependency unhealthy
+  // - Non-critical: Node can be ready even if dependency unhealthy (fallback)
+  bool is_critical = 2;
+
+  // Current health status
+  HealthStatus status = 3;
+
+  // Error message if unhealthy
+  string error_message = 4;
+
+  // When this check was last performed
+  google.protobuf.Timestamp checked_at = 5;
+
+  // Response time for the check
+  google.protobuf.Duration response_time = 6;
+
+  // Additional details (key-value pairs)
+  map<string, google.protobuf.Value> details = 7;
+}
+
+// Health check result with dependency breakdown
+//
+// ## Purpose
+// Extends HealthCheck to include dependency checks for detailed diagnostics.
+message DetailedHealthCheck {
+  // Overall health status
+  HealthStatus overall_status = 1;
+
+  // Individual component checks
+  repeated HealthCheck component_checks = 2;
+
+  // Dependency checks (critical and non-critical)
+  repeated DependencyCheck dependency_checks = 3;
+
+  // Whether all critical dependencies are healthy
+  bool critical_dependencies_healthy = 4;
+
+  // Whether any non-critical dependencies are unhealthy (for observability)
+  bool non_critical_dependencies_healthy = 5;
+}
+
+// Mark startup complete request
+//
+// ## Purpose
+// Signals that node initialization is complete and the node is ready to
+// transition from NOT_SERVING (startup) to SERVING.
+//
+// ## When to Use
+// After all initialization steps complete:
+// - gRPC server started
+// - TupleSpace backend connected
+// - Actor registry initialized
+// - Initial actors spawned
+message MarkStartupCompleteRequest {
+  // Optional message explaining what was initialized
+  string message = 1;
+}
+
+message MarkStartupCompleteResponse {
+  // New serving status (should be SERVING)
+  ServingStatus status = 1;
+
+  // Time taken for startup
+  google.protobuf.Duration startup_duration = 2;
+}
+
+// Begin shutdown request
+//
+// ## Purpose
+// Initiates graceful shutdown sequence:
+// 1. Set health to NOT_SERVING (Kubernetes removes from service)
+// 2. Drain in-flight requests
+// 3. Prepare for final shutdown
+//
+// ## Kubernetes Behavior
+// - Readiness probe fails immediately (removed from load balancer)
+// - No new requests routed to this pod
+// - Pod has terminationGracePeriodSeconds (default 30s) before SIGKILL
+message BeginShutdownRequest {
+  // Reason for shutdown (for logging)
+  string reason = 1;
+
+  // Override default drain timeout
+  google.protobuf.Duration drain_timeout = 2;
+}
+
+message BeginShutdownResponse {
+  // Number of requests drained
+  uint64 requests_drained = 1;
+
+  // Time taken to drain
+  google.protobuf.Duration drain_duration = 2;
+
+  // Whether drain completed or timed out
+  bool drain_completed = 3;
+}
+
+// Get node readiness request (custom health check)
+//
+// ## Purpose
+// Get detailed readiness status for debugging (beyond simple SERVING/NOT_SERVING)
+message GetNodeReadinessRequest {
+  // No parameters needed
+}
+
+message GetNodeReadinessResponse {
+  NodeReadinessStatus readiness = 1;
+}
+
+// Get detailed health request
+message GetDetailedHealthRequest {
+  // If true, include non-critical dependency checks
+  bool include_non_critical = 1;
+}
+
+// Get detailed health response
+message GetDetailedHealthResponse {
+  DetailedHealthCheck health = 1;
+}
+
+// Liveness probe request
+message LivenessProbeRequest {
+  // No parameters needed
+}
+
+// Liveness probe response
+message LivenessProbeResponse {
+  // Whether node is alive
+  bool is_alive = 1;
+  
+  // Status code for HTTP (200 if alive, 503 if not)
+  int32 http_status_code = 2;
+}
+
+// Readiness probe request
+message ReadinessProbeRequest {
+  // No parameters needed
+}
+
+// Readiness probe response
+message ReadinessProbeResponse {
+  // Whether node is ready
+  bool is_ready = 1;
+  
+  // Status code for HTTP (200 if ready, 503 if not)
+  int32 http_status_code = 2;
+  
+  // Reason if not ready (for debugging)
+  string not_ready_reason = 3;
+}
+
+// Startup probe request
+message StartupProbeRequest {
+  // No parameters needed
+}
+
+// Startup probe response
+message StartupProbeResponse {
+  // Whether startup is complete
+  bool startup_complete = 1;
+  
+  // Status code for HTTP (200 if complete, 503 if not)
+  int32 http_status_code = 2;
+  
+  // Reason if not complete (for debugging)
+  string not_complete_reason = 3;
+}
+
+message GetMetricsRequest {
+  google.protobuf.Timestamp start_time = 1;
+  google.protobuf.Timestamp end_time = 2;
+  google.protobuf.Duration interval = 3;
+}
+
+message GetMetricsResponse {
+  // System metrics from observability core (metrics.proto)
+  repeated plexspaces.metrics.v1.SystemMetrics metrics = 1;
+}
+
+message GetConfigRequest {
+  string key_pattern = 1; // Glob pattern for keys
+  bool include_secrets = 2;
+}
+
+message GetConfigResponse {
+  repeated ConfigSetting settings = 1;
+}
+
+message SetConfigRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Set Config Request"
+      description: "Request to set configuration values"
+      required: ["settings"]
+    }
+  };
+
+  repeated ConfigSetting settings = 1 [(google.api.field_behavior) = REQUIRED];
+  bool validate_only = 2;
+}
+
+message SetConfigResponse {
+  repeated ConfigValidationError errors = 1;
+  bool requires_restart = 2;
+}
+
+message ConfigValidationError {
+  string key = 1;
+  string error = 2;
+}
+
+message GetLogsRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Logs Request"
+      description: "Request to retrieve system logs"
+    }
+  };
+
+  google.protobuf.Timestamp start_time = 1;
+  google.protobuf.Timestamp end_time = 2;
+  LogLevel min_level = 3;
+  repeated string components = 4;
+  string query = 5; // Search query
+  plexspaces.common.v1.PageRequest page_request = 6;
+}
+
+message GetLogsResponse {
+  repeated LogEntry entries = 1;
+  plexspaces.common.v1.PageResponse page_response = 2;
+}
+
+message CreateBackupRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Create Backup Request"
+      description: "Request to create a system backup"
+    }
+  };
+
+  BackupType type = 1;
+  repeated string components = 2; // If empty, backup all
+  string destination = 3;
+  bool compress = 4;
+  bool encrypt = 5;
+}
+
+message CreateBackupResponse {
+  BackupInfo backup = 1;
+}
+
+message ListBackupsRequest {
+  plexspaces.common.v1.PageRequest page_request = 1;
+  BackupType type = 2;
+  BackupStatus status = 3;
+}
+
+message ListBackupsResponse {
+  repeated BackupInfo backups = 1;
+  plexspaces.common.v1.PageResponse page_response = 2;
+}
+
+message RestoreBackupRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Restore Backup Request"
+      description: "Request to restore from a backup"
+      required: ["backup_id"]
+    }
+  };
+
+  string backup_id = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated string components = 2; // If empty, restore all
+  bool verify_checksum = 3;
+  bool force = 4;
+}
+
+message RestoreBackupResponse {
+  bool success = 1;
+  string error = 2;
+  repeated string restored_components = 3;
+}
+
+message ShutdownRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Shutdown Request"
+      description: "Request to shutdown the system"
+    }
+  };
+
+  bool graceful = 1;
+  google.protobuf.Duration timeout = 2;
+  string reason = 3;
+}
+
+message ShutdownResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Graceful shutdown coordination (VictoriaMetrics-style)
+//
+// ## Purpose
+// Provides proto-first data model for graceful shutdown coordination,
+// following the VictoriaMetrics pattern for proper signal handling.
+//
+// ## Why This Exists
+// - Enables observability of shutdown progress
+// - Supports distributed shutdown coordination
+// - Proto-first design for cross-language compatibility
+// - Integrates with Kubernetes graceful termination
+//
+// ## Design Notes
+// Inspired by https://victoriametrics.com/blog/go-graceful-shutdown/
+//
+// ## Shutdown Sequence
+// 1. Receive signal (SIGTERM/SIGINT/SIGHUP)
+// 2. Set health to NOT_SERVING (K8s removes from load balancer)
+// 3. Drain in-flight requests (timeout: 30s)
+// 4. Stop accepting new actors
+// 5. Stop all running actors (graceful)
+// 6. Close gRPC connections
+// 7. Shutdown TupleSpace
+// 8. Final cleanup
+// 9. Exit with code 0
+
+// Shutdown signal received from OS
+//
+// ## Purpose
+// Represents OS signals that trigger graceful shutdown.
+//
+// ## Mapping
+// - SIGTERM → Graceful shutdown (K8s default)
+// - SIGINT → Interrupt (Ctrl+C)
+// - SIGHUP → Reload/restart
+enum ShutdownSignal {
+  SHUTDOWN_SIGNAL_UNSPECIFIED = 0;
+  SHUTDOWN_SIGNAL_SIGTERM = 1;    // Graceful shutdown (K8s sends this)
+  SHUTDOWN_SIGNAL_SIGINT = 2;     // Interrupt (Ctrl+C)
+  SHUTDOWN_SIGNAL_SIGHUP = 3;     // Hangup (reload config, graceful restart)
+}
+
+// Shutdown phase tracking
+//
+// ## Purpose
+// Tracks progress through graceful shutdown sequence.
+//
+// ## State Machine
+// RUNNING → HEALTH_NOT_SERVING → DRAINING → STOPPING_ACTORS →
+// CLOSING_CONNECTIONS → SHUTTING_DOWN_TUPLESPACE → FINAL_CLEANUP → COMPLETE
+//
+// ## Observability
+// Each phase transition is logged and can be monitored via GetShutdownStatus RPC.
+enum ShutdownPhase {
+  SHUTDOWN_PHASE_UNSPECIFIED = 0;
+  SHUTDOWN_PHASE_RUNNING = 1;                      // Normal operation
+  SHUTDOWN_PHASE_HEALTH_NOT_SERVING = 2;           // Health set to NOT_SERVING
+  SHUTDOWN_PHASE_DRAINING = 3;                     // Draining in-flight requests
+  SHUTDOWN_PHASE_STOPPING_ACTORS = 4;              // Stopping all actors
+  SHUTDOWN_PHASE_CLOSING_CONNECTIONS = 5;          // Closing gRPC connections
+  SHUTDOWN_PHASE_SHUTTING_DOWN_TUPLESPACE = 6;    // Shutting down TupleSpace
+  SHUTDOWN_PHASE_FINAL_CLEANUP = 7;                // Final cleanup tasks
+  SHUTDOWN_PHASE_COMPLETE = 8;                     // Shutdown complete
+}
+
+// Shutdown status (observability)
+//
+// ## Purpose
+// Provides detailed status of ongoing shutdown process.
+//
+// ## Why This Exists
+// - Observability: Monitor shutdown progress
+// - Debugging: Understand where shutdown is stuck
+// - Metrics: Track shutdown duration per phase
+//
+// ## Usage
+// Call GetShutdownStatus RPC to check shutdown progress.
+message ShutdownStatus {
+  // Current shutdown phase
+  ShutdownPhase phase = 1;
+
+  // Signal that triggered shutdown (if any)
+  ShutdownSignal signal = 2;
+
+  // When shutdown started
+  google.protobuf.Timestamp shutdown_started_at = 3;
+
+  // Elapsed time since shutdown started
+  google.protobuf.Duration elapsed = 4;
+
+  // Detailed status per phase
+  ShutdownPhaseStatus health_not_serving_status = 5;
+  ShutdownPhaseStatus draining_status = 6;
+  ShutdownPhaseStatus stopping_actors_status = 7;
+  ShutdownPhaseStatus closing_connections_status = 8;
+  ShutdownPhaseStatus shutting_down_tuplespace_status = 9;
+  ShutdownPhaseStatus final_cleanup_status = 10;
+
+  // Whether shutdown completed successfully
+  bool completed = 11;
+
+  // Error if shutdown failed
+  string error = 12;
+}
+
+// Per-phase shutdown status
+//
+// ## Purpose
+// Tracks status of individual shutdown phase.
+message ShutdownPhaseStatus {
+  // Phase name
+  ShutdownPhase phase = 1;
+
+  // Whether this phase completed
+  bool completed = 2;
+
+  // When phase started
+  google.protobuf.Timestamp started_at = 3;
+
+  // When phase completed
+  google.protobuf.Timestamp completed_at = 4;
+
+  // Duration of this phase
+  google.protobuf.Duration duration = 5;
+
+  // Error if phase failed
+  string error = 6;
+
+  // Phase-specific details (JSON)
+  google.protobuf.Struct details = 7;
+}
+
+// Get shutdown status request
+message GetShutdownStatusRequest {
+  // No parameters needed
+}
+
+// Get shutdown status response
+message GetShutdownStatusResponse {
+  ShutdownStatus status = 1;
+}
+
+// System Management service
+service SystemService {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Service for system administration and management"
+  };
+
+  // Get system information
+  rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/info"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get System Info"
+      description: "Get system information and status"
+      tags: "System"
+    };
+  }
+
+  // Health check (custom detailed health, use grpc.health.v1.Health for K8s probes)
+  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/health"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Health Check"
+      description: "Check system health status"
+      tags: "Health"
+    };
+  }
+
+  // Get detailed health with dependency checks
+  //
+  // ## Purpose
+  // Returns detailed health status including dependency checks for observability.
+  // Useful for debugging why a node is not ready.
+  //
+  // ## Design Notes
+  // - Includes both critical and non-critical dependency checks
+  // - Supports partial failure scenarios (non-critical dependencies can fail)
+  // - HTTP endpoint: GET /v1/system/health/detailed
+  rpc GetDetailedHealth(GetDetailedHealthRequest) returns (GetDetailedHealthResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/health/detailed"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Detailed Health"
+      description: "Get detailed health status with dependency checks"
+      tags: "Health"
+    };
+  }
+
+  // Liveness probe endpoint (HTTP)
+  //
+  // ## Purpose
+  // HTTP endpoint for Kubernetes liveness probe.
+  // Returns 200 if node is alive, 503 if not.
+  //
+  // ## Design Notes
+  // - Lightweight check (ping, shutdown status)
+  // - Does not check dependencies (only basic liveness)
+  // - HTTP endpoint: GET /health/live
+  rpc LivenessProbe(LivenessProbeRequest) returns (LivenessProbeResponse) {
+    option (google.api.http) = {
+      get: "/health/live"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Liveness Probe"
+      description: "Kubernetes liveness probe endpoint"
+      tags: "Health"
+    };
+  }
+
+  // Readiness probe endpoint (HTTP)
+  //
+  // ## Purpose
+  // HTTP endpoint for Kubernetes readiness probe.
+  // Returns 200 if node is ready, 503 if not.
+  //
+  // ## Design Notes
+  // - Checks critical dependencies
+  // - Non-critical dependencies can fail without blocking readiness
+  // - HTTP endpoint: GET /health/ready
+  rpc ReadinessProbe(ReadinessProbeRequest) returns (ReadinessProbeResponse) {
+    option (google.api.http) = {
+      get: "/health/ready"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Readiness Probe"
+      description: "Kubernetes readiness probe endpoint"
+      tags: "Health"
+    };
+  }
+
+  // Startup probe endpoint (HTTP)
+  //
+  // ## Purpose
+  // HTTP endpoint for Kubernetes startup probe.
+  // Returns 200 if startup is complete, 503 if still starting.
+  //
+  // ## Design Notes
+  // - Checks if initialization is complete
+  // - Checks critical dependencies required for startup
+  // - HTTP endpoint: GET /health/startup
+  rpc StartupProbe(StartupProbeRequest) returns (StartupProbeResponse) {
+    option (google.api.http) = {
+      get: "/health/startup"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Startup Probe"
+      description: "Kubernetes startup probe endpoint"
+      tags: "Health"
+    };
+  }
+
+  // Get node readiness (detailed readiness status for debugging)
+  //
+  // ## Purpose
+  // Returns detailed readiness information beyond simple SERVING/NOT_SERVING.
+  // Useful for debugging why a node is not ready.
+  //
+  // ## Design Note
+  // This is a custom PlexSpaces RPC. For Kubernetes probes, use the standard
+  // grpc.health.v1.Health service instead.
+  rpc GetNodeReadiness(GetNodeReadinessRequest) returns (GetNodeReadinessResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/readiness"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Node Readiness"
+      description: "Get detailed readiness status for debugging"
+      tags: "Health"
+    };
+  }
+
+  // Mark startup complete (optional control RPC)
+  //
+  // ## Purpose
+  // Manually trigger startup complete transition (NOT_SERVING → SERVING).
+  // Normally called automatically by PlexSpacesNode after initialization.
+  //
+  // ## Use Cases
+  // - Manual testing
+  // - Custom startup sequences
+  // - External orchestration
+  rpc MarkStartupComplete(MarkStartupCompleteRequest) returns (MarkStartupCompleteResponse) {
+    option (google.api.http) = {
+      post: "/v1/system/health/startup-complete"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Mark Startup Complete"
+      description: "Mark node startup as complete (NOT_SERVING → SERVING)"
+      tags: "Health"
+    };
+  }
+
+  // Begin shutdown (graceful shutdown with draining)
+  //
+  // ## Purpose
+  // Initiate graceful shutdown sequence:
+  // 1. Set health to NOT_SERVING (K8s removes from service)
+  // 2. Drain in-flight requests (configurable timeout)
+  // 3. Return when ready for final shutdown
+  //
+  // ## Use Cases
+  // - Manual shutdown testing
+  // - Custom shutdown orchestration
+  // - Drain verification
+  rpc BeginShutdown(BeginShutdownRequest) returns (BeginShutdownResponse) {
+    option (google.api.http) = {
+      post: "/v1/system/health/shutdown"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Begin Graceful Shutdown"
+      description: "Begin graceful shutdown with request draining"
+      tags: "Health"
+    };
+  }
+
+  // Get metrics
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/metrics"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Metrics"
+      description: "Get system performance metrics"
+      tags: "Metrics"
+    };
+  }
+
+  // Get configuration
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/config"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Config"
+      description: "Get system configuration settings"
+      tags: "Configuration"
+    };
+  }
+
+  // Set configuration
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse) {
+    option (google.api.http) = {
+      put: "/v1/system/config"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Set Config"
+      description: "Update system configuration settings"
+      tags: "Configuration"
+    };
+  }
+
+  // Get logs
+  rpc GetLogs(GetLogsRequest) returns (GetLogsResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/logs"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Logs"
+      description: "Retrieve system logs"
+      tags: "Logs"
+    };
+  }
+
+  // Create backup
+  rpc CreateBackup(CreateBackupRequest) returns (CreateBackupResponse) {
+    option (google.api.http) = {
+      post: "/v1/system/backups"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create Backup"
+      description: "Create a system backup"
+      tags: "Backup"
+    };
+  }
+
+  // List backups
+  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/backups"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List Backups"
+      description: "List system backups"
+      tags: "Backup"
+    };
+  }
+
+  // Restore backup
+  rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse) {
+    option (google.api.http) = {
+      post: "/v1/system/backups/{backup_id}/restore"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Restore Backup"
+      description: "Restore system from backup"
+      tags: "Backup"
+    };
+  }
+
+  // Shutdown system
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse) {
+    option (google.api.http) = {
+      post: "/v1/system/shutdown"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Shutdown System"
+      description: "Shutdown the system gracefully"
+      tags: "System"
+    };
+  }
+
+  // Get shutdown status (observability)
+  //
+  // ## Purpose
+  // Returns detailed status of ongoing or completed shutdown.
+  //
+  // ## Use Cases
+  // - Monitor shutdown progress
+  // - Debug stuck shutdown phases
+  // - Metrics collection (shutdown duration per phase)
+  rpc GetShutdownStatus(GetShutdownStatusRequest) returns (GetShutdownStatusResponse) {
+    option (google.api.http) = {
+      get: "/v1/system/shutdown/status"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Shutdown Status"
+      description: "Get detailed status of graceful shutdown progress"
+      tags: "System"
+    };
+  }
+}
+

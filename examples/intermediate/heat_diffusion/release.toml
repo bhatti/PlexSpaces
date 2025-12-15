@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# PlexSpaces Release Configuration for Heat Diffusion Example
+
+[release]
+name = "heat-diffusion"
+version = "0.1.0"
+description = "2D heat diffusion simulation using Jacobi iteration with TupleSpace coordination"
+
+[node]
+id = "heat-node-1"
+listen_address = "0.0.0.0:9003"
+cluster_seed_nodes = []
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9003"
+max_connections = 1000
+keepalive_interval_seconds = 30
+
+[runtime.health]
+heartbeat_interval_seconds = 2
+heartbeat_timeout_seconds = 10
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-tuplespace",
+]
+
+[[applications]]
+name = "heat-diffusion"
+version = "0.1.0"
+config_path = "examples/heat_diffusion/config.toml"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 30
+shutdown_strategy = "graceful"
+dependencies = []
+
+[env]
+LOG_LEVEL = "info"
+
+[heat_diffusion]
+grid_rows = 20
+grid_cols = 20
+region_rows = 10
+region_cols = 10
+convergence_threshold = 0.01
+max_iterations = 1000
+target_ratio = 100.0
+boundary_top = 100.0
+boundary_bottom = 0.0
+boundary_left = 0.0
+boundary_right = 0.0
+
+[shutdown]
+global_timeout_seconds = 60
+grace_period_seconds = 5
+grpc_drain_timeout_seconds = 10
+

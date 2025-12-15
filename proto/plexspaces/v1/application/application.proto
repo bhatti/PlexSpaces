@@ -1,0 +1,740 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Application API
+//
+// ## Purpose
+// Defines the Application abstraction for PlexSpaces, following Erlang/OTP principles.
+// Applications are business logic layers that run on PlexSpaces nodes.
+//
+// ## Architecture Context
+// In PlexSpaces (following Erlang/OTP):
+// - **Node** = Infrastructure layer (gRPC, actor registry, remoting, health)
+// - **Application** = Business logic layer (supervision trees, workers, domain actors)
+// - **Release** = Docker image with Node binary as entry point
+//
+// ## Design Principles
+// 1. Multi-tenant: Multiple applications per node (application-level deployment)
+// 2. Clear separation of concerns - Node provides infra, Application implements logic
+// 3. Independent lifecycle - Applications start/stop without restarting node
+// 4. AWS Lambda-like deployment model - deploy entire applications, not individual actors
+//
+// ## Component Interactions
+// - Used by: Node (to load and manage applications)
+// - Depends on: common.proto (Metadata, Timestamp), node.proto (ReleaseSpec), wasm.proto (WasmModule)
+// - Related: node.proto (Node infrastructure)
+//
+// ## Design Decisions
+// - Why ApplicationConfig in proto: Can be parsed from TOML and validated
+// - Why HealthStatus enum: Standard states for Kubernetes probes
+// - Why ShutdownStrategy: Support both graceful and immediate shutdown patterns
+// - Why ApplicationSpec: Defines supervision tree structure (Erlang/OTP style)
+
+syntax = "proto3";
+
+package plexspaces.application.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/node/release.proto";
+import "plexspaces/v1/wasm/wasm.proto";
+
+// Application configuration from TOML [[applications]] section.
+//
+// ## Purpose
+// Configuration for a single application loaded from TOML or API.
+//
+// ## TOML Example
+// ```toml
+// [[applications]]
+// name = "genomics-coordinator"
+// version = "0.1.0"
+// enabled = true
+// auto_start = true
+// shutdown_timeout_seconds = 60
+// shutdown_strategy = "graceful"
+// dependencies = []
+// ```
+//
+// ## Design Notes
+// - enabled = false prevents application from loading
+// - auto_start = false allows manual start via API (future)
+// - dependencies ensures start order (dependencies start first)
+// - metadata allows custom tags/labels for application discovery
+message ApplicationConfig {
+  // Application name (unique identifier within node)
+  //
+  // Examples: "genomics-coordinator", "finance-risk-workers"
+  string name = 1;
+
+  // Application version (semantic versioning)
+  //
+  // Examples: "0.1.0", "1.2.3"
+  string version = 2;
+
+  // Whether application is enabled (false = skip loading)
+  //
+  // Default: true
+  bool enabled = 3;
+
+  // Whether to start application automatically on node boot
+  //
+  // Default: true
+  // Future: false allows manual start via ApplicationService API
+  bool auto_start = 4;
+
+  // Shutdown timeout (force kill if exceeded)
+  //
+  // Default: 60 seconds
+  google.protobuf.Duration shutdown_timeout = 5;
+
+  // Shutdown strategy (graceful or immediate)
+  //
+  // Default: GRACEFUL
+  ShutdownStrategy shutdown_strategy = 6;
+
+  // Application dependencies (start these first)
+  //
+  // Example: ["database-app", "cache-app"]
+  // These applications must start successfully before this app starts
+  repeated string dependencies = 7;
+
+  // Application metadata (tags, labels, annotations)
+  //
+  // Examples:
+  // - environment: "production"
+  // - team: "genomics"
+  // - criticality: "high"
+  plexspaces.common.v1.Metadata metadata = 8;
+}
+
+// Application specification (Erlang/OTP .app file equivalent)
+//
+// ## Purpose
+// Complete definition of a PlexSpaces application. Analogous to
+// Erlang .app files, defines metadata, dependencies, supervision tree.
+//
+// ## Why This Exists
+// - Reusable components with clear boundaries
+// - Dependency management (start in correct order)
+// - Declarative supervision tree
+// - Supports both library and active applications
+message ApplicationSpec {
+  // Application metadata
+  string name = 1;         // e.g., "byzantine-generals"
+  string version = 2;      // Semantic version (e.g., "0.1.0")
+  string description = 3;  // Human-readable description
+
+  // Application type
+  ApplicationType type = 4;
+
+  // Dependencies (other applications that must start first)
+  // e.g., ["plexspaces-core", "plexspaces-tuplespace"]
+  repeated string dependencies = 5;
+
+  // Application-level environment variables
+  map<string, string> env = 6;
+
+  // Supervision tree (only for active applications)
+  optional SupervisorSpec supervisor = 7;
+}
+
+// Application type
+enum ApplicationType {
+  // Unspecified (invalid)
+  APPLICATION_TYPE_UNSPECIFIED = 0;
+
+  // Library application (just modules, no processes)
+  // e.g., plexspaces-core
+  APPLICATION_TYPE_LIBRARY = 1;
+
+  // Active application (has supervision tree and processes)
+  // e.g., byzantine-generals, heat-diffusion
+  APPLICATION_TYPE_ACTIVE = 2;
+}
+
+// Supervisor specification (Erlang/OTP supervisor)
+//
+// ## Purpose
+// Defines a supervision tree node. Supervisors manage child processes
+// (workers or other supervisors) with fault tolerance strategies.
+//
+// ## Why This Exists
+// - Fault tolerance (automatic restarts)
+// - Organized process hierarchy
+// - Declarative restart strategies
+// - Local supervision only (simpler than distributed)
+message SupervisorSpec {
+  // Supervision strategy
+  SupervisionStrategy strategy = 1;
+
+  // Maximum restarts allowed
+  uint32 max_restarts = 2;
+
+  // Time window for restart counting (seconds)
+  google.protobuf.Duration max_restart_window = 3;
+
+  // Child processes
+  repeated ChildSpec children = 4;
+}
+
+// Supervision strategy (Erlang/OTP)
+enum SupervisionStrategy {
+  // Unspecified (default to one_for_one)
+  SUPERVISION_STRATEGY_UNSPECIFIED = 0;
+
+  // One-for-One: Only restart failed child
+  // If child A crashes, restart only A
+  SUPERVISION_STRATEGY_ONE_FOR_ONE = 1;
+
+  // One-for-All: Restart all children if one fails
+  // If child A crashes, restart A, B, C
+  SUPERVISION_STRATEGY_ONE_FOR_ALL = 2;
+
+  // Rest-for-One: Restart failed child and those started after it
+  // If child B crashes (started after A), restart B, C (not A)
+  SUPERVISION_STRATEGY_REST_FOR_ONE = 3;
+}
+
+// Child process specification
+//
+// ## Purpose
+// Defines a child process (worker or supervisor) managed by a supervisor.
+//
+// ## Why This Exists
+// - Clear child identity and lifecycle
+// - Restart policy per child
+// - Shutdown timeout specification
+// - Support for nested supervisors
+message ChildSpec {
+  // Unique child identifier
+  string id = 1;
+
+  // Child type (worker or supervisor)
+  ChildType type = 2;
+
+  // Module to start (fully qualified name)
+  // e.g., "byzantine::General" or "byzantine::GeneralSupervisor"
+  string start_module = 3;
+
+  // Arguments to pass to start function
+  map<string, string> args = 4;
+
+  // Restart policy
+  RestartPolicy restart = 5;
+
+  // Shutdown timeout
+  google.protobuf.Duration shutdown_timeout = 6;
+
+  // Nested supervisor (if type=SUPERVISOR)
+  optional SupervisorSpec supervisor = 7;
+}
+
+// Child type
+enum ChildType {
+  // Unspecified (invalid)
+  CHILD_TYPE_UNSPECIFIED = 0;
+
+  // Worker process (actor)
+  CHILD_TYPE_WORKER = 1;
+
+  // Supervisor process (manages other children)
+  CHILD_TYPE_SUPERVISOR = 2;
+}
+
+// Restart policy (Erlang/OTP)
+enum RestartPolicy {
+  // Unspecified (default to permanent)
+  RESTART_POLICY_UNSPECIFIED = 0;
+
+  // Permanent: Always restart on failure
+  // Use for critical long-running processes
+  RESTART_POLICY_PERMANENT = 1;
+
+  // Transient: Restart only if abnormal exit (error)
+  // Don't restart if normal exit (shutdown)
+  // Use for tasks that may complete successfully
+  RESTART_POLICY_TRANSIENT = 2;
+
+  // Temporary: Never restart
+  // Use for one-shot tasks
+  RESTART_POLICY_TEMPORARY = 3;
+}
+
+// Shutdown strategy for application.
+//
+// ## Purpose
+// Determines how application shutdown is handled.
+//
+// ## Strategies
+// - GRACEFUL: Wait for in-flight work to complete (up to timeout)
+// - IMMEDIATE: Stop immediately without draining work
+//
+// ## Design Notes
+// - Default is GRACEFUL for production safety
+// - IMMEDIATE useful for dev/test or when work is not critical
+enum ShutdownStrategy {
+  // Unspecified (defaults to GRACEFUL)
+  SHUTDOWN_STRATEGY_UNSPECIFIED = 0;
+
+  // Wait for in-flight work to complete (up to shutdown_timeout)
+  //
+  // Shutdown sequence:
+  // 1. Stop accepting new work
+  // 2. Drain in-flight messages/tasks
+  // 3. Save durable state (if applicable)
+  // 4. Stop supervision tree and actors
+  // 5. Disconnect from external services
+  SHUTDOWN_STRATEGY_GRACEFUL = 1;
+
+  // Stop immediately without draining work
+  //
+  // Shutdown sequence:
+  // 1. Stop supervision tree immediately
+  // 2. Terminate actors (may lose in-flight work)
+  // 3. Exit
+  SHUTDOWN_STRATEGY_IMMEDIATE = 2;
+}
+
+// Health status for application.
+//
+// ## Purpose
+// Represents the health state of an application for monitoring and orchestration.
+// Used for Kubernetes liveness/readiness probes and load balancing decisions.
+//
+// ## States
+// - HEALTHY: Application functioning normally (ready to accept traffic)
+// - DEGRADED: Running but reduced capacity (e.g., some workers down, still accepts traffic)
+// - UNHEALTHY: Not functioning (should trigger restart/failover, do not route traffic)
+//
+// ## Design Notes
+// - Maps to Kubernetes probe states (healthy = ready, unhealthy = not ready)
+// - DEGRADED allows partial operation (some failures tolerated)
+enum HealthStatus {
+  // Unspecified (should not be used, defaults to UNHEALTHY for safety)
+  HEALTH_STATUS_UNSPECIFIED = 0;
+
+  // Application is functioning normally
+  //
+  // - All critical components running
+  // - Can accept full workload
+  // - Ready for traffic
+  HEALTH_STATUS_HEALTHY = 1;
+
+  // Application is running but with reduced capacity
+  //
+  // - Some non-critical components failed
+  // - Still accepting work but at reduced rate
+  // - Example: 2 of 5 workers down (still functional)
+  HEALTH_STATUS_DEGRADED = 2;
+
+  // Application is not functioning
+  //
+  // - Critical components failed
+  // - Cannot process work reliably
+  // - Should trigger restart or failover
+  HEALTH_STATUS_UNHEALTHY = 3;
+}
+
+// Application state in lifecycle.
+//
+// ## Purpose
+// Track application lifecycle state for management and monitoring.
+//
+// ## State Transitions
+// ```
+// CREATED -> STARTING -> RUNNING -> STOPPING -> STOPPED
+//                          |
+//                          +-> FAILED (restart or stop)
+// ```
+//
+// ## Design Notes
+// - CREATED: Config loaded, not yet started
+// - STARTING: start() called, spawning resources
+// - RUNNING: Fully operational
+// - STOPPING: stop() called, draining work
+// - STOPPED: Cleanly shut down
+// - FAILED: Crashed or failed health checks
+enum ApplicationState {
+  // Unspecified
+  APPLICATION_STATE_UNSPECIFIED = 0;
+
+  // Configuration loaded, not yet started
+  APPLICATION_STATE_CREATED = 1;
+
+  // start() called, spawning supervision tree and actors
+  APPLICATION_STATE_STARTING = 2;
+
+  // Fully operational and processing work
+  APPLICATION_STATE_RUNNING = 3;
+
+  // stop() called, draining in-flight work
+  APPLICATION_STATE_STOPPING = 4;
+
+  // Cleanly shut down
+  APPLICATION_STATE_STOPPED = 5;
+
+  // Crashed or failed health checks (may restart)
+  APPLICATION_STATE_FAILED = 6;
+}
+
+// Application status (for deployment service)
+enum ApplicationStatus {
+  // Unspecified
+  APPLICATION_STATUS_UNSPECIFIED = 0;
+
+  // Loading (reading config)
+  APPLICATION_STATUS_LOADING = 1;
+
+  // Starting (calling start())
+  APPLICATION_STATUS_STARTING = 2;
+
+  // Running (active)
+  APPLICATION_STATUS_RUNNING = 3;
+
+  // Stopping (graceful shutdown)
+  APPLICATION_STATUS_STOPPING = 4;
+
+  // Stopped (gracefully)
+  APPLICATION_STATUS_STOPPED = 5;
+
+  // Failed (error during start/run)
+  APPLICATION_STATUS_FAILED = 6;
+}
+
+// Application instance (runtime representation).
+//
+// ## Purpose
+// Runtime state of a running application instance.
+//
+// ## Design Notes
+// - config: Static configuration from TOML
+// - state: Current lifecycle state
+// - health: Current health status
+// - started_at: When application started
+// - statistics: Runtime metrics (messages processed, actors spawned, etc.)
+message Application {
+  // Application configuration
+  ApplicationConfig config = 1;
+
+  // Current lifecycle state
+  ApplicationState state = 2;
+
+  // Current health status
+  HealthStatus health = 3;
+
+  // When application started
+  google.protobuf.Timestamp started_at = 4;
+
+  // Application statistics (runtime metrics)
+  ApplicationStatistics statistics = 5;
+}
+
+// Application runtime statistics.
+//
+// ## Purpose
+// Track runtime metrics for monitoring and debugging.
+//
+// ## Design Notes
+// - Counters are cumulative since application start
+// - Gauges represent current state
+message ApplicationStatistics {
+  // Number of actors spawned by this application
+  uint64 actors_spawned = 1;
+
+  // Number of actors currently active
+  uint64 actors_active = 2;
+
+  // Number of messages processed
+  uint64 messages_processed = 3;
+
+  // Number of errors encountered
+  uint64 errors_total = 4;
+
+  // Number of restarts (if supervised)
+  uint32 restarts = 5;
+}
+
+// Application state (runtime) - for deployment service
+//
+// ## Purpose
+// Represents runtime state of a running application.
+message ApplicationRuntimeState {
+  // Application name
+  string name = 1;
+
+  // Current state
+  ApplicationStatus status = 2;
+
+  // Start timestamp
+  int64 start_timestamp_ms = 3;
+
+  // Root supervisor PID (if active application)
+  optional string supervisor_pid = 4;
+
+  // Environment variables
+  map<string, string> env = 5;
+}
+
+// Application deployment service
+//
+// ## Purpose
+// gRPC service for deploying, undeploying, and managing applications on a node.
+// Enables AWS Lambda-like deployment model where applications (not individual actors)
+// are the unit of deployment.
+//
+// ## Design Philosophy
+// - Application as unit: Deploy entire applications (supervisors + actors + config)
+// - Multi-tenant: Multiple applications per node
+// - Graceful shutdown: Undeploy performs graceful shutdown
+// - WASM support: Applications can be deployed as WASM modules
+// - Release config support: Can pass release-level configuration
+service ApplicationService {
+  // Deploy an application (like AWS Lambda deploy)
+  //
+  // ## Purpose
+  // Deploy an entire application to the node. Handles:
+  // - WASM module deployment (if WASM application)
+  // - Application configuration parsing
+  // - Supervisor tree initialization
+  // - Application registration and startup
+  //
+  // ## Workflow
+  // 1. Load WASM module (if provided)
+  // 2. Parse application config
+  // 3. Initialize supervisor tree
+  // 4. Start root supervisor
+  // 5. Register application with ApplicationManager
+  rpc DeployApplication(DeployApplicationRequest) returns (DeployApplicationResponse) {
+    option (google.api.http) = {
+      post: "/v1/applications"
+      body: "*"
+    };
+  }
+
+  // Undeploy an application (graceful shutdown)
+  //
+  // ## Purpose
+  // Gracefully shutdown an application:
+  // - Stop accepting new work
+  // - Drain in-flight messages
+  // - Shutdown supervisor tree (top-down)
+  // - Cleanup resources
+  // - Unregister application
+  //
+  // ## Timeout
+  // Uses graceful shutdown timeout from application config (default: 30s).
+  // If exceeded, may force kill the application.
+  rpc UndeployApplication(UndeployApplicationRequest) returns (UndeployApplicationResponse) {
+    option (google.api.http) = {
+      delete: "/v1/applications/{application_id}"
+    };
+  }
+
+  // List deployed applications
+  //
+  // ## Purpose
+  // Get list of all applications deployed on this node.
+  rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/applications"
+    };
+  }
+
+  // Get application status
+  //
+  // ## Purpose
+  // Get detailed status of a specific application.
+  rpc GetApplicationStatus(GetApplicationStatusRequest) returns (GetApplicationStatusResponse) {
+    option (google.api.http) = {
+      get: "/v1/applications/{application_id}/status"
+    };
+  }
+
+  // Start an application (legacy, use DeployApplication for new deployments)
+  rpc StartApplication(StartApplicationRequest) returns (StartApplicationResponse) {
+    option (google.api.http) = {
+      post: "/v1/applications/{name}:start"
+      body: "*"
+    };
+  }
+
+  // Stop an application (legacy, use UndeployApplication for new deployments)
+  rpc StopApplication(StopApplicationRequest) returns (StopApplicationResponse) {
+    option (google.api.http) = {
+      post: "/v1/applications/{name}:stop"
+      body: "*"
+    };
+  }
+}
+
+// Deploy application request
+message DeployApplicationRequest {
+  // Application identifier (unique per node)
+  string application_id = 1;
+
+  // Application name
+  string name = 2;
+
+  // Application version
+  string version = 3;
+
+  // WASM module (if WASM application)
+  // If provided, application code is loaded from WASM.
+  // If not provided, application must be pre-registered (native Rust).
+  optional plexspaces.wasm.v1.WasmModule wasm_module = 4;
+
+  // Application configuration
+  // Defines supervision tree, dependencies, environment variables, etc.
+  ApplicationSpec config = 5;
+
+  // Release configuration (optional)
+  // If provided, application is deployed with release-level settings.
+  // Similar to how applications are loaded from release.toml.
+  // If not provided, uses defaults or application-level config only.
+  optional plexspaces.node.v1.ReleaseSpec release_config = 6;
+
+  // Initial state (optional, for stateful applications)
+  // Passed to application's start() method.
+  bytes initial_state = 7;
+}
+
+// Deploy application response
+message DeployApplicationResponse {
+  // Success flag
+  bool success = 1;
+
+  // Application ID (may differ from request if auto-generated)
+  string application_id = 2;
+
+  // Application status after deployment
+  ApplicationStatus status = 3;
+
+  // Error details (if success=false)
+  optional string error = 4;
+}
+
+// Undeploy application request
+message UndeployApplicationRequest {
+  // Application ID to undeploy
+  string application_id = 1;
+
+  // Graceful shutdown timeout (optional, uses app config default if not provided)
+  optional google.protobuf.Duration timeout = 2;
+}
+
+// Undeploy application response
+message UndeployApplicationResponse {
+  // Success flag
+  bool success = 1;
+
+  // Error details (if success=false)
+  optional string error = 2;
+}
+
+// List applications request
+message ListApplicationsRequest {
+  // Filter by status (optional, empty = all applications)
+  optional ApplicationStatus status_filter = 1;
+}
+
+// List applications response
+message ListApplicationsResponse {
+  // List of deployed applications
+  repeated ApplicationInfo applications = 1;
+}
+
+// Application information
+message ApplicationInfo {
+  // Application ID
+  string application_id = 1;
+
+  // Application name
+  string name = 2;
+
+  // Application version
+  string version = 3;
+
+  // Current status
+  ApplicationStatus status = 4;
+
+  // When the application was deployed
+  google.protobuf.Timestamp deployed_at = 5;
+
+  // Application metrics (optional)
+  optional ApplicationMetrics metrics = 6;
+}
+
+// Application metrics
+message ApplicationMetrics {
+  // Number of actors in the application
+  uint32 actor_count = 1;
+
+  // Number of supervisors
+  uint32 supervisor_count = 2;
+
+  // Uptime in seconds
+  uint64 uptime_seconds = 3;
+}
+
+// Get application status request
+message GetApplicationStatusRequest {
+  // Application ID
+  string application_id = 1;
+}
+
+// Get application status response
+message GetApplicationStatusResponse {
+  // Application information
+  optional ApplicationInfo application = 1;
+
+  // Detailed application state
+  optional ApplicationRuntimeState state = 2;
+
+  // Error if application not found
+  optional string error = 3;
+}
+
+// Request to start an application (legacy).
+message StartApplicationRequest {
+  // Application name to start
+  string name = 1;
+}
+
+// Response from starting an application (legacy).
+message StartApplicationResponse {
+  // Started application instance
+  Application application = 1;
+}
+
+// Request to stop an application (legacy).
+message StopApplicationRequest {
+  // Application name to stop
+  string name = 1;
+
+  // Force immediate shutdown (ignore graceful strategy)
+  bool force = 2;
+}
+
+// Response from stopping an application (legacy).
+message StopApplicationResponse {
+  // Stopped application instance
+  Application application = 1;
+}

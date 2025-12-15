@@ -1,0 +1,64 @@
+[package]
+name = "plexspaces-blob"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+description = "S3-compatible blob storage service for PlexSpaces framework"
+repository = "https://github.com/plexobject/plexspaces"
+
+[dependencies]
+async-trait = "0.1"
+tokio = { version = "1.41", features = ["sync", "time", "macros", "rt-multi-thread", "fs"] }
+tokio-stream = "0.1"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+ulid = "1.2"
+sha2 = "0.10"
+hex = "0.4"
+bytes = "1.5"
+futures = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }
+
+# Object store for S3-compatible backends
+object_store = { version = "0.10", features = ["aws", "gcp", "azure"] }
+
+# SQL backend support
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres"], optional = true }
+
+# Proto types
+plexspaces-proto = { path = "../proto" }
+prost-types = { workspace = true }
+
+# Core for Service trait
+plexspaces-core = { path = "../core" }
+
+# HTTP server support (optional, for HTTP handlers)
+tonic = { workspace = true, optional = true }
+hyper = { version = "1.0", features = ["full"], optional = true }
+tower = { version = "0.4", features = ["util"], optional = true }
+tower-http = { version = "0.5", features = ["cors", "fs"], optional = true }
+multer = { version = "2.1", optional = true }
+http-body-util = { version = "0.1", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+anyhow = "1.0"
+env_logger = "0.11"
+serial_test = "3.0"
+reqwest = { version = "0.12", features = ["json"] }
+tempfile = "3.10"
+hyper = { version = "1.0", features = ["full"] }
+http-body-util = "0.1"
+
+[features]
+default = []
+sql-backend = ["sqlx"]
+all-backends = ["sql-backend"]
+server = ["tonic", "hyper", "tower", "tower-http", "multer", "http-body-util"]
+
+[lib]
+doctest = false

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_1"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  
+  <bpmn:process id="loan-approval-workflow" name="Loan Approval Workflow" isExecutable="true">
+    
+    <!-- Start Event -->
+    <bpmn:startEvent id="StartEvent_1" name="Start">
+      <bpmn:outgoing>Flow_SubmitApplication</bpmn:outgoing>
+    </bpmn:startEvent>
+    
+    <!-- Submit Application Task -->
+    <bpmn:serviceTask id="SubmitApplication" name="Submit Application">
+      <bpmn:incoming>Flow_SubmitApplication</bpmn:incoming>
+      <bpmn:outgoing>Flow_CreditCheck</bpmn:outgoing>
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="submit-application" />
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    
+    <!-- Credit Check Task -->
+    <bpmn:serviceTask id="CreditCheck" name="Credit Check">
+      <bpmn:incoming>Flow_CreditCheck</bpmn:incoming>
+      <bpmn:outgoing>Flow_RiskAssessment</bpmn:outgoing>
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="credit-check" />
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    
+    <!-- Risk Assessment Task -->
+    <bpmn:serviceTask id="RiskAssessment" name="Risk Assessment">
+      <bpmn:incoming>Flow_RiskAssessment</bpmn:incoming>
+      <bpmn:outgoing>Flow_ApprovalDecision</bpmn:outgoing>
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="risk-assessment" />
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    
+    <!-- Approval Decision Gateway -->
+    <bpmn:exclusiveGateway id="ApprovalDecision" name="Approval Decision">
+      <bpmn:incoming>Flow_ApprovalDecision</bpmn:incoming>
+      <bpmn:outgoing>Flow_Approved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Rejected</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    
+    <!-- Disburse Loan Task -->
+    <bpmn:serviceTask id="DisburseLoan" name="Disburse Loan">
+      <bpmn:incoming>Flow_Approved</bpmn:incoming>
+      <bpmn:outgoing>Flow_End</bpmn:outgoing>
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="disburse-loan" />
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    
+    <!-- Reject Application Task -->
+    <bpmn:serviceTask id="RejectApplication" name="Reject Application">
+      <bpmn:incoming>Flow_Rejected</bpmn:incoming>
+      <bpmn:outgoing>Flow_End</bpmn:outgoing>
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="reject-application" />
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    
+    <!-- End Event -->
+    <bpmn:endEvent id="EndEvent_1" name="End">
+      <bpmn:incoming>Flow_End</bpmn:incoming>
+    </bpmn:endEvent>
+    
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="Flow_SubmitApplication" sourceRef="StartEvent_1" targetRef="SubmitApplication" />
+    <bpmn:sequenceFlow id="Flow_CreditCheck" sourceRef="SubmitApplication" targetRef="CreditCheck" />
+    <bpmn:sequenceFlow id="Flow_RiskAssessment" sourceRef="CreditCheck" targetRef="RiskAssessment" />
+    <bpmn:sequenceFlow id="Flow_ApprovalDecision" sourceRef="RiskAssessment" targetRef="ApprovalDecision" />
+    <bpmn:sequenceFlow id="Flow_Approved" name="Approved" sourceRef="ApprovalDecision" targetRef="DisburseLoan">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${approved == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Rejected" name="Rejected" sourceRef="ApprovalDecision" targetRef="RejectApplication">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${approved == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_End" sourceRef="DisburseLoan" targetRef="EndEvent_1" />
+    <bpmn:sequenceFlow id="Flow_End_Rejected" sourceRef="RejectApplication" targetRef="EndEvent_1" />
+    
+  </bpmn:process>
+  
+</bpmn:definitions>

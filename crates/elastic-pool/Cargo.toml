@@ -1,0 +1,38 @@
+[package]
+name = "plexspaces-elastic-pool"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Elastic worker pool with auto-scaling for PlexSpaces"
+
+[dependencies]
+# PlexSpaces crates
+plexspaces-proto = { workspace = true }
+plexspaces-channel = { workspace = true }
+plexspaces-actor = { workspace = true }
+plexspaces-core = { workspace = true }
+plexspaces-supervisor = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+ulid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"

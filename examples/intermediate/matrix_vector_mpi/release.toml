@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# PlexSpaces Release Configuration for Matrix-Vector MPI Example
+
+[release]
+name = "matrix-vector-mpi"
+version = "0.1.0"
+description = "HPC-style matrix-vector multiplication using MPI collective operations"
+
+[node]
+id = "mpi-node-1"
+listen_address = "0.0.0.0:9002"
+cluster_seed_nodes = []
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9002"
+max_connections = 1000
+keepalive_interval_seconds = 30
+
+[runtime.health]
+heartbeat_interval_seconds = 2
+heartbeat_timeout_seconds = 10
+registry_url = "http://localhost:9000"
+
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-tuplespace",
+]
+
+[[applications]]
+name = "matrix-vector-mpi"
+version = "0.1.0"
+config_path = "examples/matrix_vector_mpi/config.toml"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 30
+shutdown_strategy = "graceful"
+dependencies = []
+
+[env]
+LOG_LEVEL = "info"
+
+[matrix_vector_mpi]
+num_rows = 8
+num_cols = 4
+num_workers = 2
+
+[shutdown]
+global_timeout_seconds = 60
+grace_period_seconds = 5
+grpc_drain_timeout_seconds = 10

@@ -1,0 +1,45 @@
+# Kueue ML Training Job Queue (Kubernetes YAML)
+# Demonstrates Kubernetes-native job queueing for ML workloads
+
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: ml-training-queue
+spec:
+  clusterQueue: ml-cluster-queue
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: ml-cluster-queue
+spec:
+  resourceGroups:
+  - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+    flavors:
+    - name: gpu-flavor
+      resources:
+      - name: "cpu"
+        nominalQuota: 100
+      - name: "memory"
+        nominalQuota: 200Gi
+      - name: "nvidia.com/gpu"
+        nominalQuota: 4
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-training-job-001
+  labels:
+    kueue.x-k8s.io/queue-name: ml-training-queue
+spec:
+  template:
+    spec:
+      containers:
+      - name: training
+        image: ml-training:latest
+        resources:
+          requests:
+            cpu: "4"
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+      restartPolicy: Never

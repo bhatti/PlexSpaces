@@ -1,0 +1,35 @@
+[workspace]
+
+[package]
+name = "firecracker-multi-tenant"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+license = "LGPL-2.1-or-later"
+description = "Simple Firecracker multi-tenant example demonstrating application-level isolation"
+
+[dependencies]
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-firecracker = { path = "../../../crates/firecracker" }
+plexspaces-proto = { path = "../../../crates/proto" }
+
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.4", features = ["derive"] }
+ulid = "1.1"
+
+[[bin]]
+name = "firecracker_multi_tenant"
+path = "src/main.rs"
+
+[[test]]
+name = "integration_test"
+path = "tests/integration_test.rs"
+

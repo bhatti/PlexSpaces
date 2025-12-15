@@ -1,0 +1,41 @@
+server:
+  host: "0.0.0.0"
+  grpc_port: 50051
+  http_port: 8080
+  reflection: true
+  health_check: true
+
+database:
+  url: "postgresql://plexspaces:password@localhost:5432/plexspaces"
+  max_connections: 100
+  min_connections: 5
+
+mongodb:
+  url: "mongodb://localhost:27017"
+  database: "plexspaces_tuplespace"
+
+auth:
+  jwt_secret: "your-secret-key-change-in-production"
+  token_expiry: "1h"
+  refresh_expiry: "24h"
+
+logging:
+  level: "info"
+  format: "json"
+  
+firecracker:
+  kernel_path: "/opt/firecracker/vmlinux"
+  rootfs_path: "/opt/firecracker/rootfs.ext4"
+  socket_dir: "/tmp/firecracker"
+
+blob:
+  backend: "minio"
+  bucket: "plexspaces"
+  endpoint: "http://localhost:9000"
+  region: ""
+  access_key_id: "minioadmin_user"
+  secret_access_key: "minioadmin_pass"
+  use_ssl: false
+  prefix: "/plexspaces"
+
+

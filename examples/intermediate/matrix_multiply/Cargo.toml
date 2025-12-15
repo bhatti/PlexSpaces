@@ -1,0 +1,36 @@
+[workspace]
+# Standalone example - not part of PlexSpaces workspace
+
+[package]
+name = "matrix_multiply"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "matrix_multiply"
+path = "src/lib.rs"
+
+[[bin]]
+name = "matrix_multiply"
+path = "src/main.rs"
+
+[dependencies]
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-behavior = { path = "../../../crates/behavior" }
+plexspaces-mailbox = { path = "../../../crates/mailbox" }
+plexspaces-persistence = { path = "../../../crates/persistence" }
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-tuplespace = { path = "../../../crates/tuplespace" }
+plexspaces-proto = { path = "../../../crates/proto" }
+
+tokio = { version = "1.42", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

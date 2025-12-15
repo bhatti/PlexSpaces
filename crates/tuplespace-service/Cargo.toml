@@ -1,0 +1,31 @@
+[package]
+name = "plexspaces-tuplespace-service"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gRPC service implementation for TupleSpace with provider delegation"
+
+[dependencies]
+# Core dependencies
+plexspaces-proto = { path = "../proto" }
+plexspaces-tuplespace = { path = "../tuplespace" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+# Utilities
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+ulid = { version = "1.1", features = ["serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4"

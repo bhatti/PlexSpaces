@@ -1,0 +1,28 @@
+[package]
+name = "reminders_example"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone example - not part of workspace
+[workspace]
+
+[[bin]]
+name = "reminders_example"
+path = "src/main.rs"
+
+[dependencies]
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-journaling = { path = "../../../crates/journaling" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-behavior = { path = "../../../crates/behavior" }
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-mailbox = { path = "../../../crates/mailbox" }
+plexspaces-facet = { path = "../../../crates/facet" }
+plexspaces-proto = { path = "../../../crates/proto" }
+tokio = { version = "1.44", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+

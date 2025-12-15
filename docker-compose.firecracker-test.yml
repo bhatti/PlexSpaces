@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Docker Compose for Firecracker integration testing
+# Runs PlexSpaces node with Firecracker support for gRPC API testing
+
+version: '3.8'
+
+services:
+  plexspaces-firecracker-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.firecracker-test
+    container_name: plexspaces-firecracker-test
+    hostname: firecracker-test-node
+    ports:
+      - "9001:9001"
+    environment:
+      - PLEXSPACES_NODE_ID=firecracker-test-node
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      - RUST_LOG=info
+    # Required capabilities for Firecracker
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    # Required for KVM access
+    devices:
+      - /dev/kvm:/dev/kvm
+    # Volume for Firecracker kernel/rootfs (if provided)
+    volumes:
+      - firecracker-data:/var/lib/firecracker
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9001"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - firecracker-test-net
+
+volumes:
+  firecracker-data:
+
+networks:
+  firecracker-test-net:
+    driver: bridge

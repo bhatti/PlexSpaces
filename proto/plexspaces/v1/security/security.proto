@@ -1,0 +1,392 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Security API
+//
+// ## Purpose
+// Defines authentication and authorization for service-to-service communication
+// and public APIs. Focuses on mTLS for service-to-service and JWT for public APIs.
+//
+// ## Architecture Context
+// This proto file implements simplified security model:
+// - **Service-to-Service**: mTLS (X.509 certificates)
+// - **Public APIs**: JWT (issued by external auth services)
+// - **Service Credentials**: API keys (for automated systems)
+// - **Audit Logging**: Security event tracking
+//
+// ## Design Decisions
+// - **No User Management**: User management belongs in application layer or external auth service
+// - **Service-Scoped**: All authentication is service-level, not user-level
+// - **Industry Standards**: mTLS and JWT are widely adopted standards
+
+syntax = "proto3";
+
+package plexspaces.security.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.security.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpace Security API";
+    version: "1.0";
+    description: "API for service-to-service authentication and authorization";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// Service identity for mTLS
+message ServiceIdentity {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Service Identity"
+      description: "Service identity with X.509 certificate for mTLS"
+      required: ["service_id", "certificate", "private_key"]
+    }
+  };
+
+  string service_id = 1 [(google.api.field_behavior) = REQUIRED];  // Service identifier (e.g., "actor-service", "scheduler-service")
+  bytes certificate = 2 [(google.api.field_behavior) = REQUIRED];  // X.509 certificate (PEM format)
+  bytes private_key = 3 [(google.api.field_behavior) = REQUIRED];  // Encrypted private key (PEM format)
+  google.protobuf.Timestamp expires_at = 4;
+  repeated string allowed_services = 5;  // Service IDs allowed to connect
+}
+
+// mTLS configuration
+message MtlsConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "mTLS Configuration"
+      description: "Configuration for mutual TLS authentication"
+    }
+  };
+
+  bool enable_mtls = 1;
+  string ca_certificate = 2;  // CA certificate for validation (PEM format)
+  repeated string trusted_services = 3;  // Service IDs to trust
+  google.protobuf.Duration certificate_rotation_interval = 4;
+}
+
+// JWT configuration for public APIs
+message JwtConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "JWT Configuration"
+      description: "Configuration for JWT authentication"
+    }
+  };
+
+  bool enable_jwt = 1;
+  string issuer = 2;  // JWT issuer (e.g., "https://auth.example.com")
+  string jwks_url = 3;  // JWKS endpoint for key validation
+  repeated string allowed_audiences = 4;  // Allowed JWT audiences
+  google.protobuf.Duration token_ttl = 5;
+}
+
+// API key for service authentication
+message ApiKey {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "API Key"
+      description: "API key for service authentication"
+      required: ["id", "name"]
+    }
+  };
+
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  string description = 3;
+  string key_hash = 4; // Hash of the actual key
+  repeated string scopes = 5;
+  google.protobuf.Timestamp expires_at = 6;
+  google.protobuf.Timestamp last_used = 7;
+  plexspaces.common.v1.Metadata metadata = 8;
+  // Note: user_id field removed - API keys are service-scoped, not user-scoped
+}
+
+// Audit log entry
+message AuditLogEntry {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Audit Log Entry"
+      description: "Security audit log entry"
+    }
+  };
+
+  string id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string service_id = 3;  // Changed from user_id to service_id
+  string service_name = 4;  // Changed from username to service_name
+  string action = 5;
+  string resource = 6;
+  string resource_id = 7;
+  bool success = 8;
+  string ip_address = 9;
+  string user_agent = 10;
+  map<string, google.protobuf.Value> details = 11;
+}
+
+// Requests and responses
+
+// Service-to-service authentication (mTLS)
+message AuthenticateServiceRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Authenticate Service Request"
+      description: "Request to authenticate a service using mTLS"
+      required: ["service_id", "certificate", "signature"]
+    }
+  };
+
+  string service_id = 1 [(google.api.field_behavior) = REQUIRED];
+  bytes certificate = 2 [(google.api.field_behavior) = REQUIRED];  // Client certificate
+  bytes signature = 3 [(google.api.field_behavior) = REQUIRED];  // Signature of challenge
+}
+
+message AuthenticateServiceResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Authenticate Service Response"
+      description: "Response with service identity and short-lived token"
+    }
+  };
+
+  ServiceIdentity identity = 1;
+  string token = 2;  // Short-lived token for subsequent requests
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+// API authentication (JWT)
+message AuthenticateApiRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Authenticate API Request"
+      description: "Request to authenticate using JWT"
+      required: ["jwt_token"]
+    }
+  };
+
+  string jwt_token = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message AuthenticateApiResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Authenticate API Response"
+      description: "Response with service identity from JWT claims"
+    }
+  };
+
+  string service_id = 1;  // Service ID from JWT claims
+  repeated string scopes = 2;  // Scopes from JWT claims
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+// API key management
+message CreateApiKeyRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Create API Key Request"
+      description: "Request to create an API key"
+      required: ["name"]
+    }
+  };
+
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  string description = 2;
+  repeated string scopes = 3;
+  google.protobuf.Duration expires_in = 4;
+}
+
+message CreateApiKeyResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Create API Key Response"
+      description: "Response with created API key"
+    }
+  };
+
+  ApiKey api_key = 1;
+  string key = 2; // Only returned on creation
+}
+
+message RevokeApiKeyRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Revoke API Key Request"
+      description: "Request to revoke an API key"
+      required: ["key_id"]
+    }
+  };
+
+  string key_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RevokeApiKeyResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Revoke API Key Response"
+      description: "Response confirming API key revocation"
+    }
+  };
+}
+
+message ListApiKeysRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "List API Keys Request"
+      description: "Request to list API keys"
+    }
+  };
+
+  plexspaces.common.v1.PageRequest page_request = 1;
+}
+
+message ListApiKeysResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "List API Keys Response"
+      description: "Response with list of API keys"
+    }
+  };
+
+  repeated ApiKey api_keys = 1;
+  plexspaces.common.v1.PageResponse page_response = 2;
+}
+
+// Audit logs
+message GetAuditLogsRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Audit Logs Request"
+      description: "Request to retrieve audit logs"
+    }
+  };
+
+  google.protobuf.Timestamp start_time = 1;
+  google.protobuf.Timestamp end_time = 2;
+  string service_id = 3;  // Changed from user_id to service_id
+  string action = 4;
+  string resource = 5;
+  plexspaces.common.v1.PageRequest page_request = 6;
+}
+
+message GetAuditLogsResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Audit Logs Response"
+      description: "Response with audit log entries"
+    }
+  };
+
+  repeated AuditLogEntry entries = 1;
+  plexspaces.common.v1.PageResponse page_response = 2;
+}
+
+// Security service
+service SecurityService {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Service for service-to-service authentication and authorization"
+  };
+
+  // Service-to-service authentication (mTLS)
+  rpc AuthenticateService(AuthenticateServiceRequest) returns (AuthenticateServiceResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/service"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Authenticate Service"
+      description: "Authenticate a service using mTLS"
+      tags: "Authentication"
+    };
+  }
+
+  // API authentication (JWT)
+  rpc AuthenticateApi(AuthenticateApiRequest) returns (AuthenticateApiResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/api"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Authenticate API"
+      description: "Authenticate using JWT token"
+      tags: "Authentication"
+    };
+  }
+
+  // Create API key
+  rpc CreateApiKey(CreateApiKeyRequest) returns (CreateApiKeyResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/api-keys"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create API Key"
+      description: "Create a new API key for service authentication"
+      tags: "API Keys"
+    };
+  }
+
+  // Revoke API key
+  rpc RevokeApiKey(RevokeApiKeyRequest) returns (RevokeApiKeyResponse) {
+    option (google.api.http) = {
+      delete: "/v1/auth/api-keys/{key_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Revoke API Key"
+      description: "Revoke an API key"
+      tags: "API Keys"
+    };
+  }
+
+  // List API keys
+  rpc ListApiKeys(ListApiKeysRequest) returns (ListApiKeysResponse) {
+    option (google.api.http) = {
+      get: "/v1/auth/api-keys"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List API Keys"
+      description: "List API keys"
+      tags: "API Keys"
+    };
+  }
+
+  // Get audit logs
+  rpc GetAuditLogs(GetAuditLogsRequest) returns (GetAuditLogsResponse) {
+    option (google.api.http) = {
+      get: "/v1/security/audit-logs"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Audit Logs"
+      description: "Retrieve security audit logs"
+      tags: "Audit"
+    };
+  }
+}

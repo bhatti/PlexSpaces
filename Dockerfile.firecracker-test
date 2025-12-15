@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Dockerfile for Firecracker integration testing
+# Runs PlexSpaces node with Firecracker support in a Linux environment
+
+# Build for linux/amd64 (Firecracker only supports x86_64)
+# Use rust:1-bookworm to match Debian bookworm base (ensures GLIBC compatibility)
+FROM --platform=linux/amd64 rust:1-bookworm AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    pkg-config \
+    libssl-dev \
+    cmake \
+    build-essential \
+    clang \
+    llvm \
+    libclang-dev \
+    git \
+    curl \
+    ca-certificates \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install buf for proto linting and generation
+RUN curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64" \
+    -o "/usr/local/bin/buf" && \
+    chmod +x /usr/local/bin/buf
+
+# Copy workspace files for dependency resolution
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ ./crates/
+COPY proto/ ./proto/
+COPY wit/ ./wit/
+
+# Dummy build to cache dependencies (skip if it fails - proto files may need generation)
+RUN mkdir -p src crates/proto/src crates/node/src && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "// dummy" > crates/proto/src/lib.rs && \
+    echo "// dummy" > crates/node/src/lib.rs && \
+    cargo build --release --features firecracker -p plexspaces-node 2>&1 | head -20 || true && \
+    rm -rf src crates/proto/src crates/node/src
+
+# Copy the rest of the application code
+COPY . .
+
+# Generate proto files
+RUN make proto || true
+
+# Build CLI with Firecracker feature (includes node start command)
+RUN cargo build --release --features firecracker -p plexspaces-cli
+
+# Runtime stage - must be linux/amd64 for Firecracker
+# Use debian:bookworm to match rust:1-bookworm builder (ensures GLIBC compatibility)
+FROM --platform=linux/amd64 debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies (including netcat for health checks)
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    wget \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Firecracker binary
+# Use a specific stable version (v1.4.0) for reliability
+RUN mkdir -p /usr/bin /var/lib/firecracker && \
+    wget -q https://github.com/firecracker-microvm/firecracker/releases/download/v1.4.0/firecracker-v1.4.0-x86_64.tgz && \
+    tar -xzf firecracker-v1.4.0-x86_64.tgz && \
+    mv release-v1.4.0-x86_64/firecracker-v1.4.0-x86_64 /usr/bin/firecracker && \
+    chmod +x /usr/bin/firecracker && \
+    rm -rf firecracker-v1.4.0-x86_64.tgz release-v1.4.0-x86_64 && \
+    firecracker --version
+
+# Install kernel and rootfs (minimal for testing)
+# Note: In production, these would be provided separately
+RUN echo "Firecracker kernel and rootfs should be provided via volume mount" > /var/lib/firecracker/README.txt
+
+# Copy CLI binary from builder
+COPY --from=builder /app/target/release/plexspaces /usr/local/bin/plexspaces
+
+# Expose gRPC port
+EXPOSE 9001
+
+# Health check (using simple TCP check)
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
+    CMD nc -z localhost 9001 || exit 1
+
+# Run node using CLI start command
+CMD ["plexspaces", "start", "--node-id", "docker-node-1", "--listen-addr", "0.0.0.0:9001"]

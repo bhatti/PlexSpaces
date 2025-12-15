@@ -1,0 +1,23 @@
+[package]
+name = "dirigo-comparison"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+plexspaces-core.workspace = true
+plexspaces-actor.workspace = true
+plexspaces-behavior.workspace = true
+plexspaces-journaling.workspace = true
+plexspaces-node.workspace = true
+plexspaces-mailbox.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ulid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait.workspace = true
+
+[[bin]]
+name = "dirigo_comparison"
+path = "src/main.rs"

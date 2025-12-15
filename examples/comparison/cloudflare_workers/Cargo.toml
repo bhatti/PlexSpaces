@@ -1,0 +1,30 @@
+[package]
+name = "cloudflare-workers-comparison"
+version.workspace = true
+edition.workspace = true
+
+# Standalone example - not part of workspace
+
+[dependencies]
+plexspaces-core.workspace = true
+plexspaces-actor.workspace = true
+plexspaces-behavior.workspace = true
+plexspaces-facet.workspace = true
+plexspaces-journaling = { workspace = true, features = ["sqlite-backend"] }
+plexspaces-node.workspace = true
+plexspaces-mailbox.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ulid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait.workspace = true
+
+[[bin]]
+name = "cloudflare_workers_comparison"
+path = "src/main.rs"
+
+[features]
+default = []
+sqlite-backend = ["plexspaces-journaling/sqlite-backend"]

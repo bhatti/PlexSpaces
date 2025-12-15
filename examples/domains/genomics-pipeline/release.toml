@@ -1,0 +1,105 @@
+# PlexSpaces Release Configuration for Genomics DNA Sequencing Pipeline
+#
+# This file demonstrates how to deploy the genomics pipeline as a PlexSpaces
+# Application using the Release framework (Erlang/OTP-inspired).
+
+[release]
+name = "genomics-pipeline"
+version = "0.1.0"
+description = "DNA Sequencing Analysis Pipeline with Durable Actors"
+
+[node]
+id = "genomics-coordinator-node"
+listen_address = "0.0.0.0:9001"
+cluster_seed_nodes = []
+
+[runtime.grpc]
+enabled = true
+address = "0.0.0.0:9001"
+max_connections = 1000
+keepalive_interval_seconds = 30
+
+# gRPC Middleware Configuration
+[[runtime.grpc.middleware]]
+type = "metrics"
+enabled = true
+priority = 10
+
+[[runtime.grpc.middleware]]
+type = "auth"
+enabled = true
+priority = 30
+[runtime.grpc.middleware.config.auth]
+method = "jwt"
+jwt_key = "genomics-pipeline-secret-key"
+allow_unauthenticated = true  # Permissive mode for demo
+
+[[runtime.grpc.middleware]]
+type = "rate_limit"
+enabled = true
+priority = 40
+[runtime.grpc.middleware.config.rate_limit]
+requests_per_second = 100
+burst_size = 20
+
+[[runtime.grpc.middleware]]
+type = "compression"
+enabled = true
+priority = 50
+[runtime.grpc.middleware.config.compression]
+min_compression_size_bytes = 1024
+algorithm = "gzip"
+
+[[runtime.grpc.middleware]]
+type = "tracing"
+enabled = true
+priority = 20
+[runtime.grpc.middleware.config.tracing]
+service_name = "genomics-pipeline"
+sampling_rate = 1.0
+
+[runtime.health]
+heartbeat_interval_seconds = 2
+heartbeat_timeout_seconds = 10
+registry_url = "http://localhost:9000"
+
+# System applications (PlexSpaces core infrastructure)
+[system_applications]
+included = [
+    "plexspaces-core",
+    "plexspaces-tuplespace",
+    "plexspaces-actor",
+    "plexspaces-supervisor",
+]
+
+# Genomics Pipeline application
+[[applications]]
+name = "genomics-pipeline"
+version = "0.1.0"
+config_path = "examples/genomics-pipeline/config.toml"
+enabled = true
+auto_start = true
+shutdown_timeout_seconds = 60
+shutdown_strategy = "graceful"
+dependencies = []
+
+# Genomics Pipeline Application Configuration
+[genomics_pipeline]
+target_granularity_ratio = 100.0
+
+[genomics_pipeline.worker_pools]
+qc = 2
+alignment = 2
+chromosome = 24  # One per chromosome (chr1-22, X, Y)
+annotation = 1
+report = 1
+
+[genomics_pipeline.node]
+id = "genomics-coordinator-node"
+listen_address = "0.0.0.0:9001"
+
+# Graceful shutdown configuration
+[shutdown]
+global_timeout_seconds = 300
+grace_period_seconds = 10
+grpc_drain_timeout_seconds = 30

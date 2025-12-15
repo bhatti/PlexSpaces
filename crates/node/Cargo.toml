@@ -1,0 +1,79 @@
+[package]
+name = "plexspaces-node"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Node management and Firecracker VM support"
+
+[dependencies]
+# Core types and dependencies
+plexspaces-core = { workspace = true }
+plexspaces-journaling = { workspace = true }
+plexspaces-tuplespace = { workspace = true }
+plexspaces-mailbox = { workspace = true }
+plexspaces-proto = { workspace = true }
+plexspaces-actor = { workspace = true }
+plexspaces-persistence = { workspace = true }
+plexspaces-keyvalue = { workspace = true }
+plexspaces-object-registry = { workspace = true }
+plexspaces-channel = { workspace = true }
+plexspaces-process-groups = { workspace = true }
+plexspaces-supervisor = { workspace = true }
+plexspaces-facet = { workspace = true }
+plexspaces-actor-service = { path = "../actor-service" }
+plexspaces-scheduler = { workspace = true, features = ["memory-backend"] }
+plexspaces-locks = { workspace = true }
+plexspaces-wasm-runtime = { workspace = true }
+plexspaces-blob = { path = "../blob", features = ["sql-backend", "server"] }
+plexspaces-firecracker = { workspace = true, optional = true }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = "0.23"
+toml = "0.8"
+config = "0.14"
+ulid = "1.2"
+chrono = { workspace = true }
+libc = "0.2"  # For signal handling in shutdown coordinator
+sysinfo = "0.30"  # For system resource metrics (CPU, memory, disk)
+regex = "1.10"  # For config key pattern matching
+
+# gRPC for actor remoting
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+tokio-stream = { version = "0.1", features = ["net"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
+tonic-health = { workspace = true }
+tonic-web = { workspace = true }  # For gRPC-Web and gRPC-Gateway HTTP access
+futures = { workspace = true }  # For BoxStream in ChannelService
+tower = { version = "0.4", features = ["util", "timeout", "load"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "fs"] }
+hyper = { version = "1.0", features = ["full"] }
+http-body-util = "0.1"
+axum = { version = "0.7", features = ["multipart"] }
+
+[features]
+default = []
+firecracker = ["plexspaces-firecracker"]
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+plexspaces-behavior = { workspace = true }
+plexspaces-persistence = { workspace = true }
+futures = { workspace = true }
+
+[lib]
+name = "plexspaces_node"
+path = "src/lib.rs"

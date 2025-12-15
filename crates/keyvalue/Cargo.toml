@@ -1,0 +1,42 @@
+[package]
+name = "plexspaces-keyvalue"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
+description = "Multi-purpose key-value store for PlexSpaces framework"
+repository = "https://github.com/plexobject/plexspaces"
+
+[dependencies]
+async-trait = "0.1"
+tokio = { version = "1.41", features = ["sync", "time", "macros", "rt-multi-thread"] }
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+
+# Optional SQL backend support (must match tuplespace version)
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres"], optional = true }
+
+# Optional Redis backend support
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"], optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+anyhow = "1.0"
+env_logger = "0.11"
+criterion = { version = "0.5", features = ["async_tokio"] }
+serial_test = "3.0"
+
+[features]
+default = []
+sql-backend = ["sqlx"]
+redis-backend = ["redis"]
+all-backends = ["sql-backend", "redis-backend"]
+
+[lib]
+doctest = false
+
+[[bench]]
+name = "keyvalue_benchmarks"
+harness = false

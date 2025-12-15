@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Docker Compose for Polyglot WASM Deployment Example
+# Runs example in Docker with real Firecracker support
+
+services:
+  polyglot-test:
+    build:
+      context: ../../..
+      dockerfile: examples/simple/polyglot_wasm_deployment/Dockerfile
+    container_name: polyglot-wasm-deployment-test
+    # Expose gRPC port for ApplicationService
+    ports:
+      - "9000:9000"
+    environment:
+      - RUST_LOG=info
+    networks:
+      - polyglot-net
+
+volumes:
+  polyglot-data:
+
+networks:
+  polyglot-net:
+    driver: bridge
+

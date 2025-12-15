@@ -1,0 +1,752 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Supervision API
+//
+// ## Purpose
+// Implements Erlang/OTP-style supervision trees for fault-tolerant actor systems.
+// Supervisors monitor child actors and automatically restart them on failure,
+// implementing the "let it crash" philosophy where failures are expected and handled
+// systematically rather than prevented defensively.
+//
+// ## Architecture Context
+// This proto file implements **Pillar 2 (Erlang/OTP Philosophy)** of PlexSpaces.
+// It provides the fault tolerance foundation that enables:
+// - Hierarchical supervision trees (supervisors can supervise other supervisors)
+// - Configurable restart strategies (one-for-one, one-for-all, rest-for-one)
+// - Restart intensity limits to prevent restart loops
+// - Graceful shutdown with configurable timeouts
+// - Child lifecycle management (start, stop, restart)
+//
+// ### Integration with Other Pillars
+// - **Pillar 1 (TupleSpace)**: Supervisors can coordinate recovery across distributed nodes
+// - **Pillar 3 (Durability)**: Restarted actors replay journal to restore state
+// - **Pillar 4 (WASM)**: WASM actors can be supervised just like native actors
+// - **Pillar 5 (Firecracker)**: Supervisors can manage actors across VMs
+//
+// ## Component Interactions
+// - **Used by**: Node managers to ensure actor availability, applications for fault tolerance
+// - **Depends on**: common.proto (actor IDs, metadata), actor_runtime.proto (actor lifecycle)
+// - **Provides**: Fault tolerance and automatic recovery for all PlexSpaces actors
+//
+// ## Design Decisions
+// - **Why four supervision strategies**:
+//   - ONE_FOR_ONE: Isolated failures (most common, restart only failed child)
+//   - ONE_FOR_ALL: Dependent children (restart all when one fails, ensure consistency)
+//   - REST_FOR_ONE: Ordered dependencies (restart failed + all started after it)
+//   - SIMPLE_ONE_FOR_ONE: Dynamic worker pools (all children identical, efficient)
+//
+// - **Why restart intensity limits (max_restarts/within_period)**:
+//   - Prevents infinite restart loops (bad code, missing resource)
+//   - Escalates to parent supervisor when limit exceeded
+//   - Typical: 3 restarts in 5 seconds, then give up
+//
+// - **Why three restart strategies per child**:
+//   - PERMANENT: Always restart (critical services like databases)
+//   - TRANSIENT: Restart only on abnormal exit (workers that might complete)
+//   - TEMPORARY: Never restart (one-off tasks, cleanup jobs)
+//
+// - **Why shutdown_timeout per child**:
+//   - Some actors need time to flush buffers, close connections
+//   - Prevents hanging shutdowns (timeout = kill forcefully)
+//   - Balance: too short = data loss, too long = slow shutdown
+//
+// ## Supervision Strategies Explained
+//
+// ### ONE_FOR_ONE (Default, Most Common)
+// ```
+// Supervisor
+//  ├─ Child A (running)
+//  ├─ Child B (CRASHED) → Restart only B
+//  └─ Child C (running)
+//
+// Use when: Children are independent (e.g., separate user sessions)
+// ```
+//
+// ### ONE_FOR_ALL (Consistency Critical)
+// ```
+// Supervisor
+//  ├─ Child A (running) → Restart
+//  ├─ Child B (CRASHED) → Restart
+//  └─ Child C (running) → Restart
+//
+// Use when: Children must stay consistent (e.g., cache + database connection)
+// ```
+//
+// ### REST_FOR_ONE (Ordered Dependencies)
+// ```
+// Supervisor
+//  ├─ Child A (running)     → Keep running
+//  ├─ Child B (CRASHED)     → Restart
+//  └─ Child C (depends on B) → Restart (started after B)
+//
+// Use when: Children have start-order dependencies
+// ```
+//
+// ### SIMPLE_ONE_FOR_ONE (Worker Pools)
+// ```
+// Supervisor (template: WorkerSpec)
+//  ├─ Worker-1 (running)
+//  ├─ Worker-2 (CRASHED) → Restart from template
+//  ├─ Worker-3 (running)
+//  └─ ... (can have thousands of identical workers)
+//
+// Use when: Many identical workers (e.g., connection pool, request handlers)
+// ```
+//
+// ## Restart Intensity Example
+// ```protobuf
+// SupervisorConfig {
+//   strategy: ONE_FOR_ONE
+//   max_restarts: 3
+//   within_period: "5s"
+// }
+//
+// Timeline:
+// t=0s:  Child crashes, restart #1 ✓
+// t=2s:  Child crashes, restart #2 ✓
+// t=4s:  Child crashes, restart #3 ✓
+// t=6s:  Child crashes, restart #4 ✗ (too many, escalate to parent)
+// ```
+
+syntax = "proto3";
+
+package plexspaces.supervision.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.supervision.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpaces Supervision API";
+    version: "1.0";
+    description: "Erlang/OTP-style supervision trees for fault-tolerant actor systems";
+    contact: {
+      name: "PlexSpaces";
+      url: "https://github.com/bhatti/plexspaces";
+    };
+  };
+  schemes: HTTPS;
+  schemes: HTTP;
+  consumes: "application/json";
+  produces: "application/json";
+  responses: {
+    key: "400";
+    value: {
+      description: "Invalid request";
+      schema: {
+        json_schema: {
+          ref: ".plexspaces.common.v1.Error";
+        }
+      }
+    }
+  };
+  responses: {
+    key: "404";
+    value: {
+      description: "Not found";
+      schema: {
+        json_schema: {
+          ref: ".plexspaces.common.v1.Error";
+        }
+      }
+    }
+  };
+  responses: {
+    key: "500";
+    value: {
+      description: "Internal server error";
+      schema: {
+        json_schema: {
+          ref: ".plexspaces.common.v1.Error";
+        }
+      }
+    }
+  };
+};
+
+// Supervision strategy determines how supervisor handles child failures
+enum SupervisionStrategy {
+  SUPERVISION_STRATEGY_UNSPECIFIED = 0;
+
+  // Restart only the failed child
+  ONE_FOR_ONE = 1;
+
+  // Restart all children if one fails
+  ONE_FOR_ALL = 2;
+
+  // Restart failed child and all children started after it
+  REST_FOR_ONE = 3;
+
+  // Simple one-for-one: all children are identical
+  SIMPLE_ONE_FOR_ONE = 4;
+}
+
+// Restart strategy for individual children
+enum RestartStrategy {
+  RESTART_STRATEGY_UNSPECIFIED = 0;
+
+  // Always restart child on failure
+  PERMANENT = 1;
+
+  // Restart only on abnormal termination
+  TRANSIENT = 2;
+
+  // Never restart child
+  TEMPORARY = 3;
+}
+
+// Child specification
+//
+// ## Erlang/OTP Equivalent
+// This maps to Erlang's child_spec:
+// ```erlang
+// #{id => ChildId,
+//   start => {Module, Function, Args},
+//   restart => permanent | temporary | transient,
+//   shutdown => brutal_kill | Timeout | infinity,
+//   type => worker | supervisor,
+//   modules => [Module]}
+// ```
+//
+// ## Design: Unified Child Reference
+// In PlexSpaces, both actors and supervisors are identified by ID.
+// - For actors: `actor_or_supervisor_id` is the actor ID
+// - For supervisors: `actor_or_supervisor_id` is the supervisor ID
+// - The `child_type` field distinguishes them
+//
+// This follows Erlang's approach where supervisors are just special processes.
+message ChildSpec {
+  // Unique identifier for this child within the supervisor
+  // This is the child's local name, like "worker1" or "db_supervisor"
+  string child_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // ID of the actor or supervisor to supervise
+  // - For actors: actor ID (e.g., "worker1@localhost")
+  // - For supervisors: supervisor ID (e.g., "db-supervisor")
+  // The supervisor monitors this process regardless of its type
+  string actor_or_supervisor_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // How to handle child failures
+  RestartStrategy restart_strategy = 3;
+
+  // Shutdown timeout for graceful termination
+  // - None/0 = brutal_kill (immediate)
+  // - Some(ms) = graceful shutdown with timeout
+  // - For supervisors: typically set high or infinity to allow children to shutdown
+  google.protobuf.Duration shutdown_timeout = 4 [(buf.validate.field).duration.lte.seconds = 300];  // Max 5 minutes
+
+  // Child type: actor (worker) or supervisor
+  ChildType child_type = 5;
+
+  // Metadata for child configuration
+  // Can include:
+  // - "start_module": Module name for recreation
+  // - "start_function": Function to call
+  // - "supervisor_strategy": For CHILD_TYPE_SUPERVISOR, its strategy
+  map<string, string> metadata = 6;
+}
+
+enum ChildType {
+  CHILD_TYPE_UNSPECIFIED = 0;
+  CHILD_TYPE_ACTOR = 1;
+  CHILD_TYPE_SUPERVISOR = 2;
+}
+
+// Supervisor configuration
+message SupervisorConfig {
+  // Supervision strategy
+  SupervisionStrategy strategy = 1;
+
+  // Maximum restart intensity (max restarts in period)
+  uint32 max_restarts = 2 [(buf.validate.field).uint32 = {gte: 1, lte: 1000}];  // 1 to 1000 restarts
+
+  // Time period for max_restarts
+  google.protobuf.Duration within_period = 3 [(buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 3600}}];  // 1 second to 1 hour
+
+  // Child specifications
+  repeated ChildSpec children = 4 [(buf.validate.field).repeated.max_items = 1000];  // Max 1000 children
+
+  // Supervisor metadata
+  map<string, string> metadata = 5;
+}
+
+// Supervisor state
+message SupervisorState {
+  // Supervisor ID
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // Configuration
+  SupervisorConfig config = 2;
+
+  // Current children
+  repeated ChildState children = 3 [(buf.validate.field).repeated.max_items = 1000];  // Max 1000 children
+
+  // Restart history
+  repeated RestartEvent restart_history = 4 [(buf.validate.field).repeated.max_items = 10000];  // Max 10K events
+
+  // Is supervisor active
+  bool is_active = 5;
+}
+
+// Child state
+message ChildState {
+  // Child specification
+  ChildSpec spec = 1;
+
+  // Current state
+  ChildStatus status = 2;
+
+  // When child was started
+  google.protobuf.Timestamp started_at = 3;
+
+  // Number of restarts
+  uint32 restart_count = 4 [(buf.validate.field).uint32.lte = 10000];  // Max 10K restarts
+
+  // Last restart time
+  google.protobuf.Timestamp last_restart = 5;
+}
+
+enum ChildStatus {
+  CHILD_STATUS_UNSPECIFIED = 0;
+  CHILD_STATUS_STARTING = 1;
+  CHILD_STATUS_RUNNING = 2;
+  CHILD_STATUS_STOPPING = 3;
+  CHILD_STATUS_STOPPED = 4;
+  CHILD_STATUS_FAILED = 5;
+  CHILD_STATUS_RESTARTING = 6;
+}
+
+// Event propagation policy for hierarchical supervision trees
+//
+// ## Purpose
+// Defines how events from child supervisors propagate to parent supervisors
+// in supervision trees, enabling configurable monitoring and observability.
+//
+// ## Why This Exists
+// In hierarchical supervision trees, parent supervisors need to know about
+// child supervisor events for:
+// - Monitoring child supervisor health
+// - Detecting failure patterns across tree levels
+// - Implementing escalation policies
+// - Providing unified observability
+//
+// ## Design Decisions
+// - **FORWARD_ALL**: Default Erlang/OTP behavior - transparent event flow
+// - **FILTER_CRITICAL**: Reduce noise for high-level supervisors
+// - **NO_PROPAGATION**: Isolate branches (child supervisor is autonomous)
+//
+// ## Usage
+// ```rust
+// let child_supervisor = Supervisor::new(
+//     "child",
+//     SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 60 }
+// );
+//
+// // Parent supervisor receives all child events
+// parent.add_supervisor_child(
+//     child_supervisor,
+//     EventPropagation::FORWARD_ALL
+// );
+// ```
+enum EventPropagation {
+  // Forward all events from child supervisor to parent
+  // (ChildStarted, ChildStopped, ChildFailed, ChildRestarted, etc.)
+  EVENT_PROPAGATION_FORWARD_ALL = 0;
+
+  // Only forward critical events (failures, max restarts exceeded)
+  // Filters out routine events (ChildStarted, ChildStopped)
+  EVENT_PROPAGATION_FILTER_CRITICAL = 1;
+
+  // No event propagation - child supervisor is completely autonomous
+  // Parent only knows if child supervisor itself fails
+  EVENT_PROPAGATION_NONE = 2;
+}
+
+// Restart event
+message RestartEvent {
+  // Child that was restarted
+  string child_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // When restart occurred
+  google.protobuf.Timestamp timestamp = 2;
+
+  // Reason for restart
+  string reason = 3 [(buf.validate.field).string.max_len = 1024];  // Error messages can be long
+
+  // Which strategy was applied
+  SupervisionStrategy strategy = 4;
+}
+
+// Supervisor statistics for monitoring and observability
+//
+// ## Purpose
+// Provides runtime metrics for supervisor behavior, enabling:
+// - **Production Monitoring**: Track restart rates, failure patterns
+// - **Debugging**: Identify problematic actors or recurring failures
+// - **Capacity Planning**: Understand resource usage and stability
+// - **Alerting**: Detect when restart rates exceed thresholds
+//
+// ## Why This Exists
+// In production distributed systems, supervisors are the fault tolerance backbone.
+// Without metrics, operators cannot answer critical questions:
+// - "Is this actor constantly restarting?"
+// - "What are the most common failure reasons?"
+// - "Is the system stable or thrashing?"
+// - "Do we need to adjust max_restarts thresholds?"
+//
+// ## Metrics Tracked
+//
+// ### Restart Counts
+// - **total_restarts**: All restart attempts (successful + failed)
+// - **successful_restarts**: Restarts that succeeded (actor back online)
+// - **failed_restarts**: Restarts that failed (couldn't bring actor back)
+//
+// ### Success Rate Calculation
+// ```
+// success_rate = successful_restarts / total_restarts
+// Example: 95 successful / 100 total = 0.95 (95% success rate)
+// ```
+//
+// ### Strategy Adaptations (Adaptive Strategy Only)
+// - **strategy_adaptations**: How many times adaptive strategy changed
+// - Tracks learning behavior of Adaptive supervision strategy
+// - High adaptation count indicates unstable failure patterns
+//
+// ### Failure Patterns
+// - **failure_patterns**: Map of error reasons → occurrence count
+// - Enables root cause analysis: "80% of failures are 'database timeout'"
+// - Helps prioritize fixes for most common failures
+//
+// ## Usage Examples
+//
+// ### Alerting on High Restart Rate
+// ```rust
+// let stats = supervisor.stats().await;
+// if stats.total_restarts > 100 && stats.success_rate() < 0.90 {
+//     alert("High restart rate with low success!");
+// }
+// ```
+//
+// ### Debugging Failure Patterns
+// ```rust
+// let stats = supervisor.stats().await;
+// for (reason, count) in stats.failure_patterns {
+//     if count > 10 {
+//         println!("Common failure: {} ({} times)", reason, count);
+//     }
+// }
+// ```
+//
+// ### Capacity Planning
+// ```rust
+// let stats = supervisor.stats().await;
+// let restart_rate = stats.total_restarts as f64 / uptime_seconds;
+// if restart_rate > 1.0 {  // More than 1 restart/sec
+//     scale_cluster();  // Need more capacity
+// }
+// ```
+//
+// ## Integration with Metrics Systems
+// These stats can be exported to:
+// - **Prometheus**: `supervisor_restarts_total{supervisor="foo"}`
+// - **StatsD**: `supervisor.foo.restarts.total:100|c`
+// - **CloudWatch**: Custom metrics for AWS deployments
+// - **DataDog**: APM metrics for distributed tracing
+message SupervisorStats {
+  // Total number of restart attempts (successful + failed)
+  //
+  // Monotonically increasing counter tracking all restart attempts
+  // since supervisor creation. Includes both successful restarts
+  // (actor back online) and failed restarts (couldn't recover).
+  uint64 total_restarts = 1;
+
+  // Number of successful restarts
+  //
+  // Counts restarts where the actor successfully came back online
+  // and resumed processing messages. Always <= total_restarts.
+  uint64 successful_restarts = 2;
+
+  // Number of failed restarts
+  //
+  // Counts restarts that failed (e.g., actor factory error, timeout).
+  // Always <= total_restarts.
+  // Invariant: total_restarts = successful_restarts + failed_restarts
+  uint64 failed_restarts = 3;
+
+  // Number of times adaptive strategy changed (Adaptive strategy only)
+  //
+  // Tracks how many times the Adaptive supervision strategy learned
+  // from failure patterns and switched strategies. Only increments
+  // for Adaptive strategy; always 0 for static strategies.
+  uint32 strategy_adaptations = 4 [(buf.validate.field).uint32.lte = 10000];  // Max 10K adaptations
+
+  // Failure pattern histogram: error reason → count
+  //
+  // Maps failure reasons (error messages) to their occurrence count.
+  // Enables root cause analysis:
+  // - "database_timeout": 50 → Database connection issues
+  // - "out_of_memory": 10 → Resource exhaustion
+  // - "panic": 5 → Code bugs
+  //
+  // Use this to prioritize fixes for most common failure modes.
+  map<string, uint32> failure_patterns = 5;
+}
+
+// Supervision service
+service SupervisionService {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Erlang/OTP-style supervision trees for fault-tolerant actor systems"
+  };
+
+  // Create a new supervisor
+  rpc CreateSupervisor(CreateSupervisorRequest) returns (CreateSupervisorResponse) {
+    option (google.api.http) = {
+      post: "/v1/supervisors"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create Supervisor"
+      description: "Create a new supervisor with specified strategy and configuration"
+      tags: "Supervisors"
+    };
+  }
+
+  // Add a child to supervisor
+  rpc AddChild(AddChildRequest) returns (AddChildResponse) {
+    option (google.api.http) = {
+      post: "/v1/supervisors/{supervisor_id}/children"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Add Child"
+      description: "Add a new child actor or supervisor to an existing supervisor"
+      tags: "Children"
+    };
+  }
+
+  // Remove a child from supervisor
+  rpc RemoveChild(RemoveChildRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/supervisors/{supervisor_id}/children/{child_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Remove Child"
+      description: "Remove a child from supervisor and stop it gracefully"
+      tags: "Children"
+    };
+  }
+
+  // Start a supervisor
+  rpc StartSupervisor(StartSupervisorRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      post: "/v1/supervisors/{supervisor_id}/start"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Start Supervisor"
+      description: "Start a supervisor and all its children"
+      tags: "Supervisors"
+    };
+  }
+
+  // Stop a supervisor
+  rpc StopSupervisor(StopSupervisorRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      post: "/v1/supervisors/{supervisor_id}/stop"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Stop Supervisor"
+      description: "Stop a supervisor and all its children gracefully with timeout"
+      tags: "Supervisors"
+    };
+  }
+
+  // Get supervisor state
+  rpc GetSupervisorState(GetSupervisorStateRequest) returns (GetSupervisorStateResponse) {
+    option (google.api.http) = {
+      get: "/v1/supervisors/{supervisor_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Supervisor State"
+      description: "Retrieve current state of supervisor including children and restart history"
+      tags: "Supervisors"
+    };
+  }
+
+  // List all supervisors
+  rpc ListSupervisors(ListSupervisorsRequest) returns (ListSupervisorsResponse) {
+    option (google.api.http) = {
+      get: "/v1/supervisors"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List Supervisors"
+      description: "List all supervisors, optionally filtered by namespace"
+      tags: "Supervisors"
+    };
+  }
+
+  // Restart a specific child
+  rpc RestartChild(RestartChildRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {
+      post: "/v1/supervisors/{supervisor_id}/children/{child_id}/restart"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Restart Child"
+      description: "Manually restart a specific child actor or supervisor"
+      tags: "Children"
+    };
+  }
+
+  // Get supervisor statistics
+  rpc GetSupervisorStats(GetSupervisorStatsRequest) returns (GetSupervisorStatsResponse) {
+    option (google.api.http) = {
+      get: "/v1/supervisors/{supervisor_id}/stats"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Statistics"
+      description: "Retrieve supervisor metrics including restart counts and failure patterns"
+      tags: "Monitoring"
+    };
+  }
+}
+
+message CreateSupervisorRequest {
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+  SupervisorConfig config = 2;
+}
+
+message CreateSupervisorResponse {
+  bool success = 1;
+  string supervisor_id = 2 [(buf.validate.field).string.max_len = 255];
+  string error_message = 3 [(buf.validate.field).string.max_len = 1024];
+}
+
+message AddChildRequest {
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+  ChildSpec child_spec = 2;
+}
+
+message AddChildResponse {
+  bool success = 1;
+  string error_message = 2 [(buf.validate.field).string.max_len = 1024];
+}
+
+message RemoveChildRequest {
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+  string child_id = 2 [(buf.validate.field).string.max_len = 255];
+}
+
+message StartSupervisorRequest {
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+}
+
+message StopSupervisorRequest {
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 300];  // Max 5 minutes
+}
+
+message GetSupervisorStateRequest {
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+}
+
+message GetSupervisorStateResponse {
+  SupervisorState state = 1;
+}
+
+message ListSupervisorsRequest {
+  // Optional filter
+  string namespace = 1 [(buf.validate.field).string.max_len = 128];
+}
+
+message ListSupervisorsResponse {
+  repeated SupervisorState supervisors = 1 [(buf.validate.field).repeated.max_items = 10000];  // Max 10K supervisors
+}
+
+message RestartChildRequest {
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+  string child_id = 2 [(buf.validate.field).string.max_len = 255];
+}
+
+message GetSupervisorStatsRequest {
+  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
+}
+
+message GetSupervisorStatsResponse {
+  SupervisorStats stats = 1;
+}
+
+// ============================================================================
+// Error Types (Proto-First Design)
+// ============================================================================
+
+/// Supervision error types
+///
+/// ## Design
+/// All supervision errors are defined in proto for:
+/// - Wire compatibility (gRPC error responses)
+/// - Language-agnostic error handling
+/// - Consistent error semantics across implementations
+enum SupervisionErrorCode {
+  SUPERVISION_ERROR_UNSPECIFIED = 0;
+
+  // Child management errors
+  CHILD_NOT_FOUND = 1;
+  CHILD_ALREADY_EXISTS = 2;
+  CHILD_START_FAILED = 3;
+  CHILD_STOP_FAILED = 4;
+
+  // Restart errors
+  MAX_RESTARTS_EXCEEDED = 5;
+  RESTART_FAILED = 6;
+
+  // Strategy errors
+  INVALID_STRATEGY = 7;
+  INVALID_CHILD_SPEC = 8;
+
+  // Supervisor errors
+  SUPERVISOR_NOT_FOUND = 9;
+  SUPERVISOR_ALREADY_EXISTS = 10;
+  SUPERVISOR_NOT_ACTIVE = 11;
+}
+
+/// Supervision error details
+message SupervisionError {
+  // Error code
+  SupervisionErrorCode code = 1;
+
+  // Human-readable error message
+  string message = 2 [(buf.validate.field).string.max_len = 1024];
+
+  // Additional context (child_id, supervisor_id, etc.)
+  map<string, string> context = 3;
+
+  // Timestamp when error occurred
+  google.protobuf.Timestamp timestamp = 4;
+}

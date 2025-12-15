@@ -1,0 +1,37 @@
+[package]
+name = "plexspaces-process-groups"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Process groups for distributed pub/sub and broadcast messaging (Erlang pg/pg2-inspired)"
+
+[dependencies]
+# Core types and dependencies
+plexspaces-core = { workspace = true }
+plexspaces-proto = { workspace = true }
+plexspaces-keyvalue = { workspace = true }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+ulid = { workspace = true }
+
+# Observability (CRITICAL - production-ready observability)
+metrics = "0.23"
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+
+[lib]
+name = "plexspaces_process_groups"
+path = "src/lib.rs"

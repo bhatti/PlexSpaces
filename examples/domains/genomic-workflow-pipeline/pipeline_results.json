@@ -1,0 +1,12 @@
+{
+  "total_reads": 100,
+  "qc_passed": 0,
+  "variants_called": 0,
+  "metrics": {
+    "compute_time_ms": 0,
+    "coordinate_time_ms": 27,
+    "total_time_ms": 27,
+    "granularity_ratio": 0.0,
+    "efficiency_percent": 0.0
+  }
+}

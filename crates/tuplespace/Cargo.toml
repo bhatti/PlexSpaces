@@ -1,0 +1,48 @@
+[package]
+name = "plexspaces-tuplespace"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Linda-style tuplespace coordination"
+
+[dependencies]
+# TupleSpace only depends on lattice
+plexspaces-proto = { workspace = true }
+plexspaces-lattice = { workspace = true }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { version = "0.9" }
+toml = { version = "0.8" }
+chrono = { workspace = true }
+ulid = { version = "1.1", features = ["serde"] }
+rand = "0.8"
+
+# Backend dependencies (optional)
+redis = { workspace = true, optional = true }
+sqlx = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+tempfile = { workspace = true }
+
+[features]
+default = []
+redis-backend = ["redis", "futures"]
+sql-backend = ["sqlx"]
+
+[lib]
+name = "plexspaces_tuplespace"
+path = "src/lib.rs"

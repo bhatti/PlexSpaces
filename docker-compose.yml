@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Docker Compose for multi-node PlexSpaces deployment
+# Demonstrates framework-only containers ready for dynamic WASM deployment
+
+version: '3.8'
+
+services:
+  plexspaces-node1:
+    build: .
+    container_name: plexspaces-node1
+    hostname: node1
+    ports:
+      - "9001:9001"
+    environment:
+      # Node configuration
+      - PLEXSPACES_NODE_ID=node1
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      # Cluster seed nodes for discovery
+      - PLEXSPACES_CLUSTER_SEED_NODES=node2:9001,node3:9001
+      # Config file path
+      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
+      # Logging
+      - RUST_LOG=info
+      # Journaling: SQLite (file-based, persistent)
+      - PLEXSPACES_JOURNALING_BACKEND=sqlite
+      - PLEXSPACES_JOURNALING_SQLITE_PATH=/app/data/journal.db
+      # Channel/TupleSpace: Redis (distributed, scalable)
+      - PLEXSPACES_CHANNEL_BACKEND=redis
+      - PLEXSPACES_CHANNEL_REDIS_URL=redis://redis:6379
+      - PLEXSPACES_TUPLESPACE_BACKEND=redis
+      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
+    volumes:
+      - ./config:/app/config:ro
+      - node1-data:/app/data
+    healthcheck:
+      # Health check via gRPC (requires grpc_health_probe)
+      # Alternative: Use HTTP via gRPC-Gateway if configured
+      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - plexspaces-net
+    depends_on:
+      - plexspaces-node2
+      - plexspaces-node3
+
+  plexspaces-node2:
+    build: .
+    container_name: plexspaces-node2
+    hostname: node2
+    ports:
+      - "9002:9001"
+    environment:
+      - PLEXSPACES_NODE_ID=node2
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node3:9001
+      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
+      - RUST_LOG=info
+      - PLEXSPACES_JOURNALING_BACKEND=sqlite
+      - PLEXSPACES_JOURNALING_SQLITE_PATH=/app/data/journal.db
+      - PLEXSPACES_CHANNEL_BACKEND=redis
+      - PLEXSPACES_CHANNEL_REDIS_URL=redis://redis:6379
+      - PLEXSPACES_TUPLESPACE_BACKEND=redis
+      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
+    volumes:
+      - ./config:/app/config:ro
+      - node2-data:/app/data
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - plexspaces-net
+
+  plexspaces-node3:
+    build: .
+    container_name: plexspaces-node3
+    hostname: node3
+    ports:
+      - "9003:9001"
+    environment:
+      - PLEXSPACES_NODE_ID=node3
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001
+      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
+      - RUST_LOG=info
+      - PLEXSPACES_JOURNALING_BACKEND=sqlite
+      - PLEXSPACES_JOURNALING_SQLITE_PATH=/app/data/journal.db
+      - PLEXSPACES_CHANNEL_BACKEND=redis
+      - PLEXSPACES_CHANNEL_REDIS_URL=redis://redis:6379
+      - PLEXSPACES_TUPLESPACE_BACKEND=redis
+      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
+    volumes:
+      - ./config:/app/config:ro
+      - node3-data:/app/data
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - plexspaces-net
+
+  # Redis for distributed channel/tuplespace backends
+  redis:
+    image: redis:7-alpine
+    container_name: plexspaces-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - plexspaces-net
+
+  # NATS for lightweight pub/sub messaging (used by channel tests)
+  nats:
+    image: nats:2.10-alpine
+    container_name: plexspaces-nats
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # HTTP monitoring port
+    command: ["-js", "-m", "8222"]  # Enable JetStream and monitoring
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "4222"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - plexspaces-net
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+  redis-data:
+
+networks:
+  plexspaces-net:
+    driver: bridge

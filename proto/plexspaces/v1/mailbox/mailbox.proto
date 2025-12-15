@@ -1,0 +1,478 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Mailbox API
+//
+// ## Purpose
+// Manages message queuing and delivery for actors with configurable semantics.
+// Mailboxes provide the messaging substrate that enables asynchronous actor
+// communication with backpressure, priority, and deduplication support.
+//
+// ## Architecture Context
+// This proto file supports **Pillar 2 (Erlang/OTP Philosophy)** of PlexSpaces.
+// It provides the messaging foundation that enables:
+// - Asynchronous message delivery (fire-and-forget)
+// - Priority-based message processing (system > high > normal > low)
+// - Bounded queues with backpressure (prevent memory exhaustion)
+// - Message deduplication (at-most-once semantics)
+// - Message expiration (TTL to prevent stale messages)
+//
+// ### Integration with Other Pillars
+// - **Pillar 1 (TupleSpace)**: Alternative to direct messaging for decoupled communication
+// - **Pillar 3 (Durability)**: Mailbox operations journaled for replay after failures
+// - **Pillar 4 (WASM)**: WASM actors have mailboxes just like native actors
+// - **Pillar 5 (Firecracker)**: Mailboxes can span VM boundaries for isolation
+//
+// ## Component Interactions
+// - **Used by**: All actors for receiving messages
+// - **Depends on**: common.proto (actor IDs, metadata, QoS levels)
+// - **Provides**: Message queue abstraction for actor communication
+//
+// ## Design Decisions
+// - **Why four mailbox types**:
+//   - FIFO: Predictable ordering (most common, default)
+//   - PRIORITY: Urgent messages first (system messages, control plane)
+//   - BOUNDED: Memory safety (prevents OOM from message floods)
+//   - UNBOUNDED: Simplest (development, low-traffic scenarios)
+//
+// - **Why six priority levels**:
+//   - SYSTEM (10): Lifecycle, supervision (always processed first)
+//   - HIGHEST (5): Critical business operations
+//   - HIGH (4): Important but not critical
+//   - NORMAL (3): Default priority (most messages)
+//   - LOW (2): Background tasks, cleanup
+//   - LOWEST (1): Bulk operations, analytics
+//
+// - **Why four backpressure strategies**:
+//   - BLOCK: Simplest (sender waits for space)
+//   - DROP_OLDEST: Time-sensitive data (latest is most valuable)
+//   - DROP_NEWEST: Queue-like semantics (preserve order)
+//   - ERROR: Explicit failure (caller handles overflow)
+//
+// - **Why message deduplication**:
+//   - Network retries can create duplicates
+//   - At-most-once semantics without complex protocols
+//   - Configurable window (balance memory vs accuracy)
+//
+// - **Why message TTL**:
+//   - Prevents processing stale messages (e.g., 5-minute-old price quote)
+//   - Automatic cleanup of unprocessed messages
+//   - Bounded memory growth
+//
+// ## Mailbox Type Comparison
+//
+// ### FIFO (Default)
+// ```
+// Enqueue: [A, B, C, D]
+// Dequeue: A → B → C → D (strict order)
+//
+// Use when: Order matters (e.g., event processing, state machines)
+// ```
+//
+// ### PRIORITY
+// ```
+// Enqueue: [normal:A, high:B, system:C, low:D]
+// Dequeue: C → B → A → D (priority order)
+//
+// Use when: Some messages more urgent (e.g., health checks, shutdown signals)
+// ```
+//
+// ### BOUNDED (capacity=3)
+// ```
+// Current: [A, B, C] (full)
+// Enqueue D: Apply backpressure strategy
+//   - BLOCK: Wait for dequeue
+//   - DROP_OLDEST: Remove A, add D → [B, C, D]
+//   - DROP_NEWEST: Reject D → [A, B, C]
+//   - ERROR: Return error to sender
+//
+// Use when: Memory safety critical (prevent OOM)
+// ```
+//
+// ### UNBOUNDED
+// ```
+// Enqueue: [A, B, C, D, ... unlimited]
+//
+// Use when: Development, low traffic, controlled environments
+// WARNING: Can cause OOM in production
+// ```
+//
+// ## Backpressure Strategy Comparison
+//
+// ### BLOCK (Default for bounded)
+// - Sender waits until space available
+// - Pro: No message loss
+// - Con: Can deadlock if not careful
+// - Use: Critical messages that must be delivered
+//
+// ### DROP_OLDEST
+// - Remove oldest message, add new one
+// - Pro: Always accepts new messages
+// - Con: Can lose important old messages
+// - Use: Real-time data (sensor readings, prices)
+//
+// ### DROP_NEWEST
+// - Reject new message, keep queue unchanged
+// - Pro: Preserves FIFO order
+// - Con: New messages rejected
+// - Use: Sequential processing where order critical
+//
+// ### ERROR
+// - Return error to sender
+// - Pro: Explicit failure handling
+// - Con: Caller must handle retry logic
+// - Use: When sender needs to know about overflow
+
+syntax = "proto3";
+
+package plexspaces.mailbox.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/channel/channel.proto";
+
+// Mailbox type
+enum MailboxType {
+  MAILBOX_TYPE_UNSPECIFIED = 0;
+
+  // First-In-First-Out queue
+  FIFO = 1;
+
+  // Priority-based queue
+  PRIORITY = 2;
+
+  // Bounded queue with backpressure
+  BOUNDED = 3;
+
+  // Unbounded queue (default)
+  UNBOUNDED = 4;
+}
+
+// Message priority
+enum MessagePriority {
+  MESSAGE_PRIORITY_UNSPECIFIED = 0;
+  LOWEST = 1;
+  LOW = 2;
+  NORMAL = 3;
+  HIGH = 4;
+  HIGHEST = 5;
+  SYSTEM = 10;  // System messages always processed first
+}
+
+// Mailbox configuration
+message MailboxConfig {
+  // Type of mailbox
+  MailboxType mailbox_type = 1;
+
+  // Maximum queue capacity (0 = unlimited for UNBOUNDED)
+  uint32 capacity = 2;
+
+  // Backpressure strategy when queue is full
+  BackpressureStrategy backpressure_strategy = 3;
+
+  // Message timeout (how long messages wait before being dropped)
+  google.protobuf.Duration message_timeout = 4;
+
+  // Enable priority-based processing
+  bool enable_priority = 5;
+
+  // Enable message deduplication
+  bool enable_deduplication = 6;
+
+  // Deduplication window
+  google.protobuf.Duration deduplication_window = 7;
+
+  // Maximum cache size for message ID deduplication (default: 10000)
+  // LRU cache with fixed size - evicts least recently used when full
+  // Range: 100 to 1,000,000 entries
+  uint32 message_id_cache_size = 14;
+
+  // Maximum cache size for idempotency key deduplication (default: 10000)
+  // LRU cache with fixed size - evicts least recently used when full
+  // Range: 100 to 1,000,000 entries
+  uint32 idempotency_cache_size = 15;
+
+  // Storage strategy (where messages are stored)
+  StorageStrategy storage_strategy = 8;
+
+  // Ordering strategy (how messages are ordered)
+  OrderingStrategy ordering_strategy = 9;
+
+  // Durability strategy (durability guarantees)
+  // This is a hint/requirement - the actual implementation is determined by channel_backend
+  DurabilityStrategy durability_strategy = 10;
+
+  // Channel backend implementation (defaults to IN_MEMORY if not specified)
+  // This directly specifies which channel backend to use for the mailbox.
+  // The backend must be available/configured, otherwise mailbox creation will fail.
+  plexspaces.channel.v1.ChannelBackend channel_backend = 12;
+
+  // Channel-specific configuration (optional, backend-specific)
+  // Only used if channel_backend is specified. If not provided, backend uses defaults.
+  plexspaces.channel.v1.ChannelConfig channel_config = 13;
+
+  // Metadata
+  map<string, string> metadata = 11;
+}
+
+// Backpressure strategy when mailbox is full
+enum BackpressureStrategy {
+  BACKPRESSURE_STRATEGY_UNSPECIFIED = 0;
+
+  // Block sender until space is available
+  BLOCK = 1;
+
+  // Drop oldest message in queue
+  DROP_OLDEST = 2;
+
+  // Drop newest message (reject)
+  DROP_NEWEST = 3;
+
+  // Return error to sender
+  ERROR = 4;
+}
+
+// Storage strategy for mailbox messages
+//
+// ## Purpose
+// Defines where mailbox messages are stored (memory, disk, distributed).
+// Composable strategy pattern for flexible mailbox implementations.
+enum StorageStrategy {
+  STORAGE_STRATEGY_UNSPECIFIED = 0;
+
+  // In-memory only (fastest, lost on restart)
+  MEMORY = 1;
+
+  // Disk-backed (spills to disk when full, survives restart)
+  DISK = 2;
+
+  // Distributed (Redis, Kafka, etc. for multi-node)
+  DISTRIBUTED = 3;
+}
+
+// Ordering strategy for mailbox messages
+//
+// ## Purpose
+// Defines how messages are ordered when dequeued.
+// Composable strategy pattern for flexible mailbox implementations.
+enum OrderingStrategy {
+  ORDERING_STRATEGY_UNSPECIFIED = 0;
+
+  // First-in-first-out (default, preserves order)
+  ORDERING_FIFO = 1;
+
+  // Priority-based (high priority first)
+  ORDERING_PRIORITY = 2;
+
+  // LIFO (last-in-first-out, stack-like)
+  ORDERING_LIFO = 3;
+
+  // Random (for load balancing)
+  ORDERING_RANDOM = 4;
+}
+
+// Durability strategy for mailbox messages
+//
+// ## Purpose
+// Defines durability guarantees for mailbox messages.
+// Composable strategy pattern for flexible mailbox implementations.
+enum DurabilityStrategy {
+  DURABILITY_STRATEGY_UNSPECIFIED = 0;
+
+  // No durability (messages lost on crash)
+  DURABILITY_NONE = 1;
+
+  // At-least-once delivery (journaled, may replay)
+  DURABILITY_AT_LEAST_ONCE = 2;
+
+  // Exactly-once delivery (with deduplication)
+  DURABILITY_EXACTLY_ONCE = 3;
+
+  // Fully durable (messages persisted immediately)
+  DURABILITY_DURABLE = 4;
+}
+
+// Mailbox error types
+//
+// ## Purpose
+// Defines error types for mailbox operations.
+// Used in error responses and for error handling in mailbox service.
+enum MailboxError {
+  MAILBOX_ERROR_UNSPECIFIED = 0;
+
+  // Mailbox not found
+  MAILBOX_ERROR_NOT_FOUND = 1;
+
+  // Mailbox is full (backpressure triggered)
+  MAILBOX_ERROR_FULL = 2;
+
+  // Message timeout (message expired)
+  MAILBOX_ERROR_TIMEOUT = 3;
+
+  // Invalid configuration
+  MAILBOX_ERROR_INVALID_CONFIG = 4;
+
+  // Storage operation failed
+  MAILBOX_ERROR_STORAGE = 5;
+
+  // Serialization/deserialization failed
+  MAILBOX_ERROR_SERIALIZATION = 6;
+}
+
+// Mailbox statistics
+message MailboxStats {
+  // Actor this mailbox belongs to
+  string actor_id = 1;
+
+  // Current queue depth
+  uint32 current_depth = 2;
+
+  // Maximum depth reached
+  uint32 max_depth = 3;
+
+  // Total messages enqueued
+  uint64 total_enqueued = 4;
+
+  // Total messages dequeued
+  uint64 total_dequeued = 5;
+
+  // Total messages dropped
+  uint64 total_dropped = 6;
+
+  // Total messages timed out
+  uint64 total_timed_out = 7;
+
+  // Average wait time
+  google.protobuf.Duration avg_wait_time = 8;
+
+  // Oldest message timestamp
+  google.protobuf.Timestamp oldest_message_at = 9;
+
+  // Last update timestamp
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// Message envelope for mailbox
+//
+// ## Note
+// This is the proto representation of the internal `Message` struct.
+// The Rust `Message` type should use this proto-generated type.
+message MessageEnvelope {
+  // Unique message ID
+  string message_id = 1;
+
+  // Message type
+  string message_type = 2;
+
+  // Message payload
+  bytes payload = 3;
+
+  // Sender actor ID
+  string sender_id = 4;
+
+  // Recipient actor ID
+  string recipient_id = 5;
+
+  // Message priority
+  MessagePriority priority = 6;
+
+  // When message was enqueued
+  google.protobuf.Timestamp enqueued_at = 7;
+
+  // Message expiration time
+  google.protobuf.Timestamp expires_at = 8;
+
+  // Correlation ID for request-reply
+  string correlation_id = 9;
+
+  // Message metadata
+  map<string, string> metadata = 10;
+}
+
+
+// Mailbox service
+service MailboxService {
+  // Create a mailbox
+  rpc CreateMailbox(CreateMailboxRequest) returns (CreateMailboxResponse);
+
+  // Delete a mailbox
+  rpc DeleteMailbox(DeleteMailboxRequest) returns (plexspaces.common.v1.Empty);
+
+  // Get mailbox statistics
+  rpc GetMailboxStats(GetMailboxStatsRequest) returns (GetMailboxStatsResponse);
+
+  // Update mailbox configuration
+  rpc UpdateMailboxConfig(UpdateMailboxConfigRequest) returns (plexspaces.common.v1.Empty);
+
+  // Purge mailbox (clear all messages)
+  rpc PurgeMailbox(PurgeMailboxRequest) returns (PurgeMailboxResponse);
+
+  // List mailboxes
+  rpc ListMailboxes(ListMailboxesRequest) returns (ListMailboxesResponse);
+}
+
+message CreateMailboxRequest {
+  string actor_id = 1;
+  MailboxConfig config = 2;
+}
+
+message CreateMailboxResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message DeleteMailboxRequest {
+  string actor_id = 1;
+}
+
+message GetMailboxStatsRequest {
+  string actor_id = 1;
+}
+
+message GetMailboxStatsResponse {
+  MailboxStats stats = 1;
+}
+
+message UpdateMailboxConfigRequest {
+  string actor_id = 1;
+  MailboxConfig config = 2;
+}
+
+message PurgeMailboxRequest {
+  string actor_id = 1;
+}
+
+message PurgeMailboxResponse {
+  uint32 messages_purged = 1;
+}
+
+message ListMailboxesRequest {
+  // Optional filter
+  string namespace = 1;
+}
+
+message ListMailboxesResponse {
+  repeated MailboxInfo mailboxes = 1;
+}
+
+message MailboxInfo {
+  string actor_id = 1;
+  MailboxConfig config = 2;
+  MailboxStats stats = 3;
+}

@@ -1,0 +1,247 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+
+# Finance Risk Assessment - Multi-Node Docker Compose
+#
+# This file defines a 4-node distributed deployment of the finance risk assessment system:
+# - Node 1: Coordinator (orchestration + business logic)
+# - Node 2: Data Collection workers (external API integration)
+# - Node 3: Risk Scoring worker (ML inference)
+# - Node 4: Post-Decision services (notifications, documents)
+#
+# Prerequisites:
+#   export SENDGRID_API_KEY="your-api-key"  # For email notifications
+#
+# Usage:
+#   docker-compose up -d                # Start all nodes
+#   docker-compose ps                   # Check status
+#   docker-compose logs -f coordinator  # Follow coordinator logs
+#   docker-compose down                 # Stop all nodes
+
+services:
+  # Node 1: Coordinator
+  coordinator:
+    image: plexspaces/finance-risk:latest
+    container_name: finance-coordinator
+    hostname: finance-coordinator
+    networks:
+      - finance-network
+    ports:
+      - "9101:9101"  # gRPC
+    volumes:
+      - finance-data:/data/finance
+      - ./config/node1.toml:/config/node1.toml:ro
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_CONFIG=/config/node.toml
+      # Durability configuration (DISABLED - permissions issue with Docker volumes)
+      # - NODE_ID=coordinator
+      # - FINANCE_DATA_DIR=/data/finance
+      # - CHECKPOINT_INTERVAL=100
+      # - ENABLE_COMPRESSION=true
+      # - REPLAY_ON_ACTIVATION=true
+      # - CACHE_SIDE_EFFECTS=true
+      # Worker pool configuration (minimal on coordinator)
+      - CREDIT_POOL_SIZE=0
+      - BANK_POOL_SIZE=0
+      - EMPLOYMENT_POOL_SIZE=0
+      - RISK_SCORING_POOL_SIZE=0
+      - DECISION_ENGINE_POOL_SIZE=1
+      - DOCUMENT_POOL_SIZE=0
+      - NOTIFICATION_POOL_SIZE=0
+      - AUDIT_POOL_SIZE=1
+    command: ["finance-node", "--config", "/config/node1.toml"]
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9101"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    restart: unless-stopped
+
+  # Node 2: Data Collection Workers (External API Integration)
+  data-collection:
+    image: plexspaces/finance-risk:latest
+    container_name: finance-data-collection
+    hostname: finance-data-collection
+    networks:
+      - finance-network
+    ports:
+      - "9102:9102"
+    volumes:
+      - finance-data:/data/finance
+      - ./config/node2.toml:/config/node2.toml:ro
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_CONFIG=/config/node.toml
+      # Durability configuration
+      - NODE_ID=data-collection
+      - FINANCE_DATA_DIR=/data/finance
+      - CHECKPOINT_INTERVAL=100
+      - ENABLE_COMPRESSION=true
+      - REPLAY_ON_ACTIVATION=true
+      - CACHE_SIDE_EFFECTS=true
+      # Worker pool configuration (Data Collection)
+      - CREDIT_POOL_SIZE=5
+      - BANK_POOL_SIZE=5
+      - EMPLOYMENT_POOL_SIZE=3
+      - RISK_SCORING_POOL_SIZE=0
+      - DECISION_ENGINE_POOL_SIZE=0
+      - DOCUMENT_POOL_SIZE=0
+      - NOTIFICATION_POOL_SIZE=0
+      - AUDIT_POOL_SIZE=0
+      # External API credentials (use environment variables for security)
+      - EQUIFAX_API_KEY=${EQUIFAX_API_KEY:-}
+      - EXPERIAN_API_KEY=${EXPERIAN_API_KEY:-}
+      - TRANSUNION_API_KEY=${TRANSUNION_API_KEY:-}
+      - PLAID_CLIENT_ID=${PLAID_CLIENT_ID:-}
+      - PLAID_SECRET=${PLAID_SECRET:-}
+      - THE_WORK_NUMBER_API_KEY=${THE_WORK_NUMBER_API_KEY:-}
+    command: ["finance-node", "--config", "/config/node2.toml"]
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9102"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+        reservations:
+          cpus: '1.0'
+          memory: 512M
+    depends_on:
+      coordinator:
+        condition: service_started
+    restart: unless-stopped
+
+  # Node 3: Risk Scoring Worker (ML Inference)
+  risk-scoring:
+    image: plexspaces/finance-risk:latest
+    container_name: finance-risk-scoring
+    hostname: finance-risk-scoring
+    networks:
+      - finance-network
+    ports:
+      - "9103:9103"
+    volumes:
+      - finance-data:/data/finance
+      - ./config/node3.toml:/config/node3.toml:ro
+      - ./models:/models:ro  # ML models (ONNX format)
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_CONFIG=/config/node.toml
+      # Durability configuration
+      - NODE_ID=risk-scoring
+      - FINANCE_DATA_DIR=/data/finance
+      - CHECKPOINT_INTERVAL=100
+      - ENABLE_COMPRESSION=true
+      - REPLAY_ON_ACTIVATION=true
+      - CACHE_SIDE_EFFECTS=true
+      # Worker pool configuration (Risk Scoring)
+      - CREDIT_POOL_SIZE=0
+      - BANK_POOL_SIZE=0
+      - EMPLOYMENT_POOL_SIZE=0
+      - RISK_SCORING_POOL_SIZE=2
+      - DECISION_ENGINE_POOL_SIZE=0
+      - DOCUMENT_POOL_SIZE=0
+      - NOTIFICATION_POOL_SIZE=0
+      - AUDIT_POOL_SIZE=0
+    command: ["finance-node", "--config", "/config/node3.toml"]
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9103"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s  # ML model loading takes time
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4096M
+        reservations:
+          cpus: '2.0'
+          memory: 2048M
+    depends_on:
+      coordinator:
+        condition: service_started
+    restart: unless-stopped
+
+  # Node 4: Post-Decision Services (Notifications, Documents)
+  post-decision:
+    image: plexspaces/finance-risk:latest
+    container_name: finance-post-decision
+    hostname: finance-post-decision
+    networks:
+      - finance-network
+    ports:
+      - "9104:9104"
+    volumes:
+      - finance-data:/data/finance
+      - ./config/node4.toml:/config/node4.toml:ro
+      - ./templates:/templates:ro  # Email templates
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_CONFIG=/config/node.toml
+      # Durability configuration
+      - NODE_ID=post-decision
+      - FINANCE_DATA_DIR=/data/finance
+      - CHECKPOINT_INTERVAL=100
+      - ENABLE_COMPRESSION=true
+      - REPLAY_ON_ACTIVATION=true
+      - CACHE_SIDE_EFFECTS=true
+      # Worker pool configuration (Post-Decision Services)
+      - CREDIT_POOL_SIZE=0
+      - BANK_POOL_SIZE=0
+      - EMPLOYMENT_POOL_SIZE=0
+      - RISK_SCORING_POOL_SIZE=0
+      - DECISION_ENGINE_POOL_SIZE=0
+      - DOCUMENT_POOL_SIZE=2
+      - NOTIFICATION_POOL_SIZE=3
+      - AUDIT_POOL_SIZE=0
+      # Email service credentials
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
+      - AWS_SES_ACCESS_KEY_ID=${AWS_SES_ACCESS_KEY_ID:-}
+      - AWS_SES_SECRET_ACCESS_KEY=${AWS_SES_SECRET_ACCESS_KEY:-}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+    command: ["finance-node", "--config", "/config/node4.toml"]
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9104"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    depends_on:
+      coordinator:
+        condition: service_started
+    restart: unless-stopped
+
+networks:
+  finance-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
+
+volumes:
+  finance-data:
+    driver: local

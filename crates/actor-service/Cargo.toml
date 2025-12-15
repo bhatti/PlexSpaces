@@ -1,0 +1,52 @@
+[package]
+name = "plexspaces-actor-service"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "ActorService gRPC gateway for PlexSpaces distributed actors"
+
+[dependencies]
+# PlexSpaces crates
+plexspaces-proto = { workspace = true }
+plexspaces-core = { path = "../core" }
+plexspaces-actor = { path = "../actor" }
+plexspaces-mailbox = { workspace = true }
+plexspaces-object-registry = { path = "../object-registry" }
+plexspaces-keyvalue = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+tokio-stream = "0.1"
+async-trait = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = "1.0"
+
+# Observability
+metrics = "0.23"
+tracing = "0.1"
+
+# Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[lib]
+name = "plexspaces_actor_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "node_runner"
+path = "tests/integration/node_runner.rs"

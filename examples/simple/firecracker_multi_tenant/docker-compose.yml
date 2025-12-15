@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Docker Compose for Firecracker Multi-Tenant Example
+# Runs example in Docker with real Firecracker support
+
+services:
+  firecracker-test:
+    build:
+      context: ../../..
+      dockerfile: examples/simple/firecracker_multi_tenant/Dockerfile
+      # Firecracker only supports x86_64, so we must build for linux/amd64
+      # Docker will use emulation on ARM64 hosts (like Apple Silicon)
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    container_name: firecracker-multi-tenant-test
+    # Firecracker requires KVM access and seccomp syscalls - use privileged mode
+    # Note: Firecracker needs prctl syscall for seccomp filters
+    # On macOS with emulated x86_64, seccomp may not work - this is a known limitation
+    privileged: true
+    # Disable seccomp to allow Firecracker to run (required for emulated environments)
+    # In production on native Linux, you would use a proper seccomp profile
+    security_opt:
+      - apparmor=unconfined
+      - seccomp=unconfined
+    # Alternative: Use specific capabilities instead of privileged
+    # cap_add:
+    #   - NET_ADMIN
+    #   - SYS_ADMIN
+    # devices:
+    #   - /dev/kvm:/dev/kvm
+    volumes:
+      # Mount /dev/kvm for KVM access (required for Firecracker)
+      # On macOS with Docker Desktop, this will be provided by the Linux VM
+      - /dev/kvm:/dev/kvm
+      # Mount /tmp for Firecracker sockets (shared between host and container)
+      - /tmp:/tmp
+      # Optional: Mount host directory for persistent data
+      - firecracker-data:/var/lib/firecracker
+    # Ensure container can access KVM
+    # On Linux: requires /dev/kvm on host
+    # On macOS: Docker Desktop provides /dev/kvm in Linux containers
+    environment:
+      - RUST_LOG=info
+      - PLEXSPACES_FIRECRACKER_BIN=/usr/bin/firecracker
+      - PLEXSPACES_FIRECRACKER_KERNEL=/var/lib/firecracker/vmlinux
+      - PLEXSPACES_FIRECRACKER_ROOTFS=/var/lib/firecracker/rootfs.ext4
+      # Disable seccomp for Firecracker (required in Docker/emulated environments)
+      - FIRECRACKER_NO_SECCOMP=1
+    # Override command to run specific test
+    # command: ["firecracker_multi_tenant", "run", "--tenants", "2", "--operations", "5"]
+    networks:
+      - firecracker-net
+
+volumes:
+  firecracker-data:
+
+networks:
+  firecracker-net:
+    driver: bridge
+

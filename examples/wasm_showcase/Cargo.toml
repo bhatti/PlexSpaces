@@ -1,0 +1,44 @@
+[workspace]
+
+[package]
+name = "wasm-showcase"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "wasm-showcase"
+path = "src/main.rs"
+
+[dependencies]
+# PlexSpaces crates
+plexspaces-wasm-runtime = { path = "../../crates/wasm-runtime" }
+plexspaces-proto = { path = "../../crates/proto" }
+plexspaces-node = { path = "../../crates/node" }
+plexspaces-core = { path = "../../crates/core" }
+plexspaces-mailbox = { path = "../../crates/mailbox" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+futures = "0.3"
+
+# gRPC
+tonic = { version = "0.10" }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+
+# Serialization
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+
+# Utilities
+hex = "0.4"
+wat = "1.0"

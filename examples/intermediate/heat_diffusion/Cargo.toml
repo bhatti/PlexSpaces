@@ -1,0 +1,54 @@
+[package]
+name = "heat_diffusion"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone example (not part of workspace)
+[workspace]
+
+[dependencies]
+plexspaces = { path = "../../.." }
+plexspaces-tuplespace = { path = "../../../crates/tuplespace" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-behavior = { path = "../../../crates/behavior" }
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-proto = { path = "../../../crates/proto" }
+plexspaces-mailbox = { path = "../../../crates/mailbox" }
+# tuplespace-registry removed - use object-registry instead
+plexspaces-keyvalue = { path = "../../../crates/keyvalue" }
+plexspaces-wasm-runtime = { path = "../../../crates/wasm-runtime" }
+
+tokio = { version = "1.35", features = ["full"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wasmtime = "25"  # For WASM StoreLimitsBuilder
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[features]
+default = []
+redis-backend = ["plexspaces-tuplespace/redis-backend"]
+sql-backend = ["plexspaces-tuplespace/sql-backend"]
+
+[[bin]]
+name = "heat_diffusion"
+path = "src/main.rs"
+
+[[bin]]
+name = "multi-node"
+path = "src/bin/multi_node_simple.rs"
+
+# Disabled - old registry tests (see PROJECT_TRACKER.md migration notes)
+# [[test]]
+# name = "registry_distributed_heat_diffusion"
+# path = "tests/registry_distributed_heat_diffusion.rs"
+
+# [[test]]
+# name = "e2e_large_grid"
+# path = "tests/e2e_large_grid.rs"

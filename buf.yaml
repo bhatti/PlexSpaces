@@ -1,0 +1,35 @@
+version: v2
+modules:
+  - path: proto
+    name: buf.build/bhatti/plexspaces
+deps:
+  - buf.build/googleapis/googleapis
+  - buf.build/grpc-ecosystem/grpc-gateway
+  - buf.build/bufbuild/protovalidate
+lint:
+  use:
+    - STANDARD
+  except:
+    - UNARY_RPC
+    - COMMENT_FIELD
+    - COMMENT_ENUM_VALUE
+    - COMMENT_MESSAGE
+    - COMMENT_SERVICE
+    - PACKAGE_VERSION_SUFFIX
+    - ENUM_VALUE_PREFIX
+    - ENUM_ZERO_VALUE_SUFFIX
+    - SERVICE_SUFFIX
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - PACKAGE_DIRECTORY_MATCH  # Allow flexible directory structure
+    - DIRECTORY_SAME_PACKAGE    # Allow multiple packages in same directory
+    - IMPORT_USED               # Don't error on unused imports
+  ignore:
+    - proto/third_party
+breaking:
+  use:
+    - FILE
+  except:
+    - EXTENSION_NO_DELETE
+    - FIELD_SAME_DEFAULT

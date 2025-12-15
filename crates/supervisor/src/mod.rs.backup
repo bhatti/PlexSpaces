@@ -1,0 +1,1027 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+
+//! Supervision module for fault tolerance
+//!
+//! Implements Erlang/OTP-inspired supervision trees with
+//! elevated abstractions for adaptive recovery.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::{RwLock, mpsc};
+use serde::{Deserialize, Serialize};
+
+use plexspaces_actor::Actor;
+use plexspaces_core::{ActorId, ActorRef, ActorError};
+use plexspaces_mailbox::Mailbox;
+
+/// Supervisor for managing actor lifecycle and fault tolerance
+pub struct Supervisor {
+    /// Supervisor ID
+    id: String,
+    /// Supervision strategy
+    strategy: SupervisionStrategy,
+    /// Child actors
+    children: Arc<RwLock<HashMap<ActorId, SupervisedActor>>>,
+    /// Parent supervisor (if any)
+    parent: Option<Arc<Supervisor>>,
+    /// Restart statistics
+    stats: Arc<RwLock<SupervisorStats>>,
+    /// Event channel for notifications
+    event_tx: mpsc::Sender<SupervisorEvent>,
+    /// Shutdown signal
+    shutdown_rx: Option<mpsc::Receiver<()>>,
+}
+
+/// Supervised actor wrapper
+struct SupervisedActor {
+    /// The actual actor instance
+    actor: Arc<RwLock<Actor>>,
+    /// Reference to the actor
+    actor_ref: ActorRef,
+    /// Actor task handle (for monitoring termination)
+    handle: Option<tokio::task::JoinHandle<()>>,
+    /// Restart count
+    restart_count: u32,
+    /// Last restart time
+    last_restart: Option<tokio::time::Instant>,
+    /// Actor specification for restarts
+    spec: ActorSpec,
+}
+
+/// Actor specification for creating/restarting actors
+///
+/// ## Erlang/OTP Equivalent
+/// This maps to Erlang's child_spec:
+/// ```erlang
+/// #{id => ChildId,
+///   start => {Module, Function, Args},
+///   restart => permanent | temporary | transient,
+///   shutdown => brutal_kill | Timeout | infinity,
+///   type => worker | supervisor,
+///   modules => [Module]}
+/// ```
+#[derive(Clone)]
+pub struct ActorSpec {
+    /// Actor ID (Erlang: id)
+    pub id: ActorId,
+    /// Factory function to create the actor (Erlang: start MFA)
+    pub factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync>,
+    /// Restart policy (Erlang: restart)
+    pub restart: RestartPolicy,
+    /// Child type - worker or supervisor (Erlang: type)
+    pub child_type: ChildType,
+    /// Shutdown timeout in milliseconds (Erlang: shutdown)
+    /// - None = infinity (for supervisors)
+    /// - Some(0) = brutal_kill
+    /// - Some(ms) = graceful shutdown with timeout
+    pub shutdown_timeout_ms: Option<u64>,
+}
+
+/// Supervision strategy (Erlang-inspired but elevated)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SupervisionStrategy {
+    /// One-for-one: restart only the failed actor
+    OneForOne {
+        max_restarts: u32,
+        within_seconds: u64,
+    },
+    /// One-for-all: restart all actors if one fails
+    OneForAll {
+        max_restarts: u32,
+        within_seconds: u64,
+    },
+    /// Rest-for-one: restart failed actor and all started after it
+    RestForOne {
+        max_restarts: u32,
+        within_seconds: u64,
+    },
+    /// Adaptive: Learn from failures and adapt strategy
+    Adaptive {
+        initial_strategy: Box<SupervisionStrategy>,
+        learning_rate: f64,
+    },
+    /// Custom strategy with callback
+    Custom {
+        name: String,
+    },
+}
+
+/// Restart policy for individual actors
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RestartPolicy {
+    /// Always restart
+    Permanent,
+    /// Restart only on abnormal exit
+    Transient,
+    /// Never restart
+    Temporary,
+    /// Exponential backoff
+    ExponentialBackoff {
+        initial_delay_ms: u64,
+        max_delay_ms: u64,
+        factor: f64,
+    },
+}
+
+/// Child type (Erlang-inspired)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ChildType {
+    /// Always running, restart if terminated
+    Worker,
+    /// Another supervisor
+    Supervisor,
+}
+
+/// Supervisor events
+#[derive(Debug, Clone)]
+pub enum SupervisorEvent {
+    /// Child started
+    ChildStarted(ActorId),
+    /// Child stopped
+    ChildStopped(ActorId),
+    /// Child restarted
+    ChildRestarted(ActorId, u32), // (id, restart_count)
+    /// Child failed
+    ChildFailed(ActorId, String),
+    /// Max restarts exceeded
+    MaxRestartsExceeded(ActorId),
+    /// Strategy adapted
+    StrategyAdapted(SupervisionStrategy),
+}
+
+/// Supervisor statistics
+#[derive(Debug, Default, Clone)]
+struct SupervisorStats {
+    total_restarts: u64,
+    successful_restarts: u64,
+    failed_restarts: u64,
+    strategy_adaptations: u32,
+    failure_patterns: HashMap<String, u32>,
+}
+
+impl Supervisor {
+    /// Create a new supervisor
+    pub fn new(id: String, strategy: SupervisionStrategy) -> (Self, mpsc::Receiver<SupervisorEvent>) {
+        let (event_tx, event_rx) = mpsc::channel(100);
+        let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
+
+        let supervisor = Supervisor {
+            id,
+            strategy,
+            children: Arc::new(RwLock::new(HashMap::new())),
+            parent: None,
+            stats: Arc::new(RwLock::new(SupervisorStats::default())),
+            event_tx,
+            shutdown_rx: Some(shutdown_rx),
+        };
+
+        (supervisor, event_rx)
+    }
+
+    /// Set parent supervisor (for supervision trees)
+    pub fn with_parent(mut self, parent: Arc<Supervisor>) -> Self {
+        self.parent = Some(parent);
+        self
+    }
+
+    /// Add a child actor
+    pub async fn add_child(&self, spec: ActorSpec) -> Result<ActorRef, SupervisorError> {
+        // Create the actor via factory
+        let mut actor = (spec.factory)()
+            .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?;
+
+        // Get mailbox reference before starting actor
+        let mailbox = actor.mailbox().clone();
+
+        // Create ActorRef from the actor's mailbox
+        let actor_ref = ActorRef::new(spec.id.clone(), mailbox)
+            .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?;
+
+        // Start the actor (spawns message loop)
+        let handle = actor.start().await
+            .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?;
+
+        let supervised = SupervisedActor {
+            actor: Arc::new(RwLock::new(actor)),
+            actor_ref: actor_ref.clone(),
+            handle: Some(handle),
+            restart_count: 0,
+            last_restart: None,
+            spec: spec.clone(),
+        };
+
+        // Add to children
+        let mut children = self.children.write().await;
+        children.insert(spec.id.clone(), supervised);
+
+        // Send event
+        let _ = self.event_tx.send(SupervisorEvent::ChildStarted(spec.id)).await;
+
+        Ok(actor_ref)
+    }
+
+    /// Remove a child actor
+    pub async fn remove_child(&self, id: &ActorId) -> Result<(), SupervisorError> {
+        let mut children = self.children.write().await;
+
+        if let Some(child) = children.remove(id) {
+            // Stop the actor gracefully
+            if let Some(handle) = child.handle {
+                handle.abort();
+            }
+            // Also call actor.stop() for proper cleanup
+            if let Ok(mut actor) = child.actor.try_write() {
+                let _ = actor.stop().await;
+            }
+            let _ = self.event_tx.send(SupervisorEvent::ChildStopped(id.clone())).await;
+            Ok(())
+        } else {
+            Err(SupervisorError::ChildNotFound(id.clone()))
+        }
+    }
+
+    /// Handle child failure
+    pub async fn handle_failure(&self, id: &ActorId, reason: String) -> Result<(), SupervisorError> {
+        let mut stats = self.stats.write().await;
+
+        // Record failure pattern
+        *stats.failure_patterns.entry(reason.clone()).or_insert(0) += 1;
+
+        // Send failure event
+        let _ = self.event_tx.send(SupervisorEvent::ChildFailed(id.clone(), reason.clone())).await;
+
+        // Apply supervision strategy
+        match &self.strategy {
+            SupervisionStrategy::OneForOne { max_restarts, within_seconds } => {
+                self.restart_one(id, *max_restarts, *within_seconds).await?;
+            }
+            SupervisionStrategy::OneForAll { max_restarts, within_seconds } => {
+                self.restart_all(*max_restarts, *within_seconds).await?;
+            }
+            SupervisionStrategy::RestForOne { max_restarts, within_seconds } => {
+                self.restart_rest_for_one(id, *max_restarts, *within_seconds).await?;
+            }
+            SupervisionStrategy::Adaptive { initial_strategy, learning_rate } => {
+                // Apply adaptive strategy based on failure patterns
+                self.apply_adaptive_strategy(id, &reason, initial_strategy, *learning_rate).await?;
+            }
+            SupervisionStrategy::Custom { name } => {
+                // TODO: Call custom strategy handler
+                todo!("Custom strategy: {}", name);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Restart a single actor (one-for-one)
+    async fn restart_one(
+        &self,
+        id: &ActorId,
+        max_restarts: u32,
+        within_seconds: u64,
+    ) -> Result<(), SupervisorError> {
+        let mut children = self.children.write().await;
+        let mut stats = self.stats.write().await;
+
+        if let Some(child) = children.get_mut(id) {
+            // Check restart limit
+            if let Some(last_restart) = child.last_restart {
+                if last_restart.elapsed() < Duration::from_secs(within_seconds) {
+                    if child.restart_count >= max_restarts {
+                        let _ = self.event_tx.send(SupervisorEvent::MaxRestartsExceeded(id.clone())).await;
+                        return Err(SupervisorError::MaxRestartsExceeded);
+                    }
+                } else {
+                    // Reset counter if outside time window
+                    child.restart_count = 0;
+                }
+            }
+
+            // Apply restart policy
+            match child.spec.restart {
+                RestartPolicy::Permanent => {
+                    self.perform_restart(child, &mut stats).await?;
+                }
+                RestartPolicy::Transient => {
+                    // Only restart on abnormal exit
+                    // TODO: Check if exit was abnormal
+                    self.perform_restart(child, &mut stats).await?;
+                }
+                RestartPolicy::Temporary => {
+                    // Don't restart
+                    return Ok(());
+                }
+                RestartPolicy::ExponentialBackoff { initial_delay_ms, max_delay_ms, factor } => {
+                    // Calculate delay
+                    let delay = calculate_backoff_delay(
+                        child.restart_count,
+                        initial_delay_ms,
+                        max_delay_ms,
+                        factor,
+                    );
+
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    self.perform_restart(child, &mut stats).await?;
+                }
+            }
+
+            // Send restart event
+            let _ = self.event_tx.send(
+                SupervisorEvent::ChildRestarted(id.clone(), child.restart_count)
+            ).await;
+        }
+
+        Ok(())
+    }
+
+    /// Restart all actors (one-for-all)
+    async fn restart_all(
+        &self,
+        max_restarts: u32,
+        within_seconds: u64,
+    ) -> Result<(), SupervisorError> {
+        let children = self.children.read().await;
+        let ids: Vec<ActorId> = children.keys().cloned().collect();
+        drop(children);
+
+        for id in ids {
+            self.restart_one(&id, max_restarts, within_seconds).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Restart failed actor and all started after it (rest-for-one)
+    async fn restart_rest_for_one(
+        &self,
+        failed_id: &ActorId,
+        max_restarts: u32,
+        within_seconds: u64,
+    ) -> Result<(), SupervisorError> {
+        // In a real implementation, we'd track start order
+        // For now, restart the failed one and a subset
+        self.restart_one(failed_id, max_restarts, within_seconds).await?;
+
+        // TODO: Track actor start order and restart appropriately
+
+        Ok(())
+    }
+
+    /// Apply adaptive supervision strategy
+    async fn apply_adaptive_strategy(
+        &self,
+        id: &ActorId,
+        _reason: &str,
+        initial_strategy: &SupervisionStrategy,
+        _learning_rate: f64,
+    ) -> Result<(), SupervisorError> {
+        let stats = self.stats.read().await;
+
+        // Simple adaptive logic: switch strategy based on failure patterns
+        if stats.failed_restarts > stats.successful_restarts * 2 {
+            // Too many failures, become more conservative
+            // For now, just apply initial strategy
+            if let SupervisionStrategy::OneForOne { max_restarts, within_seconds } = initial_strategy {
+                self.restart_one(id, *max_restarts, *within_seconds).await?;
+            }
+        } else {
+            // Normal failure rate, use initial strategy
+            if let SupervisionStrategy::OneForOne { max_restarts, within_seconds } = initial_strategy {
+                self.restart_one(id, *max_restarts, *within_seconds).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Perform the actual restart
+    async fn perform_restart(
+        &self,
+        child: &mut SupervisedActor,
+        stats: &mut SupervisorStats,
+    ) -> Result<(), SupervisorError> {
+        stats.total_restarts += 1;
+
+        // Stop the old actor if it's still running
+        if let Some(handle) = child.handle.take() {
+            handle.abort();
+        }
+
+        // Create new actor via factory
+        let mut new_actor = (child.spec.factory)()
+            .map_err(|e| {
+                stats.failed_restarts += 1;
+                SupervisorError::RestartFailed(e.to_string())
+            })?;
+
+        // Start the new actor
+        let handle = new_actor.start().await
+            .map_err(|e| {
+                stats.failed_restarts += 1;
+                SupervisorError::RestartFailed(e.to_string())
+            })?;
+
+        // Update child state
+        child.actor = Arc::new(RwLock::new(new_actor));
+        child.handle = Some(handle);
+        child.restart_count += 1;
+        child.last_restart = Some(tokio::time::Instant::now());
+        stats.successful_restarts += 1;
+
+        Ok(())
+    }
+
+    /// Shutdown all children gracefully
+    pub async fn shutdown(&mut self) -> Result<(), SupervisorError> {
+        let children = self.children.read().await;
+
+        for (id, child) in children.iter() {
+            // Stop each child actor gracefully
+            if let Some(handle) = &child.handle {
+                handle.abort();
+            }
+            // Also call actor.stop() for proper cleanup
+            if let Ok(mut actor) = child.actor.try_write() {
+                let _ = actor.stop().await;
+            }
+            let _ = self.event_tx.send(SupervisorEvent::ChildStopped(id.clone())).await;
+        }
+
+        Ok(())
+    }
+
+    /// Get supervisor statistics
+    pub async fn stats(&self) -> SupervisorStats {
+        let guard = self.stats.read().await;
+        guard.clone()
+    }
+}
+
+/// Calculate exponential backoff delay
+fn calculate_backoff_delay(
+    restart_count: u32,
+    initial_delay_ms: u64,
+    max_delay_ms: u64,
+    factor: f64,
+) -> u64 {
+    let delay = initial_delay_ms as f64 * factor.powi(restart_count as i32);
+    delay.min(max_delay_ms as f64) as u64
+}
+
+/// Supervisor errors
+#[derive(Debug, thiserror::Error)]
+pub enum SupervisorError {
+    #[error("Actor creation failed: {0}")]
+    ActorCreationFailed(String),
+
+    #[error("Child not found: {0:?}")]
+    ChildNotFound(ActorId),
+
+    #[error("Max restarts exceeded")]
+    MaxRestartsExceeded,
+
+    #[error("Restart failed: {0}")]
+    RestartFailed(String),
+
+    #[error("Invalid strategy: {0}")]
+    InvalidStrategy(String),
+}
+
+/// Supervisor builder for fluent API
+pub struct SupervisorBuilder {
+    id: String,
+    strategy: SupervisionStrategy,
+    children: Vec<ActorSpec>,
+    parent: Option<Arc<Supervisor>>,
+}
+
+impl SupervisorBuilder {
+    /// Create a new supervisor builder
+    pub fn new(id: String) -> Self {
+        SupervisorBuilder {
+            id,
+            strategy: SupervisionStrategy::OneForOne {
+                max_restarts: 3,
+                within_seconds: 60,
+            },
+            children: Vec::new(),
+            parent: None,
+        }
+    }
+
+    /// Set supervision strategy
+    pub fn with_strategy(mut self, strategy: SupervisionStrategy) -> Self {
+        self.strategy = strategy;
+        self
+    }
+
+    /// Add a child specification
+    pub fn add_child(mut self, spec: ActorSpec) -> Self {
+        self.children.push(spec);
+        self
+    }
+
+    /// Set parent supervisor
+    pub fn with_parent(mut self, parent: Arc<Supervisor>) -> Self {
+        self.parent = Some(parent);
+        self
+    }
+
+    /// Build the supervisor
+    pub async fn build(self) -> Result<(Supervisor, mpsc::Receiver<SupervisorEvent>), SupervisorError> {
+        let (mut supervisor, event_rx) = Supervisor::new(self.id, self.strategy);
+
+        if let Some(parent) = self.parent {
+            supervisor = supervisor.with_parent(parent);
+        }
+
+        // Add all children
+        for spec in self.children {
+            supervisor.add_child(spec).await?;
+        }
+
+        Ok((supervisor, event_rx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plexspaces_behavior::MockBehavior;
+    use plexspaces_persistence::MemoryJournal;
+
+    #[tokio::test]
+    async fn test_supervisor_creation() {
+        let (supervisor, mut event_rx) = Supervisor::new(
+            "test-supervisor".to_string(),
+            SupervisionStrategy::OneForOne {
+                max_restarts: 3,
+                within_seconds: 60,
+            },
+        );
+
+        // Add a child
+        let spec = ActorSpec {
+            id: "test-child@localhost".to_string(),
+            factory: Arc::new(|| {
+                Ok(Actor::new(
+                    "test-child@localhost".to_string(),
+                    Box::new(MockBehavior::new()),
+                    Mailbox::new(Default::default()),
+                    Arc::new(MemoryJournal::new()),
+                    "test".to_string(),
+                ))
+            }),
+            restart: RestartPolicy::Permanent,
+            child_type: ChildType::Worker,
+        };
+
+        let actor_ref = supervisor.add_child(spec).await.unwrap();
+        assert_eq!(actor_ref.id().as_str(), "test-child@localhost");
+
+        // Check event
+        if let Some(event) = event_rx.recv().await {
+            match event {
+                SupervisorEvent::ChildStarted(id) => {
+                    assert_eq!(id.as_str(), "test-child@localhost");
+                }
+                _ => panic!("Unexpected event"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_backoff_calculation() {
+        assert_eq!(calculate_backoff_delay(0, 100, 10000, 2.0), 100);
+        assert_eq!(calculate_backoff_delay(1, 100, 10000, 2.0), 200);
+        assert_eq!(calculate_backoff_delay(2, 100, 10000, 2.0), 400);
+        assert_eq!(calculate_backoff_delay(10, 100, 10000, 2.0), 10000); // Capped at max
+    }
+
+    #[tokio::test]
+    async fn test_supervisor_builder() {
+        let spec = ActorSpec {
+            id: "worker-1@localhost".to_string(),
+            factory: Arc::new(|| {
+                Ok(Actor::new(
+                    "worker-1@localhost".to_string(),
+                    Box::new(MockBehavior::new()),
+                    Mailbox::new(Default::default()),
+                    Arc::new(MemoryJournal::new()),
+                    "test".to_string(),
+                ))
+            }),
+            restart: RestartPolicy::Transient,
+            child_type: ChildType::Worker,
+        };
+
+        let (_supervisor, _event_rx) = SupervisorBuilder::new("root".to_string())
+            .with_strategy(SupervisionStrategy::OneForAll {
+                max_restarts: 5,
+                within_seconds: 30,
+            })
+            .add_child(spec)
+            .build()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_remove_child() {
+        let (supervisor, mut event_rx) = Supervisor::new(
+            "test-supervisor".to_string(),
+            SupervisionStrategy::OneForOne {
+                max_restarts: 3,
+                within_seconds: 60,
+            },
+        );
+
+        // Add a child
+        let spec = ActorSpec {
+            id: "removable-child@localhost".to_string(),
+            factory: Arc::new(|| {
+                Ok(Actor::new(
+                    "removable-child@localhost".to_string(),
+                    Box::new(MockBehavior::new()),
+                    Mailbox::new(Default::default()),
+                    Arc::new(MemoryJournal::new()),
+                    "test".to_string(),
+                ))
+            }),
+            restart: RestartPolicy::Permanent,
+            child_type: ChildType::Worker,
+        };
+
+        supervisor.add_child(spec).await.unwrap();
+        let _ = event_rx.recv().await; // Consume ChildStarted event
+
+        // Remove the child
+        supervisor.remove_child(&"removable-child@localhost".to_string()).await.unwrap();
+
+        // Check event
+        if let Some(event) = event_rx.recv().await {
+            match event {
+                SupervisorEvent::ChildStopped(id) => {
+                    assert_eq!(id.as_str(), "removable-child@localhost");
+                }
+                _ => panic!("Expected ChildStopped event"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_remove_nonexistent_child() {
+        let (supervisor, _event_rx) = Supervisor::new(
+            "test-supervisor".to_string(),
+            SupervisionStrategy::OneForOne {
+                max_restarts: 3,
+                within_seconds: 60,
+            },
+        );
+
+        // Try to remove a child that doesn't exist
+        let result = supervisor.remove_child(&"nonexistent@localhost".to_string()).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            SupervisorError::ChildNotFound(_) => (),
+            _ => panic!("Expected ChildNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_failure_one_for_one() {
+        let (supervisor, mut event_rx) = Supervisor::new(
+            "test-supervisor".to_string(),
+            SupervisionStrategy::OneForOne {
+                max_restarts: 3,
+                within_seconds: 60,
+            },
+        );
+
+        // Add a child
+        let spec = ActorSpec {
+            id: "failing-child@localhost".to_string(),
+            factory: Arc::new(|| {
+                Ok(Actor::new(
+                    "failing-child@localhost".to_string(),
+                    Box::new(MockBehavior::new()),
+                    Mailbox::new(Default::default()),
+                    Arc::new(MemoryJournal::new()),
+                    "test".to_string(),
+                ))
+            }),
+            restart: RestartPolicy::Permanent,
+            child_type: ChildType::Worker,
+        };
+
+        supervisor.add_child(spec).await.unwrap();
+        let _ = event_rx.recv().await; // Consume ChildStarted
+
+        // Handle failure
+        supervisor.handle_failure(
+            &"failing-child@localhost".to_string(),
+            "test error".to_string()
+        ).await.unwrap();
+
+        // Check for ChildFailed event
+        let event = event_rx.recv().await.unwrap();
+        match event {
+            SupervisorEvent::ChildFailed(id, reason) => {
+                assert_eq!(id.as_str(), "failing-child@localhost");
+                assert_eq!(reason, "test error");
+            }
+            _ => panic!("Expected ChildFailed event, got {:?}", event),
+        }
+
+        // Check for ChildRestarted event
+        let event = event_rx.recv().await.unwrap();
+        match event {
+            SupervisorEvent::ChildRestarted(id, count) => {
+                assert_eq!(id.as_str(), "failing-child@localhost");
+                assert_eq!(count, 1); // First restart
+            }
+            _ => panic!("Expected ChildRestarted event, got {:?}", event),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_temporary_restart_policy() {
+        let (supervisor, mut event_rx) = Supervisor::new(
+            "test-supervisor".to_string(),
+            SupervisionStrategy::OneForOne {
+                max_restarts: 3,
+                within_seconds: 60,
+            },
+        );
+
+        // Add a temporary child (should not restart)
+        let spec = ActorSpec {
+            id: "temp-child@localhost".to_string(),
+            factory: Arc::new(|| {
+                Ok(Actor::new(
+                    "temp-child@localhost".to_string(),
+                    Box::new(MockBehavior::new()),
+                    Mailbox::new(Default::default()),
+                    Arc::new(MemoryJournal::new()),
+                    "test".to_string(),
+                ))
+            }),
+            restart: RestartPolicy::Temporary,
+            child_type: ChildType::Worker,
+        };
+
+        supervisor.add_child(spec).await.unwrap();
+        let _ = event_rx.recv().await; // Consume ChildStarted
+
+        // Handle failure
+        supervisor.handle_failure(
+            &"temp-child@localhost".to_string(),
+            "test error".to_string()
+        ).await.unwrap();
+
+        // Should get ChildFailed but NOT ChildRestarted
+        let event = event_rx.recv().await.unwrap();
+        match event {
+            SupervisorEvent::ChildFailed(_, _) => (),
+            _ => panic!("Expected ChildFailed event"),
+        }
+
+        // No restart event should follow for Temporary (try_recv should fail immediately)
+        assert!(event_rx.try_recv().is_err(), "Should not restart temporary actor");
+    }
+
+    #[tokio::test]
+    async fn test_max_restarts_exceeded() {
+        let (supervisor, mut event_rx) = Supervisor::new(
+            "test-supervisor".to_string(),
+            SupervisionStrategy::OneForOne {
+                max_restarts: 2, // Low limit to test
+                within_seconds: 60,
+            },
+        );
+
+        let spec = ActorSpec {
+            id: "crash-child@localhost".to_string(),
+            factory: Arc::new(|| {
+                Ok(Actor::new(
+                    "crash-child@localhost".to_string(),
+                    Box::new(MockBehavior::new()),
+                    Mailbox::new(Default::default()),
+                    Arc::new(MemoryJournal::new()),
+                    "test".to_string(),
+                ))
+            }),
+            restart: RestartPolicy::Permanent,
+            child_type: ChildType::Worker,
+        };
+
+        supervisor.add_child(spec).await.unwrap();
+        let _ = event_rx.recv().await; // ChildStarted
+
+        // Trigger failures until max restarts exceeded
+        for i in 0..3 {
+            let result = supervisor.handle_failure(
+                &"crash-child@localhost".to_string(),
+                format!("crash {}", i)
+            ).await;
+
+            let _ = event_rx.recv().await; // ChildFailed
+
+            if i < 2 {
+                // Should succeed
+                assert!(result.is_ok());
+                let _ = event_rx.recv().await; // ChildRestarted
+            } else {
+                // Third failure should exceed limit
+                assert!(result.is_err());
+                match result.unwrap_err() {
+                    SupervisorError::MaxRestartsExceeded => (),
+                    e => panic!("Expected MaxRestartsExceeded, got {:?}", e),
+                }
+
+                // Should get MaxRestartsExceeded event
+                let event = event_rx.recv().await.unwrap();
+                match event {
+                    SupervisorEvent::MaxRestartsExceeded(id) => {
+                        assert_eq!(id.as_str(), "crash-child@localhost");
+                    }
+                    _ => panic!("Expected MaxRestartsExceeded event"),
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_supervisor_stats() {
+        let (supervisor, mut event_rx) = Supervisor::new(
+            "test-supervisor".to_string(),
+            SupervisionStrategy::OneForOne {
+                max_restarts: 5,
+                within_seconds: 60,
+            },
+        );
+
+        let spec = ActorSpec {
+            id: "stats-child@localhost".to_string(),
+            factory: Arc::new(|| {
+                Ok(Actor::new(
+                    "stats-child@localhost".to_string(),
+                    Box::new(MockBehavior::new()),
+                    Mailbox::new(Default::default()),
+                    Arc::new(MemoryJournal::new()),
+                    "test".to_string(),
+                ))
+            }),
+            restart: RestartPolicy::Permanent,
+            child_type: ChildType::Worker,
+        };
+
+        supervisor.add_child(spec).await.unwrap();
+        let _ = event_rx.recv().await; // ChildStarted
+
+        // Trigger a failure and restart
+        supervisor.handle_failure(
+            &"stats-child@localhost".to_string(),
+            "test error".to_string()
+        ).await.unwrap();
+
+        let _ = event_rx.recv().await; // ChildFailed
+        let _ = event_rx.recv().await; // ChildRestarted
+
+        // Check stats
+        let stats = supervisor.stats().await;
+        assert_eq!(stats.total_restarts, 1);
+        assert_eq!(stats.successful_restarts, 1);
+        assert_eq!(stats.failed_restarts, 0);
+        assert_eq!(stats.failure_patterns.get("test error"), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown() {
+        let (mut supervisor, mut event_rx) = Supervisor::new(
+            "test-supervisor".to_string(),
+            SupervisionStrategy::OneForOne {
+                max_restarts: 3,
+                within_seconds: 60,
+            },
+        );
+
+        // Add multiple children (reduced to 2 for faster tests)
+        for i in 0..2 {
+            let id = format!("child-{}@localhost", i);
+            let spec = ActorSpec {
+                id: id.clone(),
+                factory: Arc::new(move || {
+                    Ok(Actor::new(
+                        id.clone(),
+                        Box::new(MockBehavior::new()),
+                        Mailbox::new(Default::default()),
+                        Arc::new(MemoryJournal::new()),
+                        "test".to_string(),
+                    ))
+                }),
+                restart: RestartPolicy::Permanent,
+                child_type: ChildType::Worker,
+            };
+
+            supervisor.add_child(spec).await.unwrap();
+            let _ = event_rx.recv().await; // ChildStarted
+        }
+
+        // Shutdown all children
+        supervisor.shutdown().await.unwrap();
+
+        // Should get ChildStopped for all 2 children
+        for _ in 0..2 {
+            let event = event_rx.recv().await.unwrap();
+            match event {
+                SupervisorEvent::ChildStopped(_) => (),
+                _ => panic!("Expected ChildStopped event"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_supervision_strategy_serialization() {
+        // Test OneForOne
+        let strategy = SupervisionStrategy::OneForOne {
+            max_restarts: 3,
+            within_seconds: 60,
+        };
+        let json = serde_json::to_string(&strategy).unwrap();
+        let deserialized: SupervisionStrategy = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            SupervisionStrategy::OneForOne { max_restarts, within_seconds } => {
+                assert_eq!(max_restarts, 3);
+                assert_eq!(within_seconds, 60);
+            }
+            _ => panic!("Wrong strategy type"),
+        }
+
+        // Test OneForAll
+        let strategy = SupervisionStrategy::OneForAll {
+            max_restarts: 5,
+            within_seconds: 30,
+        };
+        let json = serde_json::to_string(&strategy).unwrap();
+        let _: SupervisionStrategy = serde_json::from_str(&json).unwrap();
+
+        // Test RestForOne
+        let strategy = SupervisionStrategy::RestForOne {
+            max_restarts: 2,
+            within_seconds: 120,
+        };
+        let json = serde_json::to_string(&strategy).unwrap();
+        let _: SupervisionStrategy = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn test_restart_policy_serialization() {
+        // Test all restart policy variants
+        let policies = vec![
+            RestartPolicy::Permanent,
+            RestartPolicy::Transient,
+            RestartPolicy::Temporary,
+            RestartPolicy::ExponentialBackoff {
+                initial_delay_ms: 100,
+                max_delay_ms: 10000,
+                factor: 2.0,
+            },
+        ];
+
+        for policy in policies {
+            let json = serde_json::to_string(&policy).unwrap();
+            let _: RestartPolicy = serde_json::from_str(&json).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_child_type_serialization() {
+        let worker = ChildType::Worker;
+        let json = serde_json::to_string(&worker).unwrap();
+        let _: ChildType = serde_json::from_str(&json).unwrap();
+
+        let supervisor = ChildType::Supervisor;
+        let json = serde_json::to_string(&supervisor).unwrap();
+        let _: ChildType = serde_json::from_str(&json).unwrap();
+    }
+}

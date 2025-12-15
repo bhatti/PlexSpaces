@@ -827,7 +827,7 @@ actor.attach_facet_by_type(
 
 ## TupleSpace
 
-PlexSpaces TupleSpace is inspired by JavaNow's EntitySpaces, which extended the Linda coordination model with innovations like multiple tuple spaces, non-blocking operations, and event notifications. JavaNow (I developed in the late 1990s for post-graduate research) pioneered many tuple space concepts that are now standard in PlexSpaces.
+PlexSpaces TupleSpace is inspired by Linda memory model.
 
 ### Linda Operations
 

@@ -20,7 +20,6 @@ PlexSpaces is a production-grade distributed actor framework that unifies the be
 
 ### What Makes PlexSpaces Unique
 
-- **Evolution of JavaNow**: Built upon my JavaNow's work in tuple spaces, mobile agents, and dynamic capabilities from late 1990s post-graduate research
 - **Five Foundational Pillars**: TupleSpace coordination, Erlang/OTP supervision, durable execution, WASM runtime, and Firecracker isolation
 - **Composable Abstractions**: One powerful actor model with dynamic facets instead of multiple specialized types
 - **Location Transparency**: Actors work seamlessly across local processes, containers, and cloud regions
@@ -276,11 +275,10 @@ See [Examples](examples/README.md) for the complete list.
 
 ## Comparison with Other Frameworks
 
-PlexSpaces unifies patterns from multiple frameworks, building upon the foundation of JavaNow:
+PlexSpaces unifies patterns from multiple frameworks:
 
 | Framework | Pattern | PlexSpaces Abstraction |
 |-----------|---------|----------------------|
-| **JavaNow** (Original) | Tuple Spaces, Mobile Agents, Facets | `TupleSpace`, `MobilityFacet`, Facet system |
 | Erlang/OTP | GenServer, Supervision | `GenServerBehavior`, `Supervisor` |
 | Akka | Actor Model, Message Passing | `Actor`, `ActorRef`, `tell()`/`ask()` |
 | Orleans | Virtual Actors | `VirtualActorFacet` |
@@ -344,11 +342,10 @@ PlexSpaces is licensed under the [GNU Lesser General Public License v2.1](LICENS
 
 ## Acknowledgments
 
-PlexSpaces is the evolution of **JavaNow**, a comprehensive parallel computing framework developed for post-graduate research in the late 1990s. JavaNow pioneered many concepts that are now central to PlexSpaces, including Linda-style tuple spaces (EntitySpaces), mobile agents, dynamic capabilities (facets), and distributed coordination patterns.
+PlexSpaces is the evolution of **JavaNow** (based on Actors/Linda memory model and MPI), a comprehensive parallel computing framework developed for my post-graduate research in the late 1990s. 
 
-PlexSpaces builds upon JavaNow's foundation and incorporates patterns from:
+PlexSpaces incorporates patterns from:
 
-- **JavaNow** (Original Inspiration): Linda-style tuple spaces (EntitySpaces), mobile agents, dynamic capabilities (facets), distributed coordination, non-blocking tuple operations
 - **Erlang/OTP**: Supervision trees and fault tolerance
 - **Akka**: Actor model and message passing
 - **Microsoft Orleans**: Virtual actors and activation patterns

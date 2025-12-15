@@ -2,7 +2,6 @@
 
 PlexSpaces excels at building scalable, fault-tolerant distributed systems. This document outlines the primary use cases and application patterns.
 
-**Historical Note**: PlexSpaces builds upon JavaNow, a comprehensive parallel computing framework I developed for post-graduate research in the late 1990s. JavaNow pioneered tuple spaces (EntitySpaces), mobile agents, and dynamic capabilities that are now central to PlexSpaces.
 
 ## Durable Workflows
 

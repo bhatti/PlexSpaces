@@ -4,7 +4,6 @@ This guide will help you get started with PlexSpaces in minutes. You'll learn ho
 
 **New to PlexSpaces?** Start here, then read the [Concepts Guide](concepts.md) to understand the fundamentals.
 
-**Note**: PlexSpaces is the evolution of JavaNow, a parallel computing framework from my late 1990s post-graduate research. It modernizes JavaNow's tuple spaces, mobile agents, and dynamic capabilities with Rust, WebAssembly, and modern distributed systems patterns.
 
 ## Prerequisites
 

@@ -8,7 +8,7 @@ PlexSpaces is a unified distributed actor framework that combines the best patte
 
 ### Historical Context
 
-PlexSpaces is the evolution of **JavaNow**, a comprehensive parallel computing framework developed for post-graduate research in the late 1990s. JavaNow pioneered many concepts that are now central to PlexSpaces:
+PlexSpaces is the evolution of **JavaNow**, a comprehensive parallel computing framework developed for post-graduate research in the late 1990s that supported:
 
 - **Linda-style Tuple Spaces** (EntitySpaces): Distributed associative shared memory
 - **Mobile Agents**: Code mobility with state migration
@@ -81,14 +81,13 @@ graph LR
     style Consumer3 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
 ```
 
-Decoupled communication via associative memory (inspired by JavaNow's EntitySpaces):
+Decoupled communication via associative memory:
 
 - **Spatial Decoupling**: Actors don't need to know each other
 - **Temporal Decoupling**: Actors don't need to be active simultaneously
 - **Pattern Matching**: Flexible tuple retrieval
 - **Blocking Operations**: `read()` and `take()` wait for matching tuples
 - **Non-blocking Operations**: `read_if_exists()` and `take_if_exists()` for non-blocking access
-- **Multiple Tuple Spaces**: Support for multiple named spaces (JavaNow innovation)
 
 ### 2. Erlang/OTP Philosophy
 

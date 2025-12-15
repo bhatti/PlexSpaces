@@ -473,6 +473,16 @@ message Message {
   // // If same idempotency_key processed within 24h, returns cached response
   // ```
   string idempotency_key = 10 [(buf.validate.field).string.max_len = 255];
+
+  // URI path for HTTP-based invocations (optional)
+  // Example: "/api/v1/actors/default/counter/metrics"
+  // Populated when message originates from HTTP InvokeActor RPC
+  string uri_path = 11;
+
+  // HTTP method for HTTP-based invocations (optional)
+  // Example: "GET", "POST", "PUT", "DELETE"
+  // Populated when message originates from HTTP InvokeActor RPC
+  string uri_method = 12;
 }
 
 // Actor instance representation.
@@ -1837,7 +1847,7 @@ service ActorService {
   // Create a new actor
   rpc CreateActor(CreateActorRequest) returns (CreateActorResponse) {
     option (google.api.http) = {
-      post: "/v1/actors"
+      post: "/api/v1/actors"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1871,7 +1881,7 @@ service ActorService {
   // - Rate limiting applied per caller to prevent spawn bombing
   rpc SpawnActor(SpawnActorRequest) returns (SpawnActorResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/spawn"
+      post: "/api/v1/actors/spawn"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1884,7 +1894,7 @@ service ActorService {
   // Get an actor by ID
   rpc GetActor(GetActorRequest) returns (GetActorResponse) {
     option (google.api.http) = {
-      get: "/v1/actors/{actor_id.id}"
+      get: "/api/v1/actors/{actor_id.id}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Actor"
@@ -1896,7 +1906,7 @@ service ActorService {
   // List actors with filtering
   rpc ListActors(ListActorsRequest) returns (ListActorsResponse) {
     option (google.api.http) = {
-      get: "/v1/actors"
+      get: "/api/v1/actors"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Actors"
@@ -1908,7 +1918,7 @@ service ActorService {
   // Send message to an actor
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{message.receiver_id}/messages"
+      post: "/api/v1/actors/{message.receiver_id}/messages"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1931,7 +1941,7 @@ service ActorService {
   // Change actor state
   rpc SetActorState(SetActorStateRequest) returns (SetActorStateResponse) {
     option (google.api.http) = {
-      patch: "/v1/actors/{actor_id.id}/state"
+      patch: "/api/v1/actors/{actor_id.id}/state"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1944,7 +1954,7 @@ service ActorService {
   // Migrate actor to different node
   rpc MigrateActor(MigrateActorRequest) returns (MigrateActorResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/migrate"
+      post: "/api/v1/actors/{actor_id.id}/migrate"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1957,7 +1967,7 @@ service ActorService {
   // Delete an actor
   rpc DeleteActor(DeleteActorRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      delete: "/v1/actors/{actor_id.id}"
+      delete: "/api/v1/actors/{actor_id.id}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Delete Actor"
@@ -2011,7 +2021,7 @@ service ActorService {
   // - Links can be created explicitly via this API
   rpc LinkActor(LinkActorRequest) returns (LinkActorResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id}/links"
+      post: "/api/v1/actors/{actor_id}/links"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -2031,7 +2041,7 @@ service ActorService {
   // Equivalent to Erlang's `unlink(Pid)` - removes bidirectional link.
   rpc UnlinkActor(UnlinkActorRequest) returns (UnlinkActorResponse) {
     option (google.api.http) = {
-      delete: "/v1/actors/{actor_id}/links/{linked_actor_id}"
+      delete: "/api/v1/actors/{actor_id}/links/{linked_actor_id}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Unlink Actor"
@@ -2082,7 +2092,7 @@ service ActorService {
   // - Updates VirtualActorLifecycle (last_activated, activation_count)
   rpc ActivateActor(ActivateActorRequest) returns (ActivateActorResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id}/activate"
+      post: "/api/v1/actors/{actor_id}/activate"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -2109,7 +2119,7 @@ service ActorService {
   // - Queues any new messages for later activation
   rpc DeactivateActor(DeactivateActorRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id}/deactivate"
+      post: "/api/v1/actors/{actor_id}/deactivate"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -2131,7 +2141,7 @@ service ActorService {
   // - is_virtual: Actor has VirtualActorFacet (is virtual)
   rpc CheckActorExists(CheckActorExistsRequest) returns (CheckActorExistsResponse) {
     option (google.api.http) = {
-      get: "/v1/actors/{actor_id}/exists"
+      get: "/api/v1/actors/{actor_id}/exists"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Check Actor Exists"
@@ -2166,13 +2176,77 @@ service ActorService {
   // - initial_state, config: Used if creating new actor
   rpc GetOrActivateActor(GetOrActivateActorRequest) returns (GetOrActivateActorResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/get-or-activate"
+      post: "/api/v1/actors/get-or-activate"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Or Activate Actor"
       description: "Get existing actor or activate virtual actor (Orleans-style)"
       tags: "Virtual Actors"
+    };
+  }
+
+  // Invoke an actor via HTTP-like interface (FaaS-style)
+  //
+  // ## Purpose
+  // Provides a FaaS-like interface for invoking actors via HTTP GET/POST requests.
+  // This enables actors to be invoked like serverless functions while maintaining
+  // the actor model's stateful, message-driven architecture.
+  //
+  // ## HTTP Method Behavior
+  // - **GET**: Converts query parameters to JSON payload, calls actor.ask() (request-reply)
+  // - **POST**: Converts request body to payload and headers to headers, calls actor.tell() (fire-and-forget)
+  //
+  // ## Actor Lookup
+  // - Looks up actors by actor_type using ObjectRegistry discover with object_category filter
+  // - If multiple actors of same type found, randomly selects one (load balancing)
+  // - Returns 404 if no actor of requested type found
+  //
+  // ## Security
+  // - Extracts tenant_id from JWT claims if authentication enabled
+  // - Verifies JWT tenant_id matches requested tenant_id in path
+  // - Default tenant_id is "default" when no authentication provided
+  // - All actors must have tenant_id (default if no auth)
+  //
+  // ## Path Format
+  // `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}`
+  // - tenant_id: Tenant identifier (default: "default")
+  // - namespace: Namespace identifier (default: "default" if not specified)
+  // - actor_type: Type of actor to invoke (used for lookup)
+  rpc InvokeActor(InvokeActorRequest) returns (InvokeActorResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
+      additional_bindings {
+        post: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
+        body: "*"
+      }
+      additional_bindings {
+        put: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
+        body: "*"
+      }
+      additional_bindings {
+        delete: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
+      }
+      // Additional bindings without tenant_id (defaults to "default")
+      additional_bindings {
+        get: "/api/v1/actors/{namespace}/{actor_type}"
+      }
+      additional_bindings {
+        post: "/api/v1/actors/{namespace}/{actor_type}"
+        body: "*"
+      }
+      additional_bindings {
+        put: "/api/v1/actors/{namespace}/{actor_type}"
+        body: "*"
+      }
+      additional_bindings {
+        delete: "/api/v1/actors/{namespace}/{actor_type}"
+      }
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Invoke Actor"
+      description: "Invoke an actor via HTTP GET/POST/PUT/DELETE (FaaS-style interface)"
+      tags: "Actors"
     };
   }
 }
@@ -2356,6 +2430,106 @@ message GetOrActivateActorResponse {
 
   // Was actor activated (true) or already active (false)
   bool was_activated = 3;
+}
+
+// Request to invoke an actor via HTTP-like interface (FaaS-style)
+//
+  // ## Purpose
+  // Enables FaaS-like invocation of actors via HTTP GET/POST/PUT/DELETE requests.
+  // The tenant_id, namespace, and actor_type are extracted from the HTTP path.
+//
+// ## HTTP Method Handling
+// - GET: Query parameters are converted to JSON and stored in payload as string
+// - POST: Request body becomes payload, HTTP headers become headers map
+message InvokeActorRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Invoke Actor Request"
+      description: "Request to invoke an actor via HTTP-like interface"
+      required: ["namespace", "actor_type"]
+    }
+  };
+
+  // Tenant ID (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type})
+  // Default: "default" if not provided in path or if no authentication provided
+  // When using path without tenant_id, this field will be empty and should default to "default"
+  string tenant_id = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Namespace (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type})
+  // Default: "default" if not specified
+  string namespace = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 128}
+  ];
+
+  // Actor type (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type})
+  // Used to lookup actors via ActorRegistry discover_actors_by_type
+  string actor_type = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 128}
+  ];
+
+  // HTTP method (GET, POST, PUT, or DELETE)
+  // GET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)
+  string http_method = 4;
+
+  // Request payload
+  // For GET/DELETE: JSON string of query parameters
+  // For POST/PUT: Request body bytes
+  bytes payload = 5;
+
+  // HTTP headers (for POST/PUT requests)
+  // Converted from HTTP request headers
+  map<string, string> headers = 6;
+
+  // Query parameters (for GET/DELETE requests)
+  // Converted to JSON and stored in payload
+  map<string, string> query_params = 7;
+
+  // Full HTTP path for the request (optional)
+  // Example: "/api/v1/actors/default/default/counter/custom/path"
+  // Allows actors to perform custom routing based on the complete URL
+  string path = 9;
+
+  // Subpath after the actor_type segment (optional)
+  // Example: for "/api/v1/actors/default/default/counter/metrics/latest"
+  //          subpath = "metrics/latest"
+  // This will be used in future for advanced per-actor routing capabilities.
+  string subpath = 10;
+}
+
+// Response from invoking an actor
+//
+// ## Purpose
+// Returns the result of actor invocation.
+// For GET (ask): Contains the reply message from actor
+// For POST (tell): Contains success status (fire-and-forget)
+message InvokeActorResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Invoke Actor Response"
+      description: "Response from actor invocation"
+    }
+  };
+
+  // Success status
+  bool success = 1;
+
+  // Response payload (for GET/ask requests)
+  // Contains the reply message from actor
+  bytes payload = 2;
+
+  // Response headers (optional metadata)
+  map<string, string> headers = 3;
+
+  // Actor ID that was invoked (format: "actor_id@node_id")
+  string actor_id = 4;
+
+  // Error message (if success is false)
+  string error_message = 5;
 }
 //
 // ## JavaNOW Heritage

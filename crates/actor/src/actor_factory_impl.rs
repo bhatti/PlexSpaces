@@ -246,7 +246,7 @@ impl ActorFactory for ActorFactoryImpl {
             manager.remove_actor_instance(&actor_id).await;
             
             // Spawn the actor
-            let _actor_ref = self.spawn_built_actor(actor_arc).await?;
+            let _actor_ref = self.spawn_built_actor(actor_arc, None, None, None).await?;
             
             // Process pending messages
             let pending_messages = manager.take_pending_messages(&actor_id).await;
@@ -309,13 +309,21 @@ impl ActorFactory for ActorFactoryImpl {
         // Build actor
         let actor = builder.build().await;
         
-        // Spawn the built actor
-        self.spawn_built_actor(Arc::new(actor)).await
+        // Extract tenant_id from labels or use "default"
+        let tenant_id = labels.get("tenant_id")
+            .cloned()
+            .unwrap_or_else(|| "default".to_string());
+        
+        // Spawn the built actor with type information
+        self.spawn_built_actor(Arc::new(actor), Some(actor_type.to_string()), Some(tenant_id), Some("default".to_string())).await
     }
     
     async fn spawn_built_actor(
         &self,
         actor: Arc<Actor>,
+        actor_type: Option<String>,
+        tenant_id: Option<String>,
+        namespace: Option<String>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
         // Unwrap the Arc to get the Actor
         let mut actor = Arc::try_unwrap(actor)
@@ -333,7 +341,7 @@ impl ActorFactory for ActorFactoryImpl {
         let local_node_id = registry.local_node_id();
         let mut actor_id = actor.id().clone();
         actor_id = self.normalize_actor_id(&actor_id, local_node_id);
-        let namespace = actor.context().namespace.clone();
+        let actor_namespace = namespace.as_ref().map(|s| s.clone()).unwrap_or_else(|| actor.context().namespace.clone());
         
         // Extract actor config from context (if available)
         let actor_config = actor.context().config.clone();
@@ -341,7 +349,7 @@ impl ActorFactory for ActorFactoryImpl {
         // Create ActorContext (actor_id is no longer stored in context)
         let actor_context = ActorContext::new(
             local_node_id.to_string(),
-            namespace.clone(),
+            actor_namespace.clone(),
             self.service_locator.clone(),
             actor_config.clone(),
         );
@@ -356,10 +364,10 @@ impl ActorFactory for ActorFactoryImpl {
         
         metrics::counter!("plexspaces_node_actors_spawned_total",
             "node_id" => local_node_id.to_string(),
-            "namespace" => namespace.clone()
+            "namespace" => actor_namespace.clone()
         ).increment(1);
         
-        tracing::info!(actor_id = %actor_id, node_id = %local_node_id, namespace = %namespace, "Actor spawned");
+        tracing::info!(actor_id = %actor_id, node_id = %local_node_id, namespace = %actor_namespace, "Actor spawned");
         
         // Emit Created event
         registry.publish_lifecycle_event(ActorLifecycleEvent {
@@ -438,7 +446,8 @@ impl ActorFactory for ActorFactoryImpl {
                 actor_id.clone(),
                 self.service_locator.clone(),
             ));
-            registry.register_actor(actor_id.clone(), virtual_wrapper).await;
+            let effective_namespace = namespace.as_ref().map(|s| s.clone()).unwrap_or_else(|| actor_namespace.clone());
+            registry.register_actor(actor_id.clone(), virtual_wrapper, actor_type.clone(), tenant_id.clone(), Some(effective_namespace)).await;
             
             // Create ActorRef
             let actor_ref = ActorRef::local(
@@ -513,7 +522,8 @@ impl ActorFactory for ActorFactoryImpl {
             mailbox.clone(),
             self.service_locator.clone(),
         ));
-        registry.register_actor(actor_id.clone(), regular_wrapper).await;
+        let effective_namespace = namespace.as_ref().map(|s| s.clone()).unwrap_or_else(|| actor_namespace.clone());
+        registry.register_actor(actor_id.clone(), regular_wrapper, actor_type, tenant_id, Some(effective_namespace)).await;
         
         // Start actor
         let join_handle = actor.start().await

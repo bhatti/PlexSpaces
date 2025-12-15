@@ -114,7 +114,7 @@ async fn test_register_actor_with_message_sender() {
     });
     
     // Register actor with MessageSender
-    registry.register_actor(actor_id.clone(), sender).await;
+    registry.register_actor(actor_id.clone(), sender, None, None, None).await;
     
     // Verify actor is registered
     let found = registry.lookup_actor(&actor_id).await;
@@ -139,7 +139,7 @@ async fn test_register_actor_mailbox_not_exposed() {
     });
     
     // Register actor
-    registry.register_actor(actor_id.clone(), sender).await;
+    registry.register_actor(actor_id.clone(), sender, None, None, None).await;
     
     // Verify we can send messages via MessageSender
     let sender = registry.lookup_actor(&actor_id).await.unwrap();
@@ -168,7 +168,7 @@ async fn test_unregister_actor_removes_message_sender() {
         actor_id: actor_id.clone(),
         mailbox: mailbox.clone(),
     });
-    registry.register_actor(actor_id.clone(), sender).await;
+    registry.register_actor(actor_id.clone(), sender, None, None, None).await;
     
     // Verify registered
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -195,7 +195,7 @@ async fn test_is_actor_activated_checks_message_sender() {
         actor_id: actor_id.clone(),
         mailbox: mailbox.clone(),
     });
-    registry.register_actor(actor_id.clone(), sender).await;
+    registry.register_actor(actor_id.clone(), sender, None, None, None).await;
     
     // Now activated
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -213,7 +213,7 @@ async fn test_multiple_actors_registration() {
             actor_id: actor_id.clone(),
             mailbox: mailbox.clone(),
         });
-        registry.register_actor(actor_id.clone(), sender).await;
+        registry.register_actor(actor_id.clone(), sender, None, None, None).await;
     }
     
     // Verify all are registered

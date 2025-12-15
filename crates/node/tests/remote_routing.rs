@@ -75,7 +75,7 @@ async fn test_node_route_local_message() {
         mailbox.clone(),
         service_locator.clone(),
     ));
-    node.actor_registry().register_actor("test-actor@node1".to_string(), wrapper).await;
+    node.actor_registry().register_actor("test-actor@node1".to_string(), wrapper, None, None, None).await;
     
     // Register actor config
     node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();
@@ -117,7 +117,7 @@ async fn test_node_route_remote_message() {
         mailbox2.clone(),
         service_locator2.clone(),
     ));
-    node2.actor_registry().register_actor("remote-actor@node2".to_string(), wrapper2).await;
+    node2.actor_registry().register_actor("remote-actor@node2".to_string(), wrapper2, None, None, None).await;
     
     let core_actor_ref2 = plexspaces_core::ActorRef::new(actor_ref2.id().as_str().to_string()).unwrap();
     // Register actor config
@@ -201,7 +201,7 @@ async fn test_connection_pooling() {
         mailbox2.clone(),
         service_locator2.clone(),
     ));
-    node2.actor_registry().register_actor("pooled-actor@node2".to_string(), wrapper_pooled).await;
+    node2.actor_registry().register_actor("pooled-actor@node2".to_string(), wrapper_pooled, None, None, None).await;
     
     let core_actor_ref2 = plexspaces_core::ActorRef::new(actor_ref2.id().as_str().to_string()).unwrap();
     // Register actor config

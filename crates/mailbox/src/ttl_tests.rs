@@ -96,6 +96,8 @@ mod tests {
             }),
             headers: Default::default(),
             idempotency_key: String::new(),
+            uri_path: String::new(),
+            uri_method: String::new(),
         };
         
         let msg = Message::from_proto(&proto_msg);
@@ -118,6 +120,8 @@ mod tests {
             ttl: None,
             headers: Default::default(),
             idempotency_key: String::new(),
+            uri_path: String::new(),
+            uri_method: String::new(),
         };
         
         let msg = Message::from_proto(&proto_msg);

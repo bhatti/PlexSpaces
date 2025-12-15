@@ -95,6 +95,9 @@ pub trait ActorFactory: Send + Sync {
     async fn spawn_built_actor(
         &self,
         actor: Arc<crate::Actor>,
+        actor_type: Option<String>,
+        tenant_id: Option<String>,
+        namespace: Option<String>,
     ) -> Result<Arc<dyn plexspaces_core::MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
 }
 

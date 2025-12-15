@@ -101,7 +101,7 @@ async fn test_redis_3_generals_agree_on_attack() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Commander");
 
     let lieutenant1 = General::new(
         "lieutenant_1".to_string(),
@@ -109,7 +109,7 @@ async fn test_redis_3_generals_agree_on_attack() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Lieutenant1");
 
     let lieutenant2 = General::new(
         "lieutenant_2".to_string(),
@@ -117,7 +117,7 @@ async fn test_redis_3_generals_agree_on_attack() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Lieutenant2");
 
     // Commander proposes Attack
     commander.propose(true).await.expect("Commander proposal failed");
@@ -192,7 +192,7 @@ async fn test_redis_vote_persistence_across_restart() {
             false,
             journal.clone(),
             tuplespace.clone(),
-        );
+        ).await.expect("Failed to create General1");
 
         general1.cast_vote(0, Decision::Attack, vec!["general".to_string()])
             .await.expect("Vote failed");
@@ -214,7 +214,7 @@ async fn test_redis_vote_persistence_across_restart() {
             false,
             journal.clone(),
             tuplespace.clone(),
-        );
+        ).await.expect("Failed to create General2");
 
         let votes = general2.read_votes(0).await.expect("Read failed");
         assert!(votes.len() >= 1, "Should see persisted vote after restart");
@@ -257,7 +257,7 @@ async fn test_redis_7_generals_mixed_votes() {
                 false,
                 journal.clone(),
                 tuplespace.clone(),
-            )
+            ).await.expect(&format!("Failed to create General {}", i))
         })
         .collect();
 
@@ -403,7 +403,7 @@ async fn test_redis_concurrent_voting() {
                 false,
                 journal.clone(),
                 tuplespace.clone(),
-            )
+            ).await.expect(&format!("Failed to create General {}", i))
         })
         .collect();
 

@@ -40,8 +40,11 @@ pub mod grpc_client;
 // gRPC service for distributed TupleSpace operations (Phase 3)
 pub mod tuplespace_service;
 
-// HTTP router for custom HTTP routes alongside gRPC
-// TODO: Temporarily disabled - see BLOB_SERVICE_COMPILATION_ISSUES.md
+// HTTP router for blob service endpoints
+pub mod blob_http_router;
+
+// HTTP router for gRPC-Gateway routes (actor invocation, etc.)
+// TODO: Implement HTTP gateway for InvokeActor routes
 // pub mod http_router;
 
 // Node registry removed - replaced by object-registry

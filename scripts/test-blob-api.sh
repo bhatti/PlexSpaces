@@ -5,17 +5,28 @@
 # Test script for blob service HTTP APIs
 #
 # Usage:
-#   ./scripts/test-blob-api.sh [NODE_URL]
+#   ./scripts/test-blob-api.sh [GRPC_PORT]
 #
-# Default NODE_URL: http://localhost:9000
+# Default: if gRPC is on 9000, HTTP is on 9001
+# Example: ./scripts/test-blob-api.sh 9000  (will use HTTP port 9001)
 
 set -euo pipefail
 
-NODE_URL="${1:-http://localhost:9000}"
+# Default: if gRPC is on 9000, HTTP is on 9100 (gRPC_PORT + 100)
+# Using +100 to avoid conflicts with MinIO console (which uses gRPC_PORT + 1)
+GRPC_PORT="${1:-9000}"
+HTTP_PORT=$((GRPC_PORT + 100))
+GRPC_URL="http://localhost:${GRPC_PORT}"  # For gRPC-Gateway endpoints (metadata, list, delete)
+HTTP_URL="http://localhost:${HTTP_PORT}"  # For blob HTTP endpoints (upload, raw download)
 TENANT_ID="test-tenant"
 NAMESPACE="test-namespace"
 
-echo "🧪 Testing Blob Service APIs at ${NODE_URL}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🧪 Testing Blob Service APIs"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "gRPC Server (metadata APIs): ${GRPC_URL}"
+echo "HTTP Server (upload/download): ${HTTP_URL}"
 echo ""
 
 # Colors for output
@@ -47,7 +58,8 @@ echo ""
 
 # Test 1: Upload a blob via HTTP
 echo "📤 Test 1: Upload blob via HTTP (multipart/form-data)"
-UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${NODE_URL}/api/v1/blobs/upload" \
+echo "   Endpoint: POST ${HTTP_URL}/api/v1/blobs/upload"
+UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${HTTP_URL}/api/v1/blobs/upload" \
     -F "file=@${TEST_FILE}" \
     -F "tenant_id=${TENANT_ID}" \
     -F "namespace=${NAMESPACE}" \
@@ -80,7 +92,8 @@ echo ""
 # Test 2: Download blob via HTTP
 if [ -n "$BLOB_ID" ] && [ "$BLOB_ID" != "null" ]; then
     echo "📥 Test 2: Download blob via HTTP (raw)"
-    DOWNLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${NODE_URL}/api/v1/blobs/${BLOB_ID}/download/raw")
+    echo "   Endpoint: GET ${HTTP_URL}/api/v1/blobs/${BLOB_ID}/download/raw"
+    DOWNLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${HTTP_URL}/api/v1/blobs/${BLOB_ID}/download/raw")
     HTTP_CODE=$(echo "$DOWNLOAD_RESPONSE" | tail -n1)
     BODY=$(echo "$DOWNLOAD_RESPONSE" | sed '$d')
     
@@ -101,8 +114,9 @@ fi
 
 # Test 3: Get blob metadata via gRPC-Gateway (HTTP)
 if [ -n "$BLOB_ID" ] && [ "$BLOB_ID" != "null" ]; then
-    echo "📋 Test 3: Get blob metadata via gRPC-Gateway (HTTP)"
-    METADATA_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${NODE_URL}/api/v1/blobs/${BLOB_ID}")
+    echo "📋 Test 3: Get blob metadata via gRPC-Gateway"
+    echo "   Endpoint: GET ${GRPC_URL}/api/v1/blobs/${BLOB_ID}"
+    METADATA_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${GRPC_URL}/api/v1/blobs/${BLOB_ID}")
     HTTP_CODE=$(echo "$METADATA_RESPONSE" | tail -n1)
     BODY=$(echo "$METADATA_RESPONSE" | sed '$d')
     
@@ -124,8 +138,9 @@ if [ -n "$BLOB_ID" ] && [ "$BLOB_ID" != "null" ]; then
 fi
 
 # Test 4: List blobs via gRPC-Gateway (HTTP)
-echo "📋 Test 4: List blobs via gRPC-Gateway (HTTP)"
-LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${NODE_URL}/api/v1/blobs?tenant_id=${TENANT_ID}&namespace=${NAMESPACE}" 2>&1)
+echo "📋 Test 4: List blobs via gRPC-Gateway"
+echo "   Endpoint: GET ${GRPC_URL}/api/v1/blobs?tenant_id=${TENANT_ID}&namespace=${NAMESPACE}"
+LIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${GRPC_URL}/api/v1/blobs?tenant_id=${TENANT_ID}&namespace=${NAMESPACE}" 2>&1)
 HTTP_CODE=$(echo "$LIST_RESPONSE" | tail -n1)
 BODY=$(echo "$LIST_RESPONSE" | sed '$d')
 
@@ -147,15 +162,16 @@ echo ""
 
 # Test 5: Delete blob via gRPC-Gateway (HTTP)
 if [ -n "$BLOB_ID" ] && [ "$BLOB_ID" != "null" ]; then
-    echo "🗑️  Test 5: Delete blob via gRPC-Gateway (HTTP)"
-    DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${NODE_URL}/api/v1/blobs/${BLOB_ID}")
+    echo "🗑️  Test 5: Delete blob via gRPC-Gateway"
+    echo "   Endpoint: DELETE ${GRPC_URL}/api/v1/blobs/${BLOB_ID}"
+    DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${GRPC_URL}/api/v1/blobs/${BLOB_ID}")
     HTTP_CODE=$(echo "$DELETE_RESPONSE" | tail -n1)
     
     if [ "$HTTP_CODE" -eq 200 ]; then
         test_result "Delete successful"
         
         # Verify deletion
-        VERIFY_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${NODE_URL}/api/v1/blobs/${BLOB_ID}")
+        VERIFY_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${GRPC_URL}/api/v1/blobs/${BLOB_ID}")
         VERIFY_HTTP_CODE=$(echo "$VERIFY_RESPONSE" | tail -n1)
         if [ "$VERIFY_HTTP_CODE" -ne 200 ]; then
             test_result "Verification: Blob deleted (not found as expected)"

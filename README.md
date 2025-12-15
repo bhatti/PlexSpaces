@@ -64,6 +64,12 @@ PlexSpaces is a production-grade distributed actor framework that unifies the be
 
 ### 🚀 Advanced Features
 
+- **FaaS-Style Invocation**: HTTP-based actor invocation via `InvokeActor` RPC (GET for reads, POST/PUT for updates, DELETE for deletes)
+  - **RESTful API**: `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` endpoint (or `/api/v1/actors/{namespace}/{actor_type}` without tenant_id)
+  - **Namespace Support**: Organize actors by namespace for better isolation (defaults to "default")
+  - **Tenant Defaulting**: Tenant ID defaults to "default" if not provided in path
+  - **AWS Lambda URL Support**: Ready for integration with AWS Lambda Function URLs
+  - **Serverless Patterns**: Invoke actors like serverless functions with automatic load balancing
 - **Resource-Aware Scheduling**: Intelligent placement based on CPU, memory, and I/O profiles
 - **Multi-Tenancy**: Built-in isolation contexts for secure multi-tenant deployments
 - **Event Sourcing**: Complete audit trail with time-travel debugging
@@ -199,7 +205,11 @@ PlexSpaces excels at:
 - **Event Processing**: Real-time stream processing with exactly-once semantics
 - **Game Servers**: Stateful game sessions with automatic migration and fault tolerance
 - **Edge Computing**: Deploy actors to edge locations with automatic synchronization
-- **FAAS Platforms**: Build serverless platforms with durable execution
+- **FaaS Platforms**: Build serverless platforms with durable execution
+  - **HTTP-Based Invocation**: Invoke actors via REST API (`GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`)
+  - **Namespace Support**: Organize actors by namespace within tenants for better isolation
+  - **AWS Lambda Integration**: Ready for AWS Lambda Function URLs and API Gateway
+  - **Serverless Functions**: Treat actors as serverless functions with automatic scaling
 
 See [Use Cases](docs/use-cases.md) for detailed examples.
 
@@ -262,11 +272,11 @@ See [Examples](examples/README.md) for the complete list.
 ## Documentation
 
 - **[Getting Started](docs/getting-started.md)**: Quick start guide and tutorials
-- **[Concepts](docs/concepts.md)**: Core concepts explained (Actors, Behaviors, Facets, TupleSpace, etc.)
-- **[Architecture](docs/architecture.md)**: System design, abstractions, and primitives
-- **[Detailed Design](docs/detailed-design.md)**: Comprehensive component documentation with all facets, behaviors, APIs, and primitives
+- **[Concepts](docs/concepts.md)**: Core concepts explained (Actors, Behaviors, Facets, TupleSpace, FaaS-Style Invocation, etc.)
+- **[Architecture](docs/architecture.md)**: System design, abstractions, and primitives (including FaaS Invocation)
+- **[Detailed Design](docs/detailed-design.md)**: Comprehensive component documentation with all facets, behaviors, APIs, and primitives (including InvokeActor Service)
 - **[Installation](docs/installation.md)**: Docker, Kubernetes, and manual setup
-- **[Use Cases](docs/use-cases.md)**: Real-world application patterns and use cases
+- **[Use Cases](docs/use-cases.md)**: Real-world application patterns and use cases (including FaaS Platforms)
 - **[Examples](docs/examples.md)**: Example gallery with feature matrix
 - **[CLI Reference](docs/cli.md)**: Command-line tools and operations
 - **[API Reference](https://docs.rs/plexspaces/)**: Full API documentation

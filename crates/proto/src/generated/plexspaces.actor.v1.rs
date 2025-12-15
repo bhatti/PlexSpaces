@@ -66,6 +66,16 @@ pub struct Message {
     /// ```
     #[prost(string, tag="10")]
     pub idempotency_key: ::prost::alloc::string::String,
+    /// URI path for HTTP-based invocations (optional)
+    /// Example: "/api/v1/actors/default/counter/metrics"
+    /// Populated when message originates from HTTP InvokeActor RPC
+    #[prost(string, tag="11")]
+    pub uri_path: ::prost::alloc::string::String,
+    /// HTTP method for HTTP-based invocations (optional)
+    /// Example: "GET", "POST", "PUT", "DELETE"
+    /// Populated when message originates from HTTP InvokeActor RPC
+    #[prost(string, tag="12")]
+    pub uri_method: ::prost::alloc::string::String,
 }
 /// Actor instance representation.
 ///
@@ -1307,6 +1317,86 @@ pub struct GetOrActivateActorResponse {
     /// Was actor activated (true) or already active (false)
     #[prost(bool, tag="3")]
     pub was_activated: bool,
+}
+/// Request to invoke an actor via HTTP-like interface (FaaS-style)
+///
+/// ## Purpose
+/// Enables FaaS-like invocation of actors via HTTP GET/POST/PUT/DELETE requests.
+/// The tenant_id, namespace, and actor_type are extracted from the HTTP path.
+///
+/// ## HTTP Method Handling
+/// - GET: Query parameters are converted to JSON and stored in payload as string
+/// - POST: Request body becomes payload, HTTP headers become headers map
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct InvokeActorRequest {
+    /// Tenant ID (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type})
+    /// Default: "default" if not provided in path or if no authentication provided
+    /// When using path without tenant_id, this field will be empty and should default to "default"
+    #[prost(string, tag="1")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Namespace (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type})
+    /// Default: "default" if not specified
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Actor type (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type})
+    /// Used to lookup actors via ActorRegistry discover_actors_by_type
+    #[prost(string, tag="3")]
+    pub actor_type: ::prost::alloc::string::String,
+    /// HTTP method (GET, POST, PUT, or DELETE)
+    /// GET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)
+    #[prost(string, tag="4")]
+    pub http_method: ::prost::alloc::string::String,
+    /// Request payload
+    /// For GET/DELETE: JSON string of query parameters
+    /// For POST/PUT: Request body bytes
+    #[prost(bytes="vec", tag="5")]
+    pub payload: ::prost::alloc::vec::Vec<u8>,
+    /// HTTP headers (for POST/PUT requests)
+    /// Converted from HTTP request headers
+    #[prost(map="string, string", tag="6")]
+    pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Query parameters (for GET/DELETE requests)
+    /// Converted to JSON and stored in payload
+    #[prost(map="string, string", tag="7")]
+    pub query_params: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Full HTTP path for the request (optional)
+    /// Example: "/api/v1/actors/default/default/counter/custom/path"
+    /// Allows actors to perform custom routing based on the complete URL
+    #[prost(string, tag="9")]
+    pub path: ::prost::alloc::string::String,
+    /// Subpath after the actor_type segment (optional)
+    /// Example: for "/api/v1/actors/default/default/counter/metrics/latest"
+    ///           subpath = "metrics/latest"
+    /// This will be used in future for advanced per-actor routing capabilities.
+    #[prost(string, tag="10")]
+    pub subpath: ::prost::alloc::string::String,
+}
+/// Response from invoking an actor
+///
+/// ## Purpose
+/// Returns the result of actor invocation.
+/// For GET (ask): Contains the reply message from actor
+/// For POST (tell): Contains success status (fire-and-forget)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct InvokeActorResponse {
+    /// Success status
+    #[prost(bool, tag="1")]
+    pub success: bool,
+    /// Response payload (for GET/ask requests)
+    /// Contains the reply message from actor
+    #[prost(bytes="vec", tag="2")]
+    pub payload: ::prost::alloc::vec::Vec<u8>,
+    /// Response headers (optional metadata)
+    #[prost(map="string, string", tag="3")]
+    pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Actor ID that was invoked (format: "actor_id@node_id")
+    #[prost(string, tag="4")]
+    pub actor_id: ::prost::alloc::string::String,
+    /// Error message (if success is false)
+    #[prost(string, tag="5")]
+    pub error_message: ::prost::alloc::string::String,
 }
 /// Lifecycle event filter for subscribers
 ///

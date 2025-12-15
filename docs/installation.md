@@ -192,6 +192,37 @@ cargo install --path crates/cli
 | `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` |
 | `PLEXSPACES_CHANNEL_BACKEND` | Channel backend | `inmemory` |
 
+### HTTP Endpoints
+
+PlexSpaces exposes HTTP endpoints via gRPC-Gateway on the same port as gRPC (default: 9001):
+
+**FaaS-Style Actor Invocation**:
+- `GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}?param1=value1` - Read operations (ask pattern)
+- `POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` - Update operations (tell pattern)
+- `GET /api/v1/actors/{namespace}/{actor_type}?param1=value1` - Read operations without tenant_id (defaults to "default")
+- `POST /api/v1/actors/{namespace}/{actor_type}` - Update operations without tenant_id (defaults to "default")
+
+**Example**:
+```bash
+# Get counter value (with tenant_id and namespace)
+curl "http://localhost:9001/api/v1/actors/default/default/counter?action=get"
+
+# Get counter value (without tenant_id, defaults to "default")
+curl "http://localhost:9001/api/v1/actors/default/counter?action=get"
+
+# Increment counter (with tenant_id and namespace)
+curl -X POST "http://localhost:9001/api/v1/actors/default/default/counter" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"increment"}'
+
+# Increment counter (without tenant_id)
+curl -X POST "http://localhost:9001/api/v1/actors/default/counter" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"increment"}'
+```
+
+See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) for detailed documentation.
+
 ### Configuration File
 
 ```yaml

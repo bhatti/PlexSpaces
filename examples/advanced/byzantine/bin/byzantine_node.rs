@@ -256,7 +256,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start gRPC server for remote actor communication
     let grpc_addr = args.address.parse()?;
-    let grpc_service = ActorServiceImpl { node: node.clone() };
+    let grpc_service = ActorServiceImpl::new(node.clone());
 
     println!("\n🌐 Starting gRPC server on {}", args.address);
 

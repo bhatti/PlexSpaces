@@ -297,8 +297,7 @@ impl BlobService {
     }
 
     /// Generate presigned URL (for direct client access)
-    /// Note: object_store crate doesn't directly support presigned URLs,
-    /// so this would need to be implemented using the underlying SDK
+    /// Requires 'presigned-urls' feature to be enabled
     pub async fn generate_presigned_url(
         &self,
         blob_id: &str,
@@ -309,11 +308,16 @@ impl BlobService {
         let metadata = self.repository.get(blob_id).await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
-        // For now, return an error indicating this needs SDK-specific implementation
-        // In production, this would use AWS SDK, GCP SDK, etc. to generate presigned URLs
-        Err(BlobError::InternalError(
-            "Presigned URLs require SDK-specific implementation".to_string()
-        ))
+        // Get storage path
+        let storage_path = crate::helpers::get_storage_path(&metadata, &self.config.prefix);
+        
+        // Generate presigned URL
+        crate::presigned::generate_presigned_url(
+            &self.config,
+            &storage_path,
+            operation,
+            expires_after,
+        ).await
     }
 
     /// Find expired blobs

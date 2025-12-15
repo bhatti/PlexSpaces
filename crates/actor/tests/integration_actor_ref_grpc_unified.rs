@@ -109,7 +109,7 @@ async fn register_test_actor(
         mailbox,
         service_locator,
     ));
-    actor_registry.register_actor(actor_id, sender).await;
+    actor_registry.register_actor(actor_id, sender, None, None, None).await;
 }
 
 /// Helper to create a test ActorService wrapper

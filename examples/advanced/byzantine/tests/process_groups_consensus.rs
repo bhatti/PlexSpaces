@@ -81,7 +81,7 @@ async fn test_byzantine_with_process_groups() {
 
     for general_id in &generals {
         println!("[{}] Joining 'generals' group...", general_id);
-        registry.join_group(GROUP_NAME, TENANT_ID, &general_id.to_string()).await.unwrap();
+        registry.join_group(GROUP_NAME, TENANT_ID, &general_id.to_string(), Vec::new()).await.unwrap();
     }
 
     let members = registry.get_members(GROUP_NAME, TENANT_ID).await.unwrap();
@@ -98,7 +98,7 @@ async fn test_byzantine_with_process_groups() {
     };
 
     let proposal_bytes = serde_json::to_vec(&proposal).unwrap();
-    let recipients = registry.publish_to_group(GROUP_NAME, TENANT_ID, proposal_bytes).await.unwrap();
+    let recipients = registry.publish_to_group(GROUP_NAME, TENANT_ID, None, proposal_bytes).await.unwrap();
 
     println!("[Broadcast] Proposal sent to {} generals", recipients.len());
     assert_eq!(recipients.len(), 4);
@@ -186,7 +186,7 @@ async fn test_byzantine_traitor_with_groups() {
     let generals = vec!["commander", "loyal-1", "loyal-2", "traitor"];
 
     for general_id in &generals {
-        registry.join_group(GROUP_NAME, TENANT_ID, &general_id.to_string()).await.unwrap();
+        registry.join_group(GROUP_NAME, TENANT_ID, &general_id.to_string(), Vec::new()).await.unwrap();
     }
 
     println!("[Setup] 4 generals joined group (1 traitor)\n");
@@ -199,7 +199,7 @@ async fn test_byzantine_traitor_with_groups() {
     };
 
     let proposal_bytes = serde_json::to_vec(&proposal).unwrap();
-    let recipients = registry.publish_to_group(GROUP_NAME, TENANT_ID, proposal_bytes).await.unwrap();
+    let recipients = registry.publish_to_group(GROUP_NAME, TENANT_ID, None, proposal_bytes).await.unwrap();
 
     println!("[Commander] Broadcast 'Attack' to {} generals", recipients.len());
     println!("[Loyal-1] Received: Attack");
@@ -247,7 +247,7 @@ async fn test_multi_round_consensus_with_groups() {
     ];
 
     for general_id in &generals {
-        registry.join_group(GROUP_NAME, TENANT_ID, &general_id.to_string()).await.unwrap();
+        registry.join_group(GROUP_NAME, TENANT_ID, &general_id.to_string(), Vec::new()).await.unwrap();
     }
 
     println!("[Setup] 7 generals joined group (can tolerate f=2 traitors)\n");

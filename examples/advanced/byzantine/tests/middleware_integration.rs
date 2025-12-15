@@ -147,7 +147,7 @@ async fn test_metrics_collection_for_byzantine_protocol() {
 
     let config = MiddlewareConfig {
         middleware: vec![MiddlewareSpec {
-            middleware_type: MiddlewareType::Metrics as i32,
+            middleware_type: MiddlewareType::MiddlewareTypeMetrics as i32,
             enabled: true,
             priority: 10,
             config: None,
@@ -204,15 +204,17 @@ async fn test_auth_with_byzantine_votes_permissive_vs_strict() {
     println!("\n🔓 Step 1: Testing permissive mode (allow_unauthenticated=true)...");
     let permissive_config = MiddlewareConfig {
         middleware: vec![MiddlewareSpec {
-            middleware_type: MiddlewareType::Auth as i32,
+            middleware_type: MiddlewareType::MiddlewareTypeAuth as i32,
             enabled: true,
             priority: 30,
             config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Auth(
                 AuthMiddlewareConfig {
-                    method: AuthMethod::Jwt as i32,
+                    method: AuthMethod::AuthMethodJwt as i32,
                     jwt_key: "byzantine-secret".to_string(),
                     rbac: None,
                     allow_unauthenticated: true,
+                    mtls_ca_certificate: String::new(),
+                    mtls_trusted_services: Vec::new(),
                 },
             )),
         }],
@@ -241,12 +243,12 @@ async fn test_auth_with_byzantine_votes_permissive_vs_strict() {
     println!("\n🔒 Step 2: Testing strict mode (allow_unauthenticated=false)...");
     let strict_config = MiddlewareConfig {
         middleware: vec![MiddlewareSpec {
-            middleware_type: MiddlewareType::Auth as i32,
+            middleware_type: MiddlewareType::MiddlewareTypeAuth as i32,
             enabled: true,
             priority: 30,
             config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Auth(
                 AuthMiddlewareConfig {
-                    method: AuthMethod::Jwt as i32,
+                    method: AuthMethod::AuthMethodJwt as i32,
                     jwt_key: "byzantine-secret".to_string(),
                     rbac: None,
                     allow_unauthenticated: false, // Strict mode
@@ -307,6 +309,8 @@ async fn test_full_middleware_stack_execution_order() {
                         jwt_key: "test-key".to_string(),
                         rbac: None,
                         allow_unauthenticated: true,
+                        mtls_ca_certificate: String::new(),
+                        mtls_trusted_services: Vec::new(),
                     },
                 )),
             },

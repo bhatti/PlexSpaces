@@ -700,6 +700,205 @@ struct Tuple {
 - Intelligent placement
 - Resource quotas and limits
 
+## FaaS Invocation
+
+PlexSpaces provides FaaS-style HTTP invocation of actors, enabling serverless patterns and cloud platform integration.
+
+### Architecture
+
+```mermaid
+graph TB
+    subgraph Client["HTTP Clients"]
+        Browser["Web Browser"]
+        Lambda["AWS Lambda"]
+        API["API Gateway"]
+        Curl["curl/HTTP Client"]
+    end
+    
+    subgraph PlexSpaces["PlexSpaces Node"]
+        Gateway["gRPC-Gateway<br/>(HTTP Server)"]
+        InvokeActor["InvokeActor RPC"]
+        ActorRegistry["Actor Registry<br/>(Type Index)"]
+        ActorService["Actor Service"]
+    end
+    
+    subgraph Actors["Actors"]
+        Counter["Counter Actor"]
+        Processor["Processor Actor"]
+        Calculator["Calculator Actor"]
+    end
+    
+    Browser -->|"GET /api/v1/actors/..."| Gateway
+    Lambda -->|"POST /api/v1/actors/..."| Gateway
+    API -->|"HTTP Requests"| Gateway
+    Curl -->|"REST API"| Gateway
+    
+    Gateway -->|"InvokeActorRequest"| InvokeActor
+    InvokeActor -->|"Lookup by type"| ActorRegistry
+    ActorRegistry -->|"Select actor"| ActorService
+    ActorService -->|"tell()/ask()"| Counter
+    ActorService -->|"tell()/ask()"| Processor
+    ActorService -->|"tell()/ask()"| Calculator
+    
+    style Gateway fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+    style InvokeActor fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style ActorRegistry fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style ActorService fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+```
+
+### API Endpoint
+
+```
+GET  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}?param1=value1&param2=value2
+POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
+PUT  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
+DELETE /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
+
+# Alternative paths without tenant_id (defaults to "default")
+GET  /api/v1/actors/{namespace}/{actor_type}?param1=value1&param2=value2
+POST /api/v1/actors/{namespace}/{actor_type}
+PUT  /api/v1/actors/{namespace}/{actor_type}
+DELETE /api/v1/actors/{namespace}/{actor_type}
+```
+
+### HTTP Method Handling
+
+- **GET**: Query parameters → JSON payload → `ask()` pattern (request-reply)
+- **POST/PUT**: Request body → payload, headers → metadata → `tell()` pattern (fire-and-forget)
+- **DELETE**: Query parameters → JSON payload → `ask()` pattern (request-reply)
+
+### Actor Discovery
+
+- **Type-Based Lookup**: O(1) hashmap lookup by `(tenant_id, namespace, actor_type)`
+- **Load Balancing**: Random selection when multiple actors of same type exist
+- **404 Handling**: Returns 404 if no actors found
+
+### Path Routing
+
+Actors receive full HTTP path information for custom routing:
+
+- `message.uri_path`: Full URL path (e.g., "/api/v1/actors/default/default/counter/metrics")
+- `message.uri_method`: HTTP method (GET, POST, PUT, DELETE)
+- `message.metadata["http_path"]`: Full URL path (for backward compatibility)
+- `message.metadata["http_subpath"]`: Path after actor_type (for future routing)
+
+### Routing Patterns
+
+#### HTTP Gateway Architecture
+
+The HTTP gateway (Axum) runs as a separate server alongside the gRPC server:
+
+```mermaid
+graph TB
+    subgraph Node["PlexSpaces Node"]
+        HTTP["HTTP Gateway<br/>(Axum, Port 9003)"]
+        GRPC["gRPC Server<br/>(Tonic, Port 9002)"]
+        Service["ActorService<br/>(Shared State)"]
+    end
+    
+    Client["HTTP Client"] -->|"HTTP/JSON"| HTTP
+    HTTP -->|"InvokeActorRequest"| Service
+    Service -->|"gRPC"| GRPC
+    GRPC -->|"Actor Messages"| Actors["Actors"]
+    
+    style HTTP fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+    style GRPC fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style Service fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+```
+
+**Key Design Decisions**:
+- **Separate Servers**: HTTP gateway and gRPC server run concurrently using `tokio::select!`
+- **Shared State**: Both servers share the same `ActorServiceImpl` instance
+- **Port Configuration**: HTTP gateway listens on `grpc_port + 1` (e.g., 9003 if gRPC is 9002)
+- **Direct Service Calls**: HTTP handlers directly invoke `ActorServiceTrait::invoke_actor` rather than making gRPC calls
+
+#### Request Flow
+
+1. **HTTP Request Parsing**: Axum router extracts path parameters (`tenant_id`, `namespace`, `actor_type`)
+2. **Query/Body Parsing**: GET requests parse query params, POST/PUT parse request body
+3. **gRPC Request Construction**: Build `InvokeActorRequest` with:
+   - Path parameters → `tenant_id`, `namespace`, `actor_type`
+   - Query params or body → `payload` (JSON bytes)
+   - HTTP method → `message_type` ("call" for GET/DELETE, "cast" for POST/PUT)
+4. **Service Invocation**: Call `ActorServiceImpl::invoke_actor` directly (not via gRPC)
+5. **Response Conversion**: Convert `InvokeActorResponse` to HTTP/JSON:
+   - `payload` (bytes) → JSON value (UTF-8 decode or base64 encode)
+   - `success` → HTTP status code (200 for success, 500 for errors)
+   - `error_message` → HTTP error response body
+
+#### Actor Discovery Pattern
+
+```rust
+// 1. Type-based lookup
+let actors = actor_registry.discover_actors_by_type(
+    tenant_id, 
+    namespace, 
+    actor_type
+).await;
+
+// 2. Random selection (load balancing)
+let selected_actor = actors.choose(&mut rng)
+    .ok_or_else(|| "No actors found")?;
+
+// 3. Message delivery
+actor_ref.ask(message, timeout).await
+```
+
+#### Message Type Routing
+
+HTTP methods map to actor message patterns:
+
+| HTTP Method | Message Type | Pattern | Reply Expected |
+|------------|--------------|---------|----------------|
+| GET | `Call` | Ask | Yes |
+| DELETE | `Call` | Ask | Yes |
+| POST | `Cast` | Tell | No |
+| PUT | `Cast` | Tell | No |
+
+**Behavior Routing**:
+- `GenServer::route_message` handles both `Call` and `Cast`
+- `Call` messages: Actor must reply via `ctx.send_reply()`
+- `Cast` messages: Fire-and-forget, no reply required
+
+#### Multi-Node Routing
+
+For distributed deployments:
+
+```mermaid
+graph TB
+    Client["HTTP Client"] --> Gateway["HTTP Gateway<br/>(Node 1)"]
+    Gateway --> Service["ActorService<br/>(Node 1)"]
+    Service -->|"Local?"| Check{Check Node ID}
+    Check -->|"Same Node"| Local["Local Mailbox<br/>(Direct)"]
+    Check -->|"Different Node"| Remote["gRPC Client<br/>(Remote)"]
+    Remote --> GRPC["gRPC Server<br/>(Node 2)"]
+    GRPC --> Actor["Actor<br/>(Node 2)"]
+    Local --> Actor2["Actor<br/>(Node 1)"]
+```
+
+**Location Transparency**: Same API works for local and remote actors - routing is automatic.
+
+### AWS Lambda Integration
+
+Ready for AWS Lambda Function URLs:
+
+1. Deploy PlexSpaces Node as Lambda function
+2. Enable Function URL for HTTP access
+3. Route `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}` to Lambda
+4. Automatic scaling based on request volume
+
+### Multi-Tenancy
+
+- **Tenant Isolation**: All actors scoped by `tenant_id` (defaults to "default" if not provided)
+- **Namespace Isolation**: Actors organized by namespace within tenant (defaults to "default" if not provided)
+- **Lookup Key**: `(tenant_id, namespace, actor_type)` for efficient O(1) lookup
+- **JWT Authentication**: Extract `tenant_id` from JWT claims
+- **Access Control**: Verify JWT `tenant_id` matches path `tenant_id`
+- **Default Tenant**: "default" when not provided in path or when no authentication provided
+- **Default Namespace**: "default" when not provided in path
+
+See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) and [Detailed Design: InvokeActor Service](detailed-design.md#invokeactor-service) for implementation details.
+
 ## Security
 
 ### Multi-Tenancy

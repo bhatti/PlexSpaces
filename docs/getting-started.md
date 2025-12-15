@@ -197,8 +197,9 @@ Facets add dynamic capabilities to actors:
 1. **Learn Core Concepts**: Read the [concepts guide](concepts.md) to understand Actors, Behaviors, Facets, and more
 2. **Explore Examples**: Check out the [examples directory](../examples/) for more patterns
 3. **Read Architecture**: Understand the [system design](architecture.md)
-4. **Deploy to Production**: Follow the [installation guide](installation.md)
-5. **Learn Use Cases**: See [real-world applications](use-cases.md)
+4. **FaaS Invocation**: Learn how to invoke actors via HTTP (GET/POST) for serverless patterns - see [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation)
+5. **Deploy to Production**: Follow the [installation guide](installation.md)
+6. **Learn Use Cases**: See [real-world applications](use-cases.md)
 
 ## Common Patterns
 

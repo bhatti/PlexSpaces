@@ -218,7 +218,7 @@ async fn test_activate_virtual_actor_already_active() {
         mailbox.clone(),
         service_locator.clone(),
     ));
-    registry.register_actor("test-actor@test-node".to_string(), wrapper).await;
+    registry.register_actor("test-actor@test-node".to_string(), wrapper, None, None, None).await;
     manager.mark_activated(&"test-actor@test-node".to_string()).await.unwrap();
     
     // Try to activate - should return Ok immediately
@@ -363,7 +363,7 @@ async fn test_spawn_built_actor_regular() {
         .build()
         .await;
     
-    let result = factory.spawn_built_actor(Arc::new(actor)).await;
+    let result = factory.spawn_built_actor(Arc::new(actor), None, None).await;
     assert!(result.is_ok(), "Spawn regular actor should succeed");
     
     // Wait a bit for actor to start
@@ -390,7 +390,7 @@ async fn test_spawn_built_actor_virtual_eager() {
     let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
     actor.attach_facet(virtual_facet, 100, facet_config).await.unwrap();
     
-    let result = factory.spawn_built_actor(Arc::new(actor)).await;
+    let result = factory.spawn_built_actor(Arc::new(actor), None, None).await;
     assert!(result.is_ok(), "Spawn virtual actor with eager activation should succeed");
     
     // Wait a bit for actor to start
@@ -417,7 +417,7 @@ async fn test_spawn_built_actor_virtual_lazy() {
     let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
     actor.attach_facet(virtual_facet, 100, facet_config).await.unwrap();
     
-    let result = factory.spawn_built_actor(Arc::new(actor)).await;
+    let result = factory.spawn_built_actor(Arc::new(actor), None, None).await;
     assert!(result.is_ok(), "Spawn virtual actor with lazy activation should succeed");
 }
 
@@ -441,7 +441,7 @@ async fn test_spawn_built_actor_virtual_prewarm() {
     let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
     actor.attach_facet(virtual_facet, 100, facet_config).await.unwrap();
     
-    let result = factory.spawn_built_actor(Arc::new(actor)).await;
+    let result = factory.spawn_built_actor(Arc::new(actor), None, None).await;
     assert!(result.is_ok(), "Spawn virtual actor with prewarm activation should succeed");
 }
 
@@ -463,7 +463,7 @@ async fn test_spawn_built_actor_multiple_references() {
     let actor_arc = Arc::new(actor);
     let actor_arc_clone = actor_arc.clone(); // Create second reference
     
-    let result = factory.spawn_built_actor(actor_arc).await;
+    let result = factory.spawn_built_actor(actor_arc, None, None).await;
     // This should fail because we have multiple references
     assert!(result.is_err(), "Should fail when Arc has multiple references");
     // Error is Box<dyn Error + Send + Sync>, can format it
@@ -491,7 +491,7 @@ async fn test_spawn_built_actor_service_not_found() {
         .build()
         .await;
     
-    let result = factory.spawn_built_actor(Arc::new(actor)).await;
+    let result = factory.spawn_built_actor(Arc::new(actor), None, None).await;
     assert!(result.is_err(), "Should fail when ActorRegistry not found");
 }
 
@@ -511,7 +511,7 @@ async fn test_spawn_built_actor_virtual_facet_not_found() {
         .await;
     
     // This should work fine since it's a regular actor
-    let result = factory.spawn_built_actor(Arc::new(actor)).await;
+    let result = factory.spawn_built_actor(Arc::new(actor), None, None).await;
     assert!(result.is_ok(), "Regular actor should spawn successfully");
 }
 

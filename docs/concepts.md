@@ -14,6 +14,7 @@ This document explains the fundamental concepts you need to understand to use Pl
 8. [Location Transparency](#location-transparency)
 9. [Message Passing](#message-passing)
 10. [Durability](#durability)
+11. [FaaS-Style Invocation](#faas-style-invocation)
 
 ## Actors
 
@@ -314,6 +315,252 @@ Each actor processes messages sequentially for predictable behavior.
 ### 5. Failure Isolation
 
 Actors are isolated - one actor's failure doesn't affect others.
+
+## FaaS-Style Invocation
+
+**FaaS-Style Invocation** enables HTTP-based actor invocation, treating actors like serverless functions:
+
+- **RESTful API**: Standard HTTP GET/POST methods for actor invocation
+- **Path-Based Routing**: `/api/v1/actors/{tenant_id}/{actor_type}` endpoint
+- **GET for Reads**: Uses `ask()` pattern (request-reply) with query parameters
+- **POST for Updates**: Uses `tell()` pattern (fire-and-forget) with request body
+- **Multi-Tenant Isolation**: Built-in tenant-based access control
+- **Load Balancing**: Automatic distribution across actor instances
+- **AWS Lambda Ready**: Designed for integration with AWS Lambda Function URLs
+
+### HTTP Methods
+
+**GET - Read Operations (Ask Pattern)**:
+```bash
+# Get counter value (with tenant_id and namespace)
+curl "http://localhost:8080/api/v1/actors/default/default/counter?action=get"
+
+# Get counter value (without tenant_id, defaults to "default")
+curl "http://localhost:8080/api/v1/actors/default/counter?action=get"
+```
+
+- Query parameters converted to JSON payload
+- Actor's `handle_request()` called (GenServer pattern)
+- Actor sends reply via `ctx.send_reply()`
+- Response contains actor's reply payload
+- `message.uri_path` and `message.uri_method` populated
+
+**POST/PUT - Update Operations (Tell Pattern)**:
+```bash
+# Increment counter (POST) - with tenant_id and namespace
+curl -X POST "http://localhost:8080/api/v1/actors/default/default/counter" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"increment"}'
+
+# Increment counter (POST) - without tenant_id
+curl -X POST "http://localhost:8080/api/v1/actors/default/counter" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"increment"}'
+
+# Update counter (PUT)
+curl -X PUT "http://localhost:8080/api/v1/actors/default/default/counter" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"set","value":42}'
+```
+
+- Request body becomes message payload
+- HTTP headers preserved as message metadata
+- Actor's `handle_message()` called (fire-and-forget)
+- Response returns immediately
+- `message.uri_path` and `message.uri_method` populated
+
+**DELETE - Delete Operations (Ask Pattern)**:
+```bash
+# Delete resource (with tenant_id and namespace)
+curl -X DELETE "http://localhost:8080/api/v1/actors/default/default/counter?confirm=true"
+
+# Delete resource (without tenant_id)
+curl -X DELETE "http://localhost:8080/api/v1/actors/default/counter?confirm=true"
+```
+
+- Query parameters converted to JSON payload
+- Actor's `handle_request()` called (GenServer pattern)
+- Actor sends reply via `ctx.send_reply()`
+- Response contains actor's reply payload
+- `message.uri_path` and `message.uri_method` populated
+
+### Actor Lookup
+
+Actors are discovered by `actor_type` using efficient O(1) hashmap lookup:
+
+1. **Type-Based Discovery**: Actors registered with `actor_type` are indexed
+2. **Random Selection**: If multiple actors exist, one is randomly selected (load balancing)
+3. **404 Not Found**: Returns 404 if no actors of the specified type are found
+
+### Path and Subpath Routing
+
+For advanced routing, actors receive:
+
+- **URI Path**: Available in `message.uri_path` (full HTTP path)
+- **URI Method**: Available in `message.uri_method` (GET, POST, PUT, DELETE)
+- **Full HTTP Path**: Also available in `message.metadata["http_path"]` (for backward compatibility)
+- **Subpath**: Available in `message.metadata["http_subpath"]` (everything after actor_type)
+
+This enables custom routing within actors (e.g., `/metrics`, `/health`, `/actions/{name}`).
+
+### Routing Patterns
+
+PlexSpaces supports multiple routing patterns for actor invocation:
+
+#### 1. HTTP to gRPC Routing
+
+The HTTP gateway translates HTTP requests to gRPC `InvokeActor` calls:
+
+```
+HTTP Request → HTTP Gateway (Axum) → gRPC InvokeActor → ActorService → Actor
+```
+
+**Pattern Flow**:
+1. **HTTP Request**: Client sends HTTP GET/POST to `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}`
+2. **HTTP Gateway**: Axum server parses path parameters, query params, and body
+3. **gRPC Translation**: Gateway constructs `InvokeActorRequest` with:
+   - `tenant_id`, `namespace`, `actor_type` from path
+   - `payload` from request body (POST/PUT) or query params (GET)
+   - `message_type` set to `"call"` for GET/DELETE (ask pattern) or `"cast"` for POST/PUT (tell pattern)
+4. **Actor Service**: `ActorServiceImpl::invoke_actor` handles the gRPC request
+5. **Actor Discovery**: Service looks up actors by type using `ActorRegistry::discover_actors_by_type`
+6. **Message Delivery**: Selected actor receives message via mailbox
+7. **Response**: For ask pattern (GET), actor sends reply via `ctx.send_reply()`
+8. **HTTP Response**: Gateway converts gRPC response back to HTTP/JSON
+
+#### 2. Actor Discovery and Selection
+
+When multiple actors of the same type exist, the system uses:
+
+- **Random Selection**: Picks one actor randomly from discovered actors
+- **Load Distribution**: Natural load balancing across actor instances
+- **Type-Based Lookup**: `ActorRegistry::discover_actors_by_type(tenant_id, namespace, actor_type)`
+
+**Example**:
+```rust
+// Multiple counter actors registered
+// GET /api/v1/actors/default/default/counter
+// → ActorService discovers all actors with type="counter"
+// → Randomly selects one (e.g., "counter-1@node1")
+// → Routes message to selected actor
+```
+
+#### 3. Message Type Routing
+
+Different HTTP methods map to different message patterns:
+
+- **GET/DELETE** → `MessageType::Call` (ask pattern, expects reply)
+- **POST/PUT** → `MessageType::Cast` (tell pattern, fire-and-forget)
+
+**Behavior Handling**:
+- `GenServer::route_message` routes `Call` messages to `handle_request` (expects reply)
+- `GenServer::route_message` routes `Cast` messages to `handle_request` (no reply required)
+
+#### 4. Path-Based Actor Routing
+
+Actors can implement custom routing based on HTTP path:
+
+```rust
+async fn handle_request(&mut self, ctx: &ActorContext, msg: Message) -> Result<(), BehaviorError> {
+    if let Some(path) = &msg.uri_path {
+        if path.ends_with("/metrics") {
+            return self.handle_metrics(ctx, msg).await;
+        }
+        if path.ends_with("/health") {
+            return self.handle_health(ctx, msg).await;
+        }
+        if let Some(subpath) = msg.metadata.get("http_subpath") {
+            // Handle custom subpath routing
+            if subpath.starts_with("/actions/") {
+                let action = subpath.strip_prefix("/actions/").unwrap();
+                return self.handle_action(ctx, msg, action).await;
+            }
+        }
+    }
+    // Default handling
+    Ok(())
+}
+```
+
+#### 5. Multi-Node Routing
+
+For distributed systems, routing automatically handles:
+
+- **Local Actors**: Direct mailbox delivery (same node)
+- **Remote Actors**: gRPC client routing (different node)
+- **Location Transparency**: Same API works for local and remote actors
+
+**Routing Decision**:
+```rust
+if actor_id.node_id == current_node_id {
+    // Local routing: direct mailbox enqueue
+} else {
+    // Remote routing: gRPC client call to remote node
+}
+```
+
+### Multi-Tenancy
+
+- **Path Parameter**: `tenant_id` in URL path
+- **JWT Authentication**: When enabled, `tenant_id` extracted from JWT claims
+- **Access Control**: JWT `tenant_id` must match requested `tenant_id`
+- **Default Tenant**: If no auth provided or not in path, defaults to "default"
+- **Default Namespace**: If not in path, defaults to "default"
+- **Path Formats**:
+  - `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` - Full path with tenant_id
+  - `/api/v1/actors/{namespace}/{actor_type}` - Path without tenant_id (defaults to "default")
+
+### Example
+
+```rust
+// Register actor with type, tenant_id, and namespace for InvokeActor lookup
+actor_registry.register_actor(
+    actor_id.clone(),
+    sender,
+    Some("counter".to_string()),  // actor_type
+    Some("default".to_string()),   // tenant_id (defaults to "default" if None)
+    Some("default".to_string()),   // namespace (defaults to "default" if None)
+).await;
+
+// Actor can access URI path and method
+async fn handle_request(&mut self, ctx: &ActorContext, msg: Message) -> Result<(), BehaviorError> {
+    // Access URI information directly from message
+    if let Some(uri_path) = &msg.uri_path {
+        if uri_path.contains("/metrics") {
+            // Handle metrics endpoint
+        }
+    }
+    
+    // Access HTTP method
+    if let Some(method) = &msg.uri_method {
+        match method.as_str() {
+            "GET" => self.handle_get(ctx, msg).await?,
+            "POST" => self.handle_post(ctx, msg).await?,
+            "PUT" => self.handle_put(ctx, msg).await?,
+            "DELETE" => self.handle_delete(ctx, msg).await?,
+            _ => {}
+        }
+    }
+    
+    // Also available in metadata for backward compatibility
+    if let Some(subpath) = msg.metadata.get("http_subpath") {
+        // Custom routing based on subpath
+    }
+    
+    Ok(())
+}
+```
+
+### AWS Lambda Integration
+
+The `InvokeActor` endpoint is designed for AWS Lambda Function URLs:
+
+1. Deploy PlexSpaces Node as Lambda function
+2. Enable Lambda Function URL for HTTP access
+3. Route requests to `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`
+4. Lambda automatically scales based on request volume
+
+See [Architecture](architecture.md#faas-invocation) and [Detailed Design](detailed-design.md#invokeactor-service) for more details.
 
 ## Next Steps
 

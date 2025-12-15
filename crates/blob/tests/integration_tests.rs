@@ -23,13 +23,12 @@
 
 use plexspaces_blob::{BlobService, repository::sql::SqlBlobRepository, repository::ListFilters};
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
 
-/// Check if MinIO is available
-async fn check_minio_available() -> bool {
+/// Get MinIO endpoint (checks which port is available)
+async fn get_minio_endpoint() -> Option<String> {
     use reqwest::Client;
     
     let client = match Client::builder()
@@ -37,32 +36,38 @@ async fn check_minio_available() -> bool {
         .build()
     {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     
-    // Try to connect to MinIO
-    match timeout(Duration::from_secs(2), client.get("http://localhost:9000/minio/health/live").send()).await {
-        Ok(Ok(resp)) => resp.status().is_success(),
-        _ => false,
+    // Try port 9001 first, then 9000
+    let ports = ["9001", "9000"];
+    for port in &ports {
+        let url = format!("http://localhost:{}/minio/health/live", port);
+        match timeout(Duration::from_secs(2), client.get(&url).send()).await {
+            Ok(Ok(resp)) if resp.status().is_success() => {
+                return Some(format!("http://localhost:{}", port));
+            }
+            _ => continue,
+        }
     }
+    None
 }
 
 async fn create_test_service() -> Option<Arc<BlobService>> {
-    if !check_minio_available().await {
-        eprintln!("⚠️  MinIO not available at http://localhost:9000. Skipping integration tests.");
-        eprintln!("   To run these tests, start MinIO with:");
-        eprintln!("   docker run -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address \":9001\"");
-        return None;
-    }
+    let endpoint = match get_minio_endpoint().await {
+        Some(e) => e,
+        None => {
+            eprintln!("⚠️  MinIO not available at http://localhost:9001 or http://localhost:9000. Skipping integration tests.");
+            eprintln!("   To run these tests, start MinIO with:");
+            eprintln!("   docker run -p 9001:9000 -p 9002:9001 -e MINIO_ROOT_USER=minioadmin_user -e MINIO_ROOT_PASSWORD=minioadmin_pass minio/minio server /data --console-address \":9002\"");
+            return None;
+        }
+    };
 
-    // Create SQLite repository
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .ok()?;
-    
-    let any_pool: sqlx::Pool<sqlx::Any> = pool.into();
+    // Create SQLite repository using AnyPool (like the node does)
+    // Use explicit sqlite:// prefix for AnyPool
+    use sqlx::AnyPool;
+    let any_pool = AnyPool::connect("sqlite://:memory:").await.ok()?;
     SqlBlobRepository::migrate(&any_pool).await.ok()?;
     let repository = Arc::new(SqlBlobRepository::new(any_pool));
 
@@ -70,7 +75,7 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
     let config = ProtoBlobConfig {
         backend: "minio".to_string(),
         bucket: "plexspaces-test".to_string(),
-        endpoint: "http://localhost:9000".to_string(),
+        endpoint: endpoint.clone(),
         region: String::new(),
         access_key_id: "minioadmin_user".to_string(),
         secret_access_key: "minioadmin_pass".to_string(),
@@ -81,6 +86,7 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
         azure_account_key: String::new(),
     };
 
+    eprintln!("Using MinIO endpoint: {}", endpoint);
     BlobService::new(config, repository).await.ok().map(Arc::new)
 }
 
@@ -272,4 +278,195 @@ async fn test_multi_tenancy_isolation() {
     // Should only see tenant-1 blob
     assert!(blobs.iter().any(|b| b.blob_id == metadata1.blob_id));
     assert!(!blobs.iter().any(|b| b.blob_id == metadata2.blob_id));
+}
+
+#[cfg(feature = "presigned-urls")]
+#[tokio::test]
+async fn test_presigned_url_get() {
+    let service = match create_test_service().await {
+        Some(s) => s,
+        None => {
+            println!("Skipping test - MinIO not available");
+            return;
+        }
+    };
+
+    // Upload a blob first
+    let data = b"Test content for presigned URL".to_vec();
+    let metadata = service
+        .upload_blob(
+            "tenant-1",
+            "ns-1",
+            "presigned-test.txt",
+            data.clone(),
+            Some("text/plain".to_string()),
+            None,
+            None,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Generate presigned URL for GET
+    use chrono::Duration;
+    let presigned_url = service
+        .generate_presigned_url(&metadata.blob_id, "GET", Duration::hours(1))
+        .await
+        .unwrap();
+
+    // Verify URL is not empty and contains expected components
+    assert!(!presigned_url.is_empty());
+    assert!(presigned_url.contains("http://") || presigned_url.contains("https://"));
+    
+    // Try to download using presigned URL
+    use reqwest::Client;
+    let client = Client::new();
+    let response = client.get(&presigned_url).send().await.unwrap();
+    assert!(response.status().is_success());
+    
+    let downloaded_data = response.bytes().await.unwrap();
+    assert_eq!(downloaded_data.as_ref(), data.as_slice());
+}
+
+#[cfg(feature = "presigned-urls")]
+#[tokio::test]
+async fn test_presigned_url_put() {
+    let service = match create_test_service().await {
+        Some(s) => s,
+        None => {
+            println!("Skipping test - MinIO not available");
+            return;
+        }
+    };
+
+    // Upload a blob first to get a valid blob_id and path
+    let data = b"Initial content".to_vec();
+    let metadata = service
+        .upload_blob(
+            "tenant-1",
+            "ns-1",
+            "presigned-put-test.txt",
+            data,
+            Some("text/plain".to_string()),
+            None,
+            None,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Generate presigned URL for PUT
+    use chrono::Duration;
+    let presigned_url = service
+        .generate_presigned_url(&metadata.blob_id, "PUT", Duration::hours(1))
+        .await
+        .unwrap();
+
+    // Verify URL is not empty
+    assert!(!presigned_url.is_empty());
+    assert!(presigned_url.contains("http://") || presigned_url.contains("https://"));
+    
+    // Try to upload using presigned URL
+    use reqwest::Client;
+    let client = Client::new();
+    let new_data = b"Updated content via presigned URL";
+    let response = client
+        .put(&presigned_url)
+        .body(new_data.to_vec())
+        .send()
+        .await
+        .unwrap();
+    
+    // PUT should succeed (200 or 204)
+    assert!(response.status().is_success() || response.status().as_u16() == 200 || response.status().as_u16() == 204);
+}
+
+#[cfg(feature = "presigned-urls")]
+#[tokio::test]
+async fn test_presigned_url_expiration() {
+    let service = match create_test_service().await {
+        Some(s) => s,
+        None => {
+            println!("Skipping test - MinIO not available");
+            return;
+        }
+    };
+
+    // Upload a blob first
+    let data = b"Test expiration".to_vec();
+    let metadata = service
+        .upload_blob(
+            "tenant-1",
+            "ns-1",
+            "expiration-test.txt",
+            data,
+            Some("text/plain".to_string()),
+            None,
+            None,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Generate presigned URL with very short expiration (1 second)
+    use chrono::Duration;
+    let presigned_url = service
+        .generate_presigned_url(&metadata.blob_id, "GET", Duration::seconds(1))
+        .await
+        .unwrap();
+
+    // Wait for expiration
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Try to use expired URL - should fail
+    use reqwest::Client;
+    let client = Client::new();
+    let response = client.get(&presigned_url).send().await.unwrap();
+    // Expired URLs typically return 403 Forbidden
+    assert!(!response.status().is_success());
+}
+
+#[cfg(feature = "presigned-urls")]
+#[tokio::test]
+async fn test_presigned_url_invalid_operation() {
+    let service = match create_test_service().await {
+        Some(s) => s,
+        None => {
+            println!("Skipping test - MinIO not available");
+            return;
+        }
+    };
+
+    // Upload a blob first
+    let data = b"Test invalid operation".to_vec();
+    let metadata = service
+        .upload_blob(
+            "tenant-1",
+            "ns-1",
+            "invalid-op-test.txt",
+            data,
+            Some("text/plain".to_string()),
+            None,
+            None,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Try invalid operation
+    use chrono::Duration;
+    let result = service
+        .generate_presigned_url(&metadata.blob_id, "DELETE", Duration::hours(1))
+        .await;
+
+    // Should fail with invalid operation error
+    assert!(result.is_err());
 }

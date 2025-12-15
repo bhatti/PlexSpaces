@@ -188,6 +188,12 @@ pub struct Message {
     /// Optional idempotency key for message deduplication
     /// If provided, messages with the same key are deduplicated within time window
     pub idempotency_key: Option<String>,
+    /// URI path for HTTP-based invocations (optional)
+    /// Example: "/api/v1/actors/default/counter/metrics"
+    pub uri_path: Option<String>,
+    /// HTTP method for HTTP-based invocations (optional)
+    /// Example: "GET", "POST", "PUT", "DELETE"
+    pub uri_method: Option<String>,
 }
 
 impl Message {
@@ -206,6 +212,8 @@ impl Message {
             ttl: None,
             created_at: std::time::Instant::now(),
             idempotency_key: None,
+            uri_path: None,
+            uri_method: None,
         }
     }
 
@@ -410,6 +418,16 @@ impl Message {
             } else {
                 Some(proto_msg.idempotency_key.clone())
             },
+            uri_path: if proto_msg.uri_path.is_empty() {
+                None
+            } else {
+                Some(proto_msg.uri_path.clone())
+            },
+            uri_method: if proto_msg.uri_method.is_empty() {
+                None
+            } else {
+                Some(proto_msg.uri_method.clone())
+            },
         }
     }
 
@@ -455,6 +473,8 @@ impl Message {
             }),
             headers,
             idempotency_key: self.idempotency_key.clone().unwrap_or_default(),
+            uri_path: self.uri_path.clone().unwrap_or_default(),
+            uri_method: self.uri_method.clone().unwrap_or_default(),
         }
     }
 
@@ -707,6 +727,8 @@ impl From<ChannelMessage> for Message {
             ttl: None, // TTL not in ChannelMessage, would need to be added if needed
             created_at: std::time::Instant::now(), // Reset creation time when deserializing
             idempotency_key: None, // Idempotency key not in ChannelMessage
+            uri_path: None, // URI path not in ChannelMessage
+            uri_method: None, // URI method not in ChannelMessage
         }
     }
 }
@@ -2122,6 +2144,8 @@ mod tests {
             ttl: None,
             headers: headers.clone(),
             idempotency_key: String::new(),
+            uri_path: String::new(),
+            uri_method: String::new(),
         };
 
         let message = Message::from_proto(&proto_msg);
@@ -2136,34 +2160,26 @@ mod tests {
         assert_eq!(message.reply_to, Some("reply-1".to_string()));
 
         // Test normal priority (25-49)
-        let proto_msg2 = ProtoMessage {
-            priority: 30,
-            ..proto_msg.clone()
-        };
+        let mut proto_msg2 = proto_msg.clone();
+        proto_msg2.priority = 30;
         let message2 = Message::from_proto(&proto_msg2);
         assert_eq!(message2.priority, MessagePriority::Normal);
 
         // Test low priority (< 25)
-        let proto_msg3 = ProtoMessage {
-            priority: 10,
-            ..proto_msg.clone()
-        };
+        let mut proto_msg3 = proto_msg.clone();
+        proto_msg3.priority = 10;
         let message3 = Message::from_proto(&proto_msg3);
         assert_eq!(message3.priority, MessagePriority::Normal); // Low maps to Normal
 
         // Test empty sender
-        let proto_msg4 = ProtoMessage {
-            sender_id: String::new(),
-            ..proto_msg.clone()
-        };
+        let mut proto_msg4 = proto_msg.clone();
+        proto_msg4.sender_id = String::new();
         let message4 = Message::from_proto(&proto_msg4);
         assert_eq!(message4.sender, None);
 
         // Test empty receiver (should default to "unknown")
-        let proto_msg5 = ProtoMessage {
-            receiver_id: String::new(),
-            ..proto_msg.clone()
-        };
+        let mut proto_msg5 = proto_msg.clone();
+        proto_msg5.receiver_id = String::new();
         let message5 = Message::from_proto(&proto_msg5);
         assert_eq!(message5.receiver, "unknown");
     }

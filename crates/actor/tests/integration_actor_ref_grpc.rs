@@ -229,7 +229,7 @@ async fn test_tell_with_grpc_remote() {
         Arc::clone(&mailbox2),
         service_locator2,
     ));
-    actor_registry2.register_actor("target-actor@node2".to_string(), sender).await;
+    actor_registry2.register_actor("target-actor@node2".to_string(), sender, None, None, None).await;
 
     // Start node2's gRPC server (service2 is moved here)
     let _server_handle = start_test_server(service2, node2_port).await;
@@ -331,7 +331,7 @@ async fn test_ask_with_grpc_remote() {
         Arc::clone(&mailbox2),
         service_locator2,
     ));
-    actor_registry2.register_actor("responder@node2".to_string(), sender).await;
+    actor_registry2.register_actor("responder@node2".to_string(), sender, None, None, None).await;
     
     // Spawn task to handle messages and reply via ActorService
     // This simulates an actor that processes messages and sends replies
@@ -471,7 +471,7 @@ async fn test_ask_with_grpc_timeout() {
         Arc::clone(&mailbox2),
         service_locator2,
     ));
-    actor_registry2.register_actor("silent@node2".to_string(), sender).await;
+    actor_registry2.register_actor("silent@node2".to_string(), sender, None, None, None).await;
 
     // Start node2's gRPC server
     let _server_handle = start_test_server(service2, node2_port).await;

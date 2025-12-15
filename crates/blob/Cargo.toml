@@ -26,8 +26,12 @@ tokio-util = { version = "0.7", features = ["io"] }
 # Object store for S3-compatible backends
 object_store = { version = "0.10", features = ["aws", "gcp", "azure"] }
 
+# AWS SDK for presigned URLs (optional, for presigned URL support)
+aws-sdk-s3 = { version = "1.0", optional = true }
+aws-config = { version = "1.0", optional = true }
+
 # SQL backend support
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres"], optional = true }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "runtime-tokio", "sqlite", "postgres", "any"], optional = true }
 
 # Proto types
 plexspaces-proto = { path = "../proto" }
@@ -43,6 +47,7 @@ tower = { version = "0.4", features = ["util"], optional = true }
 tower-http = { version = "0.5", features = ["cors", "fs"], optional = true }
 multer = { version = "2.1", optional = true }
 http-body-util = { version = "0.1", optional = true }
+axum = { version = "0.7", features = ["multipart"], optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -58,7 +63,8 @@ http-body-util = "0.1"
 default = []
 sql-backend = ["sqlx"]
 all-backends = ["sql-backend"]
-server = ["tonic", "hyper", "tower", "tower-http", "multer", "http-body-util"]
+server = ["tonic", "hyper", "tower", "tower-http", "multer", "http-body-util", "axum"]
+presigned-urls = ["aws-sdk-s3", "aws-config"]
 
 [lib]
 doctest = false

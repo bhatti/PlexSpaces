@@ -459,7 +459,7 @@ impl Node {
     // Use ActorFactory::spawn_built_actor() directly via ServiceLocator.
     // Example:
     //   let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await?;
-    //   let message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await?;
+    //   let message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None).await?;
     //   let actor_ref = ActorRef::remote(actor_id, node_id, service_locator);
 
 
@@ -1017,9 +1017,61 @@ impl Node {
 
         // Initialize blob service if configured
         let blob_service_opt = self.init_blob_service().await;
+        
+        // Start blob HTTP server on separate task if blob service is enabled
+        // The blob HTTP server handles multipart upload and raw download endpoints
+        // For now, we run it on a separate port (grpc_port + 1) to avoid conflicts
+        // TODO: Integrate more cleanly with tonic server using a router layer
+        let _blob_http_handle: Option<tokio::task::JoinHandle<()>> = if let Some(ref blob_service) = blob_service_opt {
+            // Create Axum router for blob HTTP endpoints
+            use plexspaces_blob::server::http_axum::create_blob_router;
+            let router = create_blob_router(blob_service.clone());
+            
+            // Parse the listen address to get the port, then use port+100 for HTTP
+            // Using +100 to avoid conflicts with MinIO console (which uses gRPC_PORT + 1)
+            let grpc_addr: std::net::SocketAddr = self.config.listen_addr.parse()
+                .unwrap_or_else(|_| "127.0.0.1:9999".parse().unwrap());
+            let http_port = grpc_addr.port() + 100;
+            let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
+                .parse::<std::net::SocketAddr>()
+                .unwrap_or_else(|_| "127.0.0.1:10000".parse().unwrap());
+            
+            eprintln!("🌐 Starting blob HTTP server on http://{}", http_addr);
+            
+            // Start Axum server on separate task
+            match tokio::net::TcpListener::bind(http_addr).await {
+                Ok(listener) => {
+                    Some(tokio::spawn(async move {
+                        use axum::serve;
+                        if let Err(e) = serve(listener, router).await {
+                            eprintln!("Blob HTTP server error: {}", e);
+                        }
+                    }))
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to bind blob HTTP server to {}: {}. Blob HTTP endpoints disabled.", http_addr, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         // Create gRPC services
         let actor_service = ActorServiceImpl::new(self.clone());
+        
+        // Register ActorService in ServiceLocator so ActorContext::send_reply() can use it
+        // Create ActorServiceImpl for ServiceLocator (uses same service_locator, so shares state)
+        let actor_service_for_context = Arc::new(
+            plexspaces_actor_service::ActorServiceImpl::new(
+                self.service_locator.clone(),
+                self.id.as_str().to_string(),
+            )
+        );
+        use crate::service_wrappers::ActorServiceWrapper;
+        let actor_service_wrapper = ActorServiceWrapper::new(actor_service_for_context.clone());
+        self.service_locator.register_actor_service(Arc::new(actor_service_wrapper) as Arc<dyn plexspaces_core::ActorService + Send + Sync>).await;
+        
         let tuplespace_service = TuplePlexSpaceServiceImpl::new(self.clone());
         
         // Start background cleanup task for expired temporary senders (in ActorRegistry)
@@ -1285,9 +1337,9 @@ impl Node {
         // Run server with graceful shutdown and gRPC-Gateway support
         use plexspaces_proto::scheduling::v1::scheduling_service_server::SchedulingServiceServer;
         
-        // Build server with all services
-        let server = Server::builder()
-            .accept_http1(true)  // Enable HTTP for gRPC-Gateway
+        // Build gRPC server with all services
+        let grpc_server = Server::builder()
+            .accept_http1(true)  // Enable HTTP for gRPC-Web
             .add_service(ActorServiceServer::new(actor_service))
             .add_service(TuplePlexSpaceServiceServer::new(tuplespace_service))
             .add_service(SchedulingServiceServer::new(scheduling_service))
@@ -1305,12 +1357,313 @@ impl Node {
             )
             .serve(addr);
         
+        // Start HTTP gateway server for InvokeActor routes (following demo pattern)
+        // Create a new ActorServiceImpl instance for HTTP gateway (shares same service locator)
+        let http_gateway_handle = {
+            let service_locator_for_http = self.service_locator.clone();
+            let node_id_for_http = self.id.as_str().to_string();
+            let grpc_addr = addr;
+            
+            tokio::spawn(async move {
+                use axum::{
+                    extract::{Path, Query},
+                    http::StatusCode,
+                    response::Json,
+                    routing::{get, post, put, delete},
+                    Router,
+                };
+                use serde_json::Value;
+                use std::collections::HashMap;
+                use url::form_urlencoded;
+                
+                // Create ActorServiceImpl for HTTP gateway
+                use plexspaces_actor_service::ActorServiceImpl as ActorServiceImplHttp;
+                let actor_service_http = Arc::new(ActorServiceImplHttp::new(
+                    service_locator_for_http.clone(),
+                    node_id_for_http.clone(),
+                ));
+                
+                // HTTP handler for InvokeActor
+                async fn invoke_actor_http(
+                    method: axum::http::Method,
+                    path: String,
+                    query: Option<Query<HashMap<String, String>>>,
+                    body: Option<axum::body::Bytes>,
+                    headers: axum::http::HeaderMap,
+                    actor_service: Arc<plexspaces_actor_service::ActorServiceImpl>,
+                ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+                    // Parse path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
+                    let path_parts: Vec<&str> = path
+                        .strip_prefix("/api/v1/actors/")
+                        .unwrap_or("")
+                        .split('/')
+                        .collect();
+                    
+                    if path_parts.len() < 2 {
+                        return Err((
+                            StatusCode::BAD_REQUEST,
+                            Json(serde_json::json!({
+                                "code": 400,
+                                "message": "Invalid path format. Expected /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}"
+                            })),
+                        ));
+                    }
+                    
+                    let (tenant_id, namespace, actor_type) = if path_parts.len() == 3 {
+                        (path_parts[0].to_string(), path_parts[1].to_string(), path_parts[2].to_string())
+                    } else {
+                        ("default".to_string(), path_parts[0].to_string(), path_parts[1].to_string())
+                    };
+                    
+                    // Extract query parameters
+                    let query_params: HashMap<String, String> = query
+                        .map(|q| q.0)
+                        .unwrap_or_default();
+                    
+                    // Create InvokeActorRequest
+                    use plexspaces_proto::actor::v1::InvokeActorRequest;
+                    let mut invoke_req = InvokeActorRequest {
+                        tenant_id,
+                        namespace,
+                        actor_type,
+                        http_method: method.as_str().to_string(),
+                        payload: body.map(|b| b.to_vec()).unwrap_or_default(),
+                        headers: {
+                            let mut h = HashMap::new();
+                            for (key, value) in headers.iter() {
+                                if let Ok(value_str) = value.to_str() {
+                                    h.insert(key.as_str().to_string(), value_str.to_string());
+                                }
+                            }
+                            h
+                        },
+                        query_params,
+                        path: path.clone(),
+                        subpath: String::new(),
+                    };
+                    
+                    // Call InvokeActor via ActorService
+                    use tonic::Request as TonicRequest;
+                    use plexspaces_proto::actor::v1::actor_service_server::ActorService as ActorServiceTrait;
+                    let grpc_req = TonicRequest::new(invoke_req);
+                    
+                    match ActorServiceTrait::invoke_actor(&*actor_service, grpc_req).await {
+                        Ok(grpc_resp) => {
+                            let resp_inner = grpc_resp.into_inner();
+                            // Convert InvokeActorResponse to JSON
+                            use base64::{Engine as _, engine::general_purpose};
+                            let payload_json = if resp_inner.payload.is_empty() {
+                                serde_json::Value::Null
+                            } else {
+                                // Try to decode as UTF-8 string first, otherwise base64 encode
+                                match String::from_utf8(resp_inner.payload.clone()) {
+                                    Ok(s) => {
+                                        // Try to parse as JSON, otherwise return as string
+                                        serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
+                                    }
+                                    Err(_) => {
+                                        serde_json::Value::String(general_purpose::STANDARD.encode(&resp_inner.payload))
+                                    }
+                                }
+                            };
+                            
+                            let json_resp = serde_json::json!({
+                                "success": resp_inner.success,
+                                "payload": payload_json,
+                                "headers": resp_inner.headers,
+                                "actor_id": resp_inner.actor_id,
+                                "error_message": resp_inner.error_message,
+                            });
+                            
+                            Ok(Json(json_resp))
+                        }
+                        Err(status) => {
+                            let err_json = serde_json::json!({
+                                "code": status.code() as u16,
+                                "message": status.message()
+                            });
+                            let http_status = match status.code() {
+                                tonic::Code::NotFound => StatusCode::NOT_FOUND,
+                                tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+                                tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
+                                _ => StatusCode::INTERNAL_SERVER_ERROR,
+                            };
+                            Err((http_status, Json(err_json)))
+                        }
+                    }
+                }
+                
+                // Create Axum router for HTTP gateway routes
+                let app = Router::new()
+                    .route(
+                        "/api/v1/actors/:tenant_id/:namespace/:actor_type",
+                        get({
+                            let actor_service = actor_service_http.clone();
+                            move |Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap| async move {
+                                let path = format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, actor_type);
+                                invoke_actor_http(
+                                    axum::http::Method::GET,
+                                    path,
+                                    query,
+                                    None,
+                                    headers,
+                                    actor_service,
+                                ).await
+                            }
+                        })
+                        .post({
+                            let actor_service = actor_service_http.clone();
+                            move |Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap,
+                                  body: Option<axum::body::Bytes>| async move {
+                                let path = format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, actor_type);
+                                invoke_actor_http(
+                                    axum::http::Method::POST,
+                                    path,
+                                    query,
+                                    body,
+                                    headers,
+                                    actor_service,
+                                ).await
+                            }
+                        })
+                        .put({
+                            let actor_service = actor_service_http.clone();
+                            move |Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap,
+                                  body: Option<axum::body::Bytes>| async move {
+                                let path = format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, actor_type);
+                                invoke_actor_http(
+                                    axum::http::Method::PUT,
+                                    path,
+                                    query,
+                                    body,
+                                    headers,
+                                    actor_service,
+                                ).await
+                            }
+                        })
+                        .delete({
+                            let actor_service = actor_service_http.clone();
+                            move |Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap| async move {
+                                let path = format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, actor_type);
+                                invoke_actor_http(
+                                    axum::http::Method::DELETE,
+                                    path,
+                                    query,
+                                    None,
+                                    headers,
+                                    actor_service,
+                                ).await
+                            }
+                        })
+                    )
+                    .route(
+                        "/api/v1/actors/:namespace/:actor_type",
+                        get({
+                            let actor_service = actor_service_http.clone();
+                            move |Path((namespace, actor_type)): Path<(String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap| async move {
+                                let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
+                                invoke_actor_http(
+                                    axum::http::Method::GET,
+                                    path,
+                                    query,
+                                    None,
+                                    headers,
+                                    actor_service,
+                                ).await
+                            }
+                        })
+                        .post({
+                            let actor_service = actor_service_http.clone();
+                            move |Path((namespace, actor_type)): Path<(String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap,
+                                  body: Option<axum::body::Bytes>| async move {
+                                let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
+                                invoke_actor_http(
+                                    axum::http::Method::POST,
+                                    path,
+                                    query,
+                                    body,
+                                    headers,
+                                    actor_service,
+                                ).await
+                            }
+                        })
+                        .put({
+                            let actor_service = actor_service_http.clone();
+                            move |Path((namespace, actor_type)): Path<(String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap,
+                                  body: Option<axum::body::Bytes>| async move {
+                                let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
+                                invoke_actor_http(
+                                    axum::http::Method::PUT,
+                                    path,
+                                    query,
+                                    body,
+                                    headers,
+                                    actor_service,
+                                ).await
+                            }
+                        })
+                        .delete({
+                            let actor_service = actor_service_http.clone();
+                            move |Path((namespace, actor_type)): Path<(String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap| async move {
+                                let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
+                                invoke_actor_http(
+                                    axum::http::Method::DELETE,
+                                    path,
+                                    query,
+                                    None,
+                                    headers,
+                                    actor_service,
+                                ).await
+                            }
+                        })
+                    );
+                
+                // Start HTTP server on a separate port (gRPC port + 1 for HTTP gateway)
+                // This follows the demo pattern of separate servers
+                let http_port = grpc_addr.port() + 1;
+                let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
+                    .parse::<std::net::SocketAddr>()
+                    .unwrap_or_else(|_| "127.0.0.1:9002".parse().unwrap());
+                
+                eprintln!("🌐 Starting HTTP gateway server on http://{}", http_addr);
+                
+                match tokio::net::TcpListener::bind(http_addr).await {
+                    Ok(listener) => {
+                        use axum::serve;
+                        if let Err(e) = serve(listener, app).await {
+                            eprintln!("HTTP gateway server error: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to bind HTTP gateway server to {}: {}. HTTP gateway disabled.", http_addr, e);
+                    }
+                }
+            })
+        };
+        
         tokio::select! {
-            result = server => {
+            result = grpc_server => {
                 result.map_err(|e| NodeError::GrpcError(e.to_string()))?;
             }
             _ = shutdown_signal => {
                 // Shutdown signal received - server will stop gracefully
+                http_gateway_handle.abort();
             }
         }
         
@@ -2586,7 +2939,7 @@ impl ApplicationNode for Node {
         let actor_factory: Arc<ActorFactoryImpl> = self.service_locator.get_service().await
             .ok_or_else(|| ApplicationError::ActorSpawnFailed(actor_id.clone(), "ActorFactory not found in ServiceLocator".to_string()))?;
         
-        actor_factory.spawn_built_actor(Arc::new(actor)).await
+        actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
             .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to spawn actor: {}", e)))?;
 
         Ok(actor_id)
@@ -2912,7 +3265,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(node).await;
-        actor_registry.register_actor(actor_id.to_string(), wrapper).await;
+        actor_registry.register_actor(actor_id.to_string(), wrapper, None, None, None).await;
     }
 
     #[tokio::test]
@@ -2943,7 +3296,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register actor config (if needed)
         actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
@@ -3004,7 +3357,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register actor config
         let actor_registry = get_actor_registry(&node).await;
@@ -3300,7 +3653,7 @@ mod tests {
         service_locator.register_service(actor_factory_impl.clone()).await;
         let actor_factory: Arc<ActorFactoryImpl> = actor_factory_impl;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await.unwrap();
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox_for_ref, service_locator);
@@ -3359,7 +3712,7 @@ mod tests {
         service_locator.register_service(actor_factory_impl.clone()).await;
         let actor_factory: Arc<ActorFactoryImpl> = actor_factory_impl;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await.unwrap();
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox_for_ref, service_locator);
@@ -3452,7 +3805,7 @@ mod tests {
         service_locator.register_service(actor_factory_impl.clone()).await;
         let actor_factory: Arc<ActorFactoryImpl> = actor_factory_impl;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await.unwrap();
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox_for_ref, service_locator);
@@ -3941,7 +4294,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
@@ -4003,7 +4356,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
@@ -4196,7 +4549,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
 
         let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
 
@@ -4233,7 +4586,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register actor without config
         let actor_registry = get_actor_registry(&node).await;
@@ -4261,7 +4614,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
 
         let config = create_actor_config_with_resources(1.0, 1024 * 1024 * 256, 0, 0);
 
@@ -4305,7 +4658,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor1_ref.id().clone(), wrapper1).await;
+        actor_registry.register_actor(actor1_ref.id().clone(), wrapper1, None, None, None).await;
         let config1 = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
         let actor_registry = get_actor_registry(&node).await;
         actor_registry.register_actor_with_config(actor1_ref.id().clone(), Some(config1))
@@ -4323,7 +4676,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor2_ref.id().clone(), wrapper2).await;
+        actor_registry.register_actor(actor2_ref.id().clone(), wrapper2, None, None, None).await;
         let actor_registry = get_actor_registry(&node).await;
         actor_registry.register_actor_with_config(actor2_ref.id().clone(), Some(config2))
             .await
@@ -4395,7 +4748,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
         let mut config = plexspaces_proto::v1::actor::ActorConfig::default();
         config.resource_requirements = None; // No resource requirements
         config.config_schema_version = 1;
@@ -4486,7 +4839,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper).await;
+        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
         let actor_registry = get_actor_registry(&node).await;
         actor_registry.register_actor_with_config(actor_ref.id().clone(), Some(config))
             .await

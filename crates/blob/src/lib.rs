@@ -62,6 +62,11 @@ pub mod helpers;
 pub mod repository;
 pub mod service;
 
+#[cfg(feature = "presigned-urls")]
+mod presigned;
+#[cfg(not(feature = "presigned-urls"))]
+mod presigned;
+
 #[cfg(feature = "server")]
 pub mod server;
 
@@ -78,3 +83,5 @@ pub use helpers::{get_storage_path, is_expired, validate_metadata};
 pub use server::grpc::BlobServiceImpl;
 #[cfg(feature = "server")]
 pub use server::http::BlobHttpHandler;
+#[cfg(feature = "server")]
+pub use server::http_axum::create_blob_router;

@@ -185,20 +185,7 @@ mod tests {
             .with_message_type("calculate".to_string());
 
         // Should return error for division by zero
-        struct MockReply;
-        #[async_trait::async_trait]
-        impl plexspaces_core::Reply for MockReply {
-            async fn send_reply(
-                &self,
-                _sender_id: &plexspaces_core::ActorId,
-                _correlation_id: Option<&str>,
-                _reply_message: Message,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-                Ok(())
-            }
-        }
-        let reply = MockReply;
-        let result = actor.handle_message(&*actor_ctx, message, &reply as &dyn plexspaces_core::Reply).await;
+        let result = actor.handle_message(&*actor_ctx, message).await;
         assert!(result.is_err());
     }
 
@@ -224,26 +211,13 @@ mod tests {
         let message = Message::new(request_bytes)
             .with_message_type("calculate".to_string());
 
-        struct MockReply;
-        #[async_trait::async_trait]
-        impl plexspaces_core::Reply for MockReply {
-            async fn send_reply(
-                &self,
-                _sender_id: &plexspaces_core::ActorId,
-                _correlation_id: Option<&str>,
-                _reply_message: Message,
-            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-                Ok(())
-            }
-        }
-        let reply = MockReply;
-        actor.handle_message(&*actor_ctx, message, &reply as &dyn plexspaces_core::Reply).await.expect("Failed to calculate");
+        actor.handle_message(&*actor_ctx, message).await.expect("Failed to calculate");
 
         // Get stats
         let stats_message = Message::new(vec![])
             .with_message_type("get_stats".to_string());
 
-        actor.handle_message(&*actor_ctx, stats_message, &reply as &dyn plexspaces_core::Reply).await
+        actor.handle_message(&*actor_ctx, stats_message).await
             .expect("Failed to get stats");
 
         // Verify state was updated correctly

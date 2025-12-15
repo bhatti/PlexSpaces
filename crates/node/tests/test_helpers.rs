@@ -124,7 +124,7 @@ where
             if routing_info.is_local {
                 // Local actor but not activated - create and spawn it
                 let actor = actor_factory().await?;
-                actor_factory_impl.spawn_built_actor(Arc::new(actor)).await
+                actor_factory_impl.spawn_built_actor(Arc::new(actor), None, None).await
                     .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor: {}", e)))?;
                 
                 // Get ActorRef
@@ -188,7 +188,7 @@ pub async fn register_actor_with_message_sender(
         mailbox,
         node.service_locator().clone(),
     ));
-    node.actor_registry().register_actor(actor_id.to_string(), wrapper).await;
+    node.actor_registry().register_actor(actor_id.to_string(), wrapper, None, None, None).await;
 }
 
 /// Unregister an actor (replaces Node::unregister_actor)
@@ -255,7 +255,7 @@ pub async fn spawn_actor_helper(
     let actor_id = actor.id().clone();
     
     // Use ActorFactory to spawn the actor
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None).await
         .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor via ActorFactory: {}", e)))?;
     
     // Create ActorRef from the actor ID (actor is now registered in ActorRegistry)

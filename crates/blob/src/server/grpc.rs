@@ -22,8 +22,8 @@
 //! Implements the BlobService gRPC interface for blob storage operations.
 //! This enables clients to upload, download, and manage blobs via gRPC and HTTP/REST.
 
-use chrono::Duration;
-use crate::{BlobService, repository::ListFilters};
+use chrono::{Duration, Utc};
+use crate::{BlobService, repository::ListFilters, helpers::datetime_to_timestamp};
 use plexspaces_proto::storage::v1::{
     blob_service_server::BlobService as BlobServiceTrait,
     DeleteBlobRequest, DeleteBlobResponse, DownloadBlobRequest, DownloadBlobResponse,
@@ -304,10 +304,18 @@ impl BlobServiceTrait for BlobServiceImpl {
             .map(|d| Duration::seconds(d.seconds) + Duration::nanoseconds(d.nanos as i64))
             .unwrap_or_else(|| Duration::hours(1));
 
-        // For now, return error indicating SDK-specific implementation needed
-        // In production, this would use AWS SDK, GCP SDK, etc.
-        Err(Status::unimplemented(
-            "Presigned URLs require SDK-specific implementation",
-        ))
+        // Generate presigned URL
+        let url = self.blob_service
+            .generate_presigned_url(&req.blob_id, &req.operation, expires_after)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to generate presigned URL: {}", e)))?;
+
+        // Calculate expiration time
+        let expires_at = Some(crate::helpers::datetime_to_timestamp(Utc::now() + expires_after));
+
+        Ok(Response::new(GeneratePresignedUrlResponse {
+            url,
+            expires_at,
+        }))
     }
 }

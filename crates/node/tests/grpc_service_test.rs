@@ -63,7 +63,7 @@ async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
         mailbox,
         service_locator,
     ));
-    node.actor_registry().register_actor(actor_id.clone(), wrapper).await;
+    node.actor_registry().register_actor(actor_id.clone(), wrapper, None, None, None).await;
     
     // Register actor config
     node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();

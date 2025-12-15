@@ -42,7 +42,7 @@ async fn create_test_actor_ref(node: &Node, actor_id: &str) -> plexspaces_actor:
         mailbox,
         service_locator,
     ));
-    node.actor_registry().register_actor(actor_id_full, wrapper).await;
+    node.actor_registry().register_actor(actor_id_full, wrapper, None, None, None).await;
     
     // Also register with node for config tracking
     node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();

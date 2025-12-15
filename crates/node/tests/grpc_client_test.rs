@@ -88,7 +88,7 @@ async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
         mailbox,
         service_locator,
     ));
-    node.actor_registry().register_actor(actor_id.clone(), wrapper).await;
+    node.actor_registry().register_actor(actor_id.clone(), wrapper, None, None, None).await;
     
     // Also register with node for config tracking
     let core_actor_ref = plexspaces_core::ActorRef::new(actor_ref.id().as_str().to_string()).unwrap();

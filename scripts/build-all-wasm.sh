@@ -37,17 +37,23 @@ cp target/wasm32-unknown-unknown/release/calculator_wasm_actor.wasm ../wasm-modu
 echo -e "${GREEN}✓${NC} Calculator WASM built: $(ls -lh ../wasm-modules/calculator_wasm_actor.wasm | awk '{print $5}')"
 echo ""
 
-# Build heat diffusion WASM actor
-echo -e "${YELLOW}2. Building heat diffusion WASM actor${NC}"
-cd "$PROJECT_ROOT/examples/heat_diffusion/wasm-actors"
-cargo build --target wasm32-unknown-unknown --release
-mkdir -p ../wasm-modules
-cp target/wasm32-unknown-unknown/release/heat_diffusion_wasm_actor.wasm ../wasm-modules/
-echo -e "${GREEN}✓${NC} Heat diffusion WASM built: $(ls -lh ../wasm-modules/heat_diffusion_wasm_actor.wasm | awk '{print $5}')"
-echo ""
+# Build heat diffusion WASM actor (if it exists)
+if [ -d "$PROJECT_ROOT/examples/heat_diffusion/wasm-actors" ]; then
+    echo -e "${YELLOW}2. Building heat diffusion WASM actor${NC}"
+    cd "$PROJECT_ROOT/examples/heat_diffusion/wasm-actors"
+    cargo build --target wasm32-unknown-unknown --release
+    mkdir -p ../wasm-modules
+    cp target/wasm32-unknown-unknown/release/heat_diffusion_wasm_actor.wasm ../wasm-modules/
+    echo -e "${GREEN}✓${NC} Heat diffusion WASM built: $(ls -lh ../wasm-modules/heat_diffusion_wasm_actor.wasm | awk '{print $5}')"
+    echo ""
+else
+    echo -e "${YELLOW}2. Skipping heat diffusion WASM actor (not found)${NC}"
+    echo ""
+fi
 
 echo "============================"
 echo -e "${GREEN}✓ All WASM actors built successfully!${NC}"
 echo ""
 echo "WASM modules:"
-ls -lh "$PROJECT_ROOT"/examples/*/wasm-modules/*.wasm
+# List all WASM modules that exist (ignore errors if none found)
+ls -lh "$PROJECT_ROOT"/examples/*/wasm-modules/*.wasm 2>/dev/null || true

@@ -60,7 +60,7 @@ async fn test_create_lattice_tuplespace() {
         false,
         journal,
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create General");
 
     // Commander can propose
     general.propose(true).await.expect("Proposal failed");
@@ -95,7 +95,7 @@ async fn test_create_tuplespace_with_sqlite() {
         false,
         journal,
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create General");
 
     // Commander can propose
     general.propose(true).await.expect("Proposal failed");
@@ -111,7 +111,7 @@ async fn test_create_tuplespace_with_sqlite() {
         false,
         journal2,
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Lieutenant");
 
     let votes = lieutenant.read_votes(0).await.expect("Failed to read votes");
     // Should be able to read from SQLite backend
@@ -148,7 +148,7 @@ async fn test_multi_process_coordination_with_sqlite() {
         false,
         journal1,
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Commander");
     commander.propose(true).await.expect("Proposal failed");
 
     // Process 2 (simulated): Lieutenant reads and votes
@@ -159,7 +159,7 @@ async fn test_multi_process_coordination_with_sqlite() {
         false,
         journal2,
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Lieutenant");
 
     // Wait for proposal to be persisted
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -195,7 +195,7 @@ async fn test_env_var_configuration_sqlite() {
         false,
         journal,
         tuplespace,
-    );
+    ).await.expect("Failed to create General");
 
     general.propose(false).await.expect("Proposal failed");
 

@@ -33,6 +33,7 @@ use anyhow::Result;
 
 mod actor;
 mod application;
+#[cfg(feature = "firecracker")]
 mod firecracker;
 mod node;
 
@@ -134,6 +135,7 @@ enum Commands {
     },
     
     /// Firecracker VM management
+    #[cfg(feature = "firecracker")]
     #[command(subcommand)]
     Vm(firecracker::VmCommands),
     
@@ -184,6 +186,7 @@ async fn main() -> Result<()> {
         Commands::Undeploy { node, app_id } => {
             application::undeploy(&node, &app_id).await
         }
+        #[cfg(feature = "firecracker")]
         Commands::Vm(cmd) => {
             firecracker::handle_vm_command(cmd).await
         }

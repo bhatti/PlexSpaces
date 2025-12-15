@@ -89,6 +89,7 @@ use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
 use plexspaces_core::{ActorId, ActorRegistry, ReplyTracker, ServiceLocator, actor_context::ObjectRegistry as ObjectRegistryTrait, MessageSender};
+use std::collections::HashMap;
 use plexspaces_actor::ActorFactory;
 use plexspaces_actor::ActorRef as ActorRefImpl;
 use plexspaces_actor::RegularActorWrapper;
@@ -116,6 +117,8 @@ use plexspaces_proto::actor::v1::{
     GetActorResponse,
     GetOrActivateActorRequest,
     GetOrActivateActorResponse,
+    InvokeActorRequest,
+    InvokeActorResponse,
     LinkActorRequest,
     LinkActorResponse,
     ListActorsRequest,
@@ -1260,6 +1263,417 @@ impl ActorServiceTrait for ActorServiceImpl {
     ) -> Result<Response<GetOrActivateActorResponse>, Status> {
         Err(Status::unimplemented("get_or_activate_actor not yet implemented"))
     }
+
+    async fn invoke_actor(
+        &self,
+        request: Request<InvokeActorRequest>,
+    ) -> Result<Response<InvokeActorResponse>, Status> {
+        let start_time = std::time::Instant::now();
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        
+        // OBSERVABILITY: Start tracing span
+        let span = tracing::span!(
+            tracing::Level::INFO,
+            "actor_service.invoke_actor",
+            tenant_id = %req.tenant_id,
+            namespace = %req.namespace,
+            actor_type = %req.actor_type,
+            http_method = %req.http_method
+        );
+        let _guard = span.enter();
+
+        tracing::info!(
+            "🟦 [INVOKE_ACTOR] START: tenant_id={} (from path), namespace={}, actor_type={}, http_method={}",
+            if req.tenant_id.is_empty() { "default (not in path)" } else { &req.tenant_id },
+            req.namespace, req.actor_type, req.http_method
+        );
+        
+        // Extract and validate tenant_id, namespace, and actor_type from request (from path)
+        // Both tenant_id and namespace default to "default" if not specified in HTTP path
+        // This supports both:
+        // - /api/v1/actors/{tenant_id}/{namespace}/{actor_type} (with tenant_id)
+        // - /api/v1/actors/{namespace}/{actor_type} (without tenant_id, defaults to "default")
+        // Validate tenant_id length before processing (proto validation should catch this, but double-check)
+        if !req.tenant_id.is_empty() && req.tenant_id.len() > 128 {
+            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                "error_type" => "invalid_tenant_id"
+            ).increment(1);
+            return Err(Status::invalid_argument("Tenant ID exceeds maximum length of 128 characters"));
+        }
+        
+        let tenant_id = if req.tenant_id.is_empty() {
+            "default".to_string()
+        } else {
+            req.tenant_id.clone()
+        };
+
+        // Validate namespace length before processing (proto validation should catch this, but double-check)
+        if !req.namespace.is_empty() && req.namespace.len() > 128 {
+            let tenant_id_label = if req.tenant_id.is_empty() { "default".to_string() } else { req.tenant_id.clone() };
+            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                "error_type" => "invalid_namespace",
+                "tenant_id" => tenant_id_label.clone()
+            ).increment(1);
+            return Err(Status::invalid_argument("Namespace exceeds maximum length of 128 characters"));
+        }
+        
+        let namespace = if req.namespace.is_empty() {
+            "default".to_string()
+        } else {
+            req.namespace.clone()
+        };
+
+        let actor_type = req.actor_type.clone();
+        if actor_type.is_empty() {
+            let tenant_id_label = if req.tenant_id.is_empty() { "default".to_string() } else { req.tenant_id.clone() };
+            let namespace_label = if req.namespace.is_empty() { "default".to_string() } else { req.namespace.clone() };
+            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                "error_type" => "missing_actor_type",
+                "tenant_id" => tenant_id_label.clone(),
+                "namespace" => namespace_label.clone()
+            ).increment(1);
+            return Err(Status::invalid_argument("Missing actor_type"));
+        }
+        
+        // Validate actor_type length (proto validation should catch this, but double-check)
+        if actor_type.len() > 128 {
+            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                "error_type" => "invalid_actor_type",
+                "tenant_id" => tenant_id.clone(),
+                "namespace" => namespace.clone()
+            ).increment(1);
+            return Err(Status::invalid_argument("Actor type exceeds maximum length of 128 characters"));
+        }
+
+        // Extract JWT claims from metadata if available
+        let jwt_tenant_id = ActorServiceImpl::extract_tenant_id_from_jwt(&metadata);
+        
+        // Verify tenant_id access if JWT is present
+        if let Some(ref jwt_tenant) = jwt_tenant_id {
+            if jwt_tenant != &tenant_id {
+                metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                    "error_type" => "tenant_mismatch",
+                    "tenant_id" => tenant_id.clone(),
+                    "namespace" => namespace.clone(),
+                    "actor_type" => actor_type.clone()
+                ).increment(1);
+                tracing::warn!(
+                    "🟦 [INVOKE_ACTOR] Tenant mismatch: JWT tenant_id '{}' != requested tenant_id '{}'",
+                    jwt_tenant, tenant_id
+                );
+                return Err(Status::permission_denied(format!(
+                    "JWT tenant_id '{}' does not match requested tenant_id '{}'",
+                    jwt_tenant, tenant_id
+                )));
+            }
+        }
+
+        // Use tenant_id from JWT if available, otherwise use requested tenant_id
+        let effective_tenant_id = jwt_tenant_id.unwrap_or_else(|| tenant_id.clone());
+
+        // Get ActorRegistry to lookup actors
+        let actor_registry = self.get_actor_registry().await;
+        
+        // OBSERVABILITY: Track lookup start
+        let lookup_start = std::time::Instant::now();
+        
+        // Discover actors by type using efficient hashmap lookup (O(1))
+        let actor_ids = actor_registry.discover_actors_by_type(&effective_tenant_id, &namespace, &actor_type).await;
+
+        // OBSERVABILITY: Track lookup duration
+        let lookup_duration = lookup_start.elapsed();
+        metrics::histogram!("plexspaces_actor_service_invoke_actor_lookup_duration_seconds")
+            .record(lookup_duration.as_secs_f64());
+
+        tracing::debug!(
+            "🟦 [INVOKE_ACTOR] Lookup complete: found {} actors of type '{}' in tenant '{}', namespace '{}' (took {:?})",
+            actor_ids.len(), actor_type, effective_tenant_id, namespace, lookup_duration
+        );
+
+        if actor_ids.is_empty() {
+            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                "error_type" => "actor_not_found",
+                "tenant_id" => effective_tenant_id.clone(),
+                "namespace" => namespace.clone(),
+                "actor_type" => actor_type.clone()
+            ).increment(1);
+            tracing::warn!(
+                "🟦 [INVOKE_ACTOR] No actors found: type='{}', tenant='{}', namespace='{}'",
+                actor_type, effective_tenant_id, namespace
+            );
+            return Err(Status::not_found(format!(
+                "No actors found for type '{}' in tenant '{}', namespace '{}'",
+                actor_type, effective_tenant_id, namespace
+            )));
+        }
+
+        // Randomly select an actor if multiple found (load balancing)
+        use rand::Rng;
+        let selected_actor_id = if actor_ids.len() == 1 {
+            actor_ids[0].clone()
+        } else {
+            let mut rng = rand::thread_rng();
+            let idx = rng.gen_range(0..actor_ids.len());
+            actor_ids[idx].clone()
+        };
+        
+        tracing::debug!(
+            "🟦 [INVOKE_ACTOR] Selected actor: {} (from {} candidates)",
+            selected_actor_id, actor_ids.len()
+        );
+        
+        // Determine HTTP method
+        // GET = read operation (uses ask pattern - request-reply)
+        // POST/PUT = update operation (uses tell pattern - fire-and-forget)
+        // DELETE = delete operation (uses ask pattern - request-reply for confirmation)
+        // Default to GET if not specified (read is safer default)
+        let http_method = req.http_method.to_uppercase();
+        let is_get = http_method.is_empty() || http_method == "GET";
+        let is_delete = http_method == "DELETE";
+
+        // Prepare message payload and metadata
+        let (payload, mut metadata) = if is_get || is_delete {
+            // GET/DELETE: Convert query params to JSON string
+            let query_json = serde_json::to_string(&req.query_params)
+                .map_err(|e| {
+                    metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                        "error_type" => "serialization_error"
+                    ).increment(1);
+                    Status::internal(format!("Failed to serialize query params: {}", e))
+                })?;
+            (query_json.into_bytes(), HashMap::new())
+        } else {
+            // POST/PUT: Use body as payload, convert headers to metadata
+            (req.payload, req.headers)
+        };
+
+        // Add path information to metadata if provided
+        // This allows actors to access the complete URL path for custom routing
+        if !req.path.is_empty() {
+            metadata.insert("http_path".to_string(), req.path.clone());
+            tracing::debug!(
+                "🟦 [INVOKE_ACTOR] Custom path provided: {}",
+                req.path
+            );
+        }
+        
+        // Add subpath to metadata if provided (for future routing capabilities)
+        if !req.subpath.is_empty() {
+            metadata.insert("http_subpath".to_string(), req.subpath.clone());
+            tracing::debug!(
+                "🟦 [INVOKE_ACTOR] Subpath provided: {}",
+                req.subpath
+            );
+        }
+
+        // Create message
+        let mut message = Message::new(payload);
+        message.receiver = selected_actor_id.clone();
+        // Set message type based on HTTP method:
+        // GET/DELETE = "call" (ask pattern, expects reply)
+        // POST/PUT = "cast" (tell pattern, fire-and-forget)
+        message.message_type = if is_get || is_delete {
+            "call".to_string()
+        } else {
+            "cast".to_string()
+        };
+        message.metadata = metadata;
+        
+        // Set URI path and method for HTTP-based invocations
+        // Use full path from request, or construct from tenant_id and actor_type
+        let full_path = if !req.path.is_empty() {
+            req.path.clone()
+        } else {
+            format!("/api/v1/actors/{}/{}", req.tenant_id, req.actor_type)
+        };
+        message.uri_path = Some(full_path);
+        message.uri_method = Some(http_method.clone());
+
+        // Create ActorRef for the selected actor
+        let actor_ref = ActorRefImpl::remote(
+            selected_actor_id.clone(),
+            self.local_node_id.clone(),
+            self.service_locator.clone(),
+        );
+
+        // OBSERVABILITY: Track invocation start
+        let invoke_start = std::time::Instant::now();
+        
+        // Invoke actor based on HTTP method
+        let result = if is_get || is_delete {
+            // GET/DELETE: Use ask() (request-reply)
+            let method_label = if is_get { "GET" } else { "DELETE" };
+            metrics::counter!("plexspaces_actor_service_invoke_actor_total",
+                "method" => method_label,
+                "pattern" => "ask",
+                "tenant_id" => effective_tenant_id.clone(),
+                "namespace" => namespace.clone(),
+                "actor_type" => actor_type.clone()
+            ).increment(1);
+            
+            let timeout = std::time::Duration::from_secs(5);
+            match actor_ref.ask(message, timeout).await {
+                Ok(reply) => {
+                    let invoke_duration = invoke_start.elapsed();
+                    let method_label = if is_get { "GET" } else { "DELETE" };
+                    metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
+                        "method" => method_label,
+                        "pattern" => "ask",
+                        "status" => "success",
+                        "tenant_id" => effective_tenant_id.clone(),
+                        "namespace" => namespace.clone(),
+                        "actor_type" => actor_type.clone()
+                    ).record(invoke_duration.as_secs_f64());
+                    
+                    tracing::info!(
+                        "🟦 [INVOKE_ACTOR] SUCCESS ({}/ask): actor_id={}, duration={:?}, payload_size={}",
+                        method_label, selected_actor_id, invoke_duration, reply.payload.len()
+                    );
+                    
+                    Ok(Response::new(InvokeActorResponse {
+                        success: true,
+                        payload: reply.payload,
+                        headers: reply.metadata,
+                        actor_id: selected_actor_id.clone(),
+                        error_message: String::new(),
+                    }))
+                }
+                Err(e) => {
+                    let invoke_duration = invoke_start.elapsed();
+                    let method_label = if is_get { "GET" } else { "DELETE" };
+                    metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
+                        "method" => method_label,
+                        "pattern" => "ask",
+                        "status" => "error",
+                        "tenant_id" => effective_tenant_id.clone(),
+                        "namespace" => namespace.clone(),
+                        "actor_type" => actor_type.clone()
+                    ).record(invoke_duration.as_secs_f64());
+                    metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                        "error_type" => "ask_failed",
+                        "method" => method_label,
+                        "tenant_id" => effective_tenant_id.clone(),
+                        "namespace" => namespace.clone(),
+                        "actor_type" => actor_type.clone()
+                    ).increment(1);
+                    
+                    tracing::error!(
+                        "🟦 [INVOKE_ACTOR] FAILED ({}/ask): actor_id={}, error={}, duration={:?}",
+                        method_label, selected_actor_id, e, invoke_duration
+                    );
+                    
+                    Err(Status::internal(format!("Actor ask() failed: {}", e)))
+                }
+            }
+        } else {
+            // POST/PUT: Use tell() (fire-and-forget)
+            let method_label = if http_method == "PUT" { "PUT" } else { "POST" };
+            metrics::counter!("plexspaces_actor_service_invoke_actor_total",
+                "method" => method_label,
+                "pattern" => "tell",
+                "tenant_id" => effective_tenant_id.clone(),
+                "namespace" => namespace.clone(),
+                "actor_type" => actor_type.clone()
+            ).increment(1);
+            
+            match actor_ref.tell(message).await {
+                Ok(_) => {
+                    let invoke_duration = invoke_start.elapsed();
+                    let method_label = if http_method == "PUT" { "PUT" } else { "POST" };
+                    metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
+                        "method" => method_label,
+                        "pattern" => "tell",
+                        "status" => "success",
+                        "tenant_id" => effective_tenant_id.clone(),
+                        "namespace" => namespace.clone(),
+                        "actor_type" => actor_type.clone()
+                    ).record(invoke_duration.as_secs_f64());
+                    
+                    tracing::info!(
+                        "🟦 [INVOKE_ACTOR] SUCCESS ({}/tell): actor_id={}, duration={:?}",
+                        method_label, selected_actor_id, invoke_duration
+                    );
+                    
+                    Ok(Response::new(InvokeActorResponse {
+                        success: true,
+                        payload: vec![],
+                        headers: HashMap::new(),
+                        actor_id: selected_actor_id.clone(),
+                        error_message: String::new(),
+                    }))
+                }
+                Err(e) => {
+                    let invoke_duration = invoke_start.elapsed();
+                    let method_label = if http_method == "PUT" { "PUT" } else { "POST" };
+                    metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
+                        "method" => method_label,
+                        "pattern" => "tell",
+                        "status" => "error",
+                        "tenant_id" => effective_tenant_id.clone(),
+                        "namespace" => namespace.clone(),
+                        "actor_type" => actor_type.clone()
+                    ).record(invoke_duration.as_secs_f64());
+                    metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                        "error_type" => "tell_failed",
+                        "method" => method_label,
+                        "tenant_id" => effective_tenant_id.clone(),
+                        "namespace" => namespace.clone(),
+                        "actor_type" => actor_type.clone()
+                    ).increment(1);
+                    
+                    tracing::error!(
+                        "🟦 [INVOKE_ACTOR] FAILED ({}/tell): actor_id={}, error={}, duration={:?}",
+                        method_label, selected_actor_id, e, invoke_duration
+                    );
+                    
+                    Err(Status::internal(format!("Actor tell() failed: {}", e)))
+                }
+            }
+        };
+        
+        // OBSERVABILITY: Track total duration
+        let total_duration = start_time.elapsed();
+        metrics::histogram!("plexspaces_actor_service_invoke_actor_total_duration_seconds")
+            .record(total_duration.as_secs_f64());
+        
+        tracing::debug!(
+            "🟦 [INVOKE_ACTOR] COMPLETED: total_duration={:?}, success={}",
+            total_duration, result.is_ok()
+        );
+        
+        result
+    }
+}
+
+impl ActorServiceImpl {
+    /// Extract tenant_id from JWT claims in request metadata
+    fn extract_tenant_id_from_jwt(metadata: &tonic::metadata::MetadataMap) -> Option<String> {
+        // Try to get authorization header
+        if let Some(auth_header) = metadata.get("authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                // Extract token from "Bearer <token>"
+                if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                    // Decode JWT (simplified - in production, use proper JWT library)
+                    // For now, we'll parse the JWT claims
+                    // Note: This is a simplified implementation - in production, use proper JWT validation
+                    if let Some(claims) = Self::decode_jwt_token(token) {
+                        return Some(claims.tenant_id);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Decode JWT token and extract claims (simplified implementation)
+    /// In production, use proper JWT validation library
+    fn decode_jwt_token(_token: &str) -> Option<plexspaces_proto::grpc::v1::JwtClaims> {
+        // TODO: Implement proper JWT decoding using jsonwebtoken crate
+        // For now, return None to indicate no JWT found
+        // This will be implemented when JWT validation is properly integrated
+        None
+    }
 }
 
 /// Newtype wrapper for Arc<ActorServiceImpl> to implement ActorServiceTrait
@@ -1423,6 +1837,13 @@ impl ActorServiceTrait for ActorServiceWrapper {
     ) -> Result<Response<GetOrActivateActorResponse>, Status> {
         self.0.get_or_activate_actor(request).await
     }
+
+    async fn invoke_actor(
+        &self,
+        request: Request<InvokeActorRequest>,
+    ) -> Result<Response<InvokeActorResponse>, Status> {
+        self.0.invoke_actor(request).await
+    }
 }
 
 #[cfg(test)]
@@ -1512,7 +1933,7 @@ mod tests {
             mailbox,
             service_locator,
         ));
-        actor_registry.register_actor(actor_id, sender).await;
+        actor_registry.register_actor(actor_id, sender, None, None, None).await;
     }
 
     /// Helper to create a test ActorRegistry with a node registration

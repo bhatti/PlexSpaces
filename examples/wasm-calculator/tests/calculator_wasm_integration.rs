@@ -46,11 +46,20 @@ struct CalculatorState {
 
 /// Helper: Load calculator WASM module
 async fn load_calculator_module() -> Result<Vec<u8>> {
-    // Path to compiled WASM module
-    let wasm_path = "wasm-modules/calculator_wasm_actor.wasm";
+    // Path to compiled WASM module (try wasm-modules first, then wasm-actors target)
+    let wasm_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("wasm-modules/calculator_wasm_actor.wasm");
+    
+    // If not found in wasm-modules, try wasm-actors target directory
+    let wasm_path = if wasm_path.exists() {
+        wasm_path
+    } else {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("wasm-actors/target/wasm32-unknown-unknown/release/calculator_wasm_actor.wasm")
+    };
 
-    let wasm_bytes = std::fs::read(wasm_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read WASM module at {}: {}", wasm_path, e))?;
+    let wasm_bytes = std::fs::read(&wasm_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read WASM module at {:?}: {}", wasm_path, e))?;
 
     Ok(wasm_bytes)
 }

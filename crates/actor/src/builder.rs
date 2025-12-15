@@ -628,7 +628,7 @@ impl ActorBuilder {
             .ok_or_else(|| "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string())?;
         
         // Use ActorFactory to spawn the pre-built actor
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
             .map_err(|e| format!("Failed to spawn actor via ActorFactory: {}", e))?;
         
         // Create ActorRef from the actor ID

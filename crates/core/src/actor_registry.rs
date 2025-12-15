@@ -145,6 +145,11 @@ pub struct ActorRegistry {
     /// Key: temporary_sender_id (format: "ask-{correlation_id}@{node_id}")
     /// Value: ActorRef ID that created it, correlation_id, and expiration time
     temporary_senders: Arc<RwLock<HashMap<String, TemporarySenderEntry>>>,
+    /// Efficient actor-type lookup: (tenant_id, namespace, actor_type) -> Vec<actor_id>
+    /// Used for FaaS-style actor invocation to quickly find actors by type
+    /// Maintained in sync with actors map for O(1) lookup
+    /// Key: (tenant_id, namespace, actor_type), Value: List of actor IDs of that type
+    actor_type_index: Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>>,
 }
 
 /// Temporary sender entry for ask() pattern
@@ -258,6 +263,7 @@ impl ActorRegistry {
             registered_actor_ids: Arc::new(RwLock::new(HashSet::new())),
             actor_metrics: Arc::new(RwLock::new(ActorMetricsExt::new())),
             temporary_senders: Arc::new(RwLock::new(HashMap::new())),
+            actor_type_index: Arc::new(RwLock::new(HashMap::new())),
         }
     }
     
@@ -324,14 +330,36 @@ impl ActorRegistry {
     /// ## Purpose
     /// Stores MessageSender trait object in registry. For virtual actors, this is a VirtualActorWrapper
     /// that automatically handles activation. For regular actors, this is a RegularActorWrapper.
+    /// Also maintains actor-type index for efficient FaaS-style actor invocation when type information is provided.
     ///
     /// ## Arguments
     /// * `actor_id` - Actor ID
     /// * `sender` - MessageSender trait object
-    pub async fn register_actor(&self, actor_id: ActorId, sender: Arc<dyn MessageSender>) {
+    /// * `actor_type` - Optional actor type (for efficient type-based lookup via hashmap index)
+    /// * `tenant_id` - Optional tenant ID (defaults to "default" if not provided, used for type index)
+    /// * `namespace` - Optional namespace (defaults to "default" if not provided, used for type index)
+    ///
+    /// ## Performance
+    /// When `actor_type`, `tenant_id`, and `namespace` are provided, the actor is indexed for O(1) lookup
+    /// by type, enabling efficient FaaS-style actor invocation.
+    pub async fn register_actor(
+        &self,
+        actor_id: ActorId,
+        sender: Arc<dyn MessageSender>,
+        actor_type: Option<String>,
+        tenant_id: Option<String>,
+        namespace: Option<String>,
+    ) {
         let mut actors = self.actors.write().await;
         let was_new = actors.insert(actor_id.clone(), sender).is_none();
         drop(actors);
+        
+        // Update actor-type index if type information is provided
+        if let (Some(actor_type), Some(tenant_id), Some(namespace)) = (actor_type, tenant_id, namespace) {
+            let mut index = self.actor_type_index.write().await;
+            let key = (tenant_id, namespace, actor_type);
+            index.entry(key).or_insert_with(Vec::new).push(actor_id.clone());
+        }
         
         // Update metrics if this is a new actor
         if was_new {
@@ -431,6 +459,16 @@ impl ActorRegistry {
         {
             let mut actors = self.actors.write().await;
             actors.remove(actor_id);
+        }
+
+        // Remove from actor-type index (scan all entries to find and remove)
+        {
+            let mut index = self.actor_type_index.write().await;
+            index.values_mut().for_each(|actor_ids| {
+                actor_ids.retain(|id| id != actor_id);
+            });
+            // Clean up empty entries
+            index.retain(|_, actor_ids| !actor_ids.is_empty());
         }
 
         // TODO: Add unregister to ObjectRegistry trait and call it here
@@ -686,6 +724,32 @@ impl ActorRegistry {
     }
     
     /// Get count of temporary senders (for metrics/monitoring)
+    /// Discover actors by type (efficient O(1) lookup using index)
+    ///
+    /// ## Purpose
+    /// Finds actors by actor_type within a tenant using efficient hashmap lookup.
+    /// Used for FaaS-like actor invocation where we need to find any actor of a given type.
+    ///
+    /// ## Arguments
+    /// * `tenant_id` - Tenant identifier
+    /// * `actor_type` - Actor type to search for
+    ///
+    /// ## Returns
+    /// Vector of actor IDs matching the type
+    ///
+    /// ## Performance
+    /// O(1) lookup using hashmap index, much faster than scanning ObjectRegistry
+    pub async fn discover_actors_by_type(
+        &self,
+        tenant_id: &str,
+        namespace: &str,
+        actor_type: &str,
+    ) -> Vec<ActorId> {
+        let index = self.actor_type_index.read().await;
+        let key = (tenant_id.to_string(), namespace.to_string(), actor_type.to_string());
+        index.get(&key).cloned().unwrap_or_default()
+    }
+
     pub async fn temporary_sender_count(&self) -> usize {
         let temp_senders = self.temporary_senders.read().await;
         temp_senders.len()

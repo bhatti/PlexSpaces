@@ -39,6 +39,7 @@ use tower::{Layer, Service};
 use hyper::{Request, StatusCode as HyperStatusCode};
 use http_body_util::{Full, BodyExt};
 use hyper::body::Bytes;
+use url::form_urlencoded;
 
 /// JSON-serializable blob metadata response
 #[derive(Serialize)]
@@ -104,8 +105,11 @@ impl From<plexspaces_proto::storage::v1::BlobMetadata> for BlobMetadataJson {
 }
 
 /// HTTP router layer that intercepts requests and routes to custom handlers
+#[derive(Clone)]
 pub struct HttpRouterLayer {
     blob_service: Option<Arc<plexspaces_blob::BlobService>>,
+    service_locator: Option<Arc<plexspaces_core::ServiceLocator>>,
+    node_id: Option<String>,
 }
 
 impl HttpRouterLayer {
@@ -113,12 +117,21 @@ impl HttpRouterLayer {
     pub fn new() -> Self {
         Self {
             blob_service: None,
+            service_locator: None,
+            node_id: None,
         }
     }
 
     /// Register blob service for HTTP upload/download routes
     pub fn with_blob_service(mut self, blob_service: Arc<plexspaces_blob::BlobService>) -> Self {
         self.blob_service = Some(blob_service);
+        self
+    }
+
+    /// Register service locator and node ID for actor invocation routes
+    pub fn with_actor_service(mut self, service_locator: Arc<plexspaces_core::ServiceLocator>, node_id: String) -> Self {
+        self.service_locator = Some(service_locator);
+        self.node_id = Some(node_id);
         self
     }
 }
@@ -140,6 +153,8 @@ where
     fn layer(&self, inner: S) -> Self::Service {
         HttpRouterService {
             blob_service: self.blob_service.clone(),
+            service_locator: self.service_locator.clone(),
+            node_id: self.node_id.clone(),
             inner,
         }
     }
@@ -148,6 +163,8 @@ where
 /// HTTP router service that routes requests to appropriate handlers
 pub struct HttpRouterService<S> {
     blob_service: Option<Arc<plexspaces_blob::BlobService>>,
+    service_locator: Option<Arc<plexspaces_core::ServiceLocator>>,
+    node_id: Option<String>,
     inner: S,
 }
 
@@ -167,10 +184,164 @@ where
 
     fn call(&mut self, req: Request<hyper::body::Incoming>) -> Self::Future {
         let blob_service = self.blob_service.clone();
+        let service_locator = self.service_locator.clone();
+        let node_id = self.node_id.clone();
         let mut inner = self.inner.clone();
         Box::pin(async move {
             let path = req.uri().path();
             let method = req.method();
+            
+            // Route actor invocation HTTP endpoints (gRPC-Gateway style)
+            // Pattern: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
+            if let (Some(service_locator), Some(node_id)) = (&service_locator, &node_id) {
+                if path.starts_with("/api/v1/actors/") {
+                    // Parse path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
+                    let path_parts: Vec<&str> = path.strip_prefix("/api/v1/actors/")
+                        .unwrap_or("")
+                        .split('/')
+                        .collect();
+                    
+                    if path_parts.len() >= 2 {
+                        let (tenant_id, namespace, actor_type) = if path_parts.len() == 3 {
+                            // /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
+                            (path_parts[0].to_string(), path_parts[1].to_string(), path_parts[2].to_string())
+                        } else if path_parts.len() == 2 {
+                            // /api/v1/actors/{namespace}/{actor_type} - default tenant_id to "default"
+                            ("default".to_string(), path_parts[0].to_string(), path_parts[1].to_string())
+                        } else {
+                            ("default".to_string(), "default".to_string(), path_parts[0].to_string())
+                        };
+                        
+                        // Extract query parameters for GET requests
+                        let query_params: std::collections::HashMap<String, String> = req.uri()
+                            .query()
+                            .map(|q| {
+                                form_urlencoded::parse(q.as_bytes())
+                                    .into_owned()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        
+                        // Create InvokeActorRequest
+                        use plexspaces_proto::actor::v1::InvokeActorRequest;
+                        let mut invoke_req = InvokeActorRequest {
+                            tenant_id,
+                            namespace,
+                            actor_type,
+                            http_method: method.as_str().to_string(),
+                            payload: vec![],
+                            headers: std::collections::HashMap::new(),
+                            query_params,
+                            path: path.to_string(),
+                            subpath: String::new(),
+                        };
+                        
+                        // For POST/PUT, read body as payload
+                        if method == &hyper::Method::POST || method == &hyper::Method::PUT {
+                            let (parts, body) = req.into_parts();
+                            match http_body_util::BodyExt::collect(body).await {
+                                Ok(collected) => {
+                                    invoke_req.payload = collected.to_bytes().to_vec();
+                                    // Extract headers
+                                    for (key, value) in parts.headers.iter() {
+                                        if let Ok(value_str) = value.to_str() {
+                                            invoke_req.headers.insert(
+                                                key.as_str().to_string(),
+                                                value_str.to_string()
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let err_json = serde_json::json!({
+                                        "code": 400,
+                                        "message": format!("Failed to read request body: {}", e)
+                                    });
+                                    let resp = Response::builder()
+                                        .status(HyperStatusCode::BAD_REQUEST)
+                                        .header("content-type", "application/json")
+                                        .body(hyper::body::Incoming::from(serde_json::to_string(&err_json).unwrap().into_bytes()))
+                                        .unwrap();
+                                    return Ok(resp);
+                                }
+                            }
+                        } else {
+                            // For GET/DELETE, extract headers without consuming body
+                            for (key, value) in req.headers().iter() {
+                                if let Ok(value_str) = value.to_str() {
+                                    invoke_req.headers.insert(
+                                        key.as_str().to_string(),
+                                        value_str.to_string()
+                                    );
+                                }
+                            }
+                        }
+                        
+                        // Call InvokeActor via ActorService
+                        use plexspaces_actor_service::ActorServiceImpl;
+                        let actor_service = ActorServiceImpl::new(service_locator.clone(), node_id.clone());
+                        use tonic::Request as TonicRequest;
+                        let grpc_req = TonicRequest::new(invoke_req);
+                        
+                        match actor_service.invoke_actor(grpc_req).await {
+                            Ok(grpc_resp) => {
+                                let resp_inner = grpc_resp.into_inner();
+                                // Convert InvokeActorResponse to JSON
+                                use plexspaces_proto::actor::v1::InvokeActorResponse;
+                                let json_resp = serde_json::json!({
+                                    "success": resp_inner.success,
+                                    "payload": if resp_inner.payload.is_empty() {
+                                        serde_json::Value::Null
+                                    } else {
+                                        // Try to decode base64 or use as string
+                                        match String::from_utf8(resp_inner.payload.clone()) {
+                                            Ok(s) => serde_json::Value::String(s),
+                                            Err(_) => {
+                                                use base64::{Engine as _, engine::general_purpose};
+                                                serde_json::Value::String(general_purpose::STANDARD.encode(&resp_inner.payload))
+                                            }
+                                        }
+                                    },
+                                    "headers": resp_inner.headers,
+                                    "actor_id": resp_inner.actor_id,
+                                    "error_message": resp_inner.error_message,
+                                });
+                                
+                                let status = if resp_inner.success {
+                                    HyperStatusCode::OK
+                                } else {
+                                    HyperStatusCode::from_u16(500).unwrap_or(HyperStatusCode::INTERNAL_SERVER_ERROR)
+                                };
+                                
+                                let resp = Response::builder()
+                                    .status(status)
+                                    .header("content-type", "application/json")
+                                    .body(hyper::body::Incoming::from(serde_json::to_string(&json_resp).unwrap().into_bytes()))
+                                    .unwrap();
+                                return Ok(resp);
+                            }
+                            Err(status) => {
+                                let err_json = serde_json::json!({
+                                    "code": status.code() as u16,
+                                    "message": status.message()
+                                });
+                                let http_status = match status.code() {
+                                    tonic::Code::NotFound => HyperStatusCode::NOT_FOUND,
+                                    tonic::Code::InvalidArgument => HyperStatusCode::BAD_REQUEST,
+                                    tonic::Code::PermissionDenied => HyperStatusCode::FORBIDDEN,
+                                    _ => HyperStatusCode::INTERNAL_SERVER_ERROR,
+                                };
+                                let resp = Response::builder()
+                                    .status(http_status)
+                                    .header("content-type", "application/json")
+                                    .body(hyper::body::Incoming::from(serde_json::to_string(&err_json).unwrap().into_bytes()))
+                                    .unwrap();
+                                return Ok(resp);
+                            }
+                        }
+                    }
+                }
+            }
 
             // Route blob HTTP endpoints - these need custom handling
             if let Some(blob_service) = &blob_service {

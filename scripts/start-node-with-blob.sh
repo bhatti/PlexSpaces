@@ -129,24 +129,48 @@ export BLOB_PREFIX="/plexspaces"
 export BLOB_DATABASE_URL="sqlite:blob_metadata.db"
 export RUST_LOG="${RUST_LOG:-info}"
 
-# Build if needed
+# Build CLI if needed
 echo -e "${YELLOW}Building CLI (if needed)...${NC}"
-cargo build --package plexspaces-cli --bin plexspaces --quiet 2>/dev/null || cargo build --package plexspaces-cli --bin plexspaces
+cargo build --package plexspaces-cli --bin plexspaces --quiet 2>/dev/null || {
+    echo "Building CLI..."
+    cargo build --package plexspaces-cli --bin plexspaces
+}
 echo ""
 
 echo -e "${GREEN}Starting node...${NC}"
 echo ""
+
+# Extract port from address (e.g., "0.0.0.0:9000" -> "9000")
+# HTTP port is gRPC_PORT + 100 to avoid conflicts with MinIO console (which uses gRPC_PORT + 1)
+GRPC_PORT="${PORT##*:}"
+HTTP_PORT=$((GRPC_PORT + 100))
+GRPC_HOST="${PORT%:*}"
+if [ "$GRPC_HOST" = "$PORT" ]; then
+    GRPC_HOST="localhost"
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "API Endpoints:"
-HTTP_PORT="${PORT#*:}"
-echo "  gRPC:        ${PORT}"
-echo "  HTTP:        http://${HTTP_PORT}"
-echo "  Blob Upload: POST http://${HTTP_PORT}/api/v1/blobs/upload"
-echo "  Blob Download: GET http://${HTTP_PORT}/api/v1/blobs/{blob_id}/download/raw"
-echo "  Blob Metadata: GET http://${HTTP_PORT}/api/v1/blobs/{blob_id}"
-echo "  List Blobs:  GET http://${HTTP_PORT}/api/v1/blobs?tenant_id=...&namespace=..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "📡 gRPC Server: ${GRPC_HOST}:${GRPC_PORT}"
+echo "   - All gRPC services"
+echo "   - gRPC-Gateway HTTP endpoints"
+echo ""
+echo "🌐 Blob HTTP Server: http://${GRPC_HOST}:${HTTP_PORT}"
+echo "   - POST /api/v1/blobs/upload (multipart upload)"
+echo "   - GET  /api/v1/blobs/{blob_id}/download/raw (raw download)"
+echo ""
+echo "📋 Metadata APIs (via gRPC-Gateway on gRPC port):"
+echo "   - GET    http://${GRPC_HOST}:${GRPC_PORT}/api/v1/blobs/{blob_id} (get metadata)"
+echo "   - GET    http://${GRPC_HOST}:${GRPC_PORT}/api/v1/blobs?tenant_id=...&namespace=... (list)"
+echo "   - DELETE http://${GRPC_HOST}:${GRPC_PORT}/api/v1/blobs/{blob_id} (delete)"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
 echo ""
 
 # Run the node using CLI
-exec cargo run --package plexspaces-cli --bin plexspaces --quiet -- start --node-id "$NODE_ID" --listen-addr "$PORT"
+# Note: CLI compilation may show firecracker warnings/errors, but the 'start' command should work
+exec cargo run --package plexspaces-cli --bin plexspaces -- start --node-id "$NODE_ID" --listen-addr "$PORT"

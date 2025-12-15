@@ -215,36 +215,32 @@ mod tests {
     async fn test_genserver_rejects_events() {
         let mut behavior = Counter::new();
 
-        // GenServer should reject cast messages
+        // GenServer should accept cast messages (for HTTP POST/PUT support)
         let msg = Message::new(b"inc".to_vec()).with_message_type("cast".to_string());
         let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
 
         let result = behavior.handle_message(&*ctx, msg_actual).await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            BehaviorError::UnsupportedMessage
-        ));
+        assert!(result.is_ok()); // Cast messages are now accepted
 
-        // State should not be mutated
-        assert_eq!(behavior.value, 0);
+        // State should be mutated (cast message was processed)
+        assert_eq!(behavior.value, 10);
     }
 
-    // Test 5: Multiple events - all should be rejected
+    // Test 5: Multiple cast messages - all should be accepted
     #[tokio::test]
     async fn test_genserver_rejects_multiple_events() {
         let mut behavior = Counter::new();
 
-        // Send 5 events - all should be rejected
+        // Send 5 cast messages - all should be accepted (for HTTP POST/PUT support)
         for _ in 0..5 {
             let msg = Message::new(b"inc".to_vec()).with_message_type("cast".to_string());
             let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
             let result = behavior.handle_message(&*ctx, msg_actual).await;
-            assert!(result.is_err());
+            assert!(result.is_ok()); // Cast messages are now accepted
         }
 
-        // State should not be mutated
-        assert_eq!(behavior.value, 0);
+        // State should be mutated (5 * 10 = 50)
+        assert_eq!(behavior.value, 50);
     }
 
     // Test 6: Correlation ID preservation
@@ -292,36 +288,35 @@ mod tests {
         let (ctx1, msg1_actual, _mailbox1) = create_test_context_and_message(msg1, None).await;
         behavior.handle_message(&*ctx1, msg1_actual).await.unwrap();
 
-        // Event should be rejected (GenServer doesn't handle events - Phase 2 cleanup)
+        // Cast message should be accepted (GenServer now supports Cast for HTTP POST/PUT)
         let msg2 = Message::new(b"inc".to_vec()).with_message_type("cast".to_string());
         let (ctx2, msg2_actual, _) = create_test_context_and_message(msg2, None).await;
         let result = behavior.handle_message(&*ctx2, msg2_actual).await;
-        assert!(result.is_err()); // Should reject cast messages
+        assert!(result.is_ok()); // Cast messages are now accepted
 
         // Request again (adds 10)
         let msg3 = Message::new(b"inc".to_vec()).with_message_type("call".to_string());
         let (ctx3, msg3_actual, _mailbox3) = create_test_context_and_message(msg3, None).await;
         behavior.handle_message(&*ctx3, msg3_actual).await.unwrap();
 
-        // Final state: 10 + 0 + 10 = 20 (event was rejected)
-        assert_eq!(behavior.value, 20);
+        // Final state: 10 + 10 + 10 = 30 (cast message was processed)
+        assert_eq!(behavior.value, 30);
     }
 
-    // Test 9: Event rejection (Phase 2 cleanup)
+    // Test 9: Cast message acceptance (GenServer now supports Cast for HTTP POST/PUT)
     #[tokio::test]
     async fn test_genserver_rejects_cast_messages() {
         let mut behavior = Counter::new();
 
-        // GenServer should reject cast messages
-        let msg = Message::new(b"fail".to_vec()).with_message_type("cast".to_string());
+        // GenServer should accept cast messages (for HTTP POST/PUT support)
+        let msg = Message::new(b"inc".to_vec()).with_message_type("cast".to_string());
         let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
 
         let result = behavior.handle_message(&*ctx, msg_actual).await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            BehaviorError::UnsupportedMessage
-        ));
+        assert!(result.is_ok()); // Cast messages are now accepted
+        
+        // State should be mutated (cast message was processed)
+        assert_eq!(behavior.value, 10);
     }
 
     // Test 10: Unknown message type (should be ignored)

@@ -121,7 +121,7 @@ async fn test_get_or_activate_actor_returns_existing_actor() {
     // Spawn actor using ActorFactory
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await.unwrap();
-    actor_factory.spawn_built_actor(Arc::new(actor)).await.unwrap();
+    actor_factory.spawn_built_actor(Arc::new(actor), None, None).await.unwrap();
     let actor_ref1 = lookup_actor_ref(&node, &"existing-actor@test-node".to_string()).await.unwrap().unwrap();
 
     // Now get_or_activate should return existing actor

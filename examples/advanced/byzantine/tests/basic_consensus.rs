@@ -89,7 +89,7 @@ async fn test_3_generals_all_honest_agree_on_attack() {
         false,  // is_faulty (honest)
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Commander");
 
     let lieutenant1 = General::new(
         "lieutenant_1".to_string(),
@@ -97,7 +97,7 @@ async fn test_3_generals_all_honest_agree_on_attack() {
         false,  // honest
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Lieutenant1");
 
     let lieutenant2 = General::new(
         "lieutenant_2".to_string(),
@@ -105,7 +105,7 @@ async fn test_3_generals_all_honest_agree_on_attack() {
         false,  // honest
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Lieutenant2");
 
     // Commander proposes Attack
     commander.propose(true).await.expect("Commander proposal failed");
@@ -168,11 +168,11 @@ async fn test_4_generals_all_honest_agree_on_retreat() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Commander");
 
-    let lieutenant1 = General::new("lt1".to_string(), false, false, journal.clone(), tuplespace.clone());
-    let lieutenant2 = General::new("lt2".to_string(), false, false, journal.clone(), tuplespace.clone());
-    let lieutenant3 = General::new("lt3".to_string(), false, false, journal.clone(), tuplespace.clone());
+    let lieutenant1 = General::new("lt1".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create Lieutenant1");
+    let lieutenant2 = General::new("lt2".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create Lieutenant2");
+    let lieutenant3 = General::new("lt3".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create Lieutenant3");
 
     // Commander proposes Retreat (false = retreat)
     commander.propose(false).await.expect("Commander proposal failed");
@@ -227,7 +227,7 @@ async fn test_7_generals_mixed_votes_reach_majority() {
                 false,  // All honest
                 journal.clone(),
                 tuplespace.clone(),
-            )
+            ).await.expect(&format!("Failed to create General {}", i))
         })
         .collect();
 
@@ -499,7 +499,7 @@ async fn test_non_commander_cannot_propose() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Lieutenant");
 
     // Try to propose - should fail
     let result = lieutenant.propose(true).await;
@@ -531,7 +531,7 @@ async fn test_faulty_general_returns_opposite_values() {
         true,  // FAULTY
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Faulty General");
 
     // Test faulty behavior
     assert_eq!(faulty.get_faulty_value(Decision::Attack), Decision::Retreat);
@@ -563,7 +563,7 @@ async fn test_commander_sticks_to_proposal() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Commander");
 
     // Commander proposes Attack
     commander.propose(true).await.expect("Propose failed");
@@ -597,7 +597,7 @@ async fn test_lieutenant_defaults_to_retreat_no_votes() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    );
+    ).await.expect("Failed to create Lieutenant");
 
     // Decide with no votes - should default to Retreat
     let decision = lieutenant.decide().await.expect("Decide failed");

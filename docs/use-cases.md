@@ -105,9 +105,30 @@ Deploy actors to edge locations with automatic synchronization:
 
 **Example**: See [Edge Computing](../examples/advanced/edge_computing/) example.
 
-## FAAS Platforms
+## FaaS Platforms
 
 Build serverless platforms with durable execution:
+
+- **HTTP-Based Invocation**: Invoke actors via REST API (`GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`)
+- **AWS Lambda Integration**: Ready for AWS Lambda Function URLs and API Gateway
+- **Serverless Functions**: Treat actors as serverless functions with automatic scaling
+- **Multi-Tenant Isolation**: Built-in tenant-based access control
+- **Load Balancing**: Automatic load distribution across actor instances
+
+**Key Features**:
+- FaaS-style HTTP invocation (GET for reads, POST for updates)
+- AWS Lambda Function URL support
+- API Gateway integration
+- Automatic actor discovery by type
+- Random load balancing when multiple actors exist
+- Tenant isolation with JWT authentication
+
+**Example**: See [FaaS Actor](../examples/simple/faas_actor/) example.
+
+**Documentation**:
+- [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) - Core concepts
+- [Architecture: FaaS Invocation](architecture.md#faas-invocation) - System design
+- [Detailed Design: InvokeActor Service](detailed-design.md#invokeactor-service) - Implementation details
 
 - **Function Orchestration**: Multi-function workflows
 - **Stateful Functions**: Functions with memory

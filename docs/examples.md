@@ -80,6 +80,31 @@ cd examples/simple/actor_groups_sharding
 cargo run
 ```
 
+### FaaS Actor (HTTP-Based Invocation)
+
+**Location**: `examples/simple/faas_actor/`
+
+Learn FaaS-style actor invocation via HTTP GET/POST requests. Demonstrates serverless patterns and AWS Lambda integration.
+
+**Features**:
+- HTTP-based actor invocation (GET/POST)
+- Actor lookup by type
+- Load balancing across actor instances
+- Multi-tenant isolation
+- Path and subpath routing support
+- AWS Lambda Function URL ready
+
+**Run**:
+```bash
+cd examples/simple/faas_actor
+./test.sh
+```
+
+**See Also**: 
+- [Concepts: FaaS-Style Invocation](../docs/concepts.md#faas-style-invocation) - Core concepts
+- [Architecture: FaaS Invocation](../docs/architecture.md#faas-invocation) - System design
+- [Detailed Design: InvokeActor Service](../docs/detailed-design.md#invokeactor-service) - Implementation details
+
 ## Intermediate Examples
 
 ### Matrix Multiply

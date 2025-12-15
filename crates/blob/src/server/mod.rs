@@ -22,3 +22,6 @@
 
 pub mod grpc;
 pub mod http;
+
+#[cfg(feature = "server")]
+pub mod http_axum;

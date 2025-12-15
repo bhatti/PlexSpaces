@@ -4,7 +4,7 @@
 
 use plexspaces::actor::Actor;
 use plexspaces::ActorId;  // ActorId is re-exported from root
-use plexspaces::{ActorBehavior, BehaviorError, BehaviorType};  // Re-exported from root
+use plexspaces_core::{Actor as ActorTrait, BehaviorError, BehaviorType};
 use plexspaces::mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 use tokio;
@@ -36,14 +36,15 @@ impl GeneralBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for GeneralBehavior {
+#[async_trait::async_trait]
+impl ActorTrait for GeneralBehavior {
     async fn handle_message(&mut self, _ctx: &plexspaces_core::ActorContext, _msg: plexspaces_mailbox::Message) -> Result<(), BehaviorError> {
         // For now, just accept messages without processing
         Ok(())
     }
 
     fn behavior_type(&self) -> BehaviorType {
-        BehaviorType::Custom("ByzantineGeneral".to_string())
+        BehaviorType::GenServer
     }
 }
 

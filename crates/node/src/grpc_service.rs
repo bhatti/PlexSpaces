@@ -26,6 +26,7 @@ use plexspaces_proto::{
         CheckActorExistsRequest, CheckActorExistsResponse, CreateActorRequest,
         CreateActorResponse, DeactivateActorRequest, DeleteActorRequest, GetActorRequest,
         GetActorResponse, GetOrActivateActorRequest, GetOrActivateActorResponse,
+        InvokeActorRequest, InvokeActorResponse,
         ListActorsRequest,
         ListActorsResponse, Message as ProtoMessage, MigrateActorRequest, MigrateActorResponse,
         MonitorActorRequest, MonitorActorResponse, SendMessageRequest, SendMessageResponse,
@@ -145,7 +146,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
             .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
         
         // Record metrics
@@ -265,7 +266,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
             .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
 
         // Build proto Actor message for response
@@ -641,6 +642,23 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         Ok(Response::new(LinkActorResponse { success: true }))
     }
 
+    async fn invoke_actor(
+        &self,
+        request: Request<InvokeActorRequest>,
+    ) -> Result<Response<InvokeActorResponse>, Status> {
+        // Check if service is accepting requests
+        self.check_accepting_requests().await?;
+        
+        // Delegate to actor-service's ActorServiceImpl
+        // Create actor-service instance with node's service locator
+        let actor_service_impl = plexspaces_actor_service::ActorServiceImpl::new(
+            self.node.service_locator().clone(),
+            self.node.id().as_str().to_string(),
+        );
+        
+        actor_service_impl.invoke_actor(request).await
+    }
+
     async fn unlink_actor(
         &self,
         request: Request<UnlinkActorRequest>,
@@ -895,7 +913,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                 let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
                     .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
                 
-                let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor)).await
+                let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
                     .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
 
                 tracing::debug!(actor_id = %actor_id, "Actor created and activated");

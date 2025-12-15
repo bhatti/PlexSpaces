@@ -47,6 +47,7 @@ pub enum BlobError {
     #[error("Object store error: {0}")]
     ObjectStoreError(#[from] object_store::Error),
 
+    #[cfg(feature = "sql-backend")]
     #[error("SQL error: {0}")]
     SqlError(#[from] sqlx::Error),
 

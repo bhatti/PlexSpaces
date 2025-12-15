@@ -116,7 +116,7 @@ impl GeneralBehavior {
 /// Helper to start a gRPC server for testing
 async fn start_test_server(node: Arc<Node>) -> String {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let service = ActorServiceImpl { node: node.clone() };
+    let service = ActorServiceImpl::new(node.clone());
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let bound_addr = listener.local_addr().unwrap();

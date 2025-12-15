@@ -278,7 +278,37 @@ pub trait GenServer: Actor {
                 
                 Ok(())
             }
-            MessageType::Cast | MessageType::Info => {
+            MessageType::Cast => {
+                // Handle Cast (fire-and-forget) - call handle_request but don't require reply
+                tracing::debug!(
+                    "🟡 [ROUTE_MESSAGE] CAST: Routing to handle_request (fire-and-forget): message_id={}, sender={:?}, target_actor_id={}",
+                    msg.id, msg.sender, target_actor_id
+                );
+                
+                // Clone values for logging before moving msg
+                let message_id = msg.id.clone();
+                let sender_id = msg.sender.clone();
+                
+                // Call handle_request - actor can choose to send reply or not
+                // For Cast, reply is optional (fire-and-forget)
+                let _ = self.handle_request(ctx, msg).await;
+                
+                tracing::debug!(
+                    "🟡 [ROUTE_MESSAGE] CAST handle_request completed: message_id={}, target_actor_id={}",
+                    message_id, target_actor_id
+                );
+                
+                // Decrement recursion depth on success
+                let _ = ROUTE_MESSAGE_DEPTH.with(|d| {
+                    let current = d.get();
+                    if current > 0 {
+                        d.set(current - 1);
+                    }
+                });
+                
+                Ok(())
+            }
+            MessageType::Info => {
                 // Decrement recursion depth on error
                 let _ = ROUTE_MESSAGE_DEPTH.with(|d| {
                     let current = d.get();
@@ -286,7 +316,7 @@ pub trait GenServer: Actor {
                         d.set(current - 1);
                     }
                 });
-                // GenServer doesn't handle events - use GenEvent instead
+                // GenServer doesn't handle Info messages - use GenEvent instead
                 Err(BehaviorError::UnsupportedMessage)
             }
             _ => {

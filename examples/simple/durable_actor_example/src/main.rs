@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         replay_on_activation: true, // Enable replay on restart
         cache_side_effects: true,   // Enable side effect caching
         compression: CompressionType::CompressionTypeNone as i32,
+        state_schema_version: 1,
         backend_config: None,
     };
 

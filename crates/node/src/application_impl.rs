@@ -62,6 +62,8 @@ pub struct SpecApplication {
     node: Arc<RwLock<Option<Arc<dyn ApplicationNode>>>>,
     /// Behavior factory for dynamic actor spawning (optional)
     behavior_factory: Option<Arc<dyn plexspaces_core::behavior_factory::BehaviorFactory + Send + Sync>>,
+    /// ServiceLocator for accessing ActorFactory
+    service_locator: Arc<RwLock<Option<Arc<plexspaces_core::ServiceLocator>>>>,
 }
 
 impl SpecApplication {
@@ -73,6 +75,7 @@ impl SpecApplication {
             spawned_actor_ids: Arc::new(RwLock::new(Vec::new())),
             node: Arc::new(RwLock::new(None)),
             behavior_factory: None,
+            service_locator: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -105,6 +108,7 @@ impl SpecApplication {
             spawned_actor_ids: Arc::new(RwLock::new(Vec::new())),
             node: Arc::new(RwLock::new(None)),
             behavior_factory: Some(behavior_factory),
+            service_locator: Arc::new(RwLock::new(None)),
         }
     }
     
@@ -141,6 +145,7 @@ impl SpecApplication {
     async fn initialize_supervisor_tree(
         &self,
         node: Arc<dyn ApplicationNode>,
+        service_locator: Arc<plexspaces_core::ServiceLocator>,
         supervisor_spec: &SupervisorSpec,
     ) -> Result<Vec<String>, ApplicationError> {
         let mut actor_ids = Vec::new();
@@ -212,9 +217,16 @@ impl SpecApplication {
                 match factory.create(&child.start_module, &args_bytes).await {
                     Ok(behavior) => {
                         let actor_id = format!("{}@{}", child.id, node.id());
-                        // Use ApplicationNode::spawn_actor (which uses ActorFactory internally)
-                        match node.spawn_actor(actor_id.clone(), behavior, self.spec.name.clone()).await {
-                            Ok(_actor_id) => {
+                        
+                        // Use ActorBuilder to build and spawn the actor with custom behavior
+                        use plexspaces_actor::ActorBuilder;
+                        match ActorBuilder::new(behavior)
+                            .with_id(actor_id.clone())
+                            .with_namespace(self.spec.name.clone())
+                            .spawn(service_locator.clone())
+                            .await
+                        {
+                            Ok(_actor_ref) => {
                                 debug!(
                                     application = %self.spec.name,
                                     child_id = %child.id,
@@ -339,9 +351,21 @@ impl Application for SpecApplication {
             *node_ref = Some(node.clone());
         }
 
+        // Get ServiceLocator from node
+        let service_locator = node.service_locator()
+            .ok_or_else(|| ApplicationError::StartupFailed(
+                "ServiceLocator not available from node".to_string()
+            ))?;
+        
+        // Store ServiceLocator for use in stop()
+        {
+            let mut sl = self.service_locator.write().await;
+            *sl = Some(service_locator.clone());
+        }
+
         // Initialize supervisor tree if specified
         let actor_count = if let Some(ref supervisor_spec) = self.spec.supervisor {
-            let actor_ids = self.initialize_supervisor_tree(node.clone(), supervisor_spec)
+            let actor_ids = self.initialize_supervisor_tree(node.clone(), service_locator.clone(), supervisor_spec)
                 .await
                 .map_err(|e| {
                     error!(
@@ -363,15 +387,7 @@ impl Application for SpecApplication {
             0
         };
 
-        // Update actor count in ApplicationManager for metrics tracking
-        if let Err(e) = node.update_actor_count(&self.spec.name, actor_count).await {
-            warn!(
-                application = %self.spec.name,
-                error = %e,
-                "Failed to update actor count in ApplicationManager"
-            );
-            // Don't fail startup if metrics update fails
-        }
+        // Actor counts are automatically tracked by ActorRegistry when actors are spawned
 
         // Mark as running
         {
@@ -424,10 +440,24 @@ impl Application for SpecApplication {
             );
 
             // Stop actors in reverse order (last spawned, first stopped)
+            // Use ActorFactory directly from ServiceLocator
+            let service_locator = {
+                let sl = self.service_locator.read().await;
+                sl.clone()
+            };
+            
             let mut errors = Vec::new();
-            for actor_id in actor_ids.iter().rev() {
-                if let Some(ref node) = node {
-                    if let Err(e) = node.stop_actor(actor_id).await {
+            if let Some(ref service_locator) = service_locator {
+                use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+                
+                let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
+                    .ok_or_else(|| ApplicationError::ActorStopFailed(
+                        "unknown".to_string(),
+                        "ActorFactory not found in ServiceLocator".to_string()
+                    ))?;
+                
+                for actor_id in actor_ids.iter().rev() {
+                    if let Err(e) = actor_factory.stop_actor(actor_id).await {
                         error!(
                             application = %self.spec.name,
                             actor_id = %actor_id,
@@ -443,6 +473,11 @@ impl Application for SpecApplication {
                         );
                     }
                 }
+            } else {
+                warn!(
+                    application = %self.spec.name,
+                    "ServiceLocator not available, cannot stop actors"
+                );
             }
 
             if !errors.is_empty() {
@@ -462,17 +497,7 @@ impl Application for SpecApplication {
             spawned.len() as u32
         };
 
-        // Update actor count to 0 in ApplicationManager for metrics tracking
-        if let Some(ref node) = node {
-            if let Err(e) = node.update_actor_count(&self.spec.name, 0).await {
-                warn!(
-                    application = %self.spec.name,
-                    error = %e,
-                    "Failed to update actor count in ApplicationManager"
-                );
-                // Don't fail shutdown if metrics update fails
-            }
-        }
+        // Actor counts are automatically tracked by ActorRegistry
 
         // Clear spawned actor IDs
         {
@@ -538,7 +563,6 @@ mod tests {
         SupervisionStrategy,
     };
     use prost_types::Duration as ProtoDuration;
-    use std::sync::Arc;
     use tokio::sync::RwLock;
 
     /// Mock ApplicationNode for testing
@@ -547,6 +571,7 @@ mod tests {
         addr: String,
         spawned_actors: Arc<RwLock<Vec<String>>>,
         stopped_actors: Arc<RwLock<Vec<String>>>,
+        service_locator: Arc<plexspaces_core::ServiceLocator>,
     }
 
     impl MockNode {
@@ -556,6 +581,7 @@ mod tests {
                 addr: "0.0.0.0:9001".to_string(),
                 spawned_actors: Arc::new(RwLock::new(Vec::new())),
                 stopped_actors: Arc::new(RwLock::new(Vec::new())),
+                service_locator: Arc::new(plexspaces_core::ServiceLocator::new()),
             }
         }
 
@@ -578,21 +604,8 @@ mod tests {
             &self.addr
         }
 
-        async fn spawn_actor(
-            &self,
-            actor_id: String,
-            _behavior: Box<dyn plexspaces_core::Actor>,
-            _namespace: String,
-        ) -> Result<String, ApplicationError> {
-            let mut spawned = self.spawned_actors.write().await;
-            spawned.push(actor_id.clone());
-            Ok(actor_id)
-        }
-
-        async fn stop_actor(&self, actor_id: &str) -> Result<(), ApplicationError> {
-            let mut stopped = self.stopped_actors.write().await;
-            stopped.push(actor_id.to_string());
-            Ok(())
+        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+            Some(self.service_locator.clone())
         }
     }
 

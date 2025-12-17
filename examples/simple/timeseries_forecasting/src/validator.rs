@@ -6,7 +6,7 @@
 //! Performs offline batch inference and calculates metrics.
 
 use async_trait::async_trait;
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -29,7 +29,7 @@ impl ValidatorActor {
 }
 
 #[async_trait]
-impl ActorBehavior for ValidatorActor {
+impl ActorTrait for ValidatorActor {
     async fn handle_message(
         &mut self,
         ctx: &ActorContext,

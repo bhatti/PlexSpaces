@@ -10,6 +10,8 @@ mod tests {
     use std::sync::Arc;
     use futures::StreamExt;
     use plexspaces_channel::{Channel, InMemoryChannel};
+    use async_trait::async_trait;
+    use plexspaces_core::{ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider};
 
     // Integration test: Test ActorContext with real ChannelServiceWrapper from node crate
     // Note: We can't directly import from node crate due to circular dependencies,
@@ -218,4 +220,5 @@ mod tests {
             Ok(0)
         }
     }
+}
 

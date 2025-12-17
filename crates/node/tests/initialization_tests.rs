@@ -3,6 +3,9 @@
 //
 // Minimal tests to verify Node initialization and service setup
 
+mod test_helpers;
+use test_helpers::spawn_actor_helper;
+
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
 
@@ -80,7 +83,7 @@ impl Actor for TestBehavior {
         .await;
     
     // This is where the hang might occur
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     assert_eq!(actor_ref.id(), &ActorId::from("test-actor@local"));
 }
 

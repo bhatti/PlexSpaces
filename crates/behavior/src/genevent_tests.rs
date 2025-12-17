@@ -85,7 +85,7 @@ mod tests {
         let ctx = Arc::new(ActorContext::minimal(
             "test-genevent".to_string(),
             "test-node".to_string(),
-            "test-ns".to_string(),
+            "test-ns".to_string(), // namespace
         ));
         (ctx, message)
     }

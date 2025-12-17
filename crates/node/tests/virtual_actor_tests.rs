@@ -21,15 +21,15 @@
 //! Tests the Orleans-inspired virtual actor activation/deactivation
 //! functionality integrated with Node.
 
-use plexspaces_core::Actor;
+mod test_helpers;
+use test_helpers::spawn_actor_helper;
+
+use plexspaces_core::ActorBehavior;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
-
-mod test_helpers;
-use test_helpers::{lookup_actor_ref, activate_virtual_actor};
 
 // Simple test behavior
 struct TestBehavior {
@@ -37,12 +37,11 @@ struct TestBehavior {
 }
 
 #[async_trait::async_trait]
-impl Actor for TestBehavior {
+impl ActorBehavior for TestBehavior {
     async fn handle_message(
         &mut self,
         _ctx: &plexspaces_core::ActorContext,
         _msg: Message,
-        _reply: &dyn plexspaces_core::Reply,
     ) -> Result<(), plexspaces_core::BehaviorError> {
         let mut count = self.count.lock().unwrap();
         *count += 1;
@@ -95,7 +94,7 @@ async fn test_virtual_actor_implicit_activation() {
         .unwrap();
 
     // Spawn actor - should register as virtual but not activate yet
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Check that actor is registered as virtual but not yet active
     let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&"virtual-actor-1".to_string()).await;
@@ -105,7 +104,7 @@ async fn test_virtual_actor_implicit_activation() {
     
     // Send first message - should trigger activation
     let message = Message::new(b"test".to_vec());
-    let actor_ref = lookup_actor_ref(&node, &"virtual-actor-1".to_string()).await.unwrap().unwrap();
+    let actor_ref = node.lookup_actor_ref(&"virtual-actor-1".to_string()).await.unwrap().unwrap();
     actor_ref.tell(message).await.unwrap();
     
     // Wait a bit for activation to complete
@@ -161,11 +160,11 @@ async fn test_virtual_actor_idle_deactivation() {
         .unwrap();
 
     // Spawn actor
-    let _actor_ref = node.spawn_actor(actor).await.unwrap();
+    let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Send message to activate
     let message = Message::new(b"test".to_vec());
-    let actor_ref = lookup_actor_ref(&node, &"virtual-actor-2".to_string()).await.unwrap().unwrap();
+    let actor_ref = node.lookup_actor_ref(&"virtual-actor-2".to_string()).await.unwrap().unwrap();
     actor_ref.tell(message).await.unwrap();
     
     // Wait a bit for activation
@@ -227,11 +226,11 @@ async fn test_virtual_actor_pending_messages() {
         .unwrap();
 
     // Spawn actor (registers as virtual, not yet activated)
-    let _actor_ref = node.spawn_actor(actor).await.unwrap();
+    let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Send multiple messages before activation completes
     // Messages should be queued in pending_activations
-    let actor_ref = lookup_actor_ref(&node, &"virtual-actor-3".to_string()).await.unwrap().unwrap();
+    let actor_ref = node.lookup_actor_ref(&"virtual-actor-3".to_string()).await.unwrap().unwrap();
     for i in 0..5 {
         let message = Message::new(format!("msg-{}", i).into_bytes());
         actor_ref.tell(message).await.unwrap();
@@ -285,10 +284,10 @@ async fn test_activate_actor_manual() {
         .unwrap();
 
     // Spawn actor (registers as virtual)
-    let _actor_ref = node.spawn_actor(actor).await.unwrap();
+    let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Manually activate
-    let activated_ref = activate_virtual_actor(&node, &"virtual-actor-4".to_string()).await.unwrap();
+    let activated_ref = node.activate_virtual_actor(&"virtual-actor-4".to_string()).await.unwrap();
     
     // Verify actor is active
     let (exists, is_active, _) = node.check_virtual_actor_exists(&"virtual-actor-4".to_string()).await;
@@ -334,10 +333,10 @@ async fn test_deactivate_actor_manual() {
         .await
         .unwrap();
 
-    let _actor_ref = node.spawn_actor(actor).await.unwrap();
+    let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Activate first
-    activate_virtual_actor(&node, &"virtual-actor-5".to_string()).await.unwrap();
+    node.activate_virtual_actor(&"virtual-actor-5".to_string()).await.unwrap();
     
     // Verify active
     let (_, is_active, _) = node.check_virtual_actor_exists(&"virtual-actor-5".to_string()).await;
@@ -392,7 +391,7 @@ async fn test_check_actor_exists() {
         .await
         .unwrap();
 
-    let _actor_ref = node.spawn_actor(actor).await.unwrap();
+    let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Check virtual actor (not yet activated)
     let (exists_va, is_active_va, is_virtual_va) = node.check_virtual_actor_exists(&"virtual-actor-6".to_string()).await;
@@ -400,7 +399,7 @@ async fn test_check_actor_exists() {
     assert!(is_virtual_va, "Actor should be registered as virtual");
     
     // Activate and check again
-    activate_virtual_actor(&node, &"virtual-actor-6".to_string()).await.unwrap();
+    node.activate_virtual_actor(&"virtual-actor-6".to_string()).await.unwrap();
     let (exists_after, is_active_after, is_virtual_after) = node.check_virtual_actor_exists(&"virtual-actor-6".to_string()).await;
     assert!(exists_after, "Actor should still exist");
     assert!(is_active_after, "Actor should be active after activation");

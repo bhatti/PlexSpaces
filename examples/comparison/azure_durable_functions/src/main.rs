@@ -3,7 +3,7 @@
 
 use plexspaces_actor::{ActorBuilder, ActorRef};
 use plexspaces_behavior::WorkflowBehavior;
-use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, Reply};
+use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError};
 use plexspaces_journaling::{DurabilityFacet, DurabilityConfig, MemoryJournalStorage};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
@@ -141,11 +141,10 @@ impl Actor for OrderOrchestration {
         &mut self,
         ctx: &ActorContext,
         msg: Message,
-        reply: &dyn Reply,
     ) -> Result<(), BehaviorError> {
         // Delegate to WorkflowBehavior's route_workflow_message
         // Since OrderOrchestration implements WorkflowBehavior, we can call route_workflow_message directly
-        <Self as WorkflowBehavior>::route_workflow_message(self, ctx, msg, reply).await
+        self.route_workflow_message(ctx, msg).await
     }
 
     fn behavior_type(&self) -> BehaviorType {

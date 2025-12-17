@@ -98,9 +98,10 @@ async fn main() -> Result<()> {
     // Spawn Loader actors (CPU-intensive)
     let mut loader_refs = Vec::new();
     for i in 0..config.loader_count {
-        use plexspaces_actor::ActorBuilder;
-        let loader_ref = ActorBuilder::new(Box::new(LoaderBehavior::new(args.documents.clone())))
-            .with_id(format!("loader-{}@{}", i, node.id().as_str()))
+        let loader_ref = node.clone()
+            .spawn_actor_builder()
+            .with_behavior(Box::new(LoaderBehavior::new(args.documents.clone())))
+            .with_name(format!("loader-{}", i))
             .with_resource_requirements(
                 2.0,                              // CPU cores
                 1024 * 1024 * 1024,              // 1GB memory
@@ -112,7 +113,7 @@ async fn main() -> Result<()> {
                 ]),
                 vec!["entity-recognition-loaders".to_string()],
             )
-            .spawn(node.service_locator().clone())
+            .spawn()
             .await?;
         let loader_id = loader_ref.id().clone();
         loader_refs.push(loader_ref);
@@ -122,8 +123,10 @@ async fn main() -> Result<()> {
     // Spawn Processor actors (GPU-intensive)
     let mut processor_refs = Vec::new();
     for i in 0..config.processor_count {
-        let processor_ref = ActorBuilder::new(Box::new(ProcessorBehavior::new()))
-            .with_id(format!("processor-{}@{}", i, node.id().as_str()))
+        let processor_ref = node.clone()
+            .spawn_actor_builder()
+            .with_behavior(Box::new(ProcessorBehavior::new()))
+            .with_name(format!("processor-{}", i))
             .with_resource_requirements(
                 1.0,                              // CPU cores
                 4 * 1024 * 1024 * 1024,          // 4GB memory
@@ -135,7 +138,7 @@ async fn main() -> Result<()> {
                 ]),
                 vec!["entity-recognition-processors".to_string()],
             )
-            .spawn(node.service_locator().clone())
+            .spawn()
             .await?;
         let processor_id = processor_ref.id().clone();
         processor_refs.push(processor_ref);
@@ -145,8 +148,10 @@ async fn main() -> Result<()> {
     // Spawn Aggregator actors (CPU-intensive)
     let mut aggregator_refs = Vec::new();
     for i in 0..config.aggregator_count {
-        let aggregator_ref = ActorBuilder::new(Box::new(AggregatorBehavior::new(args.documents.len() as u32)))
-            .with_id(format!("aggregator-{}@{}", i, node.id().as_str()))
+        let aggregator_ref = node.clone()
+            .spawn_actor_builder()
+            .with_behavior(Box::new(AggregatorBehavior::new(args.documents.len() as u32)))
+            .with_name(format!("aggregator-{}", i))
             .with_resource_requirements(
                 2.0,                              // CPU cores
                 1024 * 1024 * 1024,              // 1GB memory
@@ -158,7 +163,7 @@ async fn main() -> Result<()> {
                 ]),
                 vec!["entity-recognition-aggregators".to_string()],
             )
-            .spawn(node.service_locator().clone())
+            .spawn()
             .await?;
         aggregator_refs.push(aggregator_ref.clone());
         info!("Spawned aggregator actor: {}", aggregator_ref.id());

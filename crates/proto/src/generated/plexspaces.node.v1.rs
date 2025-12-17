@@ -67,7 +67,8 @@ pub struct NodeConfig {
 /// Runtime configuration
 ///
 /// ## Purpose
-/// Defines runtime services (gRPC, middleware, health monitoring, security, blob storage).
+/// Defines runtime services (gRPC, middleware, health monitoring, security, blob storage,
+/// and unified storage backends).
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RuntimeConfig {
@@ -83,6 +84,46 @@ pub struct RuntimeConfig {
     /// Blob storage configuration (S3-compatible object storage)
     #[prost(message, optional, tag="4")]
     pub blob: ::core::option::Option<super::super::storage::v1::BlobConfig>,
+    /// Shared relational database configuration
+    ///
+    /// Used by components that always use relational database:
+    /// - scheduler (crates/scheduler/migrations)
+    /// - workflow (crates/workflow/migrations)
+    /// - journaling (crates/journaling/migrations)
+    /// - blob (crates/blob/migrations)
+    /// - keyvalue (crates/keyvalue/migrations) - now always SQL
+    ///
+    /// Convention: All these components share the same database by default.
+    /// Can be overridden per-component if needed.
+    #[prost(message, optional, tag="5")]
+    pub shared_database: ::core::option::Option<super::super::storage::v1::SharedRelationalDbConfig>,
+    /// Locks storage provider configuration
+    ///
+    /// Supports: postgres, sqlite, redis, dynamodb
+    /// Default: redis (if available), else postgres
+    #[prost(message, optional, tag="6")]
+    pub locks_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
+    /// Channel storage provider configuration
+    ///
+    /// Supports: redis, kafka, nats, sqlite, memory
+    /// Default: redis (if available), else memory
+    #[prost(message, optional, tag="7")]
+    pub channel_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
+    /// TupleSpace storage provider configuration
+    ///
+    /// Supports: postgres, sqlite, redis, dynamodb
+    /// Default: postgres (if available), else memory
+    #[prost(message, optional, tag="8")]
+    pub tuplespace_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
+    /// Mailbox storage provider configuration
+    ///
+    /// Supports: memory, redis, sqlite, postgres
+    /// Default: memory
+    #[prost(message, optional, tag="9")]
+    pub mailbox_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
+    /// Framework version information (auto-populated at build time)
+    #[prost(message, optional, tag="10")]
+    pub framework_info: ::core::option::Option<super::super::storage::v1::FrameworkInfo>,
 }
 /// gRPC server configuration
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -158,6 +199,7 @@ pub struct HealthConfig {
 /// - Store secrets in environment variables or secret management systems
 /// - Use file paths for certificates (not inline in config)
 /// - Rotate certificates regularly
+/// - Auth enabled by default (can disable for local testing)
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SecurityConfig {
@@ -185,6 +227,17 @@ pub struct SecurityConfig {
     /// Keys are service-scoped (not user-scoped).
     #[prost(message, repeated, tag="4")]
     pub api_keys: ::prost::alloc::vec::Vec<super::super::security::v1::ApiKey>,
+    /// Allow disabling auth for local testing (default: false)
+    ///
+    /// Security: Only set to true in development/test environments.
+    /// Production should always have auth enabled.
+    #[prost(bool, tag="5")]
+    pub allow_disable_auth: bool,
+    /// Disable authentication (only if allow_disable_auth = true)
+    ///
+    /// Security: Only for integration tests. Never use in production.
+    #[prost(bool, tag="6")]
+    pub disable_auth: bool,
 }
 /// Application configuration (in release)
 ///
@@ -389,6 +442,23 @@ pub struct Node {
     /// Resource metrics
     #[prost(message, optional, tag="21")]
     pub metrics: ::core::option::Option<NodeMetrics>,
+    /// mTLS identity for node-to-node communication
+    ///
+    /// Used for service-to-service authentication.
+    /// Nodes register their public certificate in object-registry.
+    #[prost(message, optional, tag="22")]
+    pub mtls_identity: ::core::option::Option<super::super::security::v1::ServiceIdentity>,
+    /// Public certificate (PEM format) for object-registry registration
+    ///
+    /// Other nodes can fetch this certificate for mTLS verification.
+    /// Stored in object-registry for service discovery.
+    #[prost(bytes="vec", tag="23")]
+    pub public_certificate: ::prost::alloc::vec::Vec<u8>,
+    /// Auto-generate certificates if not provided (for local dev/testing)
+    ///
+    /// Security: Only for local development. Production should use proper cert management.
+    #[prost(bool, tag="24")]
+    pub auto_generate_certs: bool,
     /// Type-specific configuration
     #[prost(oneof="node::Config", tags="10, 11, 12")]
     pub config: ::core::option::Option<node::Config>,

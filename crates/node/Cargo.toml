@@ -41,6 +41,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 metrics = "0.23"
 toml = "0.8"
+serde_yaml = "0.9"
 config = "0.14"
 ulid = "1.2"
 chrono = { workspace = true }
@@ -75,6 +76,7 @@ pretty_assertions = { version = "1.4" }
 plexspaces-behavior = { workspace = true }
 plexspaces-persistence = { workspace = true }
 futures = { workspace = true }
+tempfile = "3.10"
 
 [lib]
 name = "plexspaces_node"

@@ -244,19 +244,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tuplespace: tuplespace.clone(),
         };
 
-        // Create ActorRef (pure data - just ID)
-        let actor_ref = ActorRef::new(actor_id.clone())
-            .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
-
-        // Register actor with node (requires ActorConfig as second parameter)
-        node.register_actor(actor_ref, None).await?;
+        // Create Actor and spawn it using ActorFactory
+        use plexspaces_actor::{Actor, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+        use std::sync::Arc;
+        let actor = Actor::new(
+            actor_id.clone(),
+            Box::new(general),
+            mailbox,
+            "byzantine".to_string(),
+            None,
+        );
+        
+        // Get ActorFactory from ServiceLocator
+        let service_locator = node.service_locator()
+            .ok_or_else(|| format!("ServiceLocator not available from node. Ensure Node::start() has been called."))?;
+        let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator. Ensure Node::start() has been called."))?;
+        
+        // Spawn actor using ActorFactory
+        actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+            .map_err(|e| format!("Failed to spawn actor via ActorFactory: {}", e))?;
 
         println!("  ✅ Spawned {}: {}", if is_commander { "Commander" } else { "Lieutenant" }, general_id);
     }
 
     // Start gRPC server for remote actor communication
     let grpc_addr = args.address.parse()?;
-    let grpc_service = ActorServiceImpl::new(node.clone());
+    let grpc_service = ActorServiceImpl { node: node.clone() };
 
     println!("\n🌐 Starting gRPC server on {}", args.address);
 

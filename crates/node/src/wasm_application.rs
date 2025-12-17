@@ -363,7 +363,6 @@ impl WasmApplication {
         // Create ChannelService for WASM instance (same as in create_actor_context)
         use plexspaces_core::ChannelService;
         use crate::service_wrappers::ChannelServiceWrapper;
-        use std::sync::Arc;
         let channel_service: Arc<dyn ChannelService> = Arc::new(ChannelServiceWrapper::new());
 
         // Create WASM instance with ChannelService
@@ -392,12 +391,23 @@ impl WasmApplication {
         let node_id = node.id();
         let actor_id = format!("{}@{}", child_spec.id, node_id);
 
-        // Spawn actor on node
-        let spawned_id = node
-            .spawn_actor(actor_id.clone(), behavior, "default".to_string())
-            .await?;
+        // Get ServiceLocator from node
+        let service_locator = node.service_locator()
+            .ok_or_else(|| ApplicationError::ActorSpawnFailed(
+                actor_id.clone(),
+                "ServiceLocator not available from node".to_string()
+            ))?;
+        
+        // Use ActorBuilder to build and spawn the actor with custom behavior
+        use plexspaces_actor::ActorBuilder;
+        let _actor_ref = ActorBuilder::new(behavior)
+            .with_id(actor_id.clone())
+            .with_namespace("default".to_string())
+            .spawn(service_locator)
+            .await
+            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to spawn actor: {}", e)))?;
 
-        Ok(spawned_id)
+        Ok(actor_id)
     }
 
     /// Call get_supervisor_tree() function from WASM module
@@ -428,7 +438,6 @@ impl WasmApplication {
         // Create ChannelService for WASM instance
         use plexspaces_core::ChannelService;
         use crate::service_wrappers::ChannelServiceWrapper;
-        use std::sync::Arc;
         let channel_service: Arc<dyn ChannelService> = Arc::new(ChannelServiceWrapper::new());
 
         // Create instance using runtime's instantiate method
@@ -517,7 +526,23 @@ impl WasmApplication {
                 "Stopping actor with timeout"
             );
             
-            match timeout(timeout_duration, node.stop_actor(actor_id)).await {
+            // Use ActorFactory directly from ServiceLocator
+            let service_locator = node.service_locator()
+                .ok_or_else(|| ApplicationError::ActorStopFailed(
+                    actor_id.to_string(),
+                    "ServiceLocator not available from node".to_string()
+                ))?;
+            
+            use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+            
+            let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
+                .ok_or_else(|| ApplicationError::ActorStopFailed(
+                    actor_id.to_string(),
+                    "ActorFactory not found in ServiceLocator".to_string()
+                ))?;
+            
+            let actor_id_string = actor_id.to_string();
+            match timeout(timeout_duration, actor_factory.stop_actor(&actor_id_string)).await {
                 Ok(Ok(())) => {
                     tracing::debug!(
                         application = %self.name,
@@ -611,16 +636,8 @@ impl Application for WasmApplication {
             ApplicationError::Other(format!("Failed to load supervisor tree: {}", e))
         })?;
 
-        // Update actor count in ApplicationManager for metrics tracking
-        let actor_count = actor_ids.len() as u32;
-        if let Err(e) = node.update_actor_count(&self.name, actor_count).await {
-            tracing::warn!(
-                application = %self.name,
-                error = %e,
-                "Failed to update actor count in ApplicationManager"
-            );
-            // Don't fail startup if metrics update fails
-        }
+        // Actor counts are automatically tracked by ActorRegistry when actors are spawned
+        let actor_count = actor_ids.len();
 
         // Mark as running
         *is_running = true;
@@ -731,16 +748,7 @@ impl Application for WasmApplication {
             let node_opt = self.node.read().await;
             node_opt.clone()
         };
-        if let Some(ref node) = node_ref {
-            if let Err(e) = node.update_actor_count(&self.name, 0).await {
-                tracing::warn!(
-                    application = %self.name,
-                    error = %e,
-                    "Failed to update actor count in ApplicationManager"
-                );
-                // Don't fail shutdown if metrics update fails
-            }
-        }
+        // Actor counts are automatically tracked by ActorRegistry
 
         // Clear spawned actor IDs
         {
@@ -799,19 +807,6 @@ mod tests {
 
         fn listen_addr(&self) -> &str {
             "127.0.0.1:9000"
-        }
-
-        async fn spawn_actor(
-            &self,
-            _actor_id: String,
-            _behavior: Box<dyn plexspaces_core::Actor>,
-            _namespace: String,
-        ) -> Result<String, ApplicationError> {
-            Ok("mock-actor-id".to_string())
-        }
-
-        async fn stop_actor(&self, _actor_id: &str) -> Result<(), ApplicationError> {
-            Ok(())
         }
     }
 
@@ -1117,20 +1112,6 @@ mod tests {
             fn listen_addr(&self) -> &str {
                 "127.0.0.1:9000"
             }
-
-            async fn spawn_actor(
-                &self,
-                actor_id: String,
-                _behavior: Box<dyn plexspaces_core::Actor>,
-                _namespace: String,
-            ) -> Result<String, ApplicationError> {
-                self.spawned_actors.lock().await.push(actor_id.clone());
-                Ok(actor_id)
-            }
-
-            async fn stop_actor(&self, _actor_id: &str) -> Result<(), ApplicationError> {
-                Ok(())
-            }
         }
 
         let tracking_node = Arc::new(TrackingMockNode {
@@ -1221,20 +1202,6 @@ mod tests {
             fn listen_addr(&self) -> &str {
                 "127.0.0.1:9000"
             }
-
-            async fn spawn_actor(
-                &self,
-                actor_id: String,
-                _behavior: Box<dyn plexspaces_core::Actor>,
-                _namespace: String,
-            ) -> Result<String, ApplicationError> {
-                Ok(actor_id)
-            }
-
-            async fn stop_actor(&self, actor_id: &str) -> Result<(), ApplicationError> {
-                self.stopped_actors.lock().await.push(actor_id.to_string());
-                Ok(())
-            }
         }
 
         let tracking_node = Arc::new(StopTrackingMockNode {
@@ -1276,28 +1243,13 @@ mod tests {
             fn listen_addr(&self) -> &str {
                 "127.0.0.1:9000"
             }
-
-            async fn spawn_actor(
-                &self,
-                actor_id: String,
-                _behavior: Box<dyn plexspaces_core::Actor>,
-                _namespace: String,
-            ) -> Result<String, ApplicationError> {
-                Ok(actor_id)
-            }
-
-            async fn stop_actor(&self, _actor_id: &str) -> Result<(), ApplicationError> {
-                // Simulate slow shutdown
-                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                Ok(())
-            }
         }
 
         let node: Arc<dyn ApplicationNode> = Arc::new(SlowStopMockNode);
         app.start(node).await.expect("Start should succeed");
 
-        // Stop should timeout and still succeed (or return timeout error)
         // TODO: Implement timeout handling in stop()
+        // Stop should timeout and still succeed (or return timeout error)
         let _result = app.stop().await;
         // assert!(result.is_err() || result.is_ok()); // Either timeout error or force stop
     }

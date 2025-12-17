@@ -2,8 +2,8 @@
 // Comparison: Restate Durable Execution with Journaling
 
 use plexspaces_actor::{ActorBuilder, ActorRef};
-use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, Reply};
+use plexspaces_behavior::GenServerBehavior;
+use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError};
 use plexspaces_journaling::{DurabilityFacet, DurabilityConfig, MemoryJournalStorage};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
@@ -92,11 +92,10 @@ impl Actor for PaymentActor {
         &mut self,
         ctx: &ActorContext,
         msg: Message,
-        reply: &dyn Reply,
     ) -> Result<(), BehaviorError> {
-        // Delegate to GenServer's route_message
+        // Delegate to GenServerBehavior's route_message
         // DurabilityFacet will automatically journal all operations
-        <Self as GenServer>::route_message(self, ctx, msg, reply).await
+        self.route_message(ctx, msg).await
     }
 
     fn behavior_type(&self) -> BehaviorType {
@@ -105,7 +104,7 @@ impl Actor for PaymentActor {
 }
 
 #[async_trait::async_trait]
-impl GenServer for PaymentActor {
+impl GenServerBehavior for PaymentActor {
     async fn handle_request(
         &mut self,
         _ctx: &ActorContext,

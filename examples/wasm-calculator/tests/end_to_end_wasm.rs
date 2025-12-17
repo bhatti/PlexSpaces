@@ -100,15 +100,27 @@ async fn test_load_and_execute_wasm_actor() {
     let config = WasmConfig {
         limits: ResourceLimits {
             max_memory_bytes: 16 * 1024 * 1024, // 16MB
+            max_stack_bytes: 512 * 1024,        // 512KB
             max_fuel: 10_000_000,
-            ..Default::default()
+            max_execution_time: None,
+            max_table_elements: 10_000,
+            max_pooled_instances: 10,
         },
         capabilities: WasmCapabilities {
-            allow_logging: true,
+            allow_filesystem: false,
+            filesystem_root: String::new(),
+            allow_network: false,
+            allow_env: false,
+            allow_random: true,
+            allow_clocks: true,
+            allow_tuplespace: false,
+            allow_spawn_actors: false,
             allow_send_messages: true,
-            ..Default::default()
+            allow_logging: true,
         },
-        ..Default::default()
+        profile_name: "test".to_string(),
+        enable_pooling: false,
+        enable_aot: false,
     };
 
     let instance = runtime

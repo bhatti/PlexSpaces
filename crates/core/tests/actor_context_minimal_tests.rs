@@ -11,24 +11,24 @@ async fn test_actor_context_minimal() {
     let ctx = ActorContext::minimal(
         "test-actor".to_string(),
         "test-node".to_string(),
-        "test-ns".to_string(),
+        "test-ns".to_string(), // namespace
+        "test-tenant".to_string(), // tenant_id (required)
     );
 
     // actor_id removed from ActorContext
     assert_eq!(ctx.node_id, "test-node");
     assert_eq!(ctx.namespace, "test-ns");
+    assert_eq!(ctx.tenant_id(), "test-tenant");
     assert!(ctx.metadata.is_empty());
     assert_eq!(ctx.config, None);
-    assert_eq!(ctx.sender_id, None);
-    assert_eq!(ctx.correlation_id, None);
 }
 
 #[tokio::test]
 async fn test_actor_context_minimal_with_config_none() {
     let ctx = ActorContext::minimal_with_config(
-        "test-actor".to_string(),
         "test-node".to_string(),
         "test-ns".to_string(),
+        "test-tenant".to_string(), // tenant_id (required)
         None,
     );
 
@@ -50,9 +50,9 @@ async fn test_actor_context_minimal_with_config_some() {
     let config = Some(config.clone());
 
     let ctx = ActorContext::minimal_with_config(
-        "test-actor".to_string(),
         "test-node".to_string(),
         "test-ns".to_string(),
+        "test-tenant".to_string(), // tenant_id (required)
         config.clone(),
     );
 
@@ -66,16 +66,13 @@ async fn test_actor_context_minimal_creates_stub_services() {
     let ctx = ActorContext::minimal(
         "test-actor".to_string(),
         "test-node".to_string(),
-        "default".to_string(),
+        "default".to_string(), // namespace
+        "test-tenant".to_string(), // tenant_id (required)
     );
 
-    // Verify stub services are created (they return errors)
-    let result = ctx.actor_service.spawn_actor("test", "GenServer", vec![]).await;
-    assert!(result.is_err());
-    
-    let result = ctx.object_registry.lookup("default", "test", "default", None).await;
-    assert!(result.is_err());
-    
-    assert_eq!(ctx.node.node_id(), "test-node");
+    // Services are accessed via service_locator, not directly
+    // Verify the context is created correctly
+    assert_eq!(ctx.node_id, "test-node");
+    assert_eq!(ctx.tenant_id(), "test-tenant");
 }
 

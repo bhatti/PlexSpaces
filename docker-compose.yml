@@ -1,114 +1,41 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 #
-# Docker Compose for multi-node PlexSpaces deployment
-# Demonstrates framework-only containers ready for dynamic WASM deployment
+# Docker Compose for PlexSpaces deployment
+# Production-ready setup with PostgreSQL, Redis, and MinIO
+#
+# This setup demonstrates:
+# - Empty node with default application (no actors)
+# - Shared PostgreSQL database for scheduler, workflow, object-registry, journaling, blob
+# - Redis for channel and locks backends
+# - MinIO for blob storage (S3-compatible)
+#
+# Configuration is managed via release.yaml and environment variables
 
 version: '3.8'
 
 services:
-  plexspaces-node1:
-    build: .
-    container_name: plexspaces-node1
-    hostname: node1
-    ports:
-      - "9001:9001"
+  # PostgreSQL for shared relational database
+  postgres:
+    image: postgres:16-alpine
+    container_name: plexspaces-postgres
     environment:
-      # Node configuration
-      - PLEXSPACES_NODE_ID=node1
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      # Cluster seed nodes for discovery
-      - PLEXSPACES_CLUSTER_SEED_NODES=node2:9001,node3:9001
-      # Config file path
-      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
-      # Logging
-      - RUST_LOG=info
-      # Journaling: SQLite (file-based, persistent)
-      - PLEXSPACES_JOURNALING_BACKEND=sqlite
-      - PLEXSPACES_JOURNALING_SQLITE_PATH=/app/data/journal.db
-      # Channel/TupleSpace: Redis (distributed, scalable)
-      - PLEXSPACES_CHANNEL_BACKEND=redis
-      - PLEXSPACES_CHANNEL_REDIS_URL=redis://redis:6379
-      - PLEXSPACES_TUPLESPACE_BACKEND=redis
-      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
-    volumes:
-      - ./config:/app/config:ro
-      - node1-data:/app/data
-    healthcheck:
-      # Health check via gRPC (requires grpc_health_probe)
-      # Alternative: Use HTTP via gRPC-Gateway if configured
-      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      - plexspaces-net
-    depends_on:
-      - plexspaces-node2
-      - plexspaces-node3
-
-  plexspaces-node2:
-    build: .
-    container_name: plexspaces-node2
-    hostname: node2
+      POSTGRES_USER: plexspaces
+      POSTGRES_PASSWORD: plexspaces
+      POSTGRES_DB: plexspaces
     ports:
-      - "9002:9001"
-    environment:
-      - PLEXSPACES_NODE_ID=node2
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node3:9001
-      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
-      - RUST_LOG=info
-      - PLEXSPACES_JOURNALING_BACKEND=sqlite
-      - PLEXSPACES_JOURNALING_SQLITE_PATH=/app/data/journal.db
-      - PLEXSPACES_CHANNEL_BACKEND=redis
-      - PLEXSPACES_CHANNEL_REDIS_URL=redis://redis:6379
-      - PLEXSPACES_TUPLESPACE_BACKEND=redis
-      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
+      - "5432:5432"
     volumes:
-      - ./config:/app/config:ro
-      - node2-data:/app/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+      test: ["CMD-SHELL", "pg_isready -U plexspaces"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - plexspaces-net
 
-  plexspaces-node3:
-    build: .
-    container_name: plexspaces-node3
-    hostname: node3
-    ports:
-      - "9003:9001"
-    environment:
-      - PLEXSPACES_NODE_ID=node3
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001
-      - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
-      - RUST_LOG=info
-      - PLEXSPACES_JOURNALING_BACKEND=sqlite
-      - PLEXSPACES_JOURNALING_SQLITE_PATH=/app/data/journal.db
-      - PLEXSPACES_CHANNEL_BACKEND=redis
-      - PLEXSPACES_CHANNEL_REDIS_URL=redis://redis:6379
-      - PLEXSPACES_TUPLESPACE_BACKEND=redis
-      - PLEXSPACES_TUPLESPACE_REDIS_URL=redis://redis:6379
-    volumes:
-      - ./config:/app/config:ro
-      - node3-data:/app/data
-    healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      - plexspaces-net
-
-  # Redis for distributed channel/tuplespace backends
+  # Redis for channel and locks backends
   redis:
     image: redis:7-alpine
     container_name: plexspaces-redis
@@ -125,27 +52,102 @@ services:
     networks:
       - plexspaces-net
 
-  # NATS for lightweight pub/sub messaging (used by channel tests)
-  nats:
-    image: nats:2.10-alpine
-    container_name: plexspaces-nats
+  # MinIO for blob storage (S3-compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: plexspaces-minio
     ports:
-      - "4222:4222"
-      - "8222:8222"  # HTTP monitoring port
-    command: ["-js", "-m", "8222"]  # Enable JetStream and monitoring
+      - "9000:9000"  # API
+      - "9001:9001"  # Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "4222"]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
       retries: 5
     networks:
       - plexspaces-net
 
+  # Create MinIO bucket on startup
+  minio-setup:
+    image: minio/mc:latest
+    container_name: plexspaces-minio-setup
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb myminio/plexspaces || true;
+      /usr/bin/mc anonymous set download myminio/plexspaces;
+      exit 0;
+      "
+    networks:
+      - plexspaces-net
+
+  # PlexSpaces node (empty, ready for deployments)
+  plexspaces-node:
+    build: .
+    container_name: plexspaces-node
+    hostname: node1
+    ports:
+      - "9001:9001"
+    environment:
+      # Node configuration
+      - NODE_ID=node1
+      - NODE_LISTEN_ADDRESS=0.0.0.0:9001
+      - GRPC_ADDRESS=0.0.0.0:9001
+      
+      # Release configuration
+      - PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
+      
+      # Database configuration
+      - DATABASE_URL=postgres://plexspaces:plexspaces@postgres:5432/plexspaces
+      
+      # Backend configurations
+      - LOCKS_BACKEND=redis
+      - LOCKS_REDIS_URL=redis://redis:6379/0
+      - CHANNEL_BACKEND=redis
+      - CHANNEL_REDIS_URL=redis://redis:6379/0
+      - KEYVALUE_BACKEND=sql
+      - TUPLESPACE_BACKEND=sql
+      
+      # Blob storage configuration
+      - BLOB_BACKEND=minio
+      - BLOB_BUCKET=plexspaces
+      - BLOB_ENDPOINT=http://minio:9000
+      - BLOB_ACCESS_KEY_ID=minioadmin
+      - BLOB_SECRET_ACCESS_KEY=minioadmin
+      
+      # Logging
+      - RUST_LOG=info
+    volumes:
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - plexspaces-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
 volumes:
-  node1-data:
-  node2-data:
-  node3-data:
+  postgres-data:
   redis-data:
+  minio-data:
 
 networks:
   plexspaces-net:

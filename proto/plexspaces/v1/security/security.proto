@@ -79,6 +79,16 @@ message ServiceIdentity {
 }
 
 // mTLS configuration
+//
+// ## Purpose
+// Configuration for mutual TLS authentication between nodes.
+// Supports both configured certificates and auto-generation for local development.
+//
+// ## Security Best Practices
+// - Certificates should be stored as file paths (not inline in config)
+// - Private keys should never be in config files (use env vars or key management)
+// - Auto-generation only for local development/testing
+// - Production should use proper certificate management (e.g., cert-manager, Vault)
 message MtlsConfig {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
@@ -87,13 +97,47 @@ message MtlsConfig {
     }
   };
 
+  // Enable mTLS (default: true for production, false for local dev)
   bool enable_mtls = 1;
-  string ca_certificate = 2;  // CA certificate for validation (PEM format)
-  repeated string trusted_services = 3;  // Service IDs to trust
-  google.protobuf.Duration certificate_rotation_interval = 4;
+
+  // CA certificate path for validation (PEM format)
+  // Security: Path only, not certificate contents
+  string ca_certificate_path = 2;
+
+  // Server certificate path (PEM format)
+  // Security: Path only, not certificate contents
+  string server_certificate_path = 3;
+
+  // Server private key path (PEM format)
+  // Security: Path only, never include key contents in config
+  string server_key_path = 4;
+
+  // Auto-generate certificates if not provided (for local dev/testing)
+  // Default: false (production should use proper cert management)
+  bool auto_generate = 5;
+
+  // Directory for auto-generated certificates (if auto_generate = true)
+  // Default: /app/certs
+  string cert_dir = 6;
+
+  // Certificate rotation interval
+  google.protobuf.Duration certificate_rotation_interval = 7;
+
+  // Trusted service IDs (for service-to-service auth)
+  repeated string trusted_services = 8;
 }
 
 // JWT configuration for public APIs
+//
+// ## Purpose
+// Configuration for JWT authentication for user-facing APIs.
+// Supports both symmetric (HS256) and asymmetric (RS256) algorithms.
+//
+// ## Security Best Practices
+// - Secret should be from environment variable, never in config file
+// - Use JWKS for distributed authentication (RS256)
+// - Extract tenant_id from JWT claims for multi-tenant isolation
+// - Token TTL should be short (15 minutes default)
 message JwtConfig {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
@@ -102,11 +146,34 @@ message JwtConfig {
     }
   };
 
+  // Enable JWT authentication (default: true)
   bool enable_jwt = 1;
-  string issuer = 2;  // JWT issuer (e.g., "https://auth.example.com")
-  string jwks_url = 3;  // JWKS endpoint for key validation
-  repeated string allowed_audiences = 4;  // Allowed JWT audiences
-  google.protobuf.Duration token_ttl = 5;
+
+  // JWT secret (for HS256) - should be from env var, not config file
+  // Security: Leave empty in config, set via PLEXSPACES_JWT_SECRET env var
+  string secret = 2;
+
+  // JWT issuer (e.g., "https://auth.example.com")
+  string issuer = 3;
+
+  // JWKS endpoint for key validation (for RS256)
+  // If provided, uses RS256 with JWKS validation instead of HS256
+  string jwks_url = 4;
+
+  // Allowed JWT audiences
+  repeated string allowed_audiences = 5;
+
+  // Token TTL (default: 15 minutes)
+  google.protobuf.Duration token_ttl = 6;
+
+  // Refresh token TTL (default: 7 days)
+  google.protobuf.Duration refresh_token_ttl = 7;
+
+  // JWT claim name for tenant_id extraction (default: "tenant_id")
+  string tenant_id_claim = 8;
+
+  // JWT claim name for user_id extraction (default: "sub")
+  string user_id_claim = 9;
 }
 
 // API key for service authentication

@@ -18,7 +18,7 @@
 
 //! Unit tests for SystemService implementation
 
-use plexspaces_node::{system_service::SystemServiceImpl, Node, NodeConfig, NodeId};
+use plexspaces_node::{system_service::SystemServiceImpl, Node, NodeId, default_node_config};
 use plexspaces_proto::system::v1::{
     GetSystemInfoRequest, GetMetricsRequest, GetConfigRequest, GetHealthRequest,
     GetDetailedHealthRequest, LivenessProbeRequest, ReadinessProbeRequest,
@@ -31,7 +31,7 @@ use tonic::Request;
 
 /// Helper to create a test node
 async fn create_test_node() -> Arc<Node> {
-    Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()))
+    Arc::new(Node::new(NodeId::new("test-node"), default_node_config()))
 }
 
 /// Helper to create a SystemService with node

@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Default PlexSpaces Release Configuration
+#
+# This is a minimal release configuration for an empty node.
+# The node will start with a default application but no actors.
+#
+# Configuration can be overridden via environment variables.
+# See CONFIG_STREAMLINING_PLAN.md for environment variable mapping.
+
+name: "plexspaces-default"
+version: "0.1.0"
+description: "Default PlexSpaces node with empty application"
+
+node:
+  id: "${NODE_ID:-node1}"
+  listen_address: "${NODE_LISTEN_ADDRESS:-0.0.0.0:9001}"
+  cluster_seed_nodes: []
+
+runtime:
+  grpc:
+    enabled: true
+    address: "${GRPC_ADDRESS:-0.0.0.0:9001}"
+    max_connections: 1000
+    keepalive_interval_seconds: 30
+    middleware: []
+  
+  health:
+    heartbeat_interval_seconds: 30
+    heartbeat_timeout_seconds: 60
+    registry_url: ""
+  
+  security:
+    service_identity: {}
+    mtls: {}
+    jwt: {}
+    api_keys: []
+  
+  blob:
+    backend: "${BLOB_BACKEND:-minio}"
+    bucket: "${BLOB_BUCKET:-plexspaces}"
+    endpoint: "${BLOB_ENDPOINT:-http://minio:9000}"
+    access_key_id: "${BLOB_ACCESS_KEY_ID:-minioadmin}"
+    # secret_access_key should be set via PLEXSPACES_BLOB_SECRET_ACCESS_KEY env var
+    use_ssl: false
+    prefix: "/plexspaces"
+  
+  # Shared relational database for scheduler, workflow, object-registry, journaling, blob
+  shared_database:
+    connection_string: "${DATABASE_URL:-postgres://plexspaces:plexspaces@postgres:5432/plexspaces}"
+    pool_size: 10
+    auto_migrate: true
+    migration_paths: []
+  
+  # Locks backend (sql, redis, dynamodb)
+  locks_backend:
+    backend_type: "${LOCKS_BACKEND:-redis}"
+    redis:
+      url: "${LOCKS_REDIS_URL:-redis://redis:6379/0}"
+      pool_size: 10
+      key_prefix: "plexspaces:locks:"
+      cluster_mode: false
+    sql:
+      connection_string: "${DATABASE_URL:-postgres://plexspaces:plexspaces@postgres:5432/plexspaces}"
+      pool_size: 10
+      auto_migrate: true
+  
+  # Channel backend (in-memory, redis, kafka, sqlite, nats)
+  channel_backend:
+    backend_type: "${CHANNEL_BACKEND:-redis}"
+    redis:
+      url: "${CHANNEL_REDIS_URL:-redis://redis:6379/0}"
+      pool_size: 10
+      key_prefix: "plexspaces:channel:"
+      cluster_mode: false
+  
+  # KeyValue backend (sql, redis, dynamodb)
+  keyvalue_backend:
+    backend_type: "${KEYVALUE_BACKEND:-sql}"
+    sql:
+      connection_string: "${DATABASE_URL:-postgres://plexspaces:plexspaces@postgres:5432/plexspaces}"
+      pool_size: 10
+      auto_migrate: true
+    redis:
+      url: "${KEYVALUE_REDIS_URL:-redis://redis:6379/0}"
+      pool_size: 10
+      key_prefix: "plexspaces:kv:"
+      cluster_mode: false
+  
+  # TupleSpace backend (sql, redis, dynamodb)
+  tuplespace_backend:
+    backend_type: "${TUPLESPACE_BACKEND:-sql}"
+    sql:
+      connection_string: "${DATABASE_URL:-postgres://plexspaces:plexspaces@postgres:5432/plexspaces}"
+      pool_size: 10
+      auto_migrate: true
+    redis:
+      url: "${TUPLESPACE_REDIS_URL:-redis://redis:6379/0}"
+      pool_size: 10
+      key_prefix: "plexspaces:tuplespace:"
+      cluster_mode: false
+
+system_applications: []
+
+applications: []
+
+env: {}
+
+shutdown:
+  global_timeout_seconds: 30
+  grace_period_seconds: 10
+  grpc_drain_timeout_seconds: 10
+
+
+
+
+
+

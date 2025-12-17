@@ -18,8 +18,8 @@
 //   - CreateOrder: Creates order, publishes event
 //   - CancelOrder: Cancels order, publishes event
 
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
-use plexspaces_behavior::GenServerBehavior;
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_behavior::GenServer;
 use plexspaces_mailbox::{ActorMessage, Message};
 use plexspaces_node::{ConfigBootstrap, CoordinationComputeTracker};
 use serde::{Deserialize, Serialize};
@@ -79,7 +79,7 @@ impl OrderProcessorBehavior {
 // Hybrid approach: Use both ActorBehavior and GenServerBehavior
 // ActorBehavior handles commands (fire-and-forget)
 #[async_trait::async_trait]
-impl ActorBehavior for OrderProcessorBehavior {
+impl ActorTrait for OrderProcessorBehavior {
     async fn handle_message(
         &mut self,
         ctx: &ActorContext,
@@ -132,12 +132,12 @@ impl ActorBehavior for OrderProcessorBehavior {
 
 // GenServerBehavior handles queries (request/reply)
 #[async_trait::async_trait]
-impl GenServerBehavior for OrderProcessorBehavior {
+impl GenServer for OrderProcessorBehavior {
     async fn handle_request(
         &mut self,
         ctx: &ActorContext,
         msg: Message,
-    ) -> Result<Message, BehaviorError> {
+    ) -> Result<(), BehaviorError> {
         // Handle queries that need a reply
         if let Ok(typed_msg) = msg.as_typed() {
             match typed_msg {
@@ -151,10 +151,20 @@ impl GenServerBehavior for OrderProcessorBehavior {
                                         state = ?order.state,
                                         "Order retrieved via GenServer"
                                     );
-                                    // Return order as reply
+                                    // Send order as reply
                                     let reply_payload = serde_json::to_vec(order)
                                         .map_err(|e| BehaviorError::ProcessingError(format!("Serialization error: {}", e)))?;
-                                    Ok(Message::new(reply_payload))
+                                    let reply = Message::new(reply_payload);
+                                    if let Some(sender_id) = &msg.sender {
+                                        ctx.send_reply(
+                                            msg.correlation_id.as_deref(),
+                                            sender_id,
+                                            msg.receiver.clone(),
+                                            reply,
+                                        ).await
+                                            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                                    }
+                                    Ok(())
                                 }
                                 None => {
                                     warn!(order_id = %order_id, "Order not found");

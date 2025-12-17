@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Tests for get_or_activate_actor (automatic activation pattern)
+//! Tests for get_or_activate_actor (automatic activation pattern)
 
 use plexspaces_actor::Actor;
 use plexspaces_behavior::MockBehavior;
 use plexspaces_core::{ActorId, ActorRef};
 use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeId, default_node_config};
 use std::sync::Arc;
+#[path = "test_helpers.rs"]
 #[path = "test_helpers.rs"]
 mod test_helpers;
 use test_helpers::{lookup_actor_ref, activate_virtual_actor, get_or_activate_actor_helper, spawn_actor_builder_helper, find_actor_helper, spawn_actor_helper};
@@ -17,7 +18,7 @@ use test_helpers::{lookup_actor_ref, activate_virtual_actor, get_or_activate_act
 #[tokio::test]
 async fn test_get_or_activate_actor_new_actor() {
     // Test: Creating a new actor when it doesn't exist
-    let node = Node::new(NodeId::new("test-node"), NodeConfig::default());
+    let node = Node::new(NodeId::new("test-node"), default_node_config());
     let node_id = node.id().clone();
     
     let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();
@@ -60,7 +61,7 @@ async fn test_get_or_activate_actor_new_actor() {
 #[tokio::test]
 async fn test_get_or_activate_actor_existing_actor() {
     // Test: Returning existing actor when it already exists
-    let node = Node::new(NodeId::new("test-node"), NodeConfig::default());
+    let node = Node::new(NodeId::new("test-node"), default_node_config());
     let node_id = node.id().clone();
     
     let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();
@@ -101,7 +102,7 @@ async fn test_get_or_activate_actor_existing_actor() {
 #[tokio::test]
 async fn test_get_or_activate_actor_concurrent_activation() {
     // Test: Concurrent get_or_activate calls should handle race conditions
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
     let node_id = node.id().clone();
     
     let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();

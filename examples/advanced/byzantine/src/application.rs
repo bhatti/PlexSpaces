@@ -77,7 +77,9 @@ impl ByzantineApplication {
         let config = ByzantineConfig {
             general_count,
             fault_count: byzantine_count,
-            ..Default::default()
+            tuplespace_backend: "memory".to_string(),
+            redis_url: None,
+            postgres_url: None,
         };
         
         Self {
@@ -119,10 +121,31 @@ impl Application for ByzantineApplication {
                 tuplespace.clone(),
             ).await.map_err(|e| ApplicationError::StartupFailed(format!("Failed to create General: {}", e)))?;
 
-            // Spawn actor using ApplicationNode trait
-            let behavior = Box::new(general);
-            node.spawn_actor(general_id.clone(), behavior, "byzantine".to_string())
+            // Spawn actor using ActorFactory
+            use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+            use std::sync::Arc;
+            use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+            let service_locator = node.service_locator()
+                .ok_or_else(|| ApplicationError::StartupFailed("ServiceLocator not available from node".to_string()))?;
+            let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
+                .ok_or_else(|| ApplicationError::StartupFailed("ActorFactory not found in ServiceLocator".to_string()))?;
+            
+            // Create mailbox for actor
+            let mut mailbox_config = mailbox_config_default();
+            mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
+            mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
+            mailbox_config.durability_strategy = plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
+            mailbox_config.capacity = 1000;
+            mailbox_config.backpressure_strategy = plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
+            let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", general_id))
                 .await
+                .map_err(|e| ApplicationError::StartupFailed(format!("Failed to create mailbox: {}", e)))?;
+            
+            // Create actor from behavior
+            let actor = plexspaces_actor::Actor::new(general_id.clone(), Box::new(general), mailbox, "byzantine".to_string(), None);
+            
+            // Spawn using ActorFactory
+            actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
                 .map_err(|e| ApplicationError::StartupFailed(format!("Failed to spawn {}: {}", general_id, e)))?;
 
             println!("   ✅ Spawned {} (byzantine: {})", general_id, is_byzantine);
@@ -249,7 +272,9 @@ mod tests {
         let config = ByzantineConfig {
             general_count: 3,
             fault_count: 0,
-            ..Default::default()
+            tuplespace_backend: "memory".to_string(),
+            redis_url: None,
+            postgres_url: None,
         };
         assert!(ByzantineApplication::from_config(config).is_err());
     }
@@ -260,7 +285,9 @@ mod tests {
         let config = ByzantineConfig {
             general_count: 6,
             fault_count: 2,  // 2 >= 6/3, should fail
-            ..Default::default()
+            tuplespace_backend: "memory".to_string(),
+            redis_url: None,
+            postgres_url: None,
         };
         assert!(ByzantineApplication::from_config(config).is_err());
     }

@@ -32,6 +32,9 @@
 //! - ✅ Events contain correct metadata (actor_id, timestamp, reason)
 //! - ✅ Event ordering is correct (Created → Starting → Activated → Terminated)
 
+mod test_helpers;
+use test_helpers::spawn_actor_helper;
+
 use plexspaces_actor::Actor;
 use plexspaces_behavior::MockBehavior;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
@@ -74,7 +77,7 @@ async fn test_lifecycle_event_full_spawn_sequence() {
         None,
     );
 
-    let _actor_ref = node.spawn_actor(actor).await.unwrap();
+    let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Receive Created event
     let created_event =
@@ -168,7 +171,7 @@ async fn test_lifecycle_event_subscription_receives_termination() {
         None,
     );
 
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Skip the spawn lifecycle events (Created, Starting, Activated)
     for _ in 0..3 {
@@ -256,7 +259,7 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
         None,
     );
 
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Skip spawn lifecycle events (Created, Starting, Activated) for all 3 subscribers
     for _ in 0..3 {
@@ -356,7 +359,7 @@ async fn test_lifecycle_event_timestamps() {
         None,
     );
 
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Terminate actor
     drop(actor_ref);
@@ -420,7 +423,7 @@ async fn test_lifecycle_event_unsubscribe() {
         None,
     );
 
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Terminate actor
     drop(actor_ref);

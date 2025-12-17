@@ -6,7 +6,7 @@
 //! Trains a simple linear forecasting model (DLinear-inspired).
 
 use async_trait::async_trait;
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use super::preprocessor::PreprocessedData;
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ impl TrainerActor {
 }
 
 #[async_trait]
-impl ActorBehavior for TrainerActor {
+impl ActorTrait for TrainerActor {
     async fn handle_message(
         &mut self,
         ctx: &ActorContext,

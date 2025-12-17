@@ -30,6 +30,7 @@ import "google/protobuf/any.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/actors/actor_runtime.proto";
+import "plexspaces/v1/security/security.proto";
 
 
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
@@ -74,6 +75,23 @@ message Node {
 
   // Resource metrics
   NodeMetrics metrics = 21;
+
+  // mTLS identity for node-to-node communication
+  //
+  // Used for service-to-service authentication.
+  // Nodes register their public certificate in object-registry.
+  plexspaces.security.v1.ServiceIdentity mtls_identity = 22;
+
+  // Public certificate (PEM format) for object-registry registration
+  //
+  // Other nodes can fetch this certificate for mTLS verification.
+  // Stored in object-registry for service discovery.
+  bytes public_certificate = 23;
+
+  // Auto-generate certificates if not provided (for local dev/testing)
+  //
+  // Security: Only for local development. Production should use proper cert management.
+  bool auto_generate_certs = 24;
 }
 
 // Node type enumeration

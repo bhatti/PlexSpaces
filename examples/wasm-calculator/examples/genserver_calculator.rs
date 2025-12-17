@@ -108,11 +108,6 @@ impl Actor for CalculatorGenServer {
 }
 
 /// Implement GenServer - extends Actor with typed handlers
-///
-/// ## Unified send_reply API
-/// - handle_request: Synchronous, expects reply (like Orleans Task<T>)
-///   - Uses ctx.send_reply() which delegates to ActorService::send_reply()
-///   - Handles both regular and temporary sender IDs automatically
 #[async_trait]
 impl GenServer for CalculatorGenServer {
     /// Handle synchronous request (like Orleans Task<T>, gen_server:call)
@@ -130,7 +125,7 @@ impl GenServer for CalculatorGenServer {
 
         // Only send reply if sender_id is present
         let sender_id = match &msg.sender {
-            Some(sid) => sid,
+            Some(id) => id,
             None => return Ok(()), // Fire-and-forget, no reply needed
         };
 
@@ -298,22 +293,6 @@ mod tests {
         ))
     }
 
-    // Mock Reply implementation for tests
-    struct MockReply;
-
-    #[async_trait::async_trait]
-    impl plexspaces_core::Reply for MockReply {
-        async fn send_reply(
-            &self,
-            _sender_id: &plexspaces_core::ActorId,
-            _correlation_id: Option<&str>,
-            _reply_message: Message,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            // No-op for tests
-            Ok(())
-        }
-    }
-
     #[tokio::test]
     async fn test_genserver_calculator_add() {
         let mut calc = CalculatorGenServer::new();
@@ -322,26 +301,23 @@ mod tests {
         let op = CalculatorOp::Add { value: 10.0 };
         let payload = serde_json::to_vec(&op).unwrap();
         let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
 
         let ctx = create_test_context();
 
-        // Execute via unified handle_message interface (no Reply parameter)
-        // Note: ctx.send_reply() will fail in tests without proper ServiceLocator setup,
-        // but we can verify the state was updated
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        // Execute via unified handle_message interface
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         // Verify state (via another call)
         let op = CalculatorOp::GetTotal;
         let payload = serde_json::to_vec(&op).unwrap();
-        let msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
+        let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
 
         let ctx = create_test_context();
-        let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         // Check state directly
         assert_eq!(calc.state.total, 10.0);
@@ -355,33 +331,29 @@ mod tests {
         // Add 10
         let op = CalculatorOp::Add { value: 10.0 };
         let payload = serde_json::to_vec(&op).unwrap();
-        let msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        let ctx = create_test_context();
         let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
+        let ctx = create_test_context();
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         // Multiply by 2
         let op = CalculatorOp::Multiply { value: 2.0 };
         let payload = serde_json::to_vec(&op).unwrap();
-        let msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        let ctx = create_test_context();
         let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
+        let ctx = create_test_context();
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         // Subtract 5
         let op = CalculatorOp::Subtract { value: 5.0 };
         let payload = serde_json::to_vec(&op).unwrap();
         let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
         let ctx = create_test_context();
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         // Total should be (10 * 2) - 5 = 15
         assert_eq!(calc.state.total, 15.0);
@@ -395,12 +367,11 @@ mod tests {
         // Add 10
         let op = CalculatorOp::Add { value: 10.0 };
         let payload = serde_json::to_vec(&op).unwrap();
-        let msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        let ctx = create_test_context();
         let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
+        let ctx = create_test_context();
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         assert_eq!(calc.state.total, 10.0);
 
@@ -408,12 +379,10 @@ mod tests {
         let op = CalculatorOp::Clear;
         let payload = serde_json::to_vec(&op).unwrap();
         let mut msg = Message::new(payload).with_message_type(MessageType::Cast.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
         let ctx = create_test_context();
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         // Total should be 0 now
         assert_eq!(calc.state.total, 0.0);
@@ -427,12 +396,11 @@ mod tests {
         // Divide by zero
         let op = CalculatorOp::Divide { value: 0.0 };
         let payload = serde_json::to_vec(&op).unwrap();
-        let msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
+        let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
 
         let ctx = create_test_context();
-        let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
         let result = calc.handle_message(&*ctx, msg).await;
         assert!(result.is_err());
     }
@@ -447,18 +415,18 @@ mod tests {
             let op = CalculatorOp::Add { value };
             let payload = serde_json::to_vec(&op).unwrap();
             let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-            msg.sender = Some("test-sender@test-node".to_string());
-            msg.receiver = "calculator@test-node".to_string();
-            let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+            msg.sender = Some("test-sender".to_string());
+            msg.receiver = "test-actor".to_string();
+            calc.handle_message(&*ctx, msg).await.unwrap();
         }
 
         // Get history
         let op = CalculatorOp::GetHistory;
         let payload = serde_json::to_vec(&op).unwrap();
         let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         // History should have 3 operations
         assert_eq!(calc.state.history.len(), 3);
@@ -479,12 +447,12 @@ mod tests {
         // We can call handle_message (unified interface)
         let op = CalculatorOp::Add { value: 42.0 };
         let payload = serde_json::to_vec(&op).unwrap();
-        let mut msg = Message::new(payload).with_message_type(MessageType::Call.to_string());
-        msg.sender = Some("test-sender@test-node".to_string());
-        msg.receiver = "calculator@test-node".to_string();
+        let mut msg = Message::new(payload).with_message_type("call".to_string());
+        msg.sender = Some("test-sender".to_string());
+        msg.receiver = "test-actor".to_string();
         let ctx = create_test_context();
 
-        let _ = calc.handle_message(&*ctx, msg).await; // Ignore send_reply errors in tests
+        calc.handle_message(&*ctx, msg).await.unwrap();
 
         // Verify state was updated
         assert_eq!(calc.state.total, 42.0);

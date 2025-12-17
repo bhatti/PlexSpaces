@@ -35,6 +35,7 @@
 mod handlers {
     use crate::BlobService;
     use crate::BlobError;
+    use plexspaces_core::RequestContext;
     use http_body_util::Full;
     use hyper::body::Bytes;
     use hyper::{Request, Response, StatusCode, Method};
@@ -52,6 +53,43 @@ mod handlers {
         /// Create new HTTP handler
         pub fn new(blob_service: Arc<BlobService>) -> Self {
             Self { blob_service }
+        }
+
+        /// Extract RequestContext from HTTP request headers
+        /// 
+        /// Extracts tenant_id from:
+        /// 1. `x-tenant-id` header (set by JWT middleware)
+        /// 2. Form field `tenant_id` (fallback for multipart uploads)
+        /// 3. Error if not found (production should always have JWT)
+        fn extract_context_from_headers(req: &Request<hyper::body::Incoming>) -> Result<RequestContext, BlobError> {
+            let headers = req.headers();
+            
+            // Extract tenant_id from headers (set by JWT middleware)
+            let tenant_id = headers.get("x-tenant-id")
+                .and_then(|v| v.to_str().ok())
+                .ok_or_else(|| BlobError::InvalidInput("Missing x-tenant-id header. JWT authentication required.".to_string()))?;
+            
+            let namespace = headers.get("x-namespace")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("default");
+            
+            let user_id = headers.get("x-user-id")
+                .and_then(|v| v.to_str().ok());
+            
+            let mut ctx = RequestContext::new(tenant_id.to_string())
+                .with_namespace(namespace.to_string());
+            
+            if let Some(uid) = user_id {
+                ctx = ctx.with_user_id(uid.to_string());
+            }
+            
+            Ok(ctx)
+        }
+
+        /// Extract RequestContext from multipart form (fallback for uploads)
+        fn extract_context_from_form(tenant_id: &str, namespace: &str) -> RequestContext {
+            RequestContext::new(tenant_id.to_string())
+                .with_namespace(namespace.to_string())
         }
 
         /// Handle HTTP request
@@ -80,34 +118,12 @@ mod handlers {
         }
 
         /// Handle file upload (multipart/form-data)
+        /// 
+        /// Note: This is a legacy handler. The Axum router handles multipart uploads properly.
         async fn handle_upload(
             &self,
-            req: Request<hyper::body::Incoming>,
+            _req: Request<hyper::body::Incoming>,
         ) -> Result<Response<Full<Bytes>>, BlobError> {
-            // Get content type
-            let content_type = req.headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .ok_or_else(|| BlobError::ConfigError("Missing content-type header".to_string()))?;
-
-            if !content_type.starts_with("multipart/form-data") {
-                return Ok(Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Full::new(Bytes::from("Expected multipart/form-data")))
-                    .unwrap());
-            }
-
-            // Parse multipart
-            let boundary = content_type
-                .split("boundary=")
-                .nth(1)
-                .ok_or_else(|| BlobError::ConfigError("Missing boundary in content-type".to_string()))?;
-
-            // Convert request body to bytes
-            use http_body_util::BodyExt;
-            let body_bytes = req.into_body().collect().await
-                .map_err(|e| BlobError::InternalError(format!("Failed to read body: {}", e)))?
-                .to_bytes();
 
             // Create multipart parser - multer 2.1 uses different API
             // For now, we'll use a simpler approach with bytes directly
@@ -126,6 +142,9 @@ mod handlers {
             &self,
             req: Request<hyper::body::Incoming>,
         ) -> Result<Response<Full<Bytes>>, BlobError> {
+            // Extract RequestContext from headers
+            let ctx = Self::extract_context_from_headers(&req)?;
+            
             // Extract blob_id from path: /api/v1/blobs/{blob_id}/download/raw
             let path = req.uri().path();
             let blob_id = path
@@ -140,14 +159,14 @@ mod handlers {
                     .unwrap());
             }
 
-            // Get metadata
+            // Get metadata (automatically filtered by tenant_id)
             let metadata = self.blob_service
-                .get_metadata(blob_id)
+                .get_metadata(&ctx, blob_id)
                 .await?;
 
-            // Download blob data
+            // Download blob data (automatically filtered by tenant_id)
             let data = self.blob_service
-                .download_blob(blob_id)
+                .download_blob(&ctx, blob_id)
                 .await?;
 
             // Build response with appropriate content type

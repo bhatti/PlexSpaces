@@ -920,7 +920,7 @@ mod tests {
         let ctx = Arc::new(ActorContext::minimal(
             "test".to_string(),
             "test-node".to_string(),
-            "test-ns".to_string(),
+            "test-ns".to_string(), // namespace
         ));
         let msg = Message::new(vec![]);
         behavior.handle_message(&*ctx, msg).await.unwrap();

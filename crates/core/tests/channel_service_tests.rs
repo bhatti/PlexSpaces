@@ -8,11 +8,11 @@ mod tests {
     use plexspaces_mailbox::Message;
     use std::sync::Arc;
     use futures::StreamExt;
+    use async_trait::async_trait;
+    use plexspaces_core::{ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider};
 
     // Test ChannelService implementation
     struct TestChannelService;
-    
-    impl Service for TestChannelService {}
     
     #[async_trait::async_trait]
     impl plexspaces_core::ChannelService for TestChannelService {
@@ -73,4 +73,5 @@ mod tests {
             Ok(0)
         }
     }
+}
 

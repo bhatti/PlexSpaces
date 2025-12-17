@@ -35,7 +35,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeId, default_node_config};
 use plexspaces_proto::{tuplespace::v1::*, TuplePlexSpaceServiceClient};
 use plexspaces_tuplespace::{
     Pattern, PatternField, Tuple as InternalTuple, TupleField as InternalTupleField,
@@ -47,7 +47,7 @@ type ProtoTupleField = plexspaces_proto::tuplespace::v1::TupleField;
 
 /// Helper to create a test node with a specific port
 fn create_test_node(node_id: &str, port: u16) -> Node {
-    let mut config = NodeConfig::default();
+    let mut config = default_node_config();
     config.listen_addr = format!("127.0.0.1:{}", port);
 
     Node::new(NodeId::new(node_id), config)

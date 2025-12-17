@@ -21,7 +21,7 @@
 use plexspaces_actor::ActorRef;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{
-    grpc_client::RemoteActorClient, grpc_service::ActorServiceImpl, Node, NodeConfig, NodeId,
+    grpc_client::RemoteActorClient, grpc_service::ActorServiceImpl, Node, NodeId, default_node_config,
 };
 use plexspaces_proto::{v1::actor::Message as ProtoMessage, ActorServiceServer};
 use std::sync::Arc;
@@ -72,7 +72,7 @@ async fn start_test_server(node: Arc<Node>) -> String {
 
 /// Helper to create a test node with a registered actor
 async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
-    let node = Arc::new(Node::new(NodeId::new("test-node-1"), NodeConfig::default()));
+    let node = Arc::new(Node::new(NodeId::new("test-node-1"), default_node_config()));
 
     use plexspaces_actor::RegularActorWrapper;
     use plexspaces_core::MessageSender;
@@ -158,7 +158,7 @@ async fn test_send_message_via_client() {
 #[tokio::test]
 async fn test_send_message_to_nonexistent_actor() {
     // Setup: Start server WITHOUT registered actor
-    let node = Arc::new(Node::new(NodeId::new("test-node-2"), NodeConfig::default()));
+    let node = Arc::new(Node::new(NodeId::new("test-node-2"), default_node_config()));
     let server_addr = start_test_server(node).await;
 
     // Create client

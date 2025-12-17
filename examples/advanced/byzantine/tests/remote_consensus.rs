@@ -23,11 +23,12 @@
 
 use std::sync::Arc;
 use plexspaces_node::{Node, NodeId, NodeConfig, grpc_service::ActorServiceImpl};
-use plexspaces_core::ActorRef;
+use plexspaces_actor::ActorRef;
 use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
 use plexspaces_proto::ActorServiceServer;
 use tonic::transport::Server;
 use serde::{Serialize, Deserialize};
+use async_trait::async_trait;
 
 /// Byzantine General state
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,10 +114,34 @@ impl GeneralBehavior {
     }
 }
 
+/// Implement Actor trait for GeneralBehavior
+#[async_trait::async_trait]
+impl plexspaces_core::Actor for GeneralBehavior {
+    async fn handle_message(
+        &mut self,
+        _ctx: &plexspaces_core::ActorContext,
+        msg: Message,
+    ) -> Result<(), plexspaces_core::BehaviorError> {
+        // Parse message payload
+        if let Ok(text) = String::from_utf8(msg.payload().to_vec()) {
+            if text == "attack" || text == "retreat" {
+                self.handle_proposal(text);
+            } else {
+                self.handle_vote(text);
+            }
+        }
+        Ok(())
+    }
+
+    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        plexspaces_core::BehaviorType::Custom("ByzantineGeneral".to_string())
+    }
+}
+
 /// Helper to start a gRPC server for testing
 async fn start_test_server(node: Arc<Node>) -> String {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let service = ActorServiceImpl::new(node.clone());
+    let service = ActorServiceImpl { node: node.clone() };
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
@@ -160,33 +185,64 @@ async fn test_byzantine_generals_two_nodes() {
     // Node1: general1 (commander), general2 (loyal)
     // Node2: general3 (loyal), general4 (traitor)
 
-    let mailbox1 = Arc::new(Mailbox::new(MailboxConfig::default()));
-    let actor_ref1 = ActorRef::new_local("general1@node1".to_string(), mailbox1.clone())
-        .expect("Failed to create ActorRef");
-    node1.register_actor(actor_ref1.clone()).await.unwrap();
+    // Create generals and spawn them using ActorFactory
+    use plexspaces_actor::{Actor, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    
+    // Get ActorFactory for both nodes
+    let service_locator1 = node1.service_locator()
+        .expect("ServiceLocator not available from node1");
+    let actor_factory1: Arc<ActorFactoryImpl> = service_locator1.get_service().await
+        .expect("ActorFactory not found");
+    let service_locator2 = node2.service_locator()
+        .expect("ServiceLocator not available from node2");
+    let actor_factory2: Arc<ActorFactoryImpl> = service_locator2.get_service().await
+        .expect("ActorFactory not found");
+    
+    // Create and spawn general1
+    let mailbox1 = Arc::new(Mailbox::new(MailboxConfig::default(), "general1@node1".to_string()).await.expect("Failed to create mailbox1"));
+    let general1_behavior = GeneralBehavior::new("general1".to_string(), true, false); // commander
+    let actor1 = Actor::new("general1@node1".to_string(), Box::new(general1_behavior), mailbox1.clone(), "byzantine".to_string(), None);
+    actor_factory1.spawn_built_actor(Arc::new(actor1), None, None, None).await.expect("Failed to spawn general1");
+    let service_locator1 = node1.service_locator().clone();
+    let actor_ref1 = plexspaces_actor::ActorRef::local("general1@node1".to_string(), mailbox1.clone(), service_locator1.clone());
 
-    let mailbox2 = Arc::new(Mailbox::new(MailboxConfig::default()));
-    let actor_ref2 = ActorRef::new_local("general2@node1".to_string(), mailbox2.clone())
-        .expect("Failed to create ActorRef");
-    node1.register_actor(actor_ref2.clone()).await.unwrap();
+    // Create and spawn general2
+    let mailbox2 = Arc::new(Mailbox::new(MailboxConfig::default(), "general2@node1".to_string()).await.expect("Failed to create mailbox2"));
+    let general2_behavior = GeneralBehavior::new("general2".to_string(), false, false); // loyal
+    let actor2 = Actor::new("general2@node1".to_string(), Box::new(general2_behavior), mailbox2.clone(), "byzantine".to_string(), None);
+    actor_factory1.spawn_built_actor(Arc::new(actor2), None, None, None).await.expect("Failed to spawn general2");
+    let actor_ref2 = plexspaces_actor::ActorRef::local("general2@node1".to_string(), mailbox2.clone(), service_locator1.clone());
 
-    let mailbox3 = Arc::new(Mailbox::new(MailboxConfig::default()));
-    let actor_ref3 = ActorRef::new_local("general3@node2".to_string(), mailbox3.clone())
-        .expect("Failed to create ActorRef");
-    node2.register_actor(actor_ref3.clone()).await.unwrap();
+    // Create and spawn general3
+    let mailbox3 = Arc::new(Mailbox::new(MailboxConfig::default(), "general3@node2".to_string()).await.expect("Failed to create mailbox3"));
+    let general3_behavior = GeneralBehavior::new("general3".to_string(), false, false); // loyal
+    let actor3 = Actor::new("general3@node2".to_string(), Box::new(general3_behavior), mailbox3.clone(), "byzantine".to_string(), None);
+    actor_factory2.spawn_built_actor(Arc::new(actor3), None, None, None).await.expect("Failed to spawn general3");
+    let service_locator2 = node2.service_locator().clone();
+    let actor_ref3 = plexspaces_actor::ActorRef::local("general3@node2".to_string(), mailbox3.clone(), service_locator2.clone());
 
-    let mailbox4 = Arc::new(Mailbox::new(MailboxConfig::default()));
-    let actor_ref4 = ActorRef::new_local("general4@node2".to_string(), mailbox4.clone())
-        .expect("Failed to create ActorRef");
-    node2.register_actor(actor_ref4.clone()).await.unwrap();
+    // Create and spawn general4
+    let mailbox4 = Arc::new(Mailbox::new(MailboxConfig::default(), "general4@node2".to_string()).await.expect("Failed to create mailbox4"));
+    let general4_behavior = GeneralBehavior::new("general4".to_string(), false, true); // traitor
+    let actor4 = Actor::new("general4@node2".to_string(), Box::new(general4_behavior), mailbox4.clone(), "byzantine".to_string(), None);
+    actor_factory2.spawn_built_actor(Arc::new(actor4), None, None, None).await.expect("Failed to spawn general4");
+    let actor_ref4 = plexspaces_actor::ActorRef::local("general4@node2".to_string(), mailbox4.clone(), service_locator2.clone());
 
     // Commander (general1) proposes "attack"
     let proposal_msg = Message::new("attack".as_bytes().to_vec());
 
-    // Send proposal to other generals (cross-node messaging)
-    node1.route_message(&"general2@node1".to_string(), proposal_msg.clone()).await.unwrap();
-    node1.route_message(&"general3@node2".to_string(), proposal_msg.clone()).await.unwrap();
-    node1.route_message(&"general4@node2".to_string(), proposal_msg.clone()).await.unwrap();
+    // Send proposal to other generals (cross-node messaging) using ActorRef::tell()
+    let actor_ref2 = plexspaces_actor::ActorRef::local("general2@node1".to_string(), mailbox2.clone(), service_locator1.clone());
+    actor_ref2.tell(proposal_msg.clone()).await.expect("Failed to send to general2");
+    
+    // For remote actors, we need to use ActorService or create remote ActorRef
+    // For now, let's use the local approach and fix remote later
+    let actor_ref3 = plexspaces_actor::ActorRef::remote("general3@node2".to_string(), "node2".to_string(), service_locator1.clone());
+    actor_ref3.tell(proposal_msg.clone()).await.expect("Failed to send to general3");
+    
+    let actor_ref4 = plexspaces_actor::ActorRef::remote("general4@node2".to_string(), "node2".to_string(), service_locator1.clone());
+    actor_ref4.tell(proposal_msg.clone()).await.expect("Failed to send to general4");
 
     // Wait for messages to propagate
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -225,15 +281,20 @@ async fn test_byzantine_connection_pooling() {
     let node2_address = start_test_server(node2.clone()).await;
     node1.register_remote_node(NodeId::new("node2"), node2_address).await.unwrap();
 
-    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default()));
-    let actor_ref = ActorRef::new_local("general@node2".to_string(), mailbox.clone())
-        .expect("Failed to create ActorRef");
-    node2.register_actor(actor_ref).await.unwrap();
+    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "general@node2".to_string()).await.expect("Failed to create mailbox"));
+    let service_locator2 = node2.service_locator().clone();
+    // Register actor with ActorRegistry
+    use plexspaces_actor::RegularActorWrapper;
+    use plexspaces_core::MessageSender;
+    let wrapper = Arc::new(RegularActorWrapper::new("general@node2".to_string(), mailbox.clone(), service_locator2.clone()));
+    node2.actor_registry().register_actor("general@node2".to_string(), wrapper, None, None, None).await;
 
-    // Send 10 messages (should reuse same gRPC connection)
+    // Send 10 messages (should reuse same gRPC connection) using ActorRef::tell()
+    let service_locator1 = node1.service_locator().clone();
+    let actor_ref = plexspaces_actor::ActorRef::remote("general@node2".to_string(), "node2".to_string(), service_locator1.clone());
     for i in 0..10 {
         let msg = Message::new(format!("vote-{}", i).as_bytes().to_vec());
-        node1.route_message(&"general@node2".to_string(), msg).await.unwrap();
+        actor_ref.tell(msg).await.expect(&format!("Failed to send message {}", i));
     }
 
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -258,7 +319,9 @@ async fn test_byzantine_node_failure() {
 
     // Try to send to unregistered node
     let msg = Message::new("attack".as_bytes().to_vec());
-    let result = node1.route_message(&"general@node999".to_string(), msg).await;
+    let service_locator1 = node1.service_locator().clone();
+    let actor_ref = plexspaces_actor::ActorRef::remote("general@node999".to_string(), "node999".to_string(), service_locator1.clone());
+    let result = actor_ref.tell(msg).await;
 
     assert!(result.is_err(), "Should fail for unregistered node");
 
@@ -278,14 +341,23 @@ async fn test_cross_node_actor_discovery() {
     let node2_address = start_test_server(node2.clone()).await;
     node1.register_remote_node(NodeId::new("node2"), node2_address).await.unwrap();
 
-    // Register actor on node2
-    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default()));
-    let actor_ref = ActorRef::new_local("general@node2".to_string(), mailbox)
-        .expect("Failed to create ActorRef");
-    node2.register_actor(actor_ref).await.unwrap();
+    // Create and spawn general using ActorFactory
+    use plexspaces_actor::{Actor, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let service_locator2 = node2.service_locator()
+        .expect("ServiceLocator not available from node2");
+    let actor_factory2: Arc<ActorFactoryImpl> = service_locator2.get_service().await
+        .expect("ActorFactory not found");
+    
+    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "general@node2".to_string()).await.expect("Failed to create mailbox"));
+    let general_behavior = GeneralBehavior::new("general".to_string(), false, false);
+    let actor = Actor::new("general@node2".to_string(), Box::new(general_behavior), mailbox.clone(), "byzantine".to_string(), None);
+    actor_factory2.spawn_built_actor(Arc::new(actor), None, None, None).await.expect("Failed to spawn general");
 
-    // Node1 should discover actor on node2
-    let location = node1.find_actor(&"general@node2".to_string()).await;
+    // Node1 should discover actor on node2 via ActorRegistry lookup
+    let service_locator1 = node1.service_locator().clone();
+    let registry1: Arc<plexspaces_core::ActorRegistry> = service_locator1.get_service().await.expect("ActorRegistry not found");
+    let location = registry1.lookup_actor(&"general@node2".to_string()).await;
     assert!(location.is_ok(), "Should find actor on remote node");
 
     match location.unwrap() {

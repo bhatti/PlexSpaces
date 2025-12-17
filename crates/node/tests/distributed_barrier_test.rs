@@ -44,7 +44,7 @@
 //! - MapReduce (shuffle barriers)
 //! - Distributed training (gradient synchronization)
 
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeId, default_node_config};
 use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField};
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};
@@ -122,7 +122,7 @@ async fn test_multi_round_barrier_coordination() {
     // Setup - Create node with LOCAL TupleSpace
     let node = Arc::new(Node::new(
         NodeId::new("test-node-multi-round"),
-        NodeConfig::default(),
+        default_node_config(),
     ));
 
     let tuplespace = node.tuplespace();

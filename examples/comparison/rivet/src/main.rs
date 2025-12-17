@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Comparison: Rivet Actors (Cloudflare Durable Objects pattern)
 
-use plexspaces_actor::{ActorBuilder, ActorRef};
-use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, ActorId, Reply};
+use plexspaces_actor::{ActorBuilder, ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use plexspaces_behavior::GenServerBehavior;
+use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, ActorId};
 use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, DurabilityConfig, MemoryJournalStorage};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::info;
@@ -38,10 +39,9 @@ impl Actor for CounterActor {
         &mut self,
         ctx: &ActorContext,
         msg: Message,
-        reply: &dyn Reply,
     ) -> Result<(), BehaviorError> {
-        // Delegate to GenServer's route_message
-        <Self as GenServer>::route_message(self, ctx, msg, reply).await
+        // Delegate to GenServerBehavior's route_message
+        self.route_message(ctx, msg).await
     }
 
     fn behavior_type(&self) -> BehaviorType {
@@ -50,7 +50,7 @@ impl Actor for CounterActor {
 }
 
 #[async_trait::async_trait]
-impl GenServer for CounterActor {
+impl GenServerBehavior for CounterActor {
     async fn handle_request(
         &mut self,
         _ctx: &ActorContext,
@@ -131,7 +131,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .attach_facet(durability_facet, 50, serde_json::json!({}))
         .await?;
     
-    let core_ref = node.spawn_actor(actor).await?;
+    // Spawn using ActorFactory
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let core_ref = plexspaces_core::ActorRef::new(actor_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
 
     // Convert to actor::ActorRef for ask method
     let mailbox = node.actor_registry()
@@ -234,7 +243,14 @@ mod tests {
         let durability_facet = Box::new(DurabilityFacet::new(storage, DurabilityConfig::default()));
         actor.attach_facet(durability_facet, 50, serde_json::json!({})).await.unwrap();
         
-        let core_ref = node.spawn_actor(actor).await.unwrap();
+        // Spawn using ActorFactory
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = actor.id().clone();
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
+        let core_ref = plexspaces_core::ActorRef::new(actor_id)
+            .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();
 
         let mailbox = node.actor_registry()
             .lookup_mailbox(core_ref.id())

@@ -107,7 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Method 1: Using ActorService from ActorContext (location-transparent)
     println!("\n1. Sending via ActorService (location-transparent):");
     let msg1 = Message::new(b"increment".to_vec());
-    let actor_service = ctx.get_actor_service().await.map_err(|e| format!("ActorService not available: {}", e))?;
+    let actor_service = ctx.get_actor_service().await
+        .ok_or("ActorService not available")?;
     actor_service.send(&counter1_ref.id(), msg1).await.map_err(|e| format!("Failed to send message: {}", e))?;
     println!("   ✅ Sent 'increment' to counter@node1 via ActorService.send_message()");
 
@@ -127,7 +128,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Method 3: Another message via ActorService
     println!("\n3. Sending 'get' command via ActorService:");
     let msg3 = Message::new(b"get".to_vec());
-    let actor_service = ctx.get_actor_service().await.map_err(|e| format!("ActorService not available: {}", e))?;
+    let actor_service = ctx.get_actor_service().await
+        .ok_or("ActorService not available")?;
     actor_service.send(&counter1_ref.id(), msg3).await?;
     println!("   ✅ Sent 'get' to counter@node1 via ActorService.send_message()");
 

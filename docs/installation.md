@@ -179,6 +179,17 @@ make test
 cargo install --path crates/cli
 ```
 
+## Security
+
+PlexSpaces provides comprehensive security features including:
+
+- **Node-to-Node Authentication**: Mutual TLS (mTLS) for secure inter-node communication
+- **User API Authentication**: JWT-based authentication for user-facing APIs
+- **Tenant Isolation**: Mandatory tenant isolation for all operations
+- **Security Validation**: Automatic validation that secrets are not hardcoded in config files
+
+**For detailed security configuration and best practices, see [Security Guide](security.md).**
+
 ## Configuration
 
 ### Environment Variables
@@ -378,6 +389,8 @@ kill -9 <PID>
 ## Next Steps
 
 - [Getting Started](getting-started.md): Learn the basics and create your first actor
+- [Usage Guide](usage.md): Practical usage patterns and examples
+- [Security Guide](security.md): Configure security, mTLS, JWT, and tenant isolation
 - [Concepts Guide](concepts.md): Understand core concepts
 - [Architecture](architecture.md): Understand the system design
 - [Examples](../examples/): Explore example applications

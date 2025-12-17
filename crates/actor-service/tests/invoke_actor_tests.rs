@@ -195,6 +195,7 @@ async fn create_test_registry_with_actors(
             .build()
             .await;
         
+        // tenant_id is optional now (removed from ActorContext)
         let message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
             .map_err(|e| format!("Failed to spawn actor: {}", e))
             .unwrap();

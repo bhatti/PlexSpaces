@@ -24,6 +24,9 @@
 //! - Facet retrieval via FacetService
 //! - SQLite backend integration (with and without locks)
 
+mod test_helpers;
+use test_helpers::spawn_actor_helper;
+
 use plexspaces_actor::ActorBuilder;
 use plexspaces_core::{Actor, ActorContext, ActorId};
 use plexspaces_journaling::TimerFacet;
@@ -81,7 +84,7 @@ async fn test_facet_service_get_facet_normal_actor() {
     
     // Spawn actor (normal actor)
     let actor_id_before = ActorId::from("test-actor@local");
-    let actor_ref = node.clone().spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
     // Verify actor_id matches
@@ -128,7 +131,7 @@ async fn test_facet_service_get_facet_virtual_actor() {
         .unwrap();
     
     // Spawn actor (virtual actor)
-    let actor_ref = node.clone().spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
     // Wait for actor to be fully initialized
@@ -157,7 +160,7 @@ async fn test_facet_service_get_facet_not_found() {
         .await;
     
     // Spawn actor
-    let actor_ref = node.clone().spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
     // Wait for actor to be fully initialized
@@ -192,7 +195,7 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
         .unwrap();
     
     // Spawn actor
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
     // IMPORTANT: Check facets IMMEDIATELY after spawning, before actor can terminate
@@ -231,7 +234,7 @@ async fn test_facet_service_with_sqlite_backend() {
         .unwrap();
     
     // Spawn actor
-    let actor_ref = node.clone().spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
     // Wait for actor to be fully initialized

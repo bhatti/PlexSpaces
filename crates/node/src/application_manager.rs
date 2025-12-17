@@ -70,6 +70,8 @@ pub struct ApplicationManager {
     shutdown_requested: Arc<RwLock<bool>>,
     /// Reference to the node context for applications
     node_context: Option<Arc<dyn ApplicationNode>>,
+    /// ServiceLocator for accessing ActorFactory
+    service_locator: Option<Arc<plexspaces_core::ServiceLocator>>,
 }
 
 impl ApplicationManager {
@@ -79,6 +81,7 @@ impl ApplicationManager {
             applications: Arc::new(RwLock::new(HashMap::new())),
             shutdown_requested: Arc::new(RwLock::new(false)),
             node_context: None,
+            service_locator: None,
         }
     }
 
@@ -87,6 +90,13 @@ impl ApplicationManager {
     /// Can be called multiple times safely (idempotent).
     pub fn set_node_context(&mut self, node_context: Arc<dyn ApplicationNode>) {
         self.node_context = Some(node_context);
+    }
+
+    /// Set the service locator for the application manager.
+    /// This is called by the Node after its creation.
+    /// Can be called multiple times safely (idempotent).
+    pub fn set_service_locator(&mut self, service_locator: Arc<plexspaces_core::ServiceLocator>) {
+        self.service_locator = Some(service_locator);
     }
 
     /// Check if node context is set
@@ -699,24 +709,6 @@ mod tests {
 
         fn listen_addr(&self) -> &str {
             &self.addr
-        }
-
-        async fn spawn_actor(
-            &self,
-            actor_id: String,
-            _behavior: Box<dyn plexspaces_core::Actor>,
-            _namespace: String,
-        ) -> Result<String, plexspaces_core::application::ApplicationError> {
-            // Mock implementation for tests
-            Ok(actor_id)
-        }
-
-        async fn stop_actor(
-            &self,
-            _actor_id: &str,
-        ) -> Result<(), plexspaces_core::application::ApplicationError> {
-            // Mock implementation for tests
-            Ok(())
         }
     }
 

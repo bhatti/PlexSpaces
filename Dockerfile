@@ -78,19 +78,40 @@ COPY --from=builder /app/target/release/plexspaces-node ./plexspaces-node
 # Create config and data directories
 RUN mkdir -p /app/config /app/data && chown -R plexspaces:plexspaces /app
 
+# Copy default release configuration
+COPY config/release.yaml /app/config/release.yaml
+RUN chown plexspaces:plexspaces /app/config/release.yaml
+
 # Switch to non-root user
 USER plexspaces
 
 # Expose the default gRPC port
 EXPOSE 9001
 
-# Default environment variables for SQLite backends
-ENV PLEXSPACES_JOURNALING_BACKEND=sqlite
-ENV PLEXSPACES_JOURNALING_SQLITE_PATH=/app/data/journal.db
-ENV PLEXSPACES_CHANNEL_BACKEND=sqlite
-ENV PLEXSPACES_CHANNEL_SQLITE_PATH=/app/data/channel.db
-ENV PLEXSPACES_TUPLESPACE_BACKEND=sqlite
-ENV PLEXSPACES_TUPLESPACE_SQLITE_PATH=/app/data/tuplespace.db
+# Default environment variables
+# These can be overridden via docker-compose or Kubernetes
+ENV PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
+ENV NODE_ID=node1
+ENV NODE_LISTEN_ADDRESS=0.0.0.0:9001
+ENV GRPC_ADDRESS=0.0.0.0:9001
+
+# Database configuration (defaults, override in docker-compose)
+ENV DATABASE_URL=postgres://plexspaces:plexspaces@postgres:5432/plexspaces
+
+# Backend configurations (defaults, override in docker-compose)
+ENV LOCKS_BACKEND=redis
+ENV LOCKS_REDIS_URL=redis://redis:6379/0
+ENV CHANNEL_BACKEND=redis
+ENV CHANNEL_REDIS_URL=redis://redis:6379/0
+ENV KEYVALUE_BACKEND=sql
+ENV TUPLESPACE_BACKEND=sql
+
+# Blob storage configuration (defaults, override in docker-compose)
+ENV BLOB_BACKEND=minio
+ENV BLOB_BUCKET=plexspaces
+ENV BLOB_ENDPOINT=http://minio:9000
+ENV BLOB_ACCESS_KEY_ID=minioadmin
+# BLOB_SECRET_ACCESS_KEY should be set via secrets in docker-compose/k8s
 
 # Health check using gRPC health probe
 # Note: Requires grpc_health_probe binary (install separately or use HTTP via gRPC-Gateway)
@@ -100,5 +121,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # Run the PlexSpaces framework node
 # Framework starts empty, ready to accept WASM deployments via gRPC
 ENTRYPOINT ["./plexspaces-node"]
-CMD ["--config", "/app/config/node.toml"]
+CMD ["--release-config", "/app/config/release.yaml"]
 

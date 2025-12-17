@@ -86,12 +86,33 @@ impl Application for EntityRecognitionApplication {
         
         self.metrics_tracker.start_coordinate();
 
+        // Use ActorFactory directly
+        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
+        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+        
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| ApplicationError::StartupFailed("ActorFactory not found in ServiceLocator".to_string()))?;
+        
+        // Create mailbox config
+        let mut mailbox_config = mailbox_config_default();
+        mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
+        mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
+        mailbox_config.durability_strategy = plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
+        mailbox_config.capacity = 1000;
+        mailbox_config.backpressure_strategy = plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
+        
         // Spawn loader actors (CPU-intensive)
         for i in 0..self.config.loader_count {
             let actor_id = format!("loader-{}@{}", i, node.id());
             let behavior = Box::new(LoaderBehavior::new(vec![]));
-            node.spawn_actor(actor_id.clone(), behavior, "entity-recognition".to_string())
+            
+            let mailbox = Mailbox::new(mailbox_config.clone(), format!("{}:mailbox", actor_id))
                 .await
+                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to create mailbox: {}", e)))?;
+            
+            let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
+            
+            actor_factory.spawn_built_actor(Arc::new(actor), None, None, Some("entity-recognition".to_string())).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             
             self.actor_refs.write().await.push(actor_id.clone());
@@ -102,8 +123,14 @@ impl Application for EntityRecognitionApplication {
         for i in 0..self.config.processor_count {
             let actor_id = format!("processor-{}@{}", i, node.id());
             let behavior = Box::new(ProcessorBehavior::new());
-            node.spawn_actor(actor_id.clone(), behavior, "entity-recognition".to_string())
+            
+            let mailbox = Mailbox::new(mailbox_config.clone(), format!("{}:mailbox", actor_id))
                 .await
+                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to create mailbox: {}", e)))?;
+            
+            let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
+            
+            actor_factory.spawn_built_actor(Arc::new(actor), None, None, Some("entity-recognition".to_string())).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             
             self.actor_refs.write().await.push(actor_id.clone());
@@ -114,8 +141,14 @@ impl Application for EntityRecognitionApplication {
         for i in 0..self.config.aggregator_count {
             let actor_id = format!("aggregator-{}@{}", i, node.id());
             let behavior = Box::new(AggregatorBehavior::new(0)); // Expected count set later
-            node.spawn_actor(actor_id.clone(), behavior, "entity-recognition".to_string())
+            
+            let mailbox = Mailbox::new(mailbox_config.clone(), format!("{}:mailbox", actor_id))
                 .await
+                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to create mailbox: {}", e)))?;
+            
+            let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
+            
+            actor_factory.spawn_built_actor(Arc::new(actor), None, None, Some("entity-recognition".to_string())).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             
             self.actor_refs.write().await.push(actor_id.clone());

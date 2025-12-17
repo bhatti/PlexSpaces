@@ -268,5 +268,115 @@ mod tests {
         );
         assert!(decision.error_message.contains("Missing authorization"));
     }
+
+    #[tokio::test]
+    async fn test_jwt_extracts_tenant_id() {
+        // Test that JWT interceptor extracts tenant_id from claims and adds to headers
+        let secret = "test-secret-key";
+        let config = AuthMiddlewareConfig {
+            method: AuthMethod::AuthMethodJwt as i32,
+            jwt_key: secret.to_string(),
+            rbac: None,
+            allow_unauthenticated: false,
+            mtls_ca_certificate: String::new(),
+            mtls_trusted_services: vec![],
+        };
+
+        let interceptor = AuthInterceptor::new(config).unwrap();
+
+        // Create JWT token with tenant_id
+        let claims = TestClaims {
+            sub: "user123".to_string(),
+            exp: chrono::Utc::now().timestamp() + 3600,
+            iat: chrono::Utc::now().timestamp(),
+            iss: "test-issuer".to_string(),
+            aud: vec![],
+            roles: vec!["admin".to_string(), "user".to_string()],
+            tenant_id: "tenant-456".to_string(),
+        };
+        let token = create_test_jwt(secret, &claims);
+
+        // Create request with JWT token
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("authorization".to_string(), format!("Bearer {}", token));
+        let request = plexspaces_proto::grpc::v1::InterceptorRequest {
+            method: "/ActorService/SpawnActor".to_string(),
+            headers,
+            remote_addr: "127.0.0.1:12345".to_string(),
+            timestamp: None,
+            request_id: ulid::Ulid::new().to_string(),
+            peer_certificate: String::new(),
+            peer_service_id: String::new(),
+        };
+
+        // Should allow and extract tenant_id
+        let result = interceptor.before_request(&request).await;
+        assert!(result.is_ok());
+        let decision = result.unwrap();
+        assert_eq!(
+            decision.decision,
+            plexspaces_proto::grpc::v1::InterceptorDecision::InterceptorDecisionAllow as i32
+        );
+        
+        // Check that tenant_id was added to headers
+        assert_eq!(decision.modified_headers.get("x-tenant-id"), Some(&"tenant-456".to_string()));
+        assert_eq!(decision.modified_headers.get("x-user-id"), Some(&"user123".to_string()));
+        assert_eq!(decision.modified_headers.get("x-user-roles"), Some(&"admin,user".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_jwt_handles_missing_tenant_id() {
+        // Test that JWT interceptor handles missing tenant_id gracefully
+        let secret = "test-secret-key";
+        let config = AuthMiddlewareConfig {
+            method: AuthMethod::AuthMethodJwt as i32,
+            jwt_key: secret.to_string(),
+            rbac: None,
+            allow_unauthenticated: false,
+            mtls_ca_certificate: String::new(),
+            mtls_trusted_services: vec![],
+        };
+
+        let interceptor = AuthInterceptor::new(config).unwrap();
+
+        // Create JWT token without tenant_id
+        let claims = TestClaims {
+            sub: "user123".to_string(),
+            exp: chrono::Utc::now().timestamp() + 3600,
+            iat: chrono::Utc::now().timestamp(),
+            iss: "test-issuer".to_string(),
+            aud: vec![],
+            roles: vec![],
+            tenant_id: "".to_string(), // Empty tenant_id
+        };
+        let token = create_test_jwt(secret, &claims);
+
+        // Create request with JWT token
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("authorization".to_string(), format!("Bearer {}", token));
+        let request = plexspaces_proto::grpc::v1::InterceptorRequest {
+            method: "/ActorService/SpawnActor".to_string(),
+            headers,
+            remote_addr: "127.0.0.1:12345".to_string(),
+            timestamp: None,
+            request_id: ulid::Ulid::new().to_string(),
+            peer_certificate: String::new(),
+            peer_service_id: String::new(),
+        };
+
+        // Should allow but not include tenant_id header
+        let result = interceptor.before_request(&request).await;
+        assert!(result.is_ok());
+        let decision = result.unwrap();
+        assert_eq!(
+            decision.decision,
+            plexspaces_proto::grpc::v1::InterceptorDecision::InterceptorDecisionAllow as i32
+        );
+        
+        // tenant_id header should not be present (empty tenant_id)
+        assert!(!decision.modified_headers.contains_key("x-tenant-id"));
+        // But user_id should still be present
+        assert_eq!(decision.modified_headers.get("x-user-id"), Some(&"user123".to_string()));
+    }
 }
 

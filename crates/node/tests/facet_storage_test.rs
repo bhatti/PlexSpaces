@@ -3,8 +3,11 @@
 //
 // Test to verify facet storage works correctly
 
+mod test_helpers;
+use test_helpers::spawn_actor_helper;
+
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{Actor, ActorContext, ActorId};
+use plexspaces_core::{ActorBehavior, ActorContext, ActorId};
 use plexspaces_journaling::TimerFacet;
 use plexspaces_mailbox::Message;
 use plexspaces_node::{Node, NodeBuilder};
@@ -15,13 +18,11 @@ use tokio::time::sleep;
 struct TestBehavior;
 
 #[async_trait::async_trait]
-#[async_trait::async_trait]
-impl Actor for TestBehavior {
+impl ActorBehavior for TestBehavior {
     async fn handle_message(
         &mut self,
         _ctx: &ActorContext,
         _message: Message,
-        _reply: &dyn plexspaces_core::Reply,
     ) -> Result<(), plexspaces_core::BehaviorError> {
         Ok(())
     }
@@ -58,7 +59,7 @@ async fn test_facet_storage_direct() {
     
     // Spawn actor
     let actor_id = ActorId::from("test-actor@local");
-    let actor_ref = node.clone().spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Wait a bit
     sleep(Duration::from_millis(100)).await;

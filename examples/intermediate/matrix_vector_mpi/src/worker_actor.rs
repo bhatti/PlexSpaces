@@ -21,7 +21,7 @@
 //! Worker actors read matrix rows and vector from TupleSpace,
 //! compute the local matrix-vector product, and write results back.
 
-use plexspaces_core::{ActorBehavior, BehaviorType, ActorContext, ActorId};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_tuplespace::{TupleSpace, Tuple, TupleField, Pattern, PatternField};
 use serde::{Deserialize, Serialize};
@@ -129,7 +129,7 @@ impl WorkerActor {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for WorkerActor {
+impl ActorTrait for WorkerActor {
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenEvent
     }

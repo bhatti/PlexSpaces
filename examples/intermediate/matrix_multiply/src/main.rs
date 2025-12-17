@@ -85,11 +85,11 @@ async fn main() -> Result<()> {
         let worker_behavior = WorkerBehavior::new(space.clone(), format!("worker-{}", worker_id));
         let behavior = Box::new(worker_behavior);
         
-        let actor = ActorBuilder::new(behavior)
+        // Build and spawn actor using ActorBuilder::spawn() which uses ActorFactory internally
+        let actor_ref = ActorBuilder::new(behavior)
             .with_name(format!("worker-{}", worker_id))
-            .build();
-        
-        let actor_ref = node.spawn_actor(actor).await?;
+            .spawn(node.service_locator().clone())
+            .await?;
         worker_refs.push(actor_ref);
         info!("  Created worker actor: worker-{}", worker_id);
     }
@@ -121,7 +121,11 @@ async fn main() -> Result<()> {
         .with_name("master")
         .build();
     
-    let master_ref = node.spawn_actor(actor).await?;
+    // Spawn using ActorBuilder::spawn() which uses ActorFactory internally
+    let master_ref = ActorBuilder::new(behavior)
+        .with_name("master".to_string())
+        .spawn(node.service_locator().clone())
+        .await?;
     info!("  Created master actor\n");
 
     // Wait for master to initialize

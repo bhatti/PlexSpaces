@@ -48,6 +48,7 @@ pub mod facet_manager;
 pub mod monitoring;
 pub mod message_metrics;
 pub mod reply_waiter;
+pub mod request_context;
 pub use monitoring::NodeMetricsUpdater;
 pub use message_metrics::{ActorMetrics, ActorMetricsHandle, ActorMetricsExt, new_actor_metrics};
 
@@ -69,6 +70,8 @@ pub use service_locator::{Service, ServiceLocator};
 pub use actor_trait::MessageSender;
 // Re-export ReplyWaiter and related types
 pub use reply_waiter::{ReplyWaiter, ReplyWaiterRegistry, ReplyWaiterError};
+// Re-export RequestContext
+pub use request_context::{RequestContext, RequestContextError};
 
 /// Actor ID type (String for simplicity and flexibility)
 pub type ActorId = String;

@@ -14,7 +14,7 @@ use order_processing::OrderProcessorBehavior;
 use order_processing::actors::order_processor::OrderMessage;
 use order_processing::types::OrderItem;
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::ActorBehavior;
+use plexspaces_core::Actor;
 use plexspaces_mailbox::Message;
 use plexspaces_node::{ConfigBootstrap, NodeBuilder};
 use serde::Deserialize;
@@ -75,20 +75,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create order processor actor using ActorBuilder
     info!("🎭 Creating order processor actor...");
     let behavior = Box::new(OrderProcessorBehavior::new());
-    let actor = ActorBuilder::new(behavior)
+    let actor_ref = ActorBuilder::new(behavior)
         .with_name("order-processor")
-        .with_mailbox_config(plexspaces_mailbox::MailboxConfig {
-            capacity: 1000,
-            ..Default::default()
-        })
-        .build();
+        .spawn(node.service_locator().clone())
+        .await?;
     
-    let actor_id = actor.id().clone();
+    let actor_id = actor_ref.id();
     info!("✅ Actor created: {}", actor_id);
     println!();
-
-    // Spawn actor
-    let actor_ref = node.spawn_actor(actor).await?;
     info!("✅ Actor spawned");
     println!();
 
@@ -105,12 +99,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     };
     
+    // Get ActorService to send messages
+    let actor_service = node.service_locator().get_actor_service().await
+        .ok_or_else(|| "ActorService not available".to_string())?;
+
     // Serialize and send message
     let payload = serde_json::to_vec(&order_msg)?;
     let message = Message::new(payload)
         .with_message_type("CreateOrder".to_string());
     
-    actor_ref.tell(message).await?;
+    actor_service.send(actor_ref.id(), message).await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
     info!("✅ Order creation message sent");
     println!();
 
@@ -127,7 +126,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let message = Message::new(payload)
         .with_message_type("GetOrder".to_string());
     
-    actor_ref.tell(message).await?;
+    actor_service.send(actor_ref.id(), message).await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
     info!("✅ Get order message sent");
     println!();
 

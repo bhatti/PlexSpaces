@@ -134,7 +134,6 @@ async fn deploy_tenant(tenant_id: &str, vcpus: u32, memory: u32) -> Result<()> {
             is_root_device: true,
             is_read_only: false,
         },
-        ..Default::default()
     };
 
     // Deploy application to VM (creates and boots real Firecracker VM)
@@ -192,7 +191,6 @@ async fn stop_tenant(tenant_id: &str) -> Result<()> {
         let config = VmConfig {
             vm_id: vm_entry.vm_id.clone(),
             socket_path: vm_entry.socket_path.clone(),
-            ..Default::default()
         };
 
         let mut vm = FirecrackerVm::create(config).await?;

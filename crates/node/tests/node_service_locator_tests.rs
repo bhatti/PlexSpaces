@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Tests for Node integration with ServiceLocator (TDD)
+//! Tests for Node integration with ServiceLocator (TDD)
 
 use plexspaces_core::{ActorRegistry, ReplyTracker, ServiceLocator};
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeId, default_node_config};
 #[cfg(feature = "firecracker")]
 use plexspaces_node::service_wrappers::FirecrackerVmServiceWrapper;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn test_node_creates_service_locator() {
     // Test: Node should create ServiceLocator in new()
-    let node = Node::new(NodeId::new("test-node"), NodeConfig::default());
+    let node = Node::new(NodeId::new("test-node"), default_node_config());
     
     // Verify ServiceLocator exists and can retrieve services
     let service_locator = node.service_locator();
@@ -42,7 +42,7 @@ async fn test_node_creates_service_locator() {
 #[tokio::test]
 async fn test_node_registers_actor_registry() {
     // Test: Node should register ActorRegistry in ServiceLocator
-    let node = Node::new(NodeId::new("test-node"), NodeConfig::default());
+    let node = Node::new(NodeId::new("test-node"), default_node_config());
     let service_locator = node.service_locator();
     
     // Wait for async registration - poll until ActorRegistry is available
@@ -66,7 +66,7 @@ async fn test_node_registers_actor_registry() {
 #[tokio::test]
 async fn test_node_registers_reply_tracker() {
     // Test: Node should register ReplyTracker in ServiceLocator
-    let node = Node::new(NodeId::new("test-node"), NodeConfig::default());
+    let node = Node::new(NodeId::new("test-node"), default_node_config());
     let service_locator = node.service_locator();
     
     // Wait for async registration - poll until ReplyTracker is available
@@ -90,7 +90,7 @@ async fn test_node_registers_reply_tracker() {
 #[tokio::test]
 async fn test_node_registers_firecracker_service() {
     // Test: Node should register FirecrackerVmServiceWrapper in ServiceLocator when firecracker feature is enabled
-    let node = Node::new(NodeId::new("test-node"), NodeConfig::default());
+    let node = Node::new(NodeId::new("test-node"), default_node_config());
     let service_locator = node.service_locator();
     
     // Wait for async registration - poll until FirecrackerVmServiceWrapper is available
@@ -115,7 +115,7 @@ async fn test_node_registers_firecracker_service() {
 #[tokio::test]
 async fn test_node_service_locator_shutdown() {
     // Test: Node shutdown should shutdown ServiceLocator (close gRPC clients)
-    let node = Node::new(NodeId::new("test-node"), NodeConfig::default());
+    let node = Node::new(NodeId::new("test-node"), default_node_config());
     let service_locator = node.service_locator();
     
     // Wait for async registration - poll until ActorRegistry is available

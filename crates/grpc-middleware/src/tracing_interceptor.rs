@@ -110,6 +110,16 @@ impl Interceptor for TracingInterceptor {
         span.set_attribute(KeyValue::new("grpc.method", context.method.clone()));
         span.set_attribute(KeyValue::new("grpc.remote_addr", context.remote_addr.clone()));
         span.set_attribute(KeyValue::new("request.id", context.request_id.clone()));
+        
+        // Extract tenant_id from headers if present (from JWT middleware)
+        if let Some(tenant_id) = context.headers.get("x-tenant-id") {
+            span.set_attribute(KeyValue::new("tenant_id", tenant_id.clone()));
+        }
+        
+        // Extract user_id from headers if present
+        if let Some(user_id) = context.headers.get("x-user-id") {
+            span.set_attribute(KeyValue::new("user_id", user_id.clone()));
+        }
 
         // Store span context
         let ctx = parent_context.with_span(span);

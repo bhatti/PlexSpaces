@@ -561,3 +561,83 @@ message ResourceSpec {
   // Empty string = any GPU type
   string gpu_type = 5 [(buf.validate.field).string.max_len = 64];
 }
+
+// Request Context (Go-style context.Context)
+//
+// ## Purpose
+// Provides request-scoped context similar to Go's context.Context.
+// Carries tenant isolation, tracing, and request metadata through the call chain.
+//
+// ## Design Philosophy
+// - **Tenant Isolation**: tenant_id is REQUIRED for all operations
+// - **Tracing**: request_id and correlation_id for distributed tracing
+// - **Extensible**: metadata map for additional context
+// - **Immutable**: Context should be passed by reference, not mutated
+//
+// ## Usage Pattern
+// ```rust
+// // Create context from request
+// let ctx = RequestContext::new("tenant-123".to_string())
+//     .with_namespace("production".to_string())
+//     .with_user_id("user-456".to_string());
+//
+// // Pass to repository/service
+// let result = repository.get(&ctx, "resource-id").await?;
+// ```
+message RequestContext {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Request Context"
+      description: "Request-scoped context for tenant isolation and tracing"
+      required: ["tenant_id"]
+    }
+  };
+
+  // Tenant ID (REQUIRED for all operations)
+  //
+  // All operations are scoped to this tenant.
+  // Must be validated at service boundaries.
+  string tenant_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 64}
+  ];
+
+  // Namespace within tenant (optional, defaults to "default")
+  //
+  // Common values: "production", "staging", "dev", "test"
+  string namespace = 2 [
+    (buf.validate.field).string = {max_len: 32}
+  ];
+
+  // User ID (from JWT, optional)
+  //
+  // Extracted from JWT claims for audit logging and authorization.
+  string user_id = 3 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Request ID (for tracing)
+  //
+  // Unique identifier for this request (ULID).
+  // Used for request tracing and correlation.
+  string request_id = 4 [
+    (buf.validate.field).string = {min_len: 1, max_len: 64}
+  ];
+
+  // Correlation ID (for distributed tracing)
+  //
+  // Links related requests across services.
+  // Propagated through gRPC metadata.
+  string correlation_id = 5 [
+    (buf.validate.field).string = {max_len: 64}
+  ];
+
+  // Request timestamp
+  google.protobuf.Timestamp timestamp = 6;
+
+  // Metadata (extensible key-value pairs)
+  //
+  // Additional context for request processing.
+  // Examples: "source_ip", "user_agent", "api_version"
+  map<string, string> metadata = 7;
+}

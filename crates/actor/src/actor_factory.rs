@@ -99,6 +99,22 @@ pub trait ActorFactory: Send + Sync {
         tenant_id: Option<String>,
         namespace: Option<String>,
     ) -> Result<Arc<dyn plexspaces_core::MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
+    
+    /// Stop an actor
+    ///
+    /// ## Purpose
+    /// Stops and unregisters an actor from the ActorRegistry.
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID to stop
+    ///
+    /// ## Returns
+    /// Ok(()) on success, error otherwise
+    ///
+    /// ## Note
+    /// This method unregisters the actor from ActorRegistry and performs cleanup.
+    /// The actor will be garbage collected after unregistration.
+    async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
 // Note: ActorFactory implementations should implement Service trait separately

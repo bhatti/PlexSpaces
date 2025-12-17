@@ -275,10 +275,24 @@ results = ray.get(futures)
 
 **PlexSpaces (Rust)**:
 ```rust
-// Spawn multiple processor actors
-let processors: Vec<ActorRef> = (0..4)
-    .map(|i| node.spawn_actor(Box::new(DocumentProcessorActor::new()), None))
-    .collect();
+// Spawn multiple processor actors using ActorFactory
+use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
+use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+use std::sync::Arc;
+
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    .ok_or_else(|| "ActorFactory not found")?;
+let mut processors = Vec::new();
+for i in 0..4 {
+    let behavior = Box::new(DocumentProcessorActor::new());
+    let actor_id = format!("processor-{}@{}", i, node.id());
+    let mut mailbox_config = mailbox_config_default();
+    mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
+    let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await?;
+    let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(), None);
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+    processors.push(plexspaces_core::ActorRef::new(actor_id)?);
+}
 
 // Send documents to processors
 for (i, doc) in documents.iter().enumerate() {

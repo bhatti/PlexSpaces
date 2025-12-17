@@ -134,7 +134,11 @@ impl Application for GenomicsPipelineApplication {
                     config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = Mailbox::new(config);
+                    let mailbox = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(
+                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
+                        )
+                    }).expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
                         actor_id_for_factory.clone(),
                         Box::new(QCWorker::new(actor_id_for_factory.clone())),
@@ -171,7 +175,11 @@ impl Application for GenomicsPipelineApplication {
                     config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = Mailbox::new(config);
+                    let mailbox = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(
+                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
+                        )
+                    }).expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
                         actor_id_for_factory.clone(),
                         Box::new(AlignmentWorker::new(actor_id_for_factory.clone())),
@@ -210,7 +218,11 @@ impl Application for GenomicsPipelineApplication {
                     config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = Mailbox::new(config);
+                    let mailbox = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(
+                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
+                        )
+                    }).expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
                         actor_id_for_factory.clone(),
                         Box::new(ChromosomeWorker::new(actor_id_for_factory.clone(), chromosome_for_factory.clone())),
@@ -247,7 +259,11 @@ impl Application for GenomicsPipelineApplication {
                     config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = Mailbox::new(config);
+                    let mailbox = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(
+                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
+                        )
+                    }).expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
                         actor_id_for_factory.clone(),
                         Box::new(AnnotationWorker::new(actor_id_for_factory.clone())),
@@ -284,7 +300,11 @@ impl Application for GenomicsPipelineApplication {
                     config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
-                    let mailbox = Mailbox::new(config);
+                    let mailbox = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(
+                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
+                        )
+                    }).expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
                         actor_id_for_factory.clone(),
                         Box::new(ReportWorker::new(actor_id_for_factory.clone())),
@@ -362,7 +382,7 @@ mod tests {
         async fn spawn_actor(
             &self,
             actor_id: String,
-            _behavior: Box<dyn plexspaces_core::ActorBehavior>,
+            _behavior: Box<dyn plexspaces_core::Actor>,
             _namespace: String,
         ) -> Result<String, ApplicationError> {
             // Mock implementation for tests

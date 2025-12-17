@@ -535,7 +535,7 @@ mod tests {
         async fn spawn_actor(
             &self,
             actor_id: String,
-            _behavior: Box<dyn plexspaces_core::ActorBehavior>,
+            _behavior: Box<dyn plexspaces_core::Actor>,
             _namespace: String,
         ) -> Result<String, ApplicationError> {
             // Mock implementation for tests

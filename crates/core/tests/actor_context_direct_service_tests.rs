@@ -164,22 +164,15 @@ async fn test_reply_using_actor_service() {
         members: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
 
-    let mut ctx = create_test_context_with_services(actor_service.clone(), process_group_service);
-    ctx.sender_id = Some("sender-actor".to_string());
-    ctx.correlation_id = Some("corr-123".to_string());
-
-    let reply_msg = Message::new(vec![1, 2, 3]);
+    let ctx = create_test_context_with_services(actor_service.clone(), process_group_service);
     
-    // Use actor_service directly instead of ctx.reply()
-    if let Some(sender_id) = &ctx.sender_id {
-        let reply_msg_with_corr = if let Some(corr_id) = &ctx.correlation_id {
-            reply_msg.with_correlation_id(corr_id.clone())
-        } else {
-            reply_msg
-        };
-        let result = ctx.actor_service.send(sender_id, reply_msg_with_corr).await;
-        assert!(result.is_ok());
-    }
+    // sender_id and correlation_id are in Message, not ActorContext
+    let reply_msg = Message::new(vec![1, 2, 3])
+        .with_correlation_id("corr-123".to_string());
+    
+    // Use actor_service directly
+    let result = actor_service.send("sender-actor", reply_msg).await;
+    assert!(result.is_ok());
 
     let sent = sent_messages.lock().unwrap();
     assert_eq!(sent.len(), 1);
@@ -205,9 +198,10 @@ async fn test_join_group_using_process_group_service() {
     let ctx = create_test_context_with_services(actor_service, process_group_service.clone());
     
     // Use process_group_service directly instead of ctx.join_group()
+    // Services are accessed via service_locator, but for this test we use the service directly
     let tenant = "default";
-    let result = ctx.process_group_service
-        .join_group("test-group", tenant, &ctx.namespace, "test-actor") // actor_id no longer in context
+    let result = process_group_service
+        .join_group("test-group", tenant, &ctx.namespace, "test-actor")
         .await;
 
     assert!(result.is_ok());
@@ -238,8 +232,8 @@ async fn test_leave_group_using_process_group_service() {
     
     // Use process_group_service directly instead of ctx.leave_group()
     let tenant = "default";
-    let result = ctx.process_group_service
-        .leave_group("test-group", tenant, &ctx.namespace, "test-actor") // actor_id no longer in context
+    let result = process_group_service
+        .leave_group("test-group", tenant, &ctx.namespace, "test-actor")
         .await;
 
     assert!(result.is_ok());
@@ -272,7 +266,7 @@ async fn test_publish_to_group_using_process_group_service() {
     
     // Use process_group_service directly instead of ctx.publish_to_group()
     let tenant = "default";
-    let result = ctx.process_group_service
+    let result = process_group_service
         .publish_to_group("test-group", tenant, &ctx.namespace, message.clone())
         .await;
 
@@ -310,7 +304,7 @@ async fn test_get_group_members_using_process_group_service() {
     
     // Use process_group_service directly instead of ctx.get_group_members()
     let tenant = "default";
-    let result = ctx.process_group_service
+    let result = process_group_service
         .get_members("test-group", tenant, &ctx.namespace)
         .await;
 
@@ -335,18 +329,16 @@ async fn test_reply_without_sender_id() {
         members: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
 
-    let ctx = create_test_context_with_services(actor_service, process_group_service);
-    // sender_id is None
-
+    let ctx = create_test_context_with_services(actor_service.clone(), process_group_service);
+    
+    // sender_id is in Message, not ActorContext
+    // This test verifies the context is created correctly
     let reply_msg = Message::new(vec![1, 2, 3]);
     
-    // Use actor_service directly - should handle None sender_id gracefully
-    if let Some(sender_id) = &ctx.sender_id {
-        let _ = ctx.actor_service.send(sender_id, reply_msg).await;
-    } else {
-        // No sender_id - this is expected behavior (no-op or error handling)
-        // In real code, this would be an error case
-    }
+    // In real code, sender_id would come from the message that triggered the reply
+    // This test just verifies the context structure
+    assert_eq!(ctx.node_id, "test-node");
+    assert_eq!(ctx.tenant_id(), "tenant-123");
     
     // Verify no message was sent
     // (This test verifies the pattern, actual error handling depends on implementation)

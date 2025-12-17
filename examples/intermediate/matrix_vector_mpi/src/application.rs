@@ -140,8 +140,30 @@ impl Application for MatrixVectorApplication {
             let behavior = Box::new(worker_actor);
             let actor_id = format!("worker-{}@{}", worker_id, node.id());
             
-            node.spawn_actor(actor_id.clone(), behavior, "matrix-vector-mpi".to_string())
+            // Use ActorFactory directly
+            use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
+            use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+            use std::sync::Arc;
+            
+            // Create mailbox for actor
+            let mut mailbox_config = mailbox_config_default();
+            mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
+            mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
+            mailbox_config.durability_strategy = plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
+            mailbox_config.capacity = 1000;
+            mailbox_config.backpressure_strategy = plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
+            let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id))
                 .await
+                .map_err(|e| ApplicationError::StartupFailed(format!("Failed to create mailbox for worker {}: {}", worker_id, e)))?;
+            
+            // Create actor from behavior
+            let actor = Actor::new(actor_id.clone(), behavior, mailbox, "matrix-vector-mpi".to_string(), None);
+            
+            // Spawn using ActorFactory
+            let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+                .ok_or_else(|| ApplicationError::StartupFailed(format!("ActorFactory not found in ServiceLocator")))?;
+            
+            actor_factory.spawn_built_actor(Arc::new(actor), None, None, Some("matrix-vector-mpi".to_string())).await
                 .map_err(|e| ApplicationError::StartupFailed(format!("Failed to spawn worker {}: {}", worker_id, e)))?;
             
             worker_actor_ids.push(actor_id);

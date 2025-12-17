@@ -268,27 +268,6 @@ impl ApplicationNode for PlexSpacesNodeApplicationNode {
     fn listen_addr(&self) -> &str {
         &self.listen_addr
     }
-
-    async fn spawn_actor(
-        &self,
-        actor_id: String,
-        _behavior: Box<dyn plexspaces_core::Actor>,
-        _namespace: String,
-    ) -> Result<String, CoreApplicationError> {
-        // TODO: Implement actor spawning when PlexSpacesNode has Node infrastructure
-        Err(CoreApplicationError::ActorSpawnFailed(
-            actor_id,
-            "Actor spawning not yet implemented in PlexSpacesNode".to_string(),
-        ))
-    }
-
-    async fn stop_actor(&self, actor_id: &str) -> Result<(), CoreApplicationError> {
-        // TODO: Implement actor stopping when PlexSpacesNode has Node infrastructure
-        Err(CoreApplicationError::ActorStopFailed(
-            actor_id.to_string(),
-            "Actor stopping not yet implemented in PlexSpacesNode".to_string(),
-        ))
-    }
 }
 
 // ============================================================================
@@ -386,21 +365,30 @@ mod tests {
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
             }),
-            runtime: Some(RuntimeConfig {
-                grpc: Some(GrpcConfig {
-                    enabled: true,
-                    address: "0.0.0.0:9001".to_string(),
-                    max_connections: 1000,
-                    keepalive_interval_seconds: 30,
-                    middleware: vec![],
-                }),
-                health: Some(HealthConfig {
-                    heartbeat_interval_seconds: 2,
-                    heartbeat_timeout_seconds: 10,
+            runtime: Some({
+                let mut runtime_config = RuntimeConfig {
+                    grpc: Some(GrpcConfig {
+                        enabled: true,
+                        address: "0.0.0.0:9001".to_string(),
+                        max_connections: 1000,
+                        keepalive_interval_seconds: 30,
+                        middleware: vec![],
+                    }),
+                    health: Some(HealthConfig {
+                        heartbeat_interval_seconds: 2,
+                        heartbeat_timeout_seconds: 10,
                     registry_url: "http://localhost:9000".to_string(),
                 }),
-                security: None,
-                blob: None,
+                    security: None,
+                    blob: None,
+                    shared_database: None,
+                    locks_provider: None,
+                    channel_provider: None,
+                    tuplespace_provider: None,
+                    framework_info: None,
+                    ..Default::default() // Include mailbox_provider default until proto is regenerated
+                };
+                runtime_config
             }),
             system_applications: vec![],
             applications,

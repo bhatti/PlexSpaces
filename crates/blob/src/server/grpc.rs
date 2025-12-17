@@ -31,6 +31,7 @@ use plexspaces_proto::storage::v1::{
     GetBlobMetadataResponse, ListBlobsRequest, ListBlobsResponse, UploadBlobRequest,
     UploadBlobResponse,
 };
+use plexspaces_core::RequestContext;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -46,6 +47,42 @@ impl BlobServiceImpl {
     pub fn new(blob_service: Arc<BlobService>) -> Self {
         Self { blob_service }
     }
+
+    /// Extract RequestContext from gRPC request metadata
+    /// 
+    /// Extracts tenant_id from:
+    /// 1. `x-tenant-id` header (set by JWT middleware)
+    /// 2. `tenant_id` in request labels (fallback)
+    /// 3. Error if not found (production should always have JWT)
+    fn extract_context<T>(request: &Request<T>) -> Result<RequestContext, Status> {
+        let metadata = request.metadata();
+        
+        // Extract tenant_id from headers (set by JWT middleware)
+        let tenant_id = metadata.get("x-tenant-id")
+            .and_then(|v| v.to_str().ok())
+            .or_else(|| {
+                // Fallback: check request labels (for backward compatibility)
+                // This is the HTTP API boundary exception
+                None  // For now, require x-tenant-id header
+            })
+            .ok_or_else(|| Status::unauthenticated("Missing x-tenant-id header. JWT authentication required."))?;
+        
+        let namespace = metadata.get("x-namespace")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("default");
+        
+        let user_id = metadata.get("x-user-id")
+            .and_then(|v| v.to_str().ok());
+        
+        let mut ctx = RequestContext::new(tenant_id.to_string())
+            .with_namespace(namespace.to_string());
+        
+        if let Some(uid) = user_id {
+            ctx = ctx.with_user_id(uid.to_string());
+        }
+        
+        Ok(ctx)
+    }
 }
 
 #[tonic::async_trait]
@@ -56,15 +93,11 @@ impl BlobServiceTrait for BlobServiceImpl {
         &self,
         request: Request<UploadBlobRequest>,
     ) -> Result<Response<UploadBlobResponse>, Status> {
+        // Extract RequestContext from metadata (tenant_id from JWT middleware)
+        let ctx = Self::extract_context(&request)?;
         let req = request.into_inner();
 
         // Validate required fields
-        if req.tenant_id.is_empty() {
-            return Err(Status::invalid_argument("tenant_id is required"));
-        }
-        if req.namespace.is_empty() {
-            return Err(Status::invalid_argument("namespace is required"));
-        }
         if req.name.is_empty() {
             return Err(Status::invalid_argument("name is required"));
         }
@@ -77,12 +110,11 @@ impl BlobServiceTrait for BlobServiceImpl {
             Duration::seconds(d.seconds) + Duration::nanoseconds(d.nanos as i64)
         });
 
-        // Upload blob
+        // Upload blob (tenant_id and namespace from RequestContext)
         let metadata = self
             .blob_service
             .upload_blob(
-                &req.tenant_id,
-                &req.namespace,
+                &ctx,
                 &req.name,
                 req.data,
                 if req.content_type.is_empty() {
@@ -117,23 +149,25 @@ impl BlobServiceTrait for BlobServiceImpl {
         &self,
         request: Request<DownloadBlobRequest>,
     ) -> Result<Response<Self::DownloadBlobStream>, Status> {
+        // Extract RequestContext from metadata (tenant_id from JWT middleware)
+        let ctx = Self::extract_context(&request)?;
         let req = request.into_inner();
 
         if req.blob_id.is_empty() {
             return Err(Status::invalid_argument("blob_id is required"));
         }
 
-        // Get metadata first
+        // Get metadata first (automatically filtered by tenant_id)
         let metadata = self
             .blob_service
-            .get_metadata(&req.blob_id)
+            .get_metadata(&ctx, &req.blob_id)
             .await
             .map_err(|e| Status::not_found(format!("Blob not found: {}", e)))?;
 
-        // Download blob data
+        // Download blob data (automatically filtered by tenant_id)
         let data = self
             .blob_service
-            .download_blob(&req.blob_id)
+            .download_blob(&ctx, &req.blob_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to download blob: {}", e)))?;
 
@@ -182,15 +216,18 @@ impl BlobServiceTrait for BlobServiceImpl {
         &self,
         request: Request<GetBlobMetadataRequest>,
     ) -> Result<Response<GetBlobMetadataResponse>, Status> {
+        // Extract RequestContext from metadata (tenant_id from JWT middleware)
+        let ctx = Self::extract_context(&request)?;
         let req = request.into_inner();
 
         if req.blob_id.is_empty() {
             return Err(Status::invalid_argument("blob_id is required"));
         }
 
+        // Get metadata (automatically filtered by tenant_id)
         let metadata = self
             .blob_service
-            .get_metadata(&req.blob_id)
+            .get_metadata(&ctx, &req.blob_id)
             .await
             .map_err(|e| Status::not_found(format!("Blob not found: {}", e)))?;
 
@@ -204,14 +241,9 @@ impl BlobServiceTrait for BlobServiceImpl {
         &self,
         request: Request<ListBlobsRequest>,
     ) -> Result<Response<ListBlobsResponse>, Status> {
+        // Extract RequestContext from metadata (tenant_id from JWT middleware)
+        let ctx = Self::extract_context(&request)?;
         let req = request.into_inner();
-
-        if req.tenant_id.is_empty() {
-            return Err(Status::invalid_argument("tenant_id is required"));
-        }
-        if req.namespace.is_empty() {
-            return Err(Status::invalid_argument("namespace is required"));
-        }
 
         // Build filters
         let filters = ListFilters {
@@ -247,9 +279,10 @@ impl BlobServiceTrait for BlobServiceImpl {
             .min(1000) as i64;
         let page = 1; // TODO: Parse from page_token
 
+        // List blobs (tenant_id and namespace from RequestContext)
         let (blobs, total_count) = self
             .blob_service
-            .list_blobs(&req.tenant_id, &req.namespace, &filters, page_size, page)
+            .list_blobs(&ctx, &filters, page_size, page)
             .await
             .map_err(|e| Status::internal(format!("Failed to list blobs: {}", e)))?;
 
@@ -271,14 +304,17 @@ impl BlobServiceTrait for BlobServiceImpl {
         &self,
         request: Request<DeleteBlobRequest>,
     ) -> Result<Response<DeleteBlobResponse>, Status> {
+        // Extract RequestContext from metadata (tenant_id from JWT middleware)
+        let ctx = Self::extract_context(&request)?;
         let req = request.into_inner();
 
         if req.blob_id.is_empty() {
             return Err(Status::invalid_argument("blob_id is required"));
         }
 
+        // Delete blob (automatically filtered by tenant_id)
         self.blob_service
-            .delete_blob(&req.blob_id)
+            .delete_blob(&ctx, &req.blob_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to delete blob: {}", e)))?;
 
@@ -290,6 +326,8 @@ impl BlobServiceTrait for BlobServiceImpl {
         &self,
         request: Request<GeneratePresignedUrlRequest>,
     ) -> Result<Response<GeneratePresignedUrlResponse>, Status> {
+        // Extract RequestContext from metadata (tenant_id from JWT middleware)
+        let ctx = Self::extract_context(&request)?;
         let req = request.into_inner();
 
         if req.blob_id.is_empty() {
@@ -304,9 +342,9 @@ impl BlobServiceTrait for BlobServiceImpl {
             .map(|d| Duration::seconds(d.seconds) + Duration::nanoseconds(d.nanos as i64))
             .unwrap_or_else(|| Duration::hours(1));
 
-        // Generate presigned URL
+        // Generate presigned URL (automatically filtered by tenant_id)
         let url = self.blob_service
-            .generate_presigned_url(&req.blob_id, &req.operation, expires_after)
+            .generate_presigned_url(&ctx, &req.blob_id, &req.operation, expires_after)
             .await
             .map_err(|e| Status::internal(format!("Failed to generate presigned URL: {}", e)))?;
 

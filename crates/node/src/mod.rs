@@ -2907,93 +2907,9 @@ impl ApplicationNode for Node {
         &self.config.listen_addr
     }
 
-    /// Spawn an actor with the given behavior
-    ///
-    /// ## Implementation
-    /// Wraps the behavior in an Actor with a mailbox and spawns it on this node.
-    async fn spawn_actor(
-        &self,
-        actor_id: String,
-        behavior: Box<dyn plexspaces_core::Actor>,
-        namespace: String,
-    ) -> Result<String, plexspaces_core::application::ApplicationError> {
-        use plexspaces_core::application::ApplicationError;
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-
-        // Create mailbox for actor
-        let mut mailbox_config = mailbox_config_default();
-        mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
-        mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
-        mailbox_config.durability_strategy = plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
-        mailbox_config.capacity = 1000;
-        mailbox_config.backpressure_strategy = plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
-        let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id))
-            .await
-            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), e.to_string()))?;
-
-        // Create actor from behavior
-        let actor = plexspaces_actor::Actor::new(actor_id.clone(), behavior, mailbox, namespace, None);
-
-        // Spawn actor using ActorFactory
-        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-        let actor_factory: Arc<ActorFactoryImpl> = self.service_locator.get_service().await
-            .ok_or_else(|| ApplicationError::ActorSpawnFailed(actor_id.clone(), "ActorFactory not found in ServiceLocator".to_string()))?;
-        
-        actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
-            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to spawn actor: {}", e)))?;
-
-        Ok(actor_id)
-    }
-
-    /// Stop an actor
-    ///
-    /// ## Implementation
-    /// Unregisters the actor from the node. The actor will be garbage collected.
-    /// TODO: Implement graceful shutdown with shutdown message
-    async fn stop_actor(
-        &self,
-        actor_id: &str,
-    ) -> Result<(), plexspaces_core::application::ApplicationError> {
-        use plexspaces_core::application::ApplicationError;
-
-        // Verify actor exists in ActorRegistry
-        let actor_id_str = actor_id.to_string();
-        let routing = self.actor_registry.lookup_routing(&actor_id_str).await
-            .map_err(|_| ApplicationError::ActorStopFailed(
-                actor_id.to_string(),
-                "Actor not found".to_string(),
-            ))?;
-        if routing.is_none() || !routing.as_ref().unwrap().is_local {
-            return Err(ApplicationError::ActorStopFailed(
-                actor_id.to_string(),
-                "Actor not found".to_string(),
-            ));
-        }
-
-        // Unregister from ActorRegistry
-        let actor_id_string = actor_id.to_string();
-        self.actor_registry.unregister_with_cleanup(&actor_id_string).await
-            .map_err(|e| ApplicationError::ActorStopFailed(actor_id.to_string(), e.to_string()))?;
-
-        Ok(())
-    }
-
-    /// Update actor count for an application (for metrics tracking)
-    ///
-    /// ## Implementation
-    /// Updates the actor count in ApplicationManager for metrics tracking.
-    async fn update_actor_count(
-        &self,
-        application_name: &str,
-        actor_count: u32,
-    ) -> Result<(), plexspaces_core::application::ApplicationError> {
-        use plexspaces_core::application::ApplicationError;
-        
-        let app_manager = self.application_manager.read().await;
-        app_manager
-            .update_actor_count(application_name, actor_count)
-            .await
-            .map_err(|e| ApplicationError::Other(format!("Failed to update actor count: {}", e)))
+    /// Get ServiceLocator
+    fn service_locator(&self) -> Option<Arc<ServiceLocator>> {
+        Some(self.service_locator.clone())
     }
 }
 

@@ -20,10 +20,10 @@
 
 use plexspaces_blob::{BlobService, BlobRepository, repository::sql::SqlBlobRepository, repository::ListFilters};
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
+use plexspaces_core::RequestContext;
 use object_store::local::LocalFileSystem;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
-use tempfile::TempDir;
+use tempfile::{TempDir, NamedTempFile};
 
 async fn create_test_service() -> (Arc<BlobService>, TempDir) {
     // Create temp directory for local filesystem
@@ -31,13 +31,11 @@ async fn create_test_service() -> (Arc<BlobService>, TempDir) {
     let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
 
     // Create SQLite repository
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .unwrap();
-    
-    let any_pool: sqlx::Pool<sqlx::Any> = pool.into();
+    use sqlx::AnyPool;
+    use tempfile::NamedTempFile;
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap();
+    let any_pool = AnyPool::connect(&format!("sqlite:{}", db_path)).await.unwrap();
     SqlBlobRepository::migrate(&any_pool).await.unwrap();
     let repository = Arc::new(SqlBlobRepository::new(any_pool));
 
@@ -61,15 +59,20 @@ async fn create_test_service() -> (Arc<BlobService>, TempDir) {
     (Arc::new(service), temp_dir)
 }
 
+fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
+    RequestContext::new(tenant_id.to_string())
+        .with_namespace(namespace.to_string())
+}
+
 #[tokio::test]
 async fn test_upload_and_download() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
 
     let data = b"Hello, World!".to_vec();
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "test.txt",
             data.clone(),
             Some("text/plain".to_string()),
@@ -90,21 +93,21 @@ async fn test_upload_and_download() {
     assert_eq!(metadata.sha256.len(), 64);
 
     // Download
-    let downloaded = service.download_blob(&metadata.blob_id).await.unwrap();
+    let downloaded = service.download_blob(&ctx, &metadata.blob_id).await.unwrap();
     assert_eq!(downloaded, data);
 }
 
 #[tokio::test]
 async fn test_deduplication() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
 
     let data = b"Duplicate content".to_vec();
 
     // Upload first time
     let metadata1 = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "file1.txt",
             data.clone(),
             None,
@@ -120,8 +123,7 @@ async fn test_deduplication() {
     // Upload same content with different name
     let metadata2 = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "file2.txt",
             data.clone(),
             None,
@@ -142,11 +144,11 @@ async fn test_deduplication() {
 #[tokio::test]
 async fn test_get_metadata() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
 
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "test.txt",
             b"content".to_vec(),
             Some("text/plain".to_string()),
@@ -163,7 +165,7 @@ async fn test_get_metadata() {
         .await
         .unwrap();
 
-    let retrieved = service.get_metadata(&metadata.blob_id).await.unwrap();
+    let retrieved = service.get_metadata(&ctx, &metadata.blob_id).await.unwrap();
     assert_eq!(retrieved.blob_id, metadata.blob_id);
     assert_eq!(retrieved.content_type, "text/plain");
     assert_eq!(retrieved.blob_group, "group1");
@@ -174,13 +176,13 @@ async fn test_get_metadata() {
 #[tokio::test]
 async fn test_list_blobs() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
 
     // Upload multiple blobs
     for i in 1..=5 {
         service
             .upload_blob(
-                "tenant-1",
-                "ns-1",
+                &ctx,
                 &format!("file{}.txt", i),
                 format!("content{}", i).into_bytes(),
                 None,
@@ -200,7 +202,7 @@ async fn test_list_blobs() {
 
     // List all
     let (blobs, total) = service
-        .list_blobs("tenant-1", "ns-1", &ListFilters::default(), 10, 1)
+        .list_blobs(&ctx, &ListFilters::default(), 10, 1)
         .await
         .unwrap();
 
@@ -213,7 +215,7 @@ async fn test_list_blobs() {
         ..Default::default()
     };
     let (blobs, total) = service
-        .list_blobs("tenant-1", "ns-1", &filters, 10, 1)
+        .list_blobs(&ctx, &filters, 10, 1)
         .await
         .unwrap();
 
@@ -224,11 +226,11 @@ async fn test_list_blobs() {
 #[tokio::test]
 async fn test_delete_blob() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
 
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "test.txt",
             b"content".to_vec(),
             None,
@@ -242,24 +244,24 @@ async fn test_delete_blob() {
         .unwrap();
 
     // Verify exists
-    assert!(service.get_metadata(&metadata.blob_id).await.is_ok());
+    assert!(service.get_metadata(&ctx, &metadata.blob_id).await.is_ok());
 
     // Delete
-    service.delete_blob(&metadata.blob_id).await.unwrap();
+    service.delete_blob(&ctx, &metadata.blob_id).await.unwrap();
 
     // Verify deleted
-    assert!(service.get_metadata(&metadata.blob_id).await.is_err());
-    assert!(service.download_blob(&metadata.blob_id).await.is_err());
+    assert!(service.get_metadata(&ctx, &metadata.blob_id).await.is_err());
+    assert!(service.download_blob(&ctx, &metadata.blob_id).await.is_err());
 }
 
 #[tokio::test]
 async fn test_empty_data_error() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
 
     let result = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "empty.txt",
             vec![],
             None,
@@ -278,21 +280,22 @@ async fn test_empty_data_error() {
 #[tokio::test]
 async fn test_not_found_error() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
 
-    assert!(service.get_metadata("nonexistent").await.is_err());
-    assert!(service.download_blob("nonexistent").await.is_err());
-    assert!(service.delete_blob("nonexistent").await.is_err());
+    assert!(service.get_metadata(&ctx, "nonexistent").await.is_err());
+    assert!(service.download_blob(&ctx, "nonexistent").await.is_err());
+    assert!(service.delete_blob(&ctx, "nonexistent").await.is_err());
 }
 
 #[tokio::test]
 async fn test_expiration() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
 
     use chrono::Duration;
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "test.txt",
             b"content".to_vec(),
             None,
@@ -308,19 +311,20 @@ async fn test_expiration() {
     assert!(metadata.expires_at.is_some());
 
     // Find expired (should be empty)
-    let expired = service.find_expired(None, 10).await.unwrap();
+    let expired = service.find_expired(&ctx, 10).await.unwrap();
     assert!(expired.is_empty());
 }
 
 #[tokio::test]
 async fn test_multi_tenancy_isolation() {
     let (service, _temp_dir) = create_test_service().await;
+    let ctx1 = create_test_context("tenant-1", "ns-1");
+    let ctx2 = create_test_context("tenant-2", "ns-1");
 
     // Upload to tenant-1
     let metadata1 = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx1,
             "file.txt",
             b"tenant1".to_vec(),
             None,
@@ -336,8 +340,7 @@ async fn test_multi_tenancy_isolation() {
     // Upload to tenant-2
     let metadata2 = service
         .upload_blob(
-            "tenant-2",
-            "ns-1",
+            &ctx2,
             "file.txt",
             b"tenant2".to_vec(),
             None,
@@ -352,7 +355,7 @@ async fn test_multi_tenancy_isolation() {
 
     // List tenant-1 blobs
     let (blobs, _) = service
-        .list_blobs("tenant-1", "ns-1", &ListFilters::default(), 10, 1)
+        .list_blobs(&ctx1, &ListFilters::default(), 10, 1)
         .await
         .unwrap();
 
@@ -362,11 +365,15 @@ async fn test_multi_tenancy_isolation() {
 
     // List tenant-2 blobs
     let (blobs, _) = service
-        .list_blobs("tenant-2", "ns-1", &ListFilters::default(), 10, 1)
+        .list_blobs(&ctx2, &ListFilters::default(), 10, 1)
         .await
         .unwrap();
 
     // Should only see tenant-2 blob
     assert!(blobs.iter().any(|b| b.blob_id == metadata2.blob_id));
     assert!(!blobs.iter().any(|b| b.blob_id == metadata1.blob_id));
+
+    // Try to access tenant-1 blob from tenant-2 context (should fail)
+    assert!(service.get_metadata(&ctx2, &metadata1.blob_id).await.is_err());
+    assert!(service.download_blob(&ctx2, &metadata1.blob_id).await.is_err());
 }

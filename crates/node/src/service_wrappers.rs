@@ -243,6 +243,10 @@ impl ChannelServiceWrapper {
     }
 
     /// Get or create a channel by name (public for use by TaskRouter)
+    ///
+    /// ## Note
+    /// This method creates channels directly. In the future, this should use
+    /// ServiceLocator::create_default_channel() to respect channel_provider configuration.
     pub async fn get_or_create_channel(&self, name: &str) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
         let mut channels = self.channels.write().await;
         
@@ -250,7 +254,8 @@ impl ChannelServiceWrapper {
             return Ok(channel.clone());
         }
 
-        // Create a new in-memory channel
+        // Create a new in-memory channel (default)
+        // TODO: Use ServiceLocator::create_default_channel() when ServiceLocator is available
         use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
         let config = ChannelConfig {
             name: name.to_string(),

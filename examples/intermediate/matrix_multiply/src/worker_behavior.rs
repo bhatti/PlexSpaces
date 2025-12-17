@@ -20,7 +20,7 @@
 //!
 //! Processes matrix multiplication blocks from TupleSpace.
 
-use plexspaces_core::{ActorBehavior, BehaviorType, ActorContext};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_tuplespace::{TupleSpace, Pattern, PatternField, TupleField};
 use serde::{Deserialize, Serialize};
@@ -334,7 +334,7 @@ impl WorkerBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for WorkerBehavior {
+impl ActorTrait for WorkerBehavior {
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenEvent
     }

@@ -135,7 +135,8 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
         .await;
     
     // Spawn actor
-    let message_sender = factory.spawn_built_actor(Arc::new(actor), None, None).await.unwrap();
+    let actor_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(actor);
+    let message_sender = factory.spawn_built_actor(actor_any).await.unwrap();
     
     // Verify actor is registered (via MessageSender, not mailbox)
     let actor_id: ActorId = "test-actor@test-node".to_string();
@@ -193,7 +194,8 @@ async fn test_multiple_actors_spawned_via_factory() {
             .build()
             .await;
         
-        factory.spawn_built_actor(Arc::new(actor), None, None).await.unwrap();
+        let actor_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(actor);
+        factory.spawn_built_actor(actor_any).await.unwrap();
         
         // Verify each is registered
         assert!(registry.is_actor_activated(&actor_id).await, "Actor {} should be activated", i);

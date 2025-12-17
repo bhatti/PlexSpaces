@@ -19,7 +19,7 @@
 //! Blob storage service implementation
 
 use bytes::Bytes;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use object_store::{
     aws::AmazonS3Builder,
     azure::MicrosoftAzureBuilder,
@@ -35,10 +35,10 @@ use ulid::Ulid;
 use crate::{
     BlobConfigExt, BlobError, BlobResult, BlobRepository,
     repository::ListFilters,
-    helpers::{datetime_to_timestamp, get_storage_path, timestamp_to_datetime},
+    helpers::{datetime_to_timestamp, get_storage_path},
 };
 use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
-use prost_types::Timestamp;
+use plexspaces_core::RequestContext;
 
 /// Blob storage service
 pub struct BlobService {
@@ -168,10 +168,20 @@ impl BlobService {
     }
 
     /// Upload a blob
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `name` - Blob name
+    /// * `data` - Blob content
+    /// * `content_type` - Optional content type
+    /// * `blob_group` - Optional blob group
+    /// * `kind` - Optional blob kind
+    /// * `metadata` - Optional metadata map
+    /// * `tags` - Optional tags map
+    /// * `expires_after` - Optional expiration duration
     pub async fn upload_blob(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         name: &str,
         data: Vec<u8>,
         content_type: Option<String>,
@@ -191,7 +201,7 @@ impl BlobService {
         let sha256 = hex::encode(hasher.finalize());
 
         // Check if blob with same SHA256 already exists
-        if let Some(existing) = self.repository.get_by_sha256(tenant_id, namespace, &sha256).await? {
+        if let Some(existing) = self.repository.get_by_sha256(ctx, &sha256).await? {
             // Return existing metadata (deduplication)
             return Ok(existing);
         }
@@ -203,10 +213,10 @@ impl BlobService {
         let now = Utc::now();
         let expires_at = expires_after.map(|d| datetime_to_timestamp(now + d));
         
-        let mut blob_metadata = BlobMetadata {
+        let blob_metadata = BlobMetadata {
             blob_id: blob_id.clone(),
-            tenant_id: tenant_id.to_string(),
-            namespace: namespace.to_string(),
+            tenant_id: ctx.tenant_id().to_string(),
+            namespace: ctx.namespace().to_string(),
             name: name.to_string(),
             sha256: sha256.clone(),
             content_type: content_type.unwrap_or_default(),
@@ -235,15 +245,23 @@ impl BlobService {
         // blob_metadata.etag = Some(etag);
 
         // Save metadata to repository
-        self.repository.save(&blob_metadata).await?;
+        self.repository.save(ctx, &blob_metadata).await?;
 
         Ok(blob_metadata)
     }
 
     /// Download a blob
-    pub async fn download_blob(&self, blob_id: &str) -> BlobResult<Vec<u8>> {
-        // Get metadata
-        let metadata = self.repository.get(blob_id).await?
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `blob_id` - Blob identifier
+    pub async fn download_blob(
+        &self,
+        ctx: &RequestContext,
+        blob_id: &str,
+    ) -> BlobResult<Vec<u8>> {
+        // Get metadata (automatically filtered by tenant_id and namespace)
+        let metadata = self.repository.get(ctx, blob_id).await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Get storage path
@@ -260,28 +278,49 @@ impl BlobService {
     }
 
     /// Get blob metadata
-    pub async fn get_metadata(&self, blob_id: &str) -> BlobResult<BlobMetadata> {
-        self.repository.get(blob_id).await?
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `blob_id` - Blob identifier
+    pub async fn get_metadata(
+        &self,
+        ctx: &RequestContext,
+        blob_id: &str,
+    ) -> BlobResult<BlobMetadata> {
+        self.repository.get(ctx, blob_id).await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))
     }
 
     /// List blobs
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `filters` - Filter criteria
+    /// * `page_size` - Number of results per page
+    /// * `page` - Page number (1-indexed)
     pub async fn list_blobs(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         filters: &ListFilters,
         page_size: i64,
         page: i64,
     ) -> BlobResult<(Vec<BlobMetadata>, i64)> {
         let offset = (page - 1) * page_size;
-        self.repository.list(tenant_id, namespace, filters, page_size, offset).await
+        self.repository.list(ctx, filters, page_size, offset).await
     }
 
     /// Delete a blob
-    pub async fn delete_blob(&self, blob_id: &str) -> BlobResult<()> {
-        // Get metadata
-        let metadata = self.repository.get(blob_id).await?
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `blob_id` - Blob identifier
+    pub async fn delete_blob(
+        &self,
+        ctx: &RequestContext,
+        blob_id: &str,
+    ) -> BlobResult<()> {
+        // Get metadata (automatically filtered by tenant_id and namespace)
+        let metadata = self.repository.get(ctx, blob_id).await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Delete from object store
@@ -291,21 +330,28 @@ impl BlobService {
             .map_err(|e| BlobError::StorageError(format!("Failed to delete blob: {}", e)))?;
 
         // Delete metadata
-        self.repository.delete(blob_id).await?;
+        self.repository.delete(ctx, blob_id).await?;
 
         Ok(())
     }
 
     /// Generate presigned URL (for direct client access)
     /// Requires 'presigned-urls' feature to be enabled
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `blob_id` - Blob identifier
+    /// * `operation` - Operation type ("GET" or "PUT")
+    /// * `expires_after` - Expiration duration
     pub async fn generate_presigned_url(
         &self,
+        ctx: &RequestContext,
         blob_id: &str,
         operation: &str,
         expires_after: Duration,
     ) -> BlobResult<String> {
-        // Get metadata
-        let metadata = self.repository.get(blob_id).await?
+        // Get metadata (automatically filtered by tenant_id and namespace)
+        let metadata = self.repository.get(ctx, blob_id).await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Get storage path
@@ -321,12 +367,16 @@ impl BlobService {
     }
 
     /// Find expired blobs
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `limit` - Maximum number of results
     pub async fn find_expired(
         &self,
-        tenant_id: Option<&str>,
+        ctx: &RequestContext,
         limit: i64,
     ) -> BlobResult<Vec<BlobMetadata>> {
-        self.repository.find_expired(tenant_id, limit).await
+        self.repository.find_expired(ctx, limit).await
     }
 }
 

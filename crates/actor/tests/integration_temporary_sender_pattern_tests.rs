@@ -4,7 +4,7 @@
 // Integration tests for temporary sender pattern in ActorRef::ask()
 // Tests all scenarios: outside sender, local actor, remote actor, chained asks
 
-use plexspaces_actor::ActorRef;
+use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorError, Actor, BehaviorType, ActorRegistry, application::ApplicationNode, ActorService};
 use plexspaces_mailbox::{Message, Mailbox, mailbox_config_default};
@@ -432,14 +432,29 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     let actor_service_trait: Arc<dyn ActorService> = actor_service_wrapper.clone() as Arc<dyn ActorService>;
     node.service_locator().register_actor_service(actor_service_trait).await;
 
-    // Create two counter actors
+    // Create two counter actors using ActorFactory
     let behavior1: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
     let behavior2: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
     
     let actor1_id = "counter-1@test-node-local-ask".to_string();
     let actor2_id = "counter-2@test-node-local-ask".to_string();
-    let _result1 = node.spawn_actor(actor1_id.clone(), behavior1, "default".to_string()).await.unwrap();
-    let _result2 = node.spawn_actor(actor2_id.clone(), behavior2, "default".to_string()).await.unwrap();
+    
+    // Use ActorFactory to spawn actors
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| "ActorFactory not found".to_string())?;
+    
+    // Create mailbox and actor for actor1 using ServiceLocator (defaults to memory backend)
+    let mailbox1 = node.service_locator().create_default_mailbox(format!("{}:mailbox", actor1_id))
+        .await.unwrap();
+    let actor1 = plexspaces_actor::Actor::new(actor1_id.clone(), behavior1, mailbox1, "default".to_string(), None);
+    let _message_sender1 = actor_factory.spawn_built_actor(Arc::new(actor1), None, None, None).await.unwrap();
+    
+    // Create mailbox and actor for actor2
+    let mailbox2 = node.service_locator().create_default_mailbox(format!("{}:mailbox", actor2_id))
+        .await.unwrap();
+    let actor2 = plexspaces_actor::Actor::new(actor2_id.clone(), behavior2, mailbox2, "default".to_string(), None);
+    let _message_sender2 = actor_factory.spawn_built_actor(Arc::new(actor2), None, None, None).await.unwrap();
     
     // Get ActorRef for counter2
     let counter2_ref = ActorRef::remote(

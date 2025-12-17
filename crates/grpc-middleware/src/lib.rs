@@ -102,19 +102,25 @@
 #![warn(clippy::all)]
 
 pub mod auth;
+pub mod cert_gen;
 pub mod chain;
 pub mod compression;
 pub mod metrics;
+pub mod observability;
 pub mod rate_limit;
 pub mod retry;
+pub mod security_validation;
 pub mod tracing_interceptor;
 
 pub use auth::AuthInterceptor;
+pub use cert_gen::{CertificateGenerator, CertificatePaths, CertGenError};
 pub use chain::{Interceptor, InterceptorChain, InterceptorError};
 pub use compression::CompressionInterceptor;
 pub use metrics::MetricsInterceptor;
+pub use observability::{ObservabilityManager, ObservabilityError, LogLevel, metrics_handler};
 pub use rate_limit::RateLimitInterceptor;
 pub use retry::RetryInterceptor;
+pub use security_validation::{SecurityValidator, SecurityValidationError};
 pub use tracing_interceptor::TracingInterceptor;
 
 /// Result type for interceptor operations

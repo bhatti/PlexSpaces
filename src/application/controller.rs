@@ -371,18 +371,6 @@ mod tests {
             &self.addr
         }
 
-        async fn spawn_actor(
-            &self,
-            actor_id: String,
-            _behavior: Box<dyn plexspaces_core::Actor>,
-            _namespace: String,
-        ) -> Result<String, CoreApplicationError> {
-            Ok(actor_id)
-        }
-
-        async fn stop_actor(&self, _actor_id: &str) -> Result<(), CoreApplicationError> {
-            Ok(())
-        }
     }
 
     /// Mock application for testing

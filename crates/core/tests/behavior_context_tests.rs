@@ -12,7 +12,8 @@ async fn test_behavior_context_creation() {
     let ctx = ActorContext::minimal(
         "test-actor".to_string(),
         "test-node".to_string(),
-        "default".to_string(),
+        "default".to_string(), // namespace
+        "test-tenant".to_string(), // tenant_id (required)
     );
     let ctx_arc = Arc::new(ctx);
 
@@ -40,7 +41,8 @@ async fn test_behavior_context_with_sender() {
     let ctx = ActorContext::minimal(
         "test-actor".to_string(),
         "test-node".to_string(),
-        "default".to_string(),
+        "default".to_string(), // namespace
+        "test-tenant".to_string(), // tenant_id (required)
     );
     let ctx_arc = Arc::new(ctx);
 

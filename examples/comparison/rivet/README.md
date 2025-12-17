@@ -71,7 +71,15 @@ actor.attach_facet(virtual_facet, 100, config).await?;
 let durability_facet = Box::new(DurabilityFacet::new(storage, config));
 actor.attach_facet(durability_facet, 50, serde_json::json!({})).await?;
 
-let counter_ref = node.spawn_actor(actor).await?;
+// Spawn using ActorFactory
+use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use std::sync::Arc;
+
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    .ok_or_else(|| "ActorFactory not found")?;
+let actor_id = actor.id().clone();
+let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+let counter_ref = plexspaces_core::ActorRef::new(actor_id)?;
 let counter = create_actor_ref(counter_ref, node).await?;
 ```
 

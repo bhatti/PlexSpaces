@@ -125,7 +125,15 @@ actor.attach_facet(timer_facet, 75, json!({})).await?;
 let reminder_facet = Box::new(ReminderFacet::new(storage));
 actor.attach_facet(reminder_facet, 60, json!({})).await?;
 
-let predictor_ref = node.spawn_actor(actor).await?;
+// Spawn using ActorFactory
+use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use std::sync::Arc;
+
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    .ok_or_else(|| "ActorFactory not found")?;
+let actor_id = actor.id().clone();
+let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+let predictor_ref = plexspaces_core::ActorRef::new(actor_id)?;
 let predictor = create_actor_ref(predictor_ref, node).await?;
 
 // Load model (cached in actor)

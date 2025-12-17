@@ -365,6 +365,69 @@ pub struct ResourceSpec {
     #[prost(string, tag="5")]
     pub gpu_type: ::prost::alloc::string::String,
 }
+/// Request Context (Go-style context.Context)
+///
+/// ## Purpose
+/// Provides request-scoped context similar to Go's context.Context.
+/// Carries tenant isolation, tracing, and request metadata through the call chain.
+///
+/// ## Design Philosophy
+/// - **Tenant Isolation**: tenant_id is REQUIRED for all operations
+/// - **Tracing**: request_id and correlation_id for distributed tracing
+/// - **Extensible**: metadata map for additional context
+/// - **Immutable**: Context should be passed by reference, not mutated
+///
+/// ## Usage Pattern
+/// ```rust
+/// // Create context from request
+/// let ctx = RequestContext::new("tenant-123".to_string())
+///      .with_namespace("production".to_string())
+///      .with_user_id("user-456".to_string());
+///
+/// // Pass to repository/service
+/// let result = repository.get(&ctx, "resource-id").await?;
+/// ```
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RequestContext {
+    /// Tenant ID (REQUIRED for all operations)
+    ///
+    /// All operations are scoped to this tenant.
+    /// Must be validated at service boundaries.
+    #[prost(string, tag="1")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Namespace within tenant (optional, defaults to "default")
+    ///
+    /// Common values: "production", "staging", "dev", "test"
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
+    /// User ID (from JWT, optional)
+    ///
+    /// Extracted from JWT claims for audit logging and authorization.
+    #[prost(string, tag="3")]
+    pub user_id: ::prost::alloc::string::String,
+    /// Request ID (for tracing)
+    ///
+    /// Unique identifier for this request (ULID).
+    /// Used for request tracing and correlation.
+    #[prost(string, tag="4")]
+    pub request_id: ::prost::alloc::string::String,
+    /// Correlation ID (for distributed tracing)
+    ///
+    /// Links related requests across services.
+    /// Propagated through gRPC metadata.
+    #[prost(string, tag="5")]
+    pub correlation_id: ::prost::alloc::string::String,
+    /// Request timestamp
+    #[prost(message, optional, tag="6")]
+    pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
+    /// Metadata (extensible key-value pairs)
+    ///
+    /// Additional context for request processing.
+    /// Examples: "source_ip", "user_agent", "api_version"
+    #[prost(map="string, string", tag="7")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
 /// Quality of Service levels
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

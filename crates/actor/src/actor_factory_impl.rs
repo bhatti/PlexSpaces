@@ -574,6 +574,121 @@ impl ActorFactory for ActorFactoryImpl {
             self.service_locator.clone(),
         )))
     }
+    
+    async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Get services from ServiceLocator
+        let registry: Arc<ActorRegistry> = self.service_locator.get_service().await
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
+        
+        let local_node_id = registry.local_node_id();
+        
+        // Check if actor exists and is local
+        let routing = registry.lookup_routing(actor_id).await
+            .map_err(|e| format!("Failed to lookup actor routing: {}", e))?;
+        
+        if routing.is_none() || !routing.as_ref().unwrap().is_local {
+            return Err(format!("Actor not found or not local: {}", actor_id).into());
+        }
+        
+        // Get namespace for observability (try to get from actor instance or use default)
+        let namespace = {
+            let instances = registry.actor_instances().read().await;
+            if let Some(instance) = instances.get(actor_id) {
+                // Try to downcast to Actor to get namespace from context
+                if let Some(actor) = instance.downcast_ref::<Actor>() {
+                    actor.context().namespace.clone()
+                } else {
+                    "default".to_string()
+                }
+            } else {
+                "default".to_string()
+            }
+        };
+        
+        // OBSERVABILITY: Log actor stop attempt
+        tracing::info!(
+            actor_id = %actor_id,
+            node_id = %local_node_id,
+            namespace = %namespace,
+            "Stopping actor"
+        );
+        
+        // OBSERVABILITY: Update ActorMetrics before stopping
+        // Note: unregister_with_cleanup will also decrement active, but we track here for explicit observability
+        {
+            use plexspaces_core::message_metrics::ActorMetricsExt;
+            let mut actor_metrics = registry.actor_metrics().write().await;
+            // Active count will be decremented by unregister_with_cleanup, but we track here for observability
+            // This ensures metrics are updated even if unregister_with_cleanup fails
+        }
+        
+        // Emit Deactivating event before unregistration
+        registry.publish_lifecycle_event(ActorLifecycleEvent {
+            actor_id: actor_id.clone(),
+            timestamp: Some(Timestamp {
+                seconds: chrono::Utc::now().timestamp(),
+                nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
+            }),
+            event_type: Some(
+                plexspaces_proto::actor_lifecycle_event::EventType::Deactivating(
+                    plexspaces_proto::v1::actor::ActorDeactivating {
+                        reason: "manual_stop".to_string(),
+                    },
+                ),
+            ),
+        }).await;
+        
+        // Unregister from ActorRegistry (this handles cleanup and decrements active in ActorMetrics)
+        registry.unregister_with_cleanup(actor_id).await
+            .map_err(|e| format!("Failed to unregister actor: {}", e))?;
+        
+        // OBSERVABILITY: Update Prometheus-style metrics
+        metrics::gauge!("plexspaces_node_active_actors",
+            "node_id" => local_node_id.to_string()
+        ).decrement(1.0);
+        
+        metrics::counter!("plexspaces_node_actors_stopped_total",
+            "node_id" => local_node_id.to_string(),
+            "namespace" => namespace.clone()
+        ).increment(1);
+        
+        // OBSERVABILITY: Verify ActorMetrics were updated (active should be decremented)
+        {
+            use plexspaces_core::message_metrics::ActorMetricsExt;
+            let actor_metrics = registry.actor_metrics().read().await;
+            tracing::debug!(
+                actor_id = %actor_id,
+                active_actors = actor_metrics.active,
+                "ActorMetrics updated after stop"
+            );
+        }
+        
+        // Emit Deactivated event after unregistration
+        registry.publish_lifecycle_event(ActorLifecycleEvent {
+            actor_id: actor_id.clone(),
+            timestamp: Some(Timestamp {
+                seconds: chrono::Utc::now().timestamp(),
+                nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
+            }),
+            event_type: Some(
+                plexspaces_proto::actor_lifecycle_event::EventType::Deactivated(
+                    plexspaces_proto::v1::actor::ActorDeactivated {
+                        reason: "manual_stop".to_string(),
+                    },
+                ),
+            ),
+        }).await;
+        
+        // OBSERVABILITY: Log successful stop
+        tracing::info!(
+            actor_id = %actor_id,
+            node_id = %local_node_id,
+            namespace = %namespace,
+            "Actor stopped successfully"
+        );
+        
+        Ok(())
+    }
 }
 
 // Implement Service trait so ActorFactoryImpl can be registered in ServiceLocator

@@ -23,6 +23,7 @@
 
 use plexspaces_blob::{BlobService, repository::sql::SqlBlobRepository, repository::ListFilters};
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
+use plexspaces_core::RequestContext;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -65,9 +66,9 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
     };
 
     // Create SQLite repository using AnyPool (like the node does)
-    // Use explicit sqlite:// prefix for AnyPool
+    // Use sqlite::memory: format (not sqlite://:memory:)
     use sqlx::AnyPool;
-    let any_pool = AnyPool::connect("sqlite://:memory:").await.ok()?;
+    let any_pool = AnyPool::connect("sqlite::memory:").await.ok()?;
     SqlBlobRepository::migrate(&any_pool).await.ok()?;
     let repository = Arc::new(SqlBlobRepository::new(any_pool));
 
@@ -90,6 +91,11 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
     BlobService::new(config, repository).await.ok().map(Arc::new)
 }
 
+fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
+    RequestContext::new(tenant_id.to_string())
+        .with_namespace(namespace.to_string())
+}
+
 #[tokio::test]
 async fn test_upload_and_download_blob() {
     let service = match create_test_service().await {
@@ -100,11 +106,11 @@ async fn test_upload_and_download_blob() {
         }
     };
 
+    let ctx = create_test_context("tenant-1", "ns-1");
     let data = b"Hello, World!".to_vec();
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "test.txt",
             data.clone(),
             Some("text/plain".to_string()),
@@ -123,7 +129,7 @@ async fn test_upload_and_download_blob() {
     assert_eq!(metadata.content_length, data.len() as i64);
 
     // Download
-    let downloaded = service.download_blob(&metadata.blob_id).await.unwrap();
+    let downloaded = service.download_blob(&ctx, &metadata.blob_id).await.unwrap();
     assert_eq!(downloaded, data);
 }
 
@@ -137,13 +143,13 @@ async fn test_deduplication() {
         }
     };
 
+    let ctx = create_test_context("tenant-1", "ns-1");
     let data = b"Duplicate content".to_vec();
 
     // Upload first time
     let metadata1 = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "file1.txt",
             data.clone(),
             None,
@@ -159,8 +165,7 @@ async fn test_deduplication() {
     // Upload same content with different name
     let metadata2 = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "file2.txt",
             data.clone(),
             None,
@@ -188,12 +193,12 @@ async fn test_list_and_delete() {
         }
     };
 
+    let ctx = create_test_context("tenant-1", "ns-1");
     // Upload multiple blobs
     for i in 1..=3 {
         service
             .upload_blob(
-                "tenant-1",
-                "ns-1",
+                &ctx,
                 &format!("file{}.txt", i),
                 format!("content{}", i).into_bytes(),
                 None,
@@ -210,7 +215,7 @@ async fn test_list_and_delete() {
     // List blobs
     let filters = ListFilters::default();
     let (blobs, total) = service
-        .list_blobs("tenant-1", "ns-1", &filters, 10, 1)
+        .list_blobs(&ctx, &filters, 10, 1)
         .await
         .unwrap();
 
@@ -219,10 +224,10 @@ async fn test_list_and_delete() {
 
     // Delete a blob
     let blob_id = &blobs[0].blob_id;
-    service.delete_blob(blob_id).await.unwrap();
+    service.delete_blob(&ctx, blob_id).await.unwrap();
 
     // Verify deleted
-    assert!(service.get_metadata(blob_id).await.is_err());
+    assert!(service.get_metadata(&ctx, blob_id).await.is_err());
 }
 
 #[tokio::test]
@@ -235,11 +240,13 @@ async fn test_multi_tenancy_isolation() {
         }
     };
 
+    let ctx1 = create_test_context("tenant-1", "ns-1");
+    let ctx2 = create_test_context("tenant-2", "ns-1");
+
     // Upload to tenant-1
     let metadata1 = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx1,
             "file.txt",
             b"tenant1".to_vec(),
             None,
@@ -255,8 +262,7 @@ async fn test_multi_tenancy_isolation() {
     // Upload to tenant-2
     let metadata2 = service
         .upload_blob(
-            "tenant-2",
-            "ns-1",
+            &ctx2,
             "file.txt",
             b"tenant2".to_vec(),
             None,
@@ -271,7 +277,7 @@ async fn test_multi_tenancy_isolation() {
 
     // List tenant-1 blobs
     let (blobs, _) = service
-        .list_blobs("tenant-1", "ns-1", &ListFilters::default(), 10, 1)
+        .list_blobs(&ctx1, &ListFilters::default(), 10, 1)
         .await
         .unwrap();
 
@@ -291,12 +297,12 @@ async fn test_presigned_url_get() {
         }
     };
 
+    let ctx = create_test_context("tenant-1", "ns-1");
     // Upload a blob first
     let data = b"Test content for presigned URL".to_vec();
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "presigned-test.txt",
             data.clone(),
             Some("text/plain".to_string()),
@@ -312,7 +318,7 @@ async fn test_presigned_url_get() {
     // Generate presigned URL for GET
     use chrono::Duration;
     let presigned_url = service
-        .generate_presigned_url(&metadata.blob_id, "GET", Duration::hours(1))
+        .generate_presigned_url(&ctx, &metadata.blob_id, "GET", Duration::hours(1))
         .await
         .unwrap();
 
@@ -341,12 +347,12 @@ async fn test_presigned_url_put() {
         }
     };
 
+    let ctx = create_test_context("tenant-1", "ns-1");
     // Upload a blob first to get a valid blob_id and path
     let data = b"Initial content".to_vec();
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "presigned-put-test.txt",
             data,
             Some("text/plain".to_string()),
@@ -362,7 +368,7 @@ async fn test_presigned_url_put() {
     // Generate presigned URL for PUT
     use chrono::Duration;
     let presigned_url = service
-        .generate_presigned_url(&metadata.blob_id, "PUT", Duration::hours(1))
+        .generate_presigned_url(&ctx, &metadata.blob_id, "PUT", Duration::hours(1))
         .await
         .unwrap();
 
@@ -396,12 +402,12 @@ async fn test_presigned_url_expiration() {
         }
     };
 
+    let ctx = create_test_context("tenant-1", "ns-1");
     // Upload a blob first
     let data = b"Test expiration".to_vec();
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "expiration-test.txt",
             data,
             Some("text/plain".to_string()),
@@ -417,7 +423,7 @@ async fn test_presigned_url_expiration() {
     // Generate presigned URL with very short expiration (1 second)
     use chrono::Duration;
     let presigned_url = service
-        .generate_presigned_url(&metadata.blob_id, "GET", Duration::seconds(1))
+        .generate_presigned_url(&ctx, &metadata.blob_id, "GET", Duration::seconds(1))
         .await
         .unwrap();
 
@@ -443,12 +449,12 @@ async fn test_presigned_url_invalid_operation() {
         }
     };
 
+    let ctx = create_test_context("tenant-1", "ns-1");
     // Upload a blob first
     let data = b"Test invalid operation".to_vec();
     let metadata = service
         .upload_blob(
-            "tenant-1",
-            "ns-1",
+            &ctx,
             "invalid-op-test.txt",
             data,
             Some("text/plain".to_string()),
@@ -464,7 +470,7 @@ async fn test_presigned_url_invalid_operation() {
     // Try invalid operation
     use chrono::Duration;
     let result = service
-        .generate_presigned_url(&metadata.blob_id, "DELETE", Duration::hours(1))
+        .generate_presigned_url(&ctx, &metadata.blob_id, "DELETE", Duration::hours(1))
         .await;
 
     // Should fail with invalid operation error

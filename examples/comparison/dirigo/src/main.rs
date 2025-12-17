@@ -3,12 +3,13 @@
 // Based on: https://arxiv.org/abs/2308.03615
 // Use Case: Real-time Event Stream Processing (Sensor Data → Filtering → Aggregation → Alerting)
 
-use plexspaces_actor::{ActorBuilder, ActorRef};
+use plexspaces_actor::{ActorBuilder, ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, ActorId, Reply};
+use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, ActorId};
 use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, DurabilityConfig, MemoryJournalStorage};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::info;
@@ -292,7 +293,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .attach_facet(durability_facet, 50, serde_json::json!({}))
         .await?;
     
-    let map_ref = node.spawn_actor(map_actor).await?;
+    // Spawn using ActorFactory
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = map_actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(map_actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let map_ref = plexspaces_core::ActorRef::new(actor_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     let map_mailbox = node.actor_registry()
         .lookup_mailbox(map_ref.id())
         .await?
@@ -331,7 +341,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let durability_facet = Box::new(DurabilityFacet::new(storage, DurabilityConfig::default()));
     filter_actor.attach_facet(durability_facet, 50, serde_json::json!({})).await?;
     
-    let filter_ref = node.spawn_actor(filter_actor).await?;
+    // Spawn using ActorFactory
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let filter_id = filter_actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(filter_actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let filter_ref = plexspaces_core::ActorRef::new(filter_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     let filter_mailbox = node.actor_registry()
         .lookup_mailbox(filter_ref.id())
         .await?
@@ -370,7 +387,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let durability_facet = Box::new(DurabilityFacet::new(storage, DurabilityConfig::default()));
     reduce_actor.attach_facet(durability_facet, 50, serde_json::json!({})).await?;
     
-    let reduce_ref = node.spawn_actor(reduce_actor).await?;
+    // Spawn using ActorFactory
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let reduce_id = reduce_actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(reduce_actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let reduce_ref = plexspaces_core::ActorRef::new(reduce_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     let reduce_mailbox = node.actor_registry()
         .lookup_mailbox(reduce_ref.id())
         .await?
@@ -548,7 +572,14 @@ mod tests {
         let durability_facet = Box::new(DurabilityFacet::new(storage, DurabilityConfig::default()));
         actor.attach_facet(durability_facet, 50, serde_json::json!({})).await.unwrap();
         
-        let actor_ref = node.spawn_actor(actor).await.unwrap();
+        // Spawn using ActorFactory
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = actor.id().clone();
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
+        let actor_ref = plexspaces_core::ActorRef::new(actor_id)
+            .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();
 
         let mailbox = node.actor_registry()
             .lookup_mailbox(actor_ref.id())

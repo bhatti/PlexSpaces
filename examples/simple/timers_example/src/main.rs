@@ -33,7 +33,7 @@
 //! 3. High-frequency polling timer: Fires every 500ms
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{ActorBehavior, ActorId};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_journaling::TimerFacet;
 use plexspaces_mailbox::{ActorMessage, MailboxConfig, Message};
 use plexspaces_node::NodeBuilder;
@@ -67,7 +67,7 @@ impl TimerBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for TimerBehavior {
+impl ActorTrait for TimerBehavior {
     async fn handle_message(
         &mut self,
         ctx: &plexspaces_core::ActorContext,
@@ -222,7 +222,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("timer-actor@local"))
         .with_mailbox_config(mailbox_config)
-        .build();
+        .build()
+        .await;
 
     // Attach TimerFacet to actor (explicit - A3: explicit facet attachment)
     let timer_facet = Box::new(TimerFacet::new());
@@ -232,8 +233,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("Failed to attach TimerFacet: {}", e))?;
 
-    // Spawn actor
-    let actor_ref = node.spawn_actor(actor).await?;
+    // Spawn using ActorFactory (spawn_built_actor is called internally by ActorFactory::spawn_actor)
+    // For built actors, we use ActorFactory::spawn_built_actor directly
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let actor_ref = plexspaces_core::ActorRef::new(actor_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     info!("✅ Actor spawned: {}", actor_ref.id());
     info!("");
 

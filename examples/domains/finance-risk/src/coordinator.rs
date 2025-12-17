@@ -23,7 +23,7 @@
 //! - Worker failures handled by OneForOne supervision
 
 use crate::models::*;
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use std::collections::HashMap;
 use tracing::{info, warn};
@@ -94,7 +94,7 @@ impl LoanCoordinator {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for LoanCoordinator {
+impl ActorTrait for LoanCoordinator {
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenServer
     }

@@ -201,65 +201,16 @@ pub trait ApplicationNode: Send + Sync {
     /// Get node listen address (gRPC server address)
     fn listen_addr(&self) -> &str;
 
-    /// Spawn an actor with given behavior
+    /// Get ServiceLocator (optional - only Node implements this)
     ///
     /// ## Purpose
-    /// Applications call this to spawn actors during start().
-    /// The Node implementation wraps the behavior in an Actor and starts it.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Unique identifier for the actor
-    /// * `behavior` - The actor behavior (e.g., CreditCheckWorker, QCWorker, etc.)
-    /// * `namespace` - Namespace for the actor (e.g., "genomics", "finance")
+    /// Allows applications to access ServiceLocator for ActorFactory.
+    /// Node implementations return Some(service_locator), mocks return None.
     ///
     /// ## Returns
-    /// The actor ID on success
-    ///
-    /// ## Errors
-    /// Returns `ApplicationError::ActorSpawnFailed` if spawning fails
-    ///
-    /// ## Example (from application's start method)
-    /// ```ignore
-    /// let behavior = Box::new(CreditCheckWorker::new(actor_id.clone()));
-    /// node.spawn_actor(actor_id, behavior, "finance").await?;
-    /// ```
-    async fn spawn_actor(
-        &self,
-        actor_id: String,
-        behavior: Box<dyn crate::Actor>,
-        namespace: String,
-    ) -> Result<String, ApplicationError>;
-
-    /// Stop an actor
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor to stop
-    ///
-    /// ## Returns
-    /// Ok(()) on success
-    ///
-    /// ## Errors
-    /// Returns `ApplicationError::ActorStopFailed` if stopping fails
-    async fn stop_actor(&self, actor_id: &str) -> Result<(), ApplicationError>;
-
-    /// Update actor count for an application (optional, for metrics tracking)
-    ///
-    /// ## Purpose
-    /// Allows applications to update their actor count for metrics tracking.
-    /// This is called automatically by the framework when actors are spawned/stopped.
-    ///
-    /// ## Arguments
-    /// * `application_name` - Application name
-    /// * `actor_count` - New actor count
-    ///
-    /// ## Returns
-    /// Ok(()) on success, or Err if application not found
-    ///
-    /// ## Note
-    /// Default implementation is a no-op. Node implementations should override this
-    /// to update ApplicationManager metrics.
-    async fn update_actor_count(&self, _application_name: &str, _actor_count: u32) -> Result<(), ApplicationError> {
-        Ok(())
+    /// Some(ServiceLocator) if available, None otherwise
+    fn service_locator(&self) -> Option<Arc<crate::ServiceLocator>> {
+        None
     }
 }
 
@@ -324,23 +275,6 @@ mod tests {
 
         fn listen_addr(&self) -> &str {
             &self.addr
-        }
-
-        async fn spawn_actor(
-            &self,
-            actor_id: String,
-            _behavior: Box<dyn crate::Actor>,
-            _namespace: String,
-        ) -> Result<String, ApplicationError> {
-            Ok(actor_id)
-        }
-
-        async fn stop_actor(&self, _actor_id: &str) -> Result<(), ApplicationError> {
-            Ok(())
-        }
-
-        async fn update_actor_count(&self, _application_name: &str, _actor_count: u32) -> Result<(), ApplicationError> {
-            Ok(())
         }
     }
 

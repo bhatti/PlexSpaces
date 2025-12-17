@@ -48,6 +48,7 @@ import "google/protobuf/duration.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/security/security.proto";
 import "plexspaces/v1/storage/blob.proto";
+import "plexspaces/v1/storage/storage_config.proto";
 
 // Release specification (Erlang/OTP-inspired)
 //
@@ -106,7 +107,8 @@ message NodeConfig {
 // Runtime configuration
 //
 // ## Purpose
-// Defines runtime services (gRPC, middleware, health monitoring, security, blob storage).
+// Defines runtime services (gRPC, middleware, health monitoring, security, blob storage,
+// and unified storage backends).
 message RuntimeConfig {
   // gRPC server configuration
   GrpcConfig grpc = 1;
@@ -119,6 +121,46 @@ message RuntimeConfig {
 
   // Blob storage configuration (S3-compatible object storage)
   plexspaces.storage.v1.BlobConfig blob = 4;
+
+  // Shared relational database configuration
+  //
+  // Used by components that always use relational database:
+  // - scheduler (crates/scheduler/migrations)
+  // - workflow (crates/workflow/migrations)
+  // - journaling (crates/journaling/migrations)
+  // - blob (crates/blob/migrations)
+  // - keyvalue (crates/keyvalue/migrations) - now always SQL
+  //
+  // Convention: All these components share the same database by default.
+  // Can be overridden per-component if needed.
+  plexspaces.storage.v1.SharedRelationalDbConfig shared_database = 5;
+
+  // Locks storage provider configuration
+  //
+  // Supports: postgres, sqlite, redis, dynamodb
+  // Default: redis (if available), else postgres
+  plexspaces.storage.v1.StorageProviderConfig locks_provider = 6;
+
+  // Channel storage provider configuration
+  //
+  // Supports: redis, kafka, nats, sqlite, memory
+  // Default: redis (if available), else memory
+  plexspaces.storage.v1.StorageProviderConfig channel_provider = 7;
+
+  // TupleSpace storage provider configuration
+  //
+  // Supports: postgres, sqlite, redis, dynamodb
+  // Default: postgres (if available), else memory
+  plexspaces.storage.v1.StorageProviderConfig tuplespace_provider = 8;
+
+  // Mailbox storage provider configuration
+  //
+  // Supports: memory, redis, sqlite, postgres
+  // Default: memory
+  plexspaces.storage.v1.StorageProviderConfig mailbox_provider = 9;
+
+  // Framework version information (auto-populated at build time)
+  plexspaces.storage.v1.FrameworkInfo framework_info = 10;
 }
 
 // gRPC server configuration
@@ -189,6 +231,7 @@ message HealthConfig {
 // - Store secrets in environment variables or secret management systems
 // - Use file paths for certificates (not inline in config)
 // - Rotate certificates regularly
+// - Auth enabled by default (can disable for local testing)
 message SecurityConfig {
   // Service identity for this node (mTLS)
   //
@@ -213,6 +256,17 @@ message SecurityConfig {
   // List of API keys this node can use for authentication.
   // Keys are service-scoped (not user-scoped).
   repeated plexspaces.security.v1.ApiKey api_keys = 4;
+
+  // Allow disabling auth for local testing (default: false)
+  //
+  // Security: Only set to true in development/test environments.
+  // Production should always have auth enabled.
+  bool allow_disable_auth = 5;
+
+  // Disable authentication (only if allow_disable_auth = true)
+  //
+  // Security: Only for integration tests. Never use in production.
+  bool disable_auth = 6;
 }
 
 // Application configuration (in release)

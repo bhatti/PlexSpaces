@@ -429,10 +429,13 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
                     // ExecutionContext will automatically return cached side effects
                     // instead of executing them (deterministic replay)
                     // Note: We pass a dummy context here - handler uses its own stored context
+                    // For replay, we need tenant_id from the actor's context
+                    // This is a placeholder - in production, tenant_id should come from actor's actual context
+                    // Note: This is acceptable here as it's internal replay logic
                     let dummy_context = ActorContext::minimal(
                         actor_id.to_string(),
                         "local".to_string(),
-                        "default".to_string(),
+                        "default".to_string(), // namespace
                     );
                     handler.replay_message(message, &dummy_context).await
                         .map_err(|e| JournalError::Replay(format!("Replay failed: {}", e)))?;

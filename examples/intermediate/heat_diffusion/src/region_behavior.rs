@@ -21,7 +21,7 @@
 //! Each RegionBehavior manages an NxM region of cells in the heat diffusion grid.
 //! This follows the **Granularity Principle**: actors manage regions, not individual cells.
 
-use plexspaces_core::{ActorBehavior, BehaviorType, ActorContext};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_tuplespace::{TupleSpace, Tuple, TupleField, Pattern, PatternField};
 use serde::{Deserialize, Serialize};
@@ -366,7 +366,7 @@ impl RegionBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for RegionBehavior {
+impl ActorTrait for RegionBehavior {
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenEvent
     }

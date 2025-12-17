@@ -156,6 +156,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for actors to initialize and start processing
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
+    // Get ActorService from node
+    let actor_service = node.service_locator().get_actor_service().await
+        .ok_or_else(|| "ActorService not available".to_string())?;
+
     // Simulation loop
     println!("Running simulation ({} steps)...", config.steps);
     println!();
@@ -170,7 +174,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Request state from all body actors (with delays to avoid mailbox overflow)
         for (idx, (_body_id, body_ref)) in body_refs.iter().enumerate() {
             let msg = Message::new(b"get_state".to_vec());
-            body_ref.tell(msg).await?;
+            actor_service.send(body_ref.id(), msg).await
+                .map_err(|e| format!("Failed to send message: {}", e))?;
             // Delay between messages to allow processing
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
@@ -204,7 +209,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Send accumulated force to body actor
             let force_json = json!({"force": [total_force[0], total_force[1], total_force[2]]});
             let msg = Message::new(serde_json::to_vec(&force_json)?);
-            body_ref.tell(msg).await?;
+            actor_service.send(body_ref.id(), msg).await
+                .map_err(|e| format!("Failed to send message: {}", e))?;
             
             // Delay to allow processing and avoid mailbox overflow
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -214,7 +220,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let dt_json = json!({"dt": config.dt});
         for (_idx, (_body_id, body_ref)) in body_refs.iter().enumerate() {
             let msg = Message::new(serde_json::to_vec(&dt_json)?);
-            body_ref.tell(msg).await?;
+            actor_service.send(body_ref.id(), msg).await
+                .map_err(|e| format!("Failed to send message: {}", e))?;
             // Delay to allow processing
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }

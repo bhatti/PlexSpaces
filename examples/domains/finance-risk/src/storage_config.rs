@@ -124,6 +124,7 @@ impl StorageConfig {
             } else {
                 CompressionType::CompressionTypeNone as i32
             },
+            state_schema_version: 1,
             backend_config: None,
         }
     }

@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Tests for Node::get_or_activate_actor (automatic activation)
+//! Tests for Node::get_or_activate_actor (automatic activation)
 
 use plexspaces_mailbox::{mailbox_config_default, Mailbox, Message};
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeId, default_node_config};
 use plexspaces_actor::{Actor, ActorRef};
 use plexspaces_core::Actor as CoreActorTrait;
 use std::sync::Arc;
 
+#[path = "test_helpers.rs"]
 #[path = "test_helpers.rs"]
 mod test_helpers;
 use test_helpers::{lookup_actor_ref, activate_virtual_actor, get_or_activate_actor_helper, find_actor_helper, spawn_actor_helper};
@@ -23,7 +24,6 @@ impl CoreActorTrait for TestBehavior {
         &mut self,
         _ctx: &plexspaces_core::ActorContext,
         msg: Message,
-        _reply: &dyn plexspaces_core::Reply,
     ) -> Result<(), plexspaces_core::BehaviorError> {
         self.received.lock().await.push(msg);
         Ok(())
@@ -37,7 +37,7 @@ impl CoreActorTrait for TestBehavior {
 #[tokio::test]
 async fn test_get_or_activate_actor_creates_new_actor() {
     // Test: get_or_activate_actor creates actor if it doesn't exist
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
     let received = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let received_clone = received.clone();
 
@@ -98,7 +98,7 @@ use test_helpers::{lookup_actor_ref, activate_virtual_actor, get_or_activate_act
 #[tokio::test]
 async fn test_get_or_activate_actor_returns_existing_actor() {
     // Test: get_or_activate_actor returns existing actor if it exists
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
     let received = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
     // Create actor first
@@ -121,7 +121,7 @@ async fn test_get_or_activate_actor_returns_existing_actor() {
     // Spawn actor using ActorFactory
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await.unwrap();
-    actor_factory.spawn_built_actor(Arc::new(actor), None, None).await.unwrap();
+    actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await.unwrap();
     let actor_ref1 = lookup_actor_ref(&node, &"existing-actor@test-node".to_string()).await.unwrap().unwrap();
 
     // Now get_or_activate should return existing actor
@@ -143,7 +143,7 @@ async fn test_get_or_activate_actor_returns_existing_actor() {
 async fn test_get_or_activate_actor_concurrent_activation() {
     // Test: Concurrent calls to get_or_activate_actor should handle race conditions
     // Note: This test verifies that concurrent calls don't panic, but only one actor is created
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
     let received = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
     // Spawn multiple tasks trying to get_or_activate the same actor

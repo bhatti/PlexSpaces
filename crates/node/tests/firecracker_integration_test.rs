@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Integration tests for Firecracker VM Service via gRPC
+//! Integration tests for Firecracker VM Service via gRPC
 // These tests require Docker to run the node with Firecracker support
 
 #[cfg(feature = "firecracker")]

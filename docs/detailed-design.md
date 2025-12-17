@@ -241,7 +241,10 @@ graph LR
     
     VA -.-> VirtualActor
     Durability -.-> DurableActor
-    VA & Durability & Timer & Metrics -.-> FullActor
+    VA -.-> FullActor
+    Durability -.-> FullActor
+    Timer -.-> FullActor
+    Metrics -.-> FullActor
     
     style Actor fill:#1e3a8a,stroke:#3b82f6,stroke-width:3px,color:#fff
     style VA fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
@@ -1288,13 +1291,6 @@ sequenceDiagram
     Workflow->>Journal: Append Step3 Complete
     Workflow->>Journal: Append Workflow Complete
     Workflow-->>Client: Success
-    
-    style Client fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
-    style Workflow fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
-    style Journal fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
-    style Step1 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
-    style Step2 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
-    style Step3 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
 ```
 
 **Features**:
@@ -1347,67 +1343,32 @@ sequenceDiagram
     participant Journal
     participant Snapshot
     
-    Note over Actor,Snapshot: Normal Execution
-    Actor->>DurabilityFacet: Process Message
-    DurabilityFacet->>Journal: Append Entry
-    Journal-->>DurabilityFacet: Entry Stored
-    DurabilityFacet->>Actor: Continue Processing
+    rect rgb(240, 240, 240)
+        Note over Actor,Snapshot: Normal Execution
+        Actor->>DurabilityFacet: Process Message
+        DurabilityFacet->>Journal: Append Entry
+        Journal-->>DurabilityFacet: Entry Stored
+        DurabilityFacet->>Actor: Continue Processing
+    end
     
-    Note over Actor,Snapshot: Periodic Checkpoint
-    DurabilityFacet->>Actor: Request Snapshot
-    Actor-->>DurabilityFacet: State Snapshot
-    DurabilityFacet->>Snapshot: Save Checkpoint
-    DurabilityFacet->>Journal: Mark Checkpoint
+    rect rgb(240, 240, 240)
+        Note over Actor,Snapshot: Periodic Checkpoint
+        DurabilityFacet->>Actor: Request Snapshot
+        Actor-->>DurabilityFacet: State Snapshot
+        DurabilityFacet->>Snapshot: Save Checkpoint
+        DurabilityFacet->>Journal: Mark Checkpoint
+    end
     
-    Note over Actor,Snapshot: Recovery After Crash
-    Actor->>DurabilityFacet: Initialize
-    DurabilityFacet->>Snapshot: Load Latest Checkpoint
-    Snapshot-->>DurabilityFacet: State
-    DurabilityFacet->>Journal: Replay from Checkpoint
-    Journal-->>DurabilityFacet: Entries
-    DurabilityFacet->>Actor: Replay Messages
-    Actor->>Actor: Reconstruct State
-    
-    style Actor fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
-    style DurabilityFacet fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
-    style Journal fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
-    style Snapshot fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
-```
-
-### Journaling and Replay Flow
-
-```mermaid
-sequenceDiagram
-    participant Actor
-    participant DurabilityFacet
-    participant Journal
-    participant Snapshot
-    
-    Note over Actor,Snapshot: Normal Execution
-    Actor->>DurabilityFacet: Process Message
-    DurabilityFacet->>Journal: Append Entry
-    Journal-->>DurabilityFacet: Entry Stored
-    DurabilityFacet->>Actor: Continue Processing
-    
-    Note over Actor,Snapshot: Periodic Checkpoint
-    DurabilityFacet->>Actor: Request Snapshot
-    Actor-->>DurabilityFacet: State Snapshot
-    DurabilityFacet->>Snapshot: Save Checkpoint
-    DurabilityFacet->>Journal: Mark Checkpoint
-    
-    Note over Actor,Snapshot: Recovery After Crash
-    Actor->>DurabilityFacet: Initialize
-    DurabilityFacet->>Snapshot: Load Latest Checkpoint
-    Snapshot-->>DurabilityFacet: State
-    DurabilityFacet->>Journal: Replay from Checkpoint
-    Journal-->>DurabilityFacet: Entries
-    DurabilityFacet->>Actor: Replay Messages
-    Actor->>Actor: Reconstruct State
-    
-    style Actor fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
-    style DurabilityFacet fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
-    style Journal fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
-    style Snapshot fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+    rect rgb(240, 240, 240)
+        Note over Actor,Snapshot: Recovery After Crash
+        Actor->>DurabilityFacet: Initialize
+        DurabilityFacet->>Snapshot: Load Latest Checkpoint
+        Snapshot-->>DurabilityFacet: State
+        DurabilityFacet->>Journal: Replay from Checkpoint
+        Journal-->>DurabilityFacet: Entries
+        DurabilityFacet->>Actor: Replay Messages
+        Actor->>Actor: Reconstruct State
+    end
 ```
 
 ## Supervision

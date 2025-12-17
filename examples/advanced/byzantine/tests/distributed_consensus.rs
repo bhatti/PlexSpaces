@@ -101,7 +101,7 @@ async fn test_redis_3_generals_agree_on_attack() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Commander");
+    ).await.expect("Failed to create commander");
 
     let lieutenant1 = General::new(
         "lieutenant_1".to_string(),
@@ -109,7 +109,7 @@ async fn test_redis_3_generals_agree_on_attack() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Lieutenant1");
+    ).await.expect("Failed to create lieutenant1");
 
     let lieutenant2 = General::new(
         "lieutenant_2".to_string(),
@@ -117,7 +117,7 @@ async fn test_redis_3_generals_agree_on_attack() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Lieutenant2");
+    ).await.expect("Failed to create lieutenant2");
 
     // Commander proposes Attack
     commander.propose(true).await.expect("Commander proposal failed");
@@ -192,7 +192,7 @@ async fn test_redis_vote_persistence_across_restart() {
             false,
             journal.clone(),
             tuplespace.clone(),
-        ).await.expect("Failed to create General1");
+        ).await.expect("Failed to create general1");
 
         general1.cast_vote(0, Decision::Attack, vec!["general".to_string()])
             .await.expect("Vote failed");
@@ -214,7 +214,7 @@ async fn test_redis_vote_persistence_across_restart() {
             false,
             journal.clone(),
             tuplespace.clone(),
-        ).await.expect("Failed to create General2");
+        ).await.expect("Failed to create general2");
 
         let votes = general2.read_votes(0).await.expect("Read failed");
         assert!(votes.len() >= 1, "Should see persisted vote after restart");
@@ -249,17 +249,17 @@ async fn test_redis_7_generals_mixed_votes() {
     let journal = Arc::new(MemoryJournal::new());
 
     // Spawn 7 generals
-    let generals: Vec<General> = (0..7)
-        .map(|i| {
-            General::new(
-                format!("general_{}", i),
-                i == 0,
-                false,
-                journal.clone(),
-                tuplespace.clone(),
-            ).await.expect(&format!("Failed to create General {}", i))
-        })
-        .collect();
+    let mut generals = Vec::new();
+    for i in 0..7 {
+        let general = General::new(
+            format!("general_{}", i),
+            i == 0,
+            false,
+            journal.clone(),
+            tuplespace.clone(),
+        ).await.expect(&format!("Failed to create general_{}", i));
+        generals.push(general);
+    }
 
     // Commander proposes
     generals[0].propose(true).await.expect("Proposal failed");
@@ -395,17 +395,17 @@ async fn test_redis_concurrent_voting() {
     let journal = Arc::new(MemoryJournal::new());
 
     // Spawn 10 generals
-    let generals: Vec<General> = (0..10)
-        .map(|i| {
-            General::new(
-                format!("general_{}", i),
-                false,
-                false,
-                journal.clone(),
-                tuplespace.clone(),
-            ).await.expect(&format!("Failed to create General {}", i))
-        })
-        .collect();
+    let mut generals = Vec::new();
+    for i in 0..10 {
+        let general = General::new(
+            format!("general_{}", i),
+            false,
+            false,
+            journal.clone(),
+            tuplespace.clone(),
+        ).await.expect(&format!("Failed to create general_{}", i));
+        generals.push(general);
+    }
 
     // All vote concurrently
     let mut tasks = vec![];

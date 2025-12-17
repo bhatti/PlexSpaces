@@ -29,7 +29,7 @@
 //! 3. Retry reminder: Fires every 1.5 seconds, max 2 occurrences
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{ActorBehavior, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_journaling::{
     ReminderFacet, ReminderRegistration, VirtualActorFacet, MemoryJournalStorage,
 };
@@ -58,7 +58,7 @@ impl ReminderBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for ReminderBehavior {
+impl Actor for ReminderBehavior {
     async fn handle_message(
         &mut self,
         ctx: &ActorContext,
@@ -181,7 +181,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("reminder-actor@local"))
         .with_mailbox_config(mailbox_config)
-        .build();
+        .build()
+        .await;
 
     // Attach VirtualActorFacet for auto-activation
     info!("🔌 Attaching VirtualActorFacet for auto-activation...");
@@ -214,8 +215,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ ReminderFacet attached");
     println!();
 
-    // Spawn actor
-    let actor_ref = node.spawn_actor(actor).await?;
+    // Spawn using ActorFactory (spawn_built_actor is called internally)
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let actor_ref = plexspaces_core::ActorRef::new(actor_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     let actor_id = actor_ref.id().clone();
     info!("✅ Actor spawned: {}", actor_id);
     println!();

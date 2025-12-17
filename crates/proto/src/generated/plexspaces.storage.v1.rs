@@ -256,5 +256,416 @@ pub struct GeneratePresignedUrlResponse {
     #[prost(message, optional, tag="2")]
     pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
 }
+/// Shared relational database configuration
+///
+/// ## Purpose
+/// Configuration for components that always use relational database:
+/// - scheduler (crates/scheduler/migrations)
+/// - workflow (crates/workflow/migrations)
+/// - object-registry (via KeyValueStore SQL backend)
+/// - journaling (crates/journaling/migrations)
+/// - blob (crates/blob/migrations)
+///
+/// ## Convention
+/// All these components share the same database connection by default.
+/// Can be overridden per-component if needed.
+///
+/// ## Environment Variables
+/// - PLEXSPACES_DATABASE_URL: Connection string (can use ${VAR} syntax)
+/// - PLEXSPACES_DATABASE_POOL_SIZE: Connection pool size (default: 10)
+/// - PLEXSPACES_DATABASE_AUTO_MIGRATE: Auto-migrate on startup (default: true)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SharedRelationalDbConfig {
+    /// Connection string (can use environment variable: ${DATABASE_URL})
+    /// Format: postgres://user:password@host:port/database
+    ///          sqlite:///path/to/database.db
+    ///          sqlite::memory:
+    ///
+    /// Security: Passwords should be in environment variables, not config files
+    /// Example: "postgres://user:${DB_PASSWORD}@localhost:5432/plexspaces"
+    #[prost(string, tag="1")]
+    pub connection_string: ::prost::alloc::string::String,
+    /// Connection pool size (default: 10)
+    #[prost(uint32, tag="2")]
+    pub pool_size: u32,
+    /// Auto-migrate on startup (default: true)
+    /// Runs migrations from migration_paths on node startup
+    #[prost(bool, tag="3")]
+    pub auto_migrate: bool,
+    /// Migration paths (default: auto-discover from crates/*/migrations)
+    /// Paths are relative to workspace root or absolute
+    #[prost(string, repeated, tag="4")]
+    pub migration_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// Redis backend configuration
+///
+/// ## Purpose
+/// Configuration for Redis-based backends (locks, channel, keyvalue, tuplespace).
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RedisBackendConfig {
+    /// Redis connection URL
+    /// Format: redis://\[password@\]host:port\[/database\]
+    ///          redis://localhost:6379/0
+    ///          redis://:password@redis-cluster:6379/0
+    ///
+    /// Security: Passwords should be in environment variables
+    /// Example: "redis://:${REDIS_PASSWORD}@localhost:6379/0"
+    #[prost(string, tag="1")]
+    pub url: ::prost::alloc::string::String,
+    /// Connection pool size (default: 10)
+    #[prost(uint32, tag="2")]
+    pub pool_size: u32,
+    /// Key prefix for namespace isolation (default: "plexspaces:")
+    /// All keys will be prefixed with this value
+    #[prost(string, tag="3")]
+    pub key_prefix: ::prost::alloc::string::String,
+    /// Connection timeout (default: 5 seconds)
+    #[prost(message, optional, tag="4")]
+    pub connect_timeout: ::core::option::Option<::prost_types::Duration>,
+    /// Enable cluster mode (default: false)
+    /// If true, url should be comma-separated list of nodes
+    #[prost(bool, tag="5")]
+    pub cluster_mode: bool,
+}
+/// DynamoDB backend configuration
+///
+/// ## Purpose
+/// Configuration for AWS DynamoDB-based backends (locks, keyvalue, tuplespace).
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DynamoDbBackendConfig {
+    /// AWS region (e.g., "us-east-1")
+    #[prost(string, tag="1")]
+    pub region: ::prost::alloc::string::String,
+    /// Table name prefix (default: "plexspaces-")
+    /// Actual table names will be: {prefix}{component_name}
+    #[prost(string, tag="2")]
+    pub table_prefix: ::prost::alloc::string::String,
+    /// Endpoint URL (for local testing with DynamoDB Local)
+    /// Leave empty for production (uses AWS service)
+    #[prost(string, tag="3")]
+    pub endpoint_url: ::prost::alloc::string::String,
+    /// AWS access key ID (should be from env var, not config file)
+    #[prost(string, tag="4")]
+    pub access_key_id: ::prost::alloc::string::String,
+    /// AWS secret access key (should be from env var, not config file)
+    #[prost(string, tag="5")]
+    pub secret_access_key: ::prost::alloc::string::String,
+}
+/// Storage provider configuration
+///
+/// ## Purpose
+/// Configuration for components that support multiple storage providers.
+/// Uses provider pattern (similar to Kubernetes StorageClass) for cleaner design.
+///
+/// ## Industry Best Practices
+/// - Provider-based: One provider per config (not oneof with all options)
+/// - Explicit: Must specify provider (no magic defaults)
+/// - Extensible: Easy to add new providers without breaking changes
+///
+/// ## Backend Selection Logic
+/// 1. Provider must be explicitly specified (no auto-detection)
+/// 2. If provider is UNSPECIFIED, use default based on component:
+///     - locks: REDIS (if available), else POSTGRES
+///     - channel: REDIS (if available), else MEMORY
+///     - tuplespace: POSTGRES (if available), else MEMORY
+/// 3. Validation: Fail if provider not available (feature flags)
+///
+/// ## Environment Variables
+/// - PLEXSPACES_{COMPONENT}_PROVIDER: Provider type (e.g., "redis", "postgres")
+/// - Provider-specific env vars follow pattern: PLEXSPACES_{COMPONENT}_{PROVIDER}_{SETTING}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StorageProviderConfig {
+    /// Storage provider type (required)
+    #[prost(enumeration="StorageProvider", tag="1")]
+    pub provider: i32,
+    /// Provider-specific configuration (oneof for type safety)
+    #[prost(oneof="storage_provider_config::Config", tags="2, 3, 4, 5, 6, 7, 8")]
+    pub config: ::core::option::Option<storage_provider_config::Config>,
+}
+/// Nested message and enum types in `StorageProviderConfig`.
+pub mod storage_provider_config {
+    /// Provider-specific configuration (oneof for type safety)
+    #[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Config {
+        /// PostgreSQL configuration
+        #[prost(message, tag="2")]
+        Postgres(super::SharedRelationalDbConfig),
+        /// SQLite configuration
+        #[prost(message, tag="3")]
+        Sqlite(super::SqliteBackendConfig),
+        /// Redis configuration
+        #[prost(message, tag="4")]
+        Redis(super::RedisBackendConfig),
+        /// DynamoDB configuration
+        #[prost(message, tag="5")]
+        Dynamodb(super::DynamoDbBackendConfig),
+        /// Kafka configuration (for channel)
+        #[prost(message, tag="6")]
+        Kafka(super::KafkaBackendConfig),
+        /// NATS configuration (for channel)
+        #[prost(message, tag="7")]
+        Nats(super::NatsBackendConfig),
+        /// Memory configuration (no-op, just a marker)
+        #[prost(message, tag="8")]
+        Memory(super::MemoryBackendConfig),
+    }
+}
+/// Kafka backend configuration (for channel)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct KafkaBackendConfig {
+    /// Kafka broker addresses
+    #[prost(string, repeated, tag="1")]
+    pub brokers: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Topic name
+    #[prost(string, tag="2")]
+    pub topic: ::prost::alloc::string::String,
+    /// Consumer group ID
+    #[prost(string, tag="3")]
+    pub consumer_group: ::prost::alloc::string::String,
+    /// Number of partitions (for topic creation)
+    #[prost(uint32, tag="4")]
+    pub partitions: u32,
+    /// Replication factor
+    #[prost(uint32, tag="5")]
+    pub replication_factor: u32,
+    #[prost(enumeration="kafka_backend_config::CompressionType", tag="6")]
+    pub compression: i32,
+    #[prost(enumeration="kafka_backend_config::ProducerAcks", tag="7")]
+    pub acks: i32,
+    /// Batch size for producers
+    #[prost(uint64, tag="8")]
+    pub batch_size: u64,
+    /// Linger time for batching
+    #[prost(message, optional, tag="9")]
+    pub linger_ms: ::core::option::Option<::prost_types::Duration>,
+}
+/// Nested message and enum types in `KafkaBackendConfig`.
+pub mod kafka_backend_config {
+    /// Compression type
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum CompressionType {
+        CompressionTypeNone = 0,
+        CompressionTypeGzip = 1,
+        CompressionTypeSnappy = 2,
+        CompressionTypeLz4 = 3,
+        CompressionTypeZstd = 4,
+    }
+    impl CompressionType {
+        /// String value of the enum field names used in the ProtoBuf definition.
+        ///
+        /// The values are not transformed in any way and thus are considered stable
+        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+        pub fn as_str_name(&self) -> &'static str {
+            match self {
+                CompressionType::CompressionTypeNone => "COMPRESSION_TYPE_NONE",
+                CompressionType::CompressionTypeGzip => "COMPRESSION_TYPE_GZIP",
+                CompressionType::CompressionTypeSnappy => "COMPRESSION_TYPE_SNAPPY",
+                CompressionType::CompressionTypeLz4 => "COMPRESSION_TYPE_LZ4",
+                CompressionType::CompressionTypeZstd => "COMPRESSION_TYPE_ZSTD",
+            }
+        }
+        /// Creates an enum from field names used in the ProtoBuf definition.
+        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+            match value {
+                "COMPRESSION_TYPE_NONE" => Some(Self::CompressionTypeNone),
+                "COMPRESSION_TYPE_GZIP" => Some(Self::CompressionTypeGzip),
+                "COMPRESSION_TYPE_SNAPPY" => Some(Self::CompressionTypeSnappy),
+                "COMPRESSION_TYPE_LZ4" => Some(Self::CompressionTypeLz4),
+                "COMPRESSION_TYPE_ZSTD" => Some(Self::CompressionTypeZstd),
+                _ => None,
+            }
+        }
+    }
+    /// Producer acks
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum ProducerAcks {
+        ProducerAcksNone = 0,
+        ProducerAcksLeader = 1,
+        ProducerAcksAll = 2,
+    }
+    impl ProducerAcks {
+        /// String value of the enum field names used in the ProtoBuf definition.
+        ///
+        /// The values are not transformed in any way and thus are considered stable
+        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+        pub fn as_str_name(&self) -> &'static str {
+            match self {
+                ProducerAcks::ProducerAcksNone => "PRODUCER_ACKS_NONE",
+                ProducerAcks::ProducerAcksLeader => "PRODUCER_ACKS_LEADER",
+                ProducerAcks::ProducerAcksAll => "PRODUCER_ACKS_ALL",
+            }
+        }
+        /// Creates an enum from field names used in the ProtoBuf definition.
+        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+            match value {
+                "PRODUCER_ACKS_NONE" => Some(Self::ProducerAcksNone),
+                "PRODUCER_ACKS_LEADER" => Some(Self::ProducerAcksLeader),
+                "PRODUCER_ACKS_ALL" => Some(Self::ProducerAcksAll),
+                _ => None,
+            }
+        }
+    }
+}
+/// NATS backend configuration (for channel)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NatsBackendConfig {
+    /// NATS server URLs (comma-separated for clustering)
+    #[prost(string, tag="1")]
+    pub servers: ::prost::alloc::string::String,
+    /// Subject/topic name
+    #[prost(string, tag="2")]
+    pub subject: ::prost::alloc::string::String,
+    /// Queue group for load-balanced consumption
+    #[prost(string, tag="3")]
+    pub queue_group: ::prost::alloc::string::String,
+    /// Enable JetStream for persistence
+    #[prost(bool, tag="4")]
+    pub jetstream_enabled: bool,
+    /// JetStream stream name
+    #[prost(string, tag="5")]
+    pub jetstream_stream: ::prost::alloc::string::String,
+    /// JetStream consumer name
+    #[prost(string, tag="6")]
+    pub jetstream_consumer: ::prost::alloc::string::String,
+    /// Connection timeout
+    #[prost(message, optional, tag="7")]
+    pub connect_timeout: ::core::option::Option<::prost_types::Duration>,
+    /// Reconnect attempts (-1 for unlimited)
+    #[prost(int32, tag="8")]
+    pub reconnect_attempts: i32,
+    /// Enable TLS
+    #[prost(bool, tag="9")]
+    pub tls_enabled: bool,
+    /// TLS certificate path
+    #[prost(string, tag="10")]
+    pub tls_cert_path: ::prost::alloc::string::String,
+    /// TLS key path
+    #[prost(string, tag="11")]
+    pub tls_key_path: ::prost::alloc::string::String,
+    /// TLS CA certificate path
+    #[prost(string, tag="12")]
+    pub tls_ca_path: ::prost::alloc::string::String,
+}
+/// Memory backend configuration (testing/development only)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MemoryBackendConfig {
+    /// Initial capacity (for HashMap pre-allocation)
+    #[prost(uint32, tag="1")]
+    pub initial_capacity: u32,
+}
+/// SQLite backend configuration
+///
+/// ## Purpose
+/// Configuration for SQLite-based backends (primarily for channel).
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SqliteBackendConfig {
+    /// SQLite database path
+    /// - ":memory:" for in-memory database
+    /// - File path for persistent database
+    #[prost(string, tag="1")]
+    pub database_path: ::prost::alloc::string::String,
+    /// Enable WAL mode for better concurrency (default: true)
+    #[prost(bool, tag="2")]
+    pub wal_mode: bool,
+    /// Synchronous mode: "NORMAL", "FULL", "OFF" (default: "NORMAL")
+    #[prost(string, tag="3")]
+    pub synchronous: ::prost::alloc::string::String,
+}
+/// Framework information
+///
+/// ## Purpose
+/// Runtime information about the PlexSpaces framework version and build.
+/// Auto-populated at build time from Cargo.toml.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct FrameworkInfo {
+    /// Framework version (from Cargo.toml, e.g., "0.1.0")
+    #[prost(string, tag="1")]
+    pub version: ::prost::alloc::string::String,
+    /// Build date (ISO 8601 format, e.g., "2025-01-25T10:30:00Z")
+    #[prost(string, tag="2")]
+    pub build_date: ::prost::alloc::string::String,
+    /// Git commit hash (if available)
+    #[prost(string, tag="3")]
+    pub git_commit: ::prost::alloc::string::String,
+    /// Build target (e.g., "x86_64-unknown-linux-gnu")
+    #[prost(string, tag="4")]
+    pub build_target: ::prost::alloc::string::String,
+}
+/// Storage provider type
+///
+/// ## Purpose
+/// Defines the storage provider type using industry-standard naming.
+/// Follows Kubernetes-style provider pattern for consistency.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum StorageProvider {
+    StorageProviderUnspecified = 0,
+    /// Relational database providers
+    ///
+    /// PostgreSQL
+    StorageProviderPostgres = 1,
+    /// SQLite (embedded)
+    StorageProviderSqlite = 2,
+    /// NoSQL providers
+    ///
+    /// Redis
+    StorageProviderRedis = 3,
+    /// AWS DynamoDB
+    StorageProviderDynamodb = 4,
+    /// Message queue providers (for channel)
+    ///
+    /// Apache Kafka
+    StorageProviderKafka = 5,
+    /// NATS
+    StorageProviderNats = 6,
+    /// In-memory (testing/development only)
+    ///
+    /// In-memory (no persistence)
+    StorageProviderMemory = 7,
+}
+impl StorageProvider {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            StorageProvider::StorageProviderUnspecified => "STORAGE_PROVIDER_UNSPECIFIED",
+            StorageProvider::StorageProviderPostgres => "STORAGE_PROVIDER_POSTGRES",
+            StorageProvider::StorageProviderSqlite => "STORAGE_PROVIDER_SQLITE",
+            StorageProvider::StorageProviderRedis => "STORAGE_PROVIDER_REDIS",
+            StorageProvider::StorageProviderDynamodb => "STORAGE_PROVIDER_DYNAMODB",
+            StorageProvider::StorageProviderKafka => "STORAGE_PROVIDER_KAFKA",
+            StorageProvider::StorageProviderNats => "STORAGE_PROVIDER_NATS",
+            StorageProvider::StorageProviderMemory => "STORAGE_PROVIDER_MEMORY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "STORAGE_PROVIDER_UNSPECIFIED" => Some(Self::StorageProviderUnspecified),
+            "STORAGE_PROVIDER_POSTGRES" => Some(Self::StorageProviderPostgres),
+            "STORAGE_PROVIDER_SQLITE" => Some(Self::StorageProviderSqlite),
+            "STORAGE_PROVIDER_REDIS" => Some(Self::StorageProviderRedis),
+            "STORAGE_PROVIDER_DYNAMODB" => Some(Self::StorageProviderDynamodb),
+            "STORAGE_PROVIDER_KAFKA" => Some(Self::StorageProviderKafka),
+            "STORAGE_PROVIDER_NATS" => Some(Self::StorageProviderNats),
+            "STORAGE_PROVIDER_MEMORY" => Some(Self::StorageProviderMemory),
+            _ => None,
+        }
+    }
+}
 include!("plexspaces.storage.v1.tonic.rs");
 // @@protoc_insertion_point(module)

@@ -89,7 +89,7 @@ async fn test_3_generals_all_honest_agree_on_attack() {
         false,  // is_faulty (honest)
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Commander");
+    ).await.expect("Failed to create commander");
 
     let lieutenant1 = General::new(
         "lieutenant_1".to_string(),
@@ -97,7 +97,7 @@ async fn test_3_generals_all_honest_agree_on_attack() {
         false,  // honest
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Lieutenant1");
+    ).await.expect("Failed to create lieutenant1");
 
     let lieutenant2 = General::new(
         "lieutenant_2".to_string(),
@@ -105,7 +105,7 @@ async fn test_3_generals_all_honest_agree_on_attack() {
         false,  // honest
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Lieutenant2");
+    ).await.expect("Failed to create lieutenant2");
 
     // Commander proposes Attack
     commander.propose(true).await.expect("Commander proposal failed");
@@ -168,11 +168,11 @@ async fn test_4_generals_all_honest_agree_on_retreat() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Commander");
+    ).await.expect("Failed to create commander");
 
-    let lieutenant1 = General::new("lt1".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create Lieutenant1");
-    let lieutenant2 = General::new("lt2".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create Lieutenant2");
-    let lieutenant3 = General::new("lt3".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create Lieutenant3");
+    let lieutenant1 = General::new("lt1".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create lieutenant1");
+    let lieutenant2 = General::new("lt2".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create lieutenant2");
+    let lieutenant3 = General::new("lt3".to_string(), false, false, journal.clone(), tuplespace.clone()).await.expect("Failed to create lieutenant3");
 
     // Commander proposes Retreat (false = retreat)
     commander.propose(false).await.expect("Commander proposal failed");
@@ -219,17 +219,17 @@ async fn test_7_generals_mixed_votes_reach_majority() {
     let journal = Arc::new(MemoryJournal::new());
 
     // Spawn 7 generals
-    let generals: Vec<General> = (0..7)
-        .map(|i| {
-            General::new(
-                format!("general_{}", i),
-                i == 0, // First one is commander
-                false,  // All honest
-                journal.clone(),
-                tuplespace.clone(),
-            ).await.expect(&format!("Failed to create General {}", i))
-        })
-        .collect();
+    let mut generals = Vec::new();
+    for i in 0..7 {
+        let general = General::new(
+            format!("general_{}", i),
+            i == 0, // First one is commander
+            false,  // All honest
+            journal.clone(),
+            tuplespace.clone(),
+        ).await.expect(&format!("Failed to create general_{}", i));
+        generals.push(general);
+    }
 
     // Commander proposes Attack
     generals[0].propose(true).await.expect("Proposal failed");
@@ -284,7 +284,7 @@ async fn test_4_generals_1_traitor_honest_agree() {
     // TODO: Traitor sends conflicting votes
     // TODO: Verify honest generals agree despite traitor
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 /// TEST 5: Seven generals with 2 traitors - 3F+1 threshold
@@ -303,7 +303,7 @@ async fn test_7_generals_2_traitors_need_3f_plus_1() {
     // TODO: Spawn 5 honest + 2 traitors
     // TODO: Verify consensus (7 >= 3*2+1)
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 /// TEST 6: Six generals with 2 traitors - CANNOT decide
@@ -322,7 +322,7 @@ async fn test_6_generals_2_traitors_cannot_decide() {
     // TODO: Spawn 4 honest + 2 traitors
     // TODO: Verify NO consensus (6 < 3*2+1)
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 // ============================================================================
@@ -349,7 +349,7 @@ async fn test_general_crashes_before_voting() {
     // TODO: Supervisor restarts it
     // TODO: Verify consensus still reached
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 /// TEST 8: General crashes after voting - no duplicate vote on restart
@@ -377,7 +377,7 @@ async fn test_general_crashes_after_voting_no_duplicate() {
     // TODO: Verify NO duplicate vote
     // TODO: Verify consensus reached
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 // ============================================================================
@@ -402,7 +402,7 @@ async fn test_slow_general_timeout_others_decide() {
     // TODO: Verify 6 generals reach consensus
     // TODO: Slow general not counted
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 /// TEST 10: Multiple rounds until consensus
@@ -421,7 +421,7 @@ async fn test_multiple_rounds_until_consensus() {
     // TODO: Run round 2
     // TODO: Verify consensus in round 2
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 // ============================================================================
@@ -447,7 +447,7 @@ async fn test_complete_audit_trail() {
     // TODO: Verify all votes present
     // TODO: Verify audit trail complete
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 /// TEST 12: Replay entire protocol from journal produces same result
@@ -469,7 +469,7 @@ async fn test_replay_produces_same_result() {
     // TODO: Replay from journals
     // TODO: Verify same results
 
-    assert_eq!(registry.count_local().await, 0);
+    assert_eq!(registry.registered_actor_ids().read().await.len(), 0);
 }
 
 // ============================================================================
@@ -499,7 +499,7 @@ async fn test_non_commander_cannot_propose() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Lieutenant");
+    );
 
     // Try to propose - should fail
     let result = lieutenant.propose(true).await;
@@ -531,7 +531,7 @@ async fn test_faulty_general_returns_opposite_values() {
         true,  // FAULTY
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Faulty General");
+    ).await.expect("Failed to create faulty general");
 
     // Test faulty behavior
     assert_eq!(faulty.get_faulty_value(Decision::Attack), Decision::Retreat);
@@ -563,7 +563,7 @@ async fn test_commander_sticks_to_proposal() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Commander");
+    ).await.expect("Failed to create commander");
 
     // Commander proposes Attack
     commander.propose(true).await.expect("Propose failed");
@@ -597,7 +597,7 @@ async fn test_lieutenant_defaults_to_retreat_no_votes() {
         false,
         journal.clone(),
         tuplespace.clone(),
-    ).await.expect("Failed to create Lieutenant");
+    );
 
     // Decide with no votes - should default to Retreat
     let decision = lieutenant.decide().await.expect("Decide failed");

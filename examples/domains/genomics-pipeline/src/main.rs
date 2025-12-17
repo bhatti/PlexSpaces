@@ -79,10 +79,11 @@ async fn main() -> Result<()> {
     info!("🎭 Spawning coordinator...");
     metrics_tracker.start_coordinate();
     let coordinator_behavior = Box::new(GenomicsCoordinator::new("coordinator-1".to_string()));
-    use plexspaces_actor::ActorBuilder;
-    let coordinator_ref = ActorBuilder::new(coordinator_behavior)
-        .with_id(format!("coordinator@{}", node.id().as_str()))
-        .spawn(node.service_locator().clone())
+    let coordinator_ref = node
+        .spawn_actor_builder()
+        .with_behavior(coordinator_behavior)
+        .with_name("coordinator")
+        .spawn()
         .await?;
     metrics_tracker.end_coordinate();
     info!("✅ Coordinator spawned: {}", coordinator_ref.id());

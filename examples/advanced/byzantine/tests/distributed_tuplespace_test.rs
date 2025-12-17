@@ -139,49 +139,100 @@ async fn test_distributed_tuplespace_consensus() {
     let mut generals = Vec::new();
 
     // General 0 (Commander) on Node 1
-    let general0 = create_general(
+    let (actor_ref0, general0) = create_general(
         "general0",
         "node1",
         true,  // is_commander
         false, // is_faulty
         tuplespace.clone(),
     ).await;
-    node1.register_actor(general0.0.clone()).await.expect("Failed to register general0");
-    generals.push(general0);
+    // Create Actor and spawn it using ActorFactory
+    use plexspaces_actor::{Actor, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor0 = Actor::new(
+        actor_ref0.id().clone(),
+        Box::new(general0),
+        general0.mailbox.clone(),
+        "byzantine".to_string(),
+        None,
+    );
+    let service_locator1 = node1.service_locator()
+        .expect("ServiceLocator not available from node1");
+    let actor_factory: Arc<ActorFactoryImpl> = service_locator1.get_service().await
+        .expect("ActorFactory not found");
+    actor_factory.spawn_built_actor(Arc::new(actor0), None, None, None).await
+        .expect("Failed to spawn general0");
+    // Store general0 for method calls (we need to keep it separate from the Actor)
+    // Create a new General instance for method calls (same state)
+    let general0_for_calls = create_general("general0", "node1", true, false, tuplespace.clone()).await.1;
+    generals.push((actor_ref0, general0_for_calls));
 
     // General 1 on Node 1
-    let general1 = create_general(
+    let (actor_ref1, general1) = create_general(
         "general1",
         "node1",
         false, // not commander
         false, // not faulty
         tuplespace.clone(),
     ).await;
-    node1.register_actor(general1.0.clone()).await.expect("Failed to register general1");
-    generals.push(general1);
+    let actor1 = Actor::new(
+        actor_ref1.id().clone(),
+        Box::new(general1),
+        general1.mailbox.clone(),
+        "byzantine".to_string(),
+        None,
+    );
+    actor_factory.spawn_built_actor(Arc::new(actor1), None, None, None).await
+        .expect("Failed to spawn general1");
+    let general1_for_calls = create_general("general1", "node1", false, false, tuplespace.clone()).await.1;
+    generals.push((actor_ref1, general1_for_calls));
 
     // Create generals on Node 2: general2, general3
+    // Get ActorFactory for node2
+    let service_locator2 = node2.service_locator()
+        .expect("ServiceLocator not available from node2");
+    let actor_factory2: Arc<ActorFactoryImpl> = service_locator2.get_service().await
+        .expect("ActorFactory not found");
+    
     // General 2 on Node 2
-    let general2 = create_general(
+    let (actor_ref2, general2) = create_general(
         "general2",
         "node2",
         false,
         false,
         tuplespace.clone(),
     ).await;
-    node2.register_actor(general2.0.clone()).await.expect("Failed to register general2");
-    generals.push(general2);
+    let actor2 = Actor::new(
+        actor_ref2.id().clone(),
+        Box::new(general2),
+        general2.mailbox.clone(),
+        "byzantine".to_string(),
+        None,
+    );
+    actor_factory2.spawn_built_actor(Arc::new(actor2), None, None, None).await
+        .expect("Failed to spawn general2");
+    let general2_for_calls = create_general("general2", "node2", false, false, tuplespace.clone()).await.1;
+    generals.push((actor_ref2, general2_for_calls));
 
     // General 3 on Node 2
-    let general3 = create_general(
+    let (actor_ref3, general3) = create_general(
         "general3",
         "node2",
         false,
         false,
         tuplespace.clone(),
     ).await;
-    node2.register_actor(general3.0.clone()).await.expect("Failed to register general3");
-    generals.push(general3);
+    let actor3 = Actor::new(
+        actor_ref3.id().clone(),
+        Box::new(general3),
+        general3.mailbox.clone(),
+        "byzantine".to_string(),
+        None,
+    );
+    actor_factory2.spawn_built_actor(Arc::new(actor3), None, None, None).await
+        .expect("Failed to spawn general3");
+    let general3_for_calls = create_general("general3", "node2", false, false, tuplespace.clone()).await.1;
+    generals.push((actor_ref3, general3_for_calls));
 
     println!("\n=== Byzantine Generals Distributed TupleSpace Test ===");
     println!("Node 1: general0 (commander), general1");
@@ -283,7 +334,7 @@ async fn create_general(
         message_count: 0,
     };
 
-    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default()));
+    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), actor_id.clone()).await.expect("Failed to create mailbox"));
     let journal = Arc::new(MemoryJournal::new());
 
     let general = General {
@@ -294,7 +345,15 @@ async fn create_general(
         tuplespace: tuplespace as Arc<dyn TupleSpaceOps>,
     };
 
-    let actor_ref = ActorRef::new(actor_id, mailbox).expect("Failed to create ActorRef");
+    // Create ActorRef for return
+    // Note: We need ServiceLocator from node, but we'll create a temporary one
+    // The actual ServiceLocator will be set when the actor is spawned
+    let service_locator = Arc::new(plexspaces_core::ServiceLocator::new());
+    let actor_ref = ActorRef::local(
+        actor_id.clone(),
+        mailbox.clone(),
+        service_locator,
+    );
 
     (actor_ref, general)
 }

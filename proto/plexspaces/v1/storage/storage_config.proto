@@ -1,0 +1,364 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Unified Storage Configuration
+//
+// ## Purpose
+// Defines unified storage configuration for all PlexSpaces components.
+// Supports convention-over-configuration with sensible defaults while
+// maintaining flexibility for production deployments.
+//
+// ## Architecture Context
+// This proto consolidates storage configurations for:
+// - Shared relational database (scheduler, workflow, object-registry, journaling, blob)
+// - Flexible backends (locks, channel, keyvalue, tuplespace)
+//
+// ## Design Principles
+// - Convention over configuration: Sensible defaults, minimal required config
+// - Environment variable support: 12-factor app compliance
+// - Security: Secrets via env vars, not config files
+// - Cloud native: Docker/Kubernetes ready
+
+syntax = "proto3";
+
+package plexspaces.storage.v1;
+
+import "google/protobuf/duration.proto";
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.storage.v1";
+option java_multiple_files = true;
+
+// Shared relational database configuration
+//
+// ## Purpose
+// Configuration for components that always use relational database:
+// - scheduler (crates/scheduler/migrations)
+// - workflow (crates/workflow/migrations)
+// - object-registry (via KeyValueStore SQL backend)
+// - journaling (crates/journaling/migrations)
+// - blob (crates/blob/migrations)
+//
+// ## Convention
+// All these components share the same database connection by default.
+// Can be overridden per-component if needed.
+//
+// ## Environment Variables
+// - PLEXSPACES_DATABASE_URL: Connection string (can use ${VAR} syntax)
+// - PLEXSPACES_DATABASE_POOL_SIZE: Connection pool size (default: 10)
+// - PLEXSPACES_DATABASE_AUTO_MIGRATE: Auto-migrate on startup (default: true)
+message SharedRelationalDbConfig {
+  // Connection string (can use environment variable: ${DATABASE_URL})
+  // Format: postgres://user:password@host:port/database
+  //         sqlite:///path/to/database.db
+  //         sqlite::memory:
+  //
+  // Security: Passwords should be in environment variables, not config files
+  // Example: "postgres://user:${DB_PASSWORD}@localhost:5432/plexspaces"
+  string connection_string = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1}
+  ];
+
+  // Connection pool size (default: 10)
+  uint32 pool_size = 2;
+
+  // Auto-migrate on startup (default: true)
+  // Runs migrations from migration_paths on node startup
+  bool auto_migrate = 3;
+
+  // Migration paths (default: auto-discover from crates/*/migrations)
+  // Paths are relative to workspace root or absolute
+  repeated string migration_paths = 4;
+}
+
+// Redis backend configuration
+//
+// ## Purpose
+// Configuration for Redis-based backends (locks, channel, keyvalue, tuplespace).
+message RedisBackendConfig {
+  // Redis connection URL
+  // Format: redis://[password@]host:port[/database]
+  //         redis://localhost:6379/0
+  //         redis://:password@redis-cluster:6379/0
+  //
+  // Security: Passwords should be in environment variables
+  // Example: "redis://:${REDIS_PASSWORD}@localhost:6379/0"
+  string url = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1}
+  ];
+
+  // Connection pool size (default: 10)
+  uint32 pool_size = 2;
+
+  // Key prefix for namespace isolation (default: "plexspaces:")
+  // All keys will be prefixed with this value
+  string key_prefix = 3;
+
+  // Connection timeout (default: 5 seconds)
+  google.protobuf.Duration connect_timeout = 4;
+
+  // Enable cluster mode (default: false)
+  // If true, url should be comma-separated list of nodes
+  bool cluster_mode = 5;
+}
+
+// DynamoDB backend configuration
+//
+// ## Purpose
+// Configuration for AWS DynamoDB-based backends (locks, keyvalue, tuplespace).
+message DynamoDbBackendConfig {
+  // AWS region (e.g., "us-east-1")
+  string region = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1}
+  ];
+
+  // Table name prefix (default: "plexspaces-")
+  // Actual table names will be: {prefix}{component_name}
+  string table_prefix = 2;
+
+  // Endpoint URL (for local testing with DynamoDB Local)
+  // Leave empty for production (uses AWS service)
+  string endpoint_url = 3;
+
+  // AWS access key ID (should be from env var, not config file)
+  string access_key_id = 4;
+
+  // AWS secret access key (should be from env var, not config file)
+  string secret_access_key = 5;
+}
+
+// Storage provider type
+//
+// ## Purpose
+// Defines the storage provider type using industry-standard naming.
+// Follows Kubernetes-style provider pattern for consistency.
+enum StorageProvider {
+  STORAGE_PROVIDER_UNSPECIFIED = 0;
+  
+  // Relational database providers
+  STORAGE_PROVIDER_POSTGRES = 1;  // PostgreSQL
+  STORAGE_PROVIDER_SQLITE = 2;    // SQLite (embedded)
+  
+  // NoSQL providers
+  STORAGE_PROVIDER_REDIS = 3;     // Redis
+  STORAGE_PROVIDER_DYNAMODB = 4;  // AWS DynamoDB
+  
+  // Message queue providers (for channel)
+  STORAGE_PROVIDER_KAFKA = 5;     // Apache Kafka
+  STORAGE_PROVIDER_NATS = 6;      // NATS
+  
+  // In-memory (testing/development only)
+  STORAGE_PROVIDER_MEMORY = 7;    // In-memory (no persistence)
+}
+
+// Storage provider configuration
+//
+// ## Purpose
+// Configuration for components that support multiple storage providers.
+// Uses provider pattern (similar to Kubernetes StorageClass) for cleaner design.
+//
+// ## Industry Best Practices
+// - Provider-based: One provider per config (not oneof with all options)
+// - Explicit: Must specify provider (no magic defaults)
+// - Extensible: Easy to add new providers without breaking changes
+//
+// ## Backend Selection Logic
+// 1. Provider must be explicitly specified (no auto-detection)
+// 2. If provider is UNSPECIFIED, use default based on component:
+//    - locks: REDIS (if available), else POSTGRES
+//    - channel: REDIS (if available), else MEMORY
+//    - tuplespace: POSTGRES (if available), else MEMORY
+// 3. Validation: Fail if provider not available (feature flags)
+//
+// ## Environment Variables
+// - PLEXSPACES_{COMPONENT}_PROVIDER: Provider type (e.g., "redis", "postgres")
+// - Provider-specific env vars follow pattern: PLEXSPACES_{COMPONENT}_{PROVIDER}_{SETTING}
+message StorageProviderConfig {
+  // Storage provider type (required)
+  StorageProvider provider = 1;
+
+  // Provider-specific configuration (oneof for type safety)
+  oneof config {
+    // PostgreSQL configuration
+    SharedRelationalDbConfig postgres = 2;
+    
+    // SQLite configuration
+    SqliteBackendConfig sqlite = 3;
+    
+    // Redis configuration
+    RedisBackendConfig redis = 4;
+    
+    // DynamoDB configuration
+    DynamoDbBackendConfig dynamodb = 5;
+    
+    // Kafka configuration (for channel)
+    KafkaBackendConfig kafka = 6;
+    
+    // NATS configuration (for channel)
+    NatsBackendConfig nats = 7;
+    
+    // Memory configuration (no-op, just a marker)
+    MemoryBackendConfig memory = 8;
+  }
+}
+
+// Kafka backend configuration (for channel)
+message KafkaBackendConfig {
+  // Kafka broker addresses
+  repeated string brokers = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {min_items: 1}
+  ];
+
+  // Topic name
+  string topic = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1}
+  ];
+
+  // Consumer group ID
+  string consumer_group = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1}
+  ];
+
+  // Number of partitions (for topic creation)
+  uint32 partitions = 4;
+
+  // Replication factor
+  uint32 replication_factor = 5;
+
+  // Compression type
+  enum CompressionType {
+    COMPRESSION_TYPE_NONE = 0;
+    COMPRESSION_TYPE_GZIP = 1;
+    COMPRESSION_TYPE_SNAPPY = 2;
+    COMPRESSION_TYPE_LZ4 = 3;
+    COMPRESSION_TYPE_ZSTD = 4;
+  }
+
+  CompressionType compression = 6;
+
+  // Producer acks
+  enum ProducerAcks {
+    PRODUCER_ACKS_NONE = 0;
+    PRODUCER_ACKS_LEADER = 1;
+    PRODUCER_ACKS_ALL = 2;
+  }
+
+  ProducerAcks acks = 7;
+
+  // Batch size for producers
+  uint64 batch_size = 8;
+
+  // Linger time for batching
+  google.protobuf.Duration linger_ms = 9;
+}
+
+// NATS backend configuration (for channel)
+message NatsBackendConfig {
+  // NATS server URLs (comma-separated for clustering)
+  string servers = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1}
+  ];
+
+  // Subject/topic name
+  string subject = 2;
+
+  // Queue group for load-balanced consumption
+  string queue_group = 3;
+
+  // Enable JetStream for persistence
+  bool jetstream_enabled = 4;
+
+  // JetStream stream name
+  string jetstream_stream = 5;
+
+  // JetStream consumer name
+  string jetstream_consumer = 6;
+
+  // Connection timeout
+  google.protobuf.Duration connect_timeout = 7;
+
+  // Reconnect attempts (-1 for unlimited)
+  int32 reconnect_attempts = 8;
+
+  // Enable TLS
+  bool tls_enabled = 9;
+
+  // TLS certificate path
+  string tls_cert_path = 10;
+
+  // TLS key path
+  string tls_key_path = 11;
+
+  // TLS CA certificate path
+  string tls_ca_path = 12;
+}
+
+// Memory backend configuration (testing/development only)
+message MemoryBackendConfig {
+  // Initial capacity (for HashMap pre-allocation)
+  uint32 initial_capacity = 1;
+}
+
+// SQLite backend configuration
+//
+// ## Purpose
+// Configuration for SQLite-based backends (primarily for channel).
+message SqliteBackendConfig {
+  // SQLite database path
+  // - ":memory:" for in-memory database
+  // - File path for persistent database
+  string database_path = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1}
+  ];
+
+  // Enable WAL mode for better concurrency (default: true)
+  bool wal_mode = 2;
+
+  // Synchronous mode: "NORMAL", "FULL", "OFF" (default: "NORMAL")
+  string synchronous = 3;
+}
+
+// Framework information
+//
+// ## Purpose
+// Runtime information about the PlexSpaces framework version and build.
+// Auto-populated at build time from Cargo.toml.
+message FrameworkInfo {
+  // Framework version (from Cargo.toml, e.g., "0.1.0")
+  string version = 1;
+
+  // Build date (ISO 8601 format, e.g., "2025-01-25T10:30:00Z")
+  string build_date = 2;
+
+  // Git commit hash (if available)
+  string git_commit = 3;
+
+  // Build target (e.g., "x86_64-unknown-linux-gnu")
+  string build_target = 4;
+}
+

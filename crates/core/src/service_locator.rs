@@ -305,6 +305,81 @@ impl ServiceLocator {
         let mut clients = self.grpc_clients.write().await;
         clients.clear();
     }
+
+    /// Create a mailbox with default configuration (memory backend)
+    ///
+    /// ## Purpose
+    /// Creates a mailbox using the default memory backend.
+    /// This will be extended to use mailbox_provider from RuntimeConfig when available.
+    ///
+    /// ## Arguments
+    /// * `mailbox_id` - Unique identifier for the mailbox
+    ///
+    /// ## Returns
+    /// Created Mailbox instance with memory backend
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let mailbox = service_locator.create_default_mailbox("actor-1:mailbox".to_string()).await?;
+    /// ```
+    pub async fn create_default_mailbox(
+        &self,
+        mailbox_id: String,
+    ) -> Result<plexspaces_mailbox::Mailbox, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_mailbox::{Mailbox, MailboxConfig};
+        use plexspaces_proto::channel::v1::ChannelBackend;
+        
+        // Create default mailbox config (defaults to memory)
+        let mut mailbox_config = plexspaces_mailbox::mailbox_config_default();
+        
+        // Default to memory backend (will be extended to use mailbox_provider from RuntimeConfig)
+        mailbox_config.channel_backend = ChannelBackend::ChannelBackendInMemory as i32;
+        
+        // Create mailbox with the configured backend
+        Mailbox::new(mailbox_config, mailbox_id)
+            .await
+            .map_err(|e| format!("Failed to create mailbox: {}", e).into())
+    }
+
+    /// Create a channel with default configuration (memory backend)
+    ///
+    /// ## Purpose
+    /// Creates a channel using the default memory backend.
+    /// This will be extended to use channel_provider from RuntimeConfig when available.
+    ///
+    /// ## Arguments
+    /// * `channel_name` - Unique identifier for the channel
+    ///
+    /// ## Returns
+    /// Created Channel instance with memory backend
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let channel = service_locator.create_default_channel("my-channel".to_string()).await?;
+    /// ```
+    pub async fn create_default_channel(
+        &self,
+        channel_name: String,
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+        
+        // Create default channel config (memory backend)
+        let channel_config = ChannelConfig {
+            name: channel_name,
+            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            capacity: 1000, // Default capacity
+            delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
+            ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
+            ..Default::default()
+        };
+        
+        // Create channel using the channel crate's create_channel function
+        let channel = plexspaces_channel::create_channel(channel_config)
+            .await
+            .map_err(|e| format!("Failed to create channel: {}", e))?;
+        
+        Ok(Arc::from(channel))
+    }
 }
 
 impl Default for ServiceLocator {

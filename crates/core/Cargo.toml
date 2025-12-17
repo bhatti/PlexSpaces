@@ -16,6 +16,7 @@ plexspaces-mailbox = { workspace = true }
 plexspaces-persistence = { workspace = true }
 plexspaces-tuplespace = { workspace = true }
 plexspaces-facet = { workspace = true }
+plexspaces-channel = { workspace = true }  # For create_default_channel
 
 # Service adapters (optional feature to avoid circular dependencies)
 # Note: These will be added when we integrate Node with ActorContext
@@ -28,6 +29,7 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }  # For metadata serialization
 uuid = { workspace = true }
+ulid = { workspace = true }  # For request_id generation
 metrics = "0.23"  # For observability
 chrono = { workspace = true }  # For lease timestamps
 prost-types = "0.12"  # For proto Duration/Timestamp types

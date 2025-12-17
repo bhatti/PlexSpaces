@@ -20,37 +20,92 @@ pub struct ServiceIdentity {
     pub allowed_services: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// mTLS configuration
+///
+/// ## Purpose
+/// Configuration for mutual TLS authentication between nodes.
+/// Supports both configured certificates and auto-generation for local development.
+///
+/// ## Security Best Practices
+/// - Certificates should be stored as file paths (not inline in config)
+/// - Private keys should never be in config files (use env vars or key management)
+/// - Auto-generation only for local development/testing
+/// - Production should use proper certificate management (e.g., cert-manager, Vault)
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MtlsConfig {
+    /// Enable mTLS (default: true for production, false for local dev)
     #[prost(bool, tag="1")]
     pub enable_mtls: bool,
-    /// CA certificate for validation (PEM format)
+    /// CA certificate path for validation (PEM format)
+    /// Security: Path only, not certificate contents
     #[prost(string, tag="2")]
-    pub ca_certificate: ::prost::alloc::string::String,
-    /// Service IDs to trust
-    #[prost(string, repeated, tag="3")]
-    pub trusted_services: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(message, optional, tag="4")]
+    pub ca_certificate_path: ::prost::alloc::string::String,
+    /// Server certificate path (PEM format)
+    /// Security: Path only, not certificate contents
+    #[prost(string, tag="3")]
+    pub server_certificate_path: ::prost::alloc::string::String,
+    /// Server private key path (PEM format)
+    /// Security: Path only, never include key contents in config
+    #[prost(string, tag="4")]
+    pub server_key_path: ::prost::alloc::string::String,
+    /// Auto-generate certificates if not provided (for local dev/testing)
+    /// Default: false (production should use proper cert management)
+    #[prost(bool, tag="5")]
+    pub auto_generate: bool,
+    /// Directory for auto-generated certificates (if auto_generate = true)
+    /// Default: /app/certs
+    #[prost(string, tag="6")]
+    pub cert_dir: ::prost::alloc::string::String,
+    /// Certificate rotation interval
+    #[prost(message, optional, tag="7")]
     pub certificate_rotation_interval: ::core::option::Option<::prost_types::Duration>,
+    /// Trusted service IDs (for service-to-service auth)
+    #[prost(string, repeated, tag="8")]
+    pub trusted_services: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// JWT configuration for public APIs
+///
+/// ## Purpose
+/// Configuration for JWT authentication for user-facing APIs.
+/// Supports both symmetric (HS256) and asymmetric (RS256) algorithms.
+///
+/// ## Security Best Practices
+/// - Secret should be from environment variable, never in config file
+/// - Use JWKS for distributed authentication (RS256)
+/// - Extract tenant_id from JWT claims for multi-tenant isolation
+/// - Token TTL should be short (15 minutes default)
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct JwtConfig {
+    /// Enable JWT authentication (default: true)
     #[prost(bool, tag="1")]
     pub enable_jwt: bool,
-    /// JWT issuer (e.g., "<https://auth.example.com">)
+    /// JWT secret (for HS256) - should be from env var, not config file
+    /// Security: Leave empty in config, set via PLEXSPACES_JWT_SECRET env var
     #[prost(string, tag="2")]
-    pub issuer: ::prost::alloc::string::String,
-    /// JWKS endpoint for key validation
+    pub secret: ::prost::alloc::string::String,
+    /// JWT issuer (e.g., "<https://auth.example.com">)
     #[prost(string, tag="3")]
+    pub issuer: ::prost::alloc::string::String,
+    /// JWKS endpoint for key validation (for RS256)
+    /// If provided, uses RS256 with JWKS validation instead of HS256
+    #[prost(string, tag="4")]
     pub jwks_url: ::prost::alloc::string::String,
     /// Allowed JWT audiences
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag="5")]
     pub allowed_audiences: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(message, optional, tag="5")]
+    /// Token TTL (default: 15 minutes)
+    #[prost(message, optional, tag="6")]
     pub token_ttl: ::core::option::Option<::prost_types::Duration>,
+    /// Refresh token TTL (default: 7 days)
+    #[prost(message, optional, tag="7")]
+    pub refresh_token_ttl: ::core::option::Option<::prost_types::Duration>,
+    /// JWT claim name for tenant_id extraction (default: "tenant_id")
+    #[prost(string, tag="8")]
+    pub tenant_id_claim: ::prost::alloc::string::String,
+    /// JWT claim name for user_id extraction (default: "sub")
+    #[prost(string, tag="9")]
+    pub user_id_claim: ::prost::alloc::string::String,
 }
 /// API key for service authentication
 #[allow(clippy::derive_partial_eq_without_eq)]

@@ -5,11 +5,12 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_core::{ActorContext, ChannelService};
+    use plexspaces_core::{ActorContext, ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider};
     use plexspaces_mailbox::Message;
     use std::sync::Arc;
     use std::time::Duration;
     use futures::StreamExt;
+    use async_trait::async_trait;
 
     // Mock ChannelService for testing
     struct MockChannelService {
@@ -83,7 +84,7 @@ mod tests {
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
-
+    }
 
     struct MockObjectRegistry;
 
@@ -153,4 +154,5 @@ mod tests {
             Ok(0)
         }
     }
+}
 

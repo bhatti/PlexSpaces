@@ -22,10 +22,10 @@
 mod tests {
     use plexspaces_blob::{BlobService, repository::sql::SqlBlobRepository};
     use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
+    use plexspaces_core::RequestContext;
     use object_store::local::LocalFileSystem;
-    use sqlx::sqlite::SqlitePoolOptions;
     use std::sync::Arc;
-    use tempfile::TempDir;
+    use tempfile::{TempDir, NamedTempFile};
     use http_body_util::Full;
     use hyper::body::Bytes;
     use hyper::{Request, Method, Uri, StatusCode};
@@ -34,13 +34,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
 
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        
-        let any_pool: sqlx::Pool<sqlx::Any> = pool.into();
+        // Use AnyPool with a temporary file
+        use sqlx::AnyPool;
+        use tempfile::NamedTempFile;
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path().to_str().unwrap();
+        let any_pool = AnyPool::connect(&format!("sqlite:{}", db_path)).await.unwrap();
         SqlBlobRepository::migrate(&any_pool).await.unwrap();
         let repository = Arc::new(SqlBlobRepository::new(any_pool));
 

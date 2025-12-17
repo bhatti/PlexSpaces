@@ -36,6 +36,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, error};
 use base64::{Engine as _, engine::general_purpose};
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use serde::{Deserialize, Serialize};
 
 /// Counter actor that handles increment (POST) and get (GET) operations
 struct CounterActor {
@@ -133,6 +135,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Disable blob service to avoid sqlx driver requirement
     std::env::set_var("BLOB_ENABLED", "false");
+    
+    // Set JWT secret for authentication (if not already set)
+    let jwt_secret = std::env::var("PLEXSPACES_JWT_SECRET")
+        .unwrap_or_else(|_| "faas-actor-example-secret".to_string());
+    std::env::set_var("PLEXSPACES_JWT_SECRET", &jwt_secret);
 
     // Create node with in-memory backends (for testing)
     // Use port 9002 to avoid conflict with MinIO (which uses 9001)
@@ -239,12 +246,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   GET  /api/v1/actors/default/default/counter?action=get - Get counter value");
     info!("   POST /api/v1/actors/default/default/counter - Increment counter");
 
+    // Create JWT token for authentication
+    #[derive(Serialize, Deserialize)]
+    struct JwtClaims {
+        sub: String,
+        exp: i64,
+        iat: i64,
+        tenant_id: String,
+        roles: Vec<String>,
+    }
+    
+    let claims = JwtClaims {
+        sub: "faas-example-user".to_string(),
+        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),
+        iat: chrono::Utc::now().timestamp(),
+        tenant_id: "default".to_string(),
+        roles: vec!["user".to_string()],
+    };
+    
+    let header = Header::new(Algorithm::HS256);
+    let key = EncodingKey::from_secret(jwt_secret.as_bytes());
+    let jwt_token = encode(&header, &claims, &key)
+        .expect("Failed to create JWT token");
+    
+    info!("✅ Created JWT token for authentication");
+
     // Test 1: GET - Get initial counter value (should be 0)
     info!("\n📥 Test 1: GET counter (should return 0)");
     let client = reqwest::Client::new();
     let get_url = format!("{}/api/v1/actors/default/default/counter?action=get", http_endpoint);
     
-    match client.get(&get_url).send().await {
+    match client
+        .get(&get_url)
+        .header("Authorization", format!("Bearer {}", jwt_token))
+        .send()
+        .await
+    {
         Ok(response) => {
             if response.status().is_success() {
                 let json: Value = response.json().await?;
@@ -287,6 +324,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     match client
         .post(&post_url)
+        .header("Authorization", format!("Bearer {}", jwt_token))
         .json(&increment_payload)
         .send()
         .await
@@ -312,7 +350,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 3: GET - Get counter value again (should be 1)
     info!("\n📥 Test 3: GET counter again (should return 1)");
-    match client.get(&get_url).send().await {
+    match client
+        .get(&get_url)
+        .header("Authorization", format!("Bearer {}", jwt_token))
+        .send()
+        .await
+    {
         Ok(response) => {
             if response.status().is_success() {
                 let json: Value = response.json().await?;
@@ -349,6 +392,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for i in 0..3 {
         match client
             .post(&post_url)
+            .header("Authorization", format!("Bearer {}", jwt_token))
             .json(&increment_payload)
             .send()
             .await
@@ -372,7 +416,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 5: Final GET (should be 4)
     info!("\n📥 Test 5: GET final counter value (should return 4)");
-    match client.get(&get_url).send().await {
+    match client
+        .get(&get_url)
+        .header("Authorization", format!("Bearer {}", jwt_token))
+        .send()
+        .await
+    {
         Ok(response) => {
             if response.status().is_success() {
                 let json: Value = response.json().await?;

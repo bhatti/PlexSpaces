@@ -22,7 +22,7 @@
 //! - Cloud storage (S3, Google Cloud Storage)
 
 use crate::models::*;
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use tracing::info;
 
@@ -95,7 +95,7 @@ impl DocumentWorker {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for DocumentWorker {
+impl ActorTrait for DocumentWorker {
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenServer
     }
@@ -122,7 +122,7 @@ impl ActorBehavior for DocumentWorker {
 
             let response = Message::new(response_payload);
 
-            ctx.reply(response).await.map_err(|e| {
+            if let Some(sender_id) = &msg.sender { ctx.send_reply(msg.correlation_id.as_deref(), sender_id, msg.receiver.clone(), response).await } else { Ok(()) }.map_err(|e| {
                 BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
             })?;
         }

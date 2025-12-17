@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Integration tests for gRPC Health and Metrics endpoints
+//! Integration tests for gRPC Health and Metrics endpoints
 
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeId, default_node_config};
 use plexspaces_proto::system::v1::ServingStatus;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
@@ -328,7 +328,7 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
     use plexspaces_node::grpc_service::ActorServiceImpl;
     use plexspaces_proto::v1::actor::actor_service_server::ActorService;
     
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
     let health_reporter = create_health_reporter();
     health_reporter.mark_startup_complete(None).await;
     
@@ -360,7 +360,7 @@ async fn test_grpc_service_accepts_requests_when_serving() {
     use plexspaces_node::grpc_service::ActorServiceImpl;
     use plexspaces_proto::v1::actor::actor_service_server::ActorService;
     
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
     let health_reporter = create_health_reporter();
     health_reporter.mark_startup_complete(None).await;
     

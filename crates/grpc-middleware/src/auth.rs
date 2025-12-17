@@ -404,11 +404,21 @@ impl AuthInterceptor {
         // Check RBAC permissions
         self.check_rbac(&claims, &context.method)?;
 
+        // Extract tenant_id and user_id from claims and add to headers for downstream use
+        let mut modified_headers = std::collections::HashMap::new();
+        if !claims.tenant_id.is_empty() {
+            modified_headers.insert("x-tenant-id".to_string(), claims.tenant_id.clone());
+        }
+        modified_headers.insert("x-user-id".to_string(), claims.sub.clone());
+        if !claims.roles.is_empty() {
+            modified_headers.insert("x-user-roles".to_string(), claims.roles.join(","));
+        }
+
         // Authentication and authorization successful
         Ok(InterceptorResult {
             decision: InterceptorDecision::InterceptorDecisionAllow as i32,
             error_message: String::new(),
-            modified_headers: std::collections::HashMap::new(),
+            modified_headers,
             metrics: vec![],
         })
     }

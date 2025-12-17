@@ -67,10 +67,27 @@ let reduce_operator = StreamOperator {
     },
 };
 
-// Create actors with VirtualActorFacet
-let map_actor = node.spawn_actor(create_operator_actor(map_operator)).await?;
-let filter_actor = node.spawn_actor(create_operator_actor(filter_operator)).await?;
-let reduce_actor = node.spawn_actor(create_operator_actor(reduce_operator)).await?;
+// Create actors with VirtualActorFacet using ActorFactory
+use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use std::sync::Arc;
+
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    .ok_or_else(|| "ActorFactory not found")?;
+
+let map_actor = create_operator_actor(map_operator);
+let map_id = map_actor.id().clone();
+let _msg_sender = actor_factory.spawn_built_actor(Arc::new(map_actor), None, None, None).await?;
+let map_actor = plexspaces_core::ActorRef::new(map_id)?;
+
+let filter_actor = create_operator_actor(filter_operator);
+let filter_id = filter_actor.id().clone();
+let _msg_sender = actor_factory.spawn_built_actor(Arc::new(filter_actor), None, None, None).await?;
+let filter_actor = plexspaces_core::ActorRef::new(filter_id)?;
+
+let reduce_actor = create_operator_actor(reduce_operator);
+let reduce_id = reduce_actor.id().clone();
+let _msg_sender = actor_factory.spawn_built_actor(Arc::new(reduce_actor), None, None, None).await?;
+let reduce_actor = plexspaces_core::ActorRef::new(reduce_id)?;
 
 // Process events in pipeline
 for event in sensor_events {

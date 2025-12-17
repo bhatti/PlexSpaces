@@ -13,7 +13,7 @@
 //! For demo purposes, we simulate the checks with realistic data.
 
 use crate::models::*;
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use tracing::info;
 
@@ -49,7 +49,7 @@ impl CreditCheckWorker {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for CreditCheckWorker {
+impl ActorTrait for CreditCheckWorker {
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenServer
     }
@@ -78,7 +78,7 @@ impl ActorBehavior for CreditCheckWorker {
             let response = Message::new(response_payload);
 
             // Use ctx.reply() to send reply (preserves correlation_id automatically)
-            ctx.reply(response).await.map_err(|e| {
+            if let Some(sender_id) = &msg.sender { ctx.send_reply(msg.correlation_id.as_deref(), sender_id, msg.receiver.clone(), response).await } else { Ok(()) }.map_err(|e| {
                 BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
             })?;
         }

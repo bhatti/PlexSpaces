@@ -23,7 +23,7 @@
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeId, default_node_config};
 use plexspaces_proto::{
     v1::actor::{ActorConfig as ProtoActorConfig, SpawnActorRequest},
     ActorService, ActorServiceServer,
@@ -32,7 +32,7 @@ use tonic::Request;
 
 /// Helper to create a test node
 fn create_test_node(id: &str, port: u16) -> Node {
-    let mut config = NodeConfig::default();
+    let mut config = default_node_config();
     config.listen_addr = format!("127.0.0.1:{}", port);
     config.heartbeat_interval_ms = 100;
 

@@ -20,7 +20,7 @@
 //!
 //! Coordinates block-based parallel matrix multiplication via TupleSpace.
 
-use plexspaces_core::{ActorBehavior, BehaviorType, ActorContext};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_tuplespace::{TupleSpace, Tuple, TupleField, Pattern, PatternField};
 use serde::{Deserialize, Serialize};
@@ -274,7 +274,7 @@ impl MasterBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for MasterBehavior {
+impl ActorTrait for MasterBehavior {
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenEvent
     }

@@ -154,10 +154,12 @@ impl Actor for BodyActor {
                 // Send state back to sender (coordinator)
                 if let Some(sender_id) = msg.sender_id() {
                     let response = Message::new(state_json.into_bytes());
-                    ctx.actor_service
-                        .send_message(sender_id, response)
-                        .await
-                        .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
+                    if let Some(actor_service) = ctx.get_actor_service().await {
+                        actor_service
+                            .send(sender_id, response)
+                            .await
+                            .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
+                    }
                 }
             }
             _ => {

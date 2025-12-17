@@ -82,11 +82,10 @@ async fn main() -> Result<()> {
         let worker_actor = WorkerActor::new(space.clone(), worker_id, num_cols);
         let behavior = Box::new(worker_actor);
         
-        let actor = ActorBuilder::new(behavior)
+        let actor_ref = ActorBuilder::new(behavior)
             .with_name(format!("worker-{}", worker_id))
-            .build();
-        
-        let actor_ref = node.spawn_actor(actor).await?;
+            .spawn(node.service_locator().clone())
+            .await?;
         worker_refs.push(actor_ref);
         info!("  Created worker actor: worker-{}", worker_id);
     }

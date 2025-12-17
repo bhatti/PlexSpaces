@@ -57,8 +57,21 @@ local tuple = luats.read({"event", "data_ready", _})
 
 ```rust
 // Event coordinator (LuaTS-style: Linda + Events)
+use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
+use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+use std::sync::Arc;
+
 let behavior = Box::new(EventCoordinatorActor::new());
-let coordinator = node.spawn_actor(actor).await?;
+let actor_id = "coordinator@node1".to_string();
+let mut mailbox_config = mailbox_config_default();
+mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
+let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await?;
+let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(), None);
+
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    .ok_or_else(|| "ActorFactory not found")?;
+let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+let coordinator = plexspaces_core::ActorRef::new(actor_id)?;
 
 // Subscribe to events (GenEventBehavior)
 coordinator.ask(Subscribe { event_type: "data_ready" }).await?;

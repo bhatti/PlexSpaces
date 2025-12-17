@@ -23,5 +23,8 @@ mod multi_node_tests;
 #[path = "integration/invoke_actor_grpc_tests.rs"]
 mod invoke_actor_grpc_tests;
 
+#[path = "integration/auth_tests.rs"]
+mod auth_tests;
+
 pub use harness::{NodeProcess, TestHarness};
 pub use helpers::*;

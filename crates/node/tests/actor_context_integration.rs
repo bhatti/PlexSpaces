@@ -22,10 +22,11 @@ use async_trait::async_trait;
 use plexspaces_actor::Actor;
 use plexspaces_core::BehaviorType;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeId, default_node_config};
 
+#[path = "test_helpers.rs"]
 mod test_helpers;
-use test_helpers::lookup_actor_ref;
+use test_helpers::{lookup_actor_ref, spawn_actor_helper};
 
 /// Test behavior that uses ActorContext
 struct ContextAwareBehavior {
@@ -47,12 +48,10 @@ impl plexspaces_core::Actor for ContextAwareBehavior {
         &mut self,
         ctx: &plexspaces_core::ActorContext,
         _msg: plexspaces_mailbox::Message,
-        _reply: &dyn plexspaces_core::Reply,
     ) -> Result<(), plexspaces_core::BehaviorError> {
         self.received_messages += 1;
 
         // Verify context has all services (Go-style: ctx is ActorContext directly)
-        assert!(!ctx.actor_id.is_empty());
         assert!(!ctx.node_id.is_empty());
         assert!(!ctx.namespace.is_empty());
 
@@ -72,7 +71,7 @@ impl plexspaces_core::Actor for ContextAwareBehavior {
 async fn test_node_spawns_actor_with_full_context() {
     // Create node
     let node_id = NodeId::new("test-node");
-    let config = NodeConfig::default();
+    let config = default_node_config();
     let node = Node::new(node_id, config);
 
     // Create actor with behavior
@@ -93,7 +92,8 @@ async fn test_node_spawns_actor_with_full_context() {
     );
 
     // Spawn actor - Node should update context with full services
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    use test_helpers::spawn_actor_helper;
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
     // The actor ID is fixed by spawn_actor_arc to include the correct node ID
@@ -143,7 +143,7 @@ async fn test_node_spawns_actor_with_full_context() {
 #[tokio::test]
 async fn test_actor_context_has_node_id() {
     let node_id = NodeId::new("test-node-2");
-    let config = NodeConfig::default();
+    let config = default_node_config();
     let node = Node::new(node_id.clone(), config);
 
     let behavior = Box::new(ContextAwareBehavior::new());
@@ -162,7 +162,7 @@ async fn test_actor_context_has_node_id() {
 
     // After spawning, Node updates context via create_actor_context()
     // The context is updated during spawn_actor() which calls create_actor_context()
-    let actor_ref = node.spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor was spawned successfully
     assert_eq!(actor_ref.id(), "test-actor-2@test-node-2");

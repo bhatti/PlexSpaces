@@ -32,7 +32,7 @@
 //! - Scatter-gather: query all shards, merge results
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{ActorBehavior, ActorId, ActorRef, BehaviorError};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_node::{ConfigBootstrap, NodeBuilder};
 use plexspaces_node::CoordinationComputeTracker;
@@ -74,7 +74,7 @@ impl ShardBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for ShardBehavior {
+impl ActorTrait for ShardBehavior {
     async fn handle_message(
         &mut self,
         _ctx: &plexspaces_core::ActorContext,
@@ -134,7 +134,7 @@ impl RouterBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for RouterBehavior {
+impl ActorTrait for RouterBehavior {
     async fn handle_message(
         &mut self,
         _ctx: &plexspaces_core::ActorContext,
@@ -257,7 +257,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_id(ActorId::from(actor_id.clone()))
             .build();
         
-        let actor_ref = node_arc.spawn_actor(actor).await?;
+        // Use ActorFactory to spawn actor
+        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+        use std::sync::Arc;
+        let actor_factory: Arc<ActorFactoryImpl> = node_arc.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+        let actor_id = actor.id().clone();
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+        let actor_ref = plexspaces_core::ActorRef::new(actor_id.clone())
+            .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
         shard_actors.push(actor_ref);
         info!("  ✓ Created shard actor: {}", actor_id);
     }

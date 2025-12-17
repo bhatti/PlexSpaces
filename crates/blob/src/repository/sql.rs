@@ -26,6 +26,7 @@ use std::sync::Arc;
 use crate::{BlobError, BlobResult};
 use crate::helpers::{datetime_to_timestamp, timestamp_to_datetime};
 use plexspaces_proto::storage::v1::BlobMetadata;
+use plexspaces_core::RequestContext;
 use super::{BlobRepository, ListFilters};
 
 /// SQL-based blob metadata repository
@@ -102,17 +103,19 @@ impl SqlBlobRepository {
 
 #[async_trait]
 impl BlobRepository for SqlBlobRepository {
-    async fn get(&self, blob_id: &str) -> BlobResult<Option<BlobMetadata>> {
+    async fn get(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<Option<BlobMetadata>> {
         let row = sqlx::query(
             r#"
             SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
                    content_length, etag, blob_group, kind, metadata_json, tags_json,
                    expires_at, created_at, updated_at
             FROM blob_metadata
-            WHERE blob_id = $1
+            WHERE blob_id = $1 AND tenant_id = $2 AND namespace = $3
             "#,
         )
         .bind(blob_id)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .fetch_optional(&*self.pool)
         .await?;
 
@@ -125,8 +128,7 @@ impl BlobRepository for SqlBlobRepository {
 
     async fn get_by_sha256(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         sha256: &str,
     ) -> BlobResult<Option<BlobMetadata>> {
         let row = sqlx::query(
@@ -140,8 +142,8 @@ impl BlobRepository for SqlBlobRepository {
             LIMIT 1
             "#,
         )
-        .bind(tenant_id)
-        .bind(namespace)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(sha256)
         .fetch_optional(&*self.pool)
         .await?;
@@ -153,7 +155,23 @@ impl BlobRepository for SqlBlobRepository {
         }
     }
 
-    async fn save(&self, metadata: &BlobMetadata) -> BlobResult<()> {
+    async fn save(&self, ctx: &RequestContext, metadata: &BlobMetadata) -> BlobResult<()> {
+        // Validate tenant_id and namespace match context
+        if metadata.tenant_id != ctx.tenant_id() {
+            return Err(BlobError::InvalidInput(format!(
+                "Metadata tenant_id '{}' does not match context tenant_id '{}'",
+                metadata.tenant_id,
+                ctx.tenant_id()
+            )));
+        }
+        if metadata.namespace != ctx.namespace() {
+            return Err(BlobError::InvalidInput(format!(
+                "Metadata namespace '{}' does not match context namespace '{}'",
+                metadata.namespace,
+                ctx.namespace()
+            )));
+        }
+
         let metadata_json = serde_json::to_string(&metadata.metadata)?;
         let tags_json = serde_json::to_string(&metadata.tags)?;
 
@@ -199,7 +217,23 @@ impl BlobRepository for SqlBlobRepository {
         Ok(())
     }
 
-    async fn update(&self, metadata: &BlobMetadata) -> BlobResult<()> {
+    async fn update(&self, ctx: &RequestContext, metadata: &BlobMetadata) -> BlobResult<()> {
+        // Validate tenant_id and namespace match context
+        if metadata.tenant_id != ctx.tenant_id() {
+            return Err(BlobError::InvalidInput(format!(
+                "Metadata tenant_id '{}' does not match context tenant_id '{}'",
+                metadata.tenant_id,
+                ctx.tenant_id()
+            )));
+        }
+        if metadata.namespace != ctx.namespace() {
+            return Err(BlobError::InvalidInput(format!(
+                "Metadata namespace '{}' does not match context namespace '{}'",
+                metadata.namespace,
+                ctx.namespace()
+            )));
+        }
+
         let metadata_json = serde_json::to_string(&metadata.metadata)?;
         let tags_json = serde_json::to_string(&metadata.tags)?;
         let updated_at = Utc::now().to_rfc3339();
@@ -214,7 +248,7 @@ impl BlobRepository for SqlBlobRepository {
             SET name = $2, content_type = $3, content_length = $4, etag = $5,
                 blob_group = $6, kind = $7, metadata_json = $8, tags_json = $9,
                 expires_at = $10, updated_at = $11
-            WHERE blob_id = $1
+            WHERE blob_id = $1 AND tenant_id = $12 AND namespace = $13
             "#,
         )
         .bind(&metadata.blob_id)
@@ -228,15 +262,19 @@ impl BlobRepository for SqlBlobRepository {
         .bind(&tags_json)
         .bind(expires_at.as_ref().map(|s| s.as_str()))
         .bind(&updated_at)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .execute(&*self.pool)
         .await?;
 
         Ok(())
     }
 
-    async fn delete(&self, blob_id: &str) -> BlobResult<()> {
-        sqlx::query("DELETE FROM blob_metadata WHERE blob_id = $1")
+    async fn delete(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<()> {
+        sqlx::query("DELETE FROM blob_metadata WHERE blob_id = $1 AND tenant_id = $2 AND namespace = $3")
             .bind(blob_id)
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .execute(&*self.pool)
             .await?;
 
@@ -245,13 +283,12 @@ impl BlobRepository for SqlBlobRepository {
 
     async fn list(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         filters: &ListFilters,
         page_size: i64,
         offset: i64,
     ) -> BlobResult<(Vec<BlobMetadata>, i64)> {
-        // Build WHERE clause
+        // Build WHERE clause - always filter by tenant_id and namespace from context
         let mut where_clauses: Vec<String> = vec!["tenant_id = $1".to_string(), "namespace = $2".to_string()];
         let mut bind_index = 3;
 
@@ -259,15 +296,15 @@ impl BlobRepository for SqlBlobRepository {
             where_clauses.push(format!("name LIKE ${}", bind_index));
             bind_index += 1;
         }
-        if let Some(ref blob_group) = filters.blob_group {
+        if filters.blob_group.is_some() {
             where_clauses.push(format!("blob_group = ${}", bind_index));
             bind_index += 1;
         }
-        if let Some(ref kind) = filters.kind {
+        if filters.kind.is_some() {
             where_clauses.push(format!("kind = ${}", bind_index));
             bind_index += 1;
         }
-        if let Some(ref sha256) = filters.sha256 {
+        if filters.sha256.is_some() {
             where_clauses.push(format!("sha256 = ${}", bind_index));
             bind_index += 1;
         }
@@ -277,8 +314,8 @@ impl BlobRepository for SqlBlobRepository {
         // Count total
         let count_query = format!("SELECT COUNT(*) FROM blob_metadata WHERE {}", where_clause);
         let mut count_query = sqlx::query(&count_query)
-            .bind(tenant_id)
-            .bind(namespace);
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace());
 
         if let Some(ref name_prefix) = filters.name_prefix {
             count_query = count_query.bind(format!("{}%", name_prefix));
@@ -313,8 +350,8 @@ impl BlobRepository for SqlBlobRepository {
         );
 
         let mut list_query = sqlx::query(&list_query)
-            .bind(tenant_id)
-            .bind(namespace);
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace());
 
         if let Some(ref name_prefix) = filters.name_prefix {
             list_query = list_query.bind(format!("{}%", name_prefix));
@@ -343,43 +380,29 @@ impl BlobRepository for SqlBlobRepository {
 
     async fn find_expired(
         &self,
-        tenant_id: Option<&str>,
+        ctx: &RequestContext,
         limit: i64,
     ) -> BlobResult<Vec<BlobMetadata>> {
         let now_str = Utc::now().to_rfc3339();
 
-        let query = if let Some(tenant_id) = tenant_id {
-            sqlx::query(
-                r#"
-                SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
-                       content_length, etag, blob_group, kind, metadata_json, tags_json,
-                       expires_at, created_at, updated_at
-                FROM blob_metadata
-                WHERE tenant_id = $1 AND expires_at IS NOT NULL AND expires_at < $2
-                ORDER BY expires_at ASC
-                LIMIT $3
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(&now_str)
-            .bind(limit)
-        } else {
-            sqlx::query(
-                r#"
-                SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
-                       content_length, etag, blob_group, kind, metadata_json, tags_json,
-                       expires_at, created_at, updated_at
-                FROM blob_metadata
-                WHERE expires_at IS NOT NULL AND expires_at < $1
-                ORDER BY expires_at ASC
-                LIMIT $2
-                "#,
-            )
-            .bind(&now_str)
-            .bind(limit)
-        };
-
-        let rows = query.fetch_all(&*self.pool).await?;
+        // Always filter by tenant_id and namespace from context
+        let rows = sqlx::query(
+            r#"
+            SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
+                   content_length, etag, blob_group, kind, metadata_json, tags_json,
+                   expires_at, created_at, updated_at
+            FROM blob_metadata
+            WHERE tenant_id = $1 AND namespace = $2 AND expires_at IS NOT NULL AND expires_at < $3
+            ORDER BY expires_at ASC
+            LIMIT $4
+            "#,
+        )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(&now_str)
+        .bind(limit)
+        .fetch_all(&*self.pool)
+        .await?;
 
         let mut results = Vec::new();
         for row in rows {

@@ -2,12 +2,13 @@
 // Comparison: LuaTS (Linda + Event-Driven Programming)
 // Based on: LuaTS combines Linda with event-driven programming to simplify multi-thread development
 
-use plexspaces_actor::{ActorBuilder, ActorRef};
+use plexspaces_actor::{ActorBuilder, ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_behavior::{GenServerBehavior, GenEventBehavior};
 use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, ActorId};
 use plexspaces_tuplespace::{Tuple, TupleField, Pattern, PatternField};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::info;
@@ -185,7 +186,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await;
     
-    let coordinator_ref = node.spawn_actor(coordinator_actor).await?;
+    // Spawn using ActorFactory
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = coordinator_actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(coordinator_actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let coordinator_ref = plexspaces_core::ActorRef::new(actor_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
 
     let mailbox = node.actor_registry()
         .lookup_mailbox(coordinator_ref.id())
@@ -206,7 +216,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await;
     
-    let subscriber_ref = node.spawn_actor(subscriber_actor).await?;
+    let actor_id2 = subscriber_actor.id().clone();
+    let _message_sender2 = actor_factory.spawn_built_actor(Arc::new(subscriber_actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let subscriber_ref = plexspaces_core::ActorRef::new(actor_id2)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
 
     let subscriber_mailbox = node.actor_registry()
         .lookup_mailbox(subscriber_ref.id())
@@ -299,7 +313,14 @@ mod tests {
             .build()
             .await;
         
-        let actor_ref = node.spawn_actor(actor).await.unwrap();
+        // Spawn using ActorFactory
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = actor.id().clone();
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
+        let actor_ref = plexspaces_core::ActorRef::new(actor_id)
+            .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();
 
         let mailbox = node.actor_registry()
             .lookup_mailbox(actor_ref.id())

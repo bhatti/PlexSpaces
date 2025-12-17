@@ -84,7 +84,6 @@ async fn test_deploy_tenant_with_real_firecracker() {
             is_root_device: true,
             is_read_only: false,
         },
-        ..Default::default()
     };
 
     // Deploy application to VM
@@ -135,7 +134,6 @@ async fn test_multiple_tenants_isolation() {
                 is_root_device: true,
                 is_read_only: false,
             },
-            ..Default::default()
         };
 
         let deployment = ApplicationDeployment::new(&tenant_id).with_vm_config(vm_config);

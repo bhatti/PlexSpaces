@@ -6,7 +6,7 @@
 //! Normalizes time-series data, handles missing values, and creates sliding windows.
 
 use async_trait::async_trait;
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use super::data_loader::DataChunk;
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ impl PreprocessorActor {
 }
 
 #[async_trait]
-impl ActorBehavior for PreprocessorActor {
+impl ActorTrait for PreprocessorActor {
     async fn handle_message(
         &mut self,
         ctx: &ActorContext,

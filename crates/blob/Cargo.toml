@@ -31,7 +31,8 @@ aws-sdk-s3 = { version = "1.0", optional = true }
 aws-config = { version = "1.0", optional = true }
 
 # SQL backend support
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "runtime-tokio", "sqlite", "postgres", "any"], optional = true }
+# Note: AnyPool requires "any" feature, and sqlite driver must be enabled
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "any"], optional = true }
 
 # Proto types
 plexspaces-proto = { path = "../proto" }
@@ -58,6 +59,8 @@ reqwest = { version = "0.12", features = ["json"] }
 tempfile = "3.10"
 hyper = { version = "1.0", features = ["full"] }
 http-body-util = "0.1"
+# Ensure sqlx with sqlite is available in tests
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
 
 [features]
 default = []

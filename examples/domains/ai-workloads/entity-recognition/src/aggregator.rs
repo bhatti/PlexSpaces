@@ -6,7 +6,7 @@
 //! Aggregator actor: Aggregates results (CPU-intensive).
 
 use crate::processor;
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ impl AggregatorBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for AggregatorBehavior {
+impl ActorTrait for AggregatorBehavior {
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenServer
     }
@@ -76,7 +76,7 @@ impl ActorBehavior for AggregatorBehavior {
                 // Send reply via context
                 if let Ok(reply_data) = serde_json::to_vec(&response) {
                     let reply = Message::new(reply_data);
-                    let _ = ctx.reply(reply).await; // Ignore reply errors for now
+                    let _ = if let Some(sender_id) = &msg.sender { ctx.send_reply(msg.correlation_id.as_deref(), sender_id, msg.receiver.clone(), reply).await } else { Ok(()) }; // Ignore reply errors for now
                 }
                 
                 Ok(())

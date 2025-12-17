@@ -79,6 +79,48 @@ impl ActorServiceImpl {
         }
         Ok(())
     }
+    
+    /// Extract tenant_id from request metadata
+    ///
+    /// ## Purpose
+    /// Extracts tenant_id from gRPC request metadata. This is the ONLY place where
+    /// tenant_id can be defaulted - at the HTTP/gRPC API invocation boundary.
+    ///
+    /// ## Sources (in order of precedence):
+    /// 1. `x-tenant-id` header (from JWT middleware)
+    /// 2. `tenant_id` in request labels/metadata
+    /// 3. Returns error if not found (tenant_id is REQUIRED)
+    ///
+    /// ## Returns
+    /// tenant_id or error if not found
+    fn extract_tenant_id_from_request(
+        &self,
+        request: &Request<impl std::fmt::Debug>,
+        labels: &std::collections::HashMap<String, String>,
+    ) -> Result<String, Status> {
+        // First, try to get from metadata headers (from JWT middleware)
+        if let Some(tenant_id_header) = request.metadata().get("x-tenant-id") {
+            if let Ok(tenant_id) = tenant_id_header.to_str() {
+                if !tenant_id.is_empty() {
+                    return Ok(tenant_id.to_string());
+                }
+            }
+        }
+        
+        // Second, try to get from labels
+        if let Some(tenant_id) = labels.get("tenant_id") {
+            if !tenant_id.is_empty() {
+                return Ok(tenant_id.clone());
+            }
+        }
+        
+        // tenant_id is REQUIRED - return error if not found
+        // This is the ONLY exception: at HTTP API invocation boundary, we might not have tenant_id yet
+        // But for production, we should always have it from JWT
+        Err(Status::invalid_argument(
+            "tenant_id is required but not found in request metadata (x-tenant-id header) or labels. Ensure JWT middleware is configured and tenant_id is in JWT claims."
+        ))
+    }
 }
 
 #[tonic::async_trait]
@@ -90,63 +132,51 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+        
+        // Extract tenant_id from request (REQUIRED - only exception is at HTTP API invocation boundary)
+        // At HTTP API invocation boundary, if tenant_id is not available, we use a placeholder
+        // This should only happen during development/testing - production should always have JWT with tenant_id
+        let tenant_id = if let Some(tenant_id_header) = metadata.get("x-tenant-id") {
+            tenant_id_header.to_str().unwrap_or("api-invocation-tenant").to_string()
+        } else if let Some(tenant_id) = req.labels.get("tenant_id") {
+            tenant_id.clone()
+        } else {
+            // At HTTP API invocation boundary only - use placeholder
+            "api-invocation-tenant".to_string()
+        };
         
         // Validate actor_type
         if req.actor_type.is_empty() {
             return Err(Status::invalid_argument("Missing actor_type"));
         }
         
-        // Use spawn_actor logic but for local node
+        // Use spawn_actor to create and spawn actor
         let actor_id = format!("{}@{}", ulid::Ulid::new(), self.node.id().as_str());
-        
-        // Create actor based on actor_type
-        // Future: Use actor registry to look up actor factory by type
-        use plexspaces_actor::Actor;
-        use plexspaces_core::Actor as ActorTrait;
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        
-        // Create a simple test behavior that logs messages
-        struct SimpleBehavior;
-        
-        #[async_trait::async_trait]
-        impl ActorTrait for SimpleBehavior {
-            async fn handle_message(
-                &mut self,
-                _ctx: &plexspaces_core::ActorContext,
-                _msg: plexspaces_mailbox::Message,
-            ) -> Result<(), plexspaces_core::BehaviorError> {
-                Ok(())
-            }
-            
-            fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-                plexspaces_core::BehaviorType::GenServer
-            }
-        }
-        
-        let mailbox = Mailbox::new(mailbox_config_default(), format!("{}:mailbox", actor_id))
-            .await
-            .map_err(|e| Status::internal(format!("Failed to create mailbox: {}", e)))?;
-        let behavior = Box::new(SimpleBehavior);
         
         // Extract namespace from labels if present, otherwise use "default"
         let namespace = req.labels.get("namespace")
             .cloned()
             .unwrap_or_else(|| "default".to_string());
         
-        let actor = Actor::new(
-            actor_id.clone(),
-            behavior,
-            mailbox,
-            namespace,
-            Some(self.node.id().as_str().to_string()),
-        );
+        // Build labels for spawn_actor (include namespace and tenant_id)
+        let mut labels = req.labels.clone();
+        labels.insert("namespace".to_string(), namespace.clone());
+        labels.insert("tenant_id".to_string(), tenant_id.clone());
         
-        // Spawn actor using ActorFactory
+        // Spawn actor using ActorFactory::spawn_actor
         let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        let _message_sender = actor_factory.spawn_actor(
+            &actor_id,
+            &req.actor_type,
+            req.initial_state.clone(),
+            req.config.clone(),
+            labels,
+        ).await
             .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
         
         // Record metrics
@@ -199,6 +229,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         &self,
         request: Request<SpawnActorRequest>,
     ) -> Result<Response<SpawnActorResponse>, Status> {
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
         // Validate actor_type
@@ -228,45 +260,36 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Future: Use actor registry to look up actor factory by type
         use plexspaces_actor::Actor;
         use plexspaces_core::Actor as ActorTrait;
-        use plexspaces_mailbox::{Mailbox, MailboxConfig};
+        // Extract tenant_id from request (REQUIRED - only exception is at HTTP API invocation boundary)
+        let tenant_id = if let Some(tenant_id_header) = metadata.get("x-tenant-id") {
+            tenant_id_header.to_str().unwrap_or("api-invocation-tenant").to_string()
+        } else if let Some(tenant_id) = req.labels.get("tenant_id") {
+            tenant_id.clone()
+        } else {
+            return Err(Status::invalid_argument("tenant_id is required (either in x-tenant-id header or request labels)"));
+        };
 
-        // Create a simple test behavior that logs messages
-        struct SimpleBehavior;
-
-        #[async_trait::async_trait]
-        impl ActorTrait for SimpleBehavior {
-            async fn handle_message(
-                &mut self,
-                _ctx: &plexspaces_core::ActorContext,
-                _msg: plexspaces_mailbox::Message,
-            ) -> Result<(), plexspaces_core::BehaviorError> {
-                Ok(())
-            }
-
-            fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-                plexspaces_core::BehaviorType::GenServer
-            }
-        }
-
-        use plexspaces_mailbox::mailbox_config_default;
-        let mailbox = Mailbox::new(mailbox_config_default(), format!("{}:mailbox", actor_id))
-            .await
-            .map_err(|e| tonic::Status::internal(format!("Failed to create mailbox: {}", e)))?;
-        let behavior = Box::new(SimpleBehavior);
-
-        let actor = Actor::new(
-            actor_id.clone(),
-            behavior,
-            mailbox,
-            "default".to_string(), // namespace
-            None, // node_id - will be set by ActorFactory
-        );
-
-        // Spawn actor using ActorFactory
+        // Extract namespace from labels if present, otherwise use "default"
+        let namespace = req.labels.get("namespace")
+            .cloned()
+            .unwrap_or_else(|| "default".to_string());
+        
+        // Build labels for spawn_actor (include namespace and tenant_id)
+        let mut labels = req.labels.clone();
+        labels.insert("namespace".to_string(), namespace.clone());
+        labels.insert("tenant_id".to_string(), tenant_id.clone());
+        
+        // Spawn actor using ActorFactory::spawn_actor
         let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        let _message_sender = actor_factory.spawn_actor(
+            &actor_id,
+            &req.actor_type,
+            req.initial_state.clone(),
+            req.config.clone(),
+            labels,
+        ).await
             .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
 
         // Build proto Actor message for response
@@ -837,8 +860,18 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let actor_id: plexspaces_core::ActorId = req.actor_id.clone();
+        
+        // Extract tenant_id from request (REQUIRED - only exception is at HTTP API invocation boundary)
+        let tenant_id = if let Some(tenant_id_header) = metadata.get("x-tenant-id") {
+            tenant_id_header.to_str().unwrap_or("api-invocation-tenant").to_string()
+        } else {
+            // At HTTP API invocation boundary only - use placeholder
+            "api-invocation-tenant".to_string()
+        };
 
         // Check if actor exists and is active using ActorRegistry
         let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
@@ -904,16 +937,15 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                 }
 
                 let behavior = Box::new(SimpleBehavior);
-                let actor = ActorBuilder::new(behavior)
-                    .with_id(actor_id.clone())
-                    .build()
-                    .await;
-
-                // Spawn actor using ActorFactory
-                let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
-                    .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
                 
-                let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+                // Use ActorBuilder.spawn() which handles spawning properly
+                let service_locator = self.node.service_locator();
+                
+                let _actor_ref = ActorBuilder::new(behavior)
+                    .with_id(actor_id.clone())
+                    .with_namespace("default".to_string())
+                    .spawn(service_locator)
+                    .await
                     .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
 
                 tracing::debug!(actor_id = %actor_id, "Actor created and activated");

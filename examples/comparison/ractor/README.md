@@ -61,7 +61,15 @@ let actor = ActorBuilder::new(behavior)
     .build()
     .await;
 
-let actor_ref = node.spawn_actor(actor).await?;
+// Spawn using ActorFactory
+use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use std::sync::Arc;
+
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    .ok_or_else(|| "ActorFactory not found")?;
+let actor_id = actor.id().clone();
+let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+let actor_ref = plexspaces_core::ActorRef::new(actor_id)?;
 
 // Send message (Ractor: actor.send_message(Add { a: 10, b: 5 }))
 let result = calculator.ask(Add { a: 10.0, b: 5.0 }).await?;

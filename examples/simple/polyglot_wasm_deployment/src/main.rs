@@ -229,7 +229,6 @@ async fn deploy_actor(
         module_bytes: wasm_bytes,
         module_hash: String::new(), // Will be computed by server
         wit_interface: String::new(),
-        ..Default::default()
     };
 
     // Create application config

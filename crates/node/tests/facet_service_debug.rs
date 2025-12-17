@@ -13,7 +13,7 @@ use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
 use std::time::Duration;
 mod test_helpers;
-use test_helpers::{lookup_actor_ref, activate_virtual_actor};
+use test_helpers::{lookup_actor_ref, activate_virtual_actor, spawn_actor_helper};
 
 
 /// Simple behavior for testing
@@ -54,7 +54,7 @@ async fn test_01_spawn_actor_no_facets() {
         .await;
     
     // Spawn actor without facets
-    let actor_ref = node.clone().spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
     // Wait for actor to be fully registered instead of using sleep
@@ -119,7 +119,7 @@ async fn test_03_spawn_actor_with_facet() {
     
     // Spawn actor - this is where hang might occur
     println!("Before spawn_actor");
-    let actor_ref = node.clone().spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     println!("After spawn_actor");
     
     let actor_id = actor_ref.id().clone();
@@ -161,7 +161,7 @@ async fn test_04_facet_storage_after_spawn() {
         .unwrap();
     
     // Spawn actor
-    let actor_ref = node.clone().spawn_actor(actor).await.unwrap();
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
     // Wait for initialization

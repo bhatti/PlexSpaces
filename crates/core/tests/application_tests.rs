@@ -25,20 +25,6 @@ impl ApplicationNode for MockNode {
         &self.addr
     }
 
-    async fn spawn_actor(
-        &self,
-        actor_id: String,
-        _behavior: Box<dyn plexspaces_core::ActorBehavior>,
-        _namespace: String,
-    ) -> Result<String, ApplicationError> {
-        self.spawned_actors.lock().unwrap().push(actor_id.clone());
-        Ok(actor_id)
-    }
-
-    async fn stop_actor(&self, actor_id: &str) -> Result<(), ApplicationError> {
-        self.stopped_actors.lock().unwrap().push(actor_id.to_string());
-        Ok(())
-    }
 }
 
 struct TestApplication {
@@ -108,55 +94,8 @@ async fn test_application_lifecycle() {
     assert!(*stop_called.lock().unwrap());
 }
 
-#[tokio::test]
-async fn test_application_node_spawn_actor() {
-    let spawned = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let node = Arc::new(MockNode {
-        id: "test-node".to_string(),
-        addr: "0.0.0.0:9000".to_string(),
-        spawned_actors: spawned.clone(),
-        stopped_actors: Arc::new(std::sync::Mutex::new(Vec::new())),
-    });
-
-    // Create a dummy behavior
-    struct DummyBehavior;
-    #[async_trait]
-    impl plexspaces_core::ActorBehavior for DummyBehavior {
-        async fn handle_message(&mut self, _ctx: &plexspaces_core::ActorContext, _msg: plexspaces_mailbox::Message) -> Result<(), plexspaces_core::BehaviorError> {
-            Ok(())
-        }
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
-        }
-    }
-
-    let behavior: Box<dyn plexspaces_core::ActorBehavior> = Box::new(DummyBehavior);
-    let result = node.spawn_actor("actor-1".to_string(), behavior, "default".to_string()).await;
-
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "actor-1");
-    let spawned_list = spawned.lock().unwrap();
-    assert_eq!(spawned_list.len(), 1);
-    assert_eq!(spawned_list[0], "actor-1");
-}
-
-#[tokio::test]
-async fn test_application_node_stop_actor() {
-    let stopped = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let node = Arc::new(MockNode {
-        id: "test-node".to_string(),
-        addr: "0.0.0.0:9000".to_string(),
-        spawned_actors: Arc::new(std::sync::Mutex::new(Vec::new())),
-        stopped_actors: stopped.clone(),
-    });
-
-    let result = node.stop_actor("actor-1").await;
-
-    assert!(result.is_ok());
-    let stopped_list = stopped.lock().unwrap();
-    assert_eq!(stopped_list.len(), 1);
-    assert_eq!(stopped_list[0], "actor-1");
-}
+// Note: spawn_actor and stop_actor methods removed from ApplicationNode trait
+// Use ActorFactory directly via ServiceLocator instead
 
 #[tokio::test]
 async fn test_application_error_variants() {

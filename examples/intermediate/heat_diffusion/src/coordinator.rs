@@ -98,7 +98,16 @@ impl Coordinator {
                     .build()
                     .await;
                 
-                let actor_ref = node.as_ref().spawn_actor(actor).await?;
+                // Use ActorFactory to spawn actor
+                use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+                use std::sync::Arc;
+                let actor_factory: Arc<ActorFactoryImpl> = node.as_ref().service_locator().get_service().await
+                    .ok_or_else(|| format!("ActorFactory not found"))?;
+                let actor_id = actor.id().clone();
+                let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+                    .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+                let actor_ref = plexspaces_core::ActorRef::new(actor_id)
+                    .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
                 self.actor_refs.push(actor_ref);
             }
         }

@@ -99,6 +99,10 @@ impl plexspaces_core::Service for Node {}
 
 // Configuration bootstrap (Erlang/OTP-inspired)
 pub mod config_bootstrap;
+// TODO: Complete config_loader implementation - temporarily disabled due to proto mismatches
+pub mod config_loader;
+mod config_loader_yaml;
+mod config_loader_convert;
 pub mod metrics_helper;
 pub use config_bootstrap::{ConfigBootstrap, ConfigError};
 pub use metrics_helper::CoordinationComputeTracker;

@@ -65,11 +65,12 @@ async fn test_channel_service_receive_from_queue_no_timeout() {
     let channel_service = Arc::new(MockChannelService { return_none: false });
     
     // Create minimal context and replace channel_service
-    let mut context = ActorContext::minimal(
-        "test@node1".to_string(),
-        "node1".to_string(),
-        "default".to_string(),
-    );
+        let mut context = ActorContext::minimal(
+            "test@node1".to_string(),
+            "node1".to_string(),
+            "default".to_string(), // namespace
+            "test-tenant".to_string(), // tenant_id (required)
+        );
     // Replace channel_service with our mock
     context.channel_service = channel_service.clone();
     
@@ -84,11 +85,12 @@ async fn test_channel_service_receive_from_queue_no_timeout_returns_none() {
     let channel_service = Arc::new(MockChannelService { return_none: true });
     
     // Create minimal context and replace channel_service
-    let mut context = ActorContext::minimal(
-        "test@node1".to_string(),
-        "node1".to_string(),
-        "default".to_string(),
-    );
+        let mut context = ActorContext::minimal(
+            "test@node1".to_string(),
+            "node1".to_string(),
+            "default".to_string(), // namespace
+            "test-tenant".to_string(), // tenant_id (required)
+        );
     // Replace channel_service with our mock
     context.channel_service = channel_service.clone();
     

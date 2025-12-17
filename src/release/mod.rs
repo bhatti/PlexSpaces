@@ -453,7 +453,6 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             cluster_seed_nodes: toml.node.cluster_seed_nodes,
         }),
         runtime: Some(RuntimeConfig {
-            security: convert_security_config(&toml.runtime.security)?,
             grpc: Some(GrpcConfig {
                 enabled: toml.runtime.grpc.enabled,
                 address: toml.runtime.grpc.address,
@@ -480,7 +479,14 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
                 heartbeat_timeout_seconds: toml.runtime.health.heartbeat_timeout_seconds,
                 registry_url: toml.runtime.health.registry_url,
             }),
+            security: convert_security_config(&toml.runtime.security)?,
             blob: None,
+            shared_database: None,
+            locks_provider: None,
+            channel_provider: None,
+            tuplespace_provider: None,
+            framework_info: None,
+            ..Default::default() // Include mailbox_provider default until proto is regenerated
         }),
         system_applications: toml.system_applications.included,
         applications: toml
@@ -532,6 +538,8 @@ fn convert_security_config(
         mtls: None,
         jwt: None,
         api_keys: vec![],
+        allow_disable_auth: false,
+        disable_auth: false,
     };
 
     // Convert service identity
@@ -586,21 +594,28 @@ fn convert_security_config(
 
         security.mtls = Some(MtlsConfig {
             enable_mtls: mtls.enable_mtls,
-            ca_certificate: ca_cert,
-            trusted_services: mtls.trusted_services.clone(),
+            ca_certificate_path: ca_cert,
+            server_certificate_path: String::new(),  // Not in TOML
+            server_key_path: String::new(),  // Not in TOML
+            auto_generate: false,  // Not in TOML
+            cert_dir: "/app/certs".to_string(),  // Default
             certificate_rotation_interval: mtls
                 .certificate_rotation_interval_seconds
                 .map(|s| prost_types::Duration {
                     seconds: s as i64,
                     nanos: 0,
                 }),
+            trusted_services: mtls.trusted_services.clone(),
         });
     }
 
     // Convert JWT config
     if let Some(jwt) = &toml.jwt {
+        // JWT secret should come from environment variable
+        let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| String::new());
         security.jwt = Some(JwtConfig {
             enable_jwt: jwt.enable_jwt,
+            secret,
             issuer: jwt.issuer.clone(),
             jwks_url: jwt.jwks_url.clone(),
             allowed_audiences: jwt.allowed_audiences.clone(),
@@ -608,6 +623,9 @@ fn convert_security_config(
                 seconds: s as i64,
                 nanos: 0,
             }),
+            refresh_token_ttl: None,  // Not in TOML
+            tenant_id_claim: "tenant_id".to_string(),  // Default
+            user_id_claim: "sub".to_string(),  // Default
         });
     }
 
@@ -1000,6 +1018,12 @@ mod tests {
                 health: None,
                 security: None,
                 blob: None,
+                shared_database: None,
+                locks_provider: None,
+                channel_provider: None,
+                tuplespace_provider: None,
+                framework_info: None,
+                ..Default::default() // Include mailbox_provider default until proto is regenerated
             }),
             system_applications: vec![],
             applications: vec![
@@ -1111,6 +1135,12 @@ mod tests {
                 health: None,
                 security: None,
                 blob: None,
+                shared_database: None,
+                locks_provider: None,
+                channel_provider: None,
+                tuplespace_provider: None,
+                framework_info: None,
+                ..Default::default() // Include mailbox_provider default until proto is regenerated
             }),
             system_applications: vec![],
             applications: vec![
@@ -1181,6 +1211,12 @@ mod tests {
                 health: None,
                 security: None,
                 blob: None,
+                shared_database: None,
+                locks_provider: None,
+                channel_provider: None,
+                tuplespace_provider: None,
+                framework_info: None,
+                ..Default::default() // Include mailbox_provider default until proto is regenerated
             }),
             system_applications: vec![],
             applications: vec![
@@ -1263,6 +1299,12 @@ mod tests {
                 health: None,
                 security: None,
                 blob: None,
+                shared_database: None,
+                locks_provider: None,
+                channel_provider: None,
+                tuplespace_provider: None,
+                framework_info: None,
+                ..Default::default() // Include mailbox_provider default until proto is regenerated
             }),
             system_applications: vec![],
             applications: vec![
@@ -1323,6 +1365,12 @@ mod tests {
                 health: None,
                 security: None,
                 blob: None,
+                shared_database: None,
+                locks_provider: None,
+                channel_provider: None,
+                tuplespace_provider: None,
+                framework_info: None,
+                ..Default::default() // Include mailbox_provider default until proto is regenerated
             }),
             system_applications: vec![],
             applications: vec![ApplicationConfig {
@@ -1376,6 +1424,12 @@ mod tests {
                 health: None,
                 security: None,
                 blob: None,
+                shared_database: None,
+                locks_provider: None,
+                channel_provider: None,
+                tuplespace_provider: None,
+                framework_info: None,
+                ..Default::default() // Include mailbox_provider default until proto is regenerated
             }),
             system_applications: vec![],
             applications: vec![

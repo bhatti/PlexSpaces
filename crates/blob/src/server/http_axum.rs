@@ -23,9 +23,10 @@
 //! - GET /api/v1/blobs/{blob_id}/download/raw - Download raw file data
 
 use crate::{BlobService, BlobError};
+use plexspaces_core::RequestContext;
 use axum::{
-    extract::{Multipart, Path},
-    http::{header, StatusCode},
+    extract::{Multipart, Path, Request},
+    http::{header, StatusCode, HeaderMap},
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
@@ -41,11 +42,39 @@ pub fn create_blob_router(blob_service: Arc<BlobService>) -> Router {
         .with_state(blob_service)
 }
 
+/// Extract RequestContext from HTTP headers
+fn extract_context_from_headers(headers: &HeaderMap) -> Result<RequestContext, BlobError> {
+    // Extract tenant_id from headers (set by JWT middleware)
+    let tenant_id = headers.get("x-tenant-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| BlobError::InvalidInput("Missing x-tenant-id header. JWT authentication required.".to_string()))?;
+    
+    let namespace = headers.get("x-namespace")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("default");
+    
+    let user_id = headers.get("x-user-id")
+        .and_then(|v| v.to_str().ok());
+    
+    let mut ctx = RequestContext::new(tenant_id.to_string())
+        .with_namespace(namespace.to_string());
+    
+    if let Some(uid) = user_id {
+        ctx = ctx.with_user_id(uid.to_string());
+    }
+    
+    Ok(ctx)
+}
+
 /// Handle file upload (multipart/form-data)
 async fn handle_upload(
     axum::extract::State(blob_service): axum::extract::State<Arc<BlobService>>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, BlobError> {
+    // Try to extract context from headers first (JWT middleware)
+    // Fallback to form fields if headers not available (for backward compatibility)
+    let mut ctx_opt = extract_context_from_headers(&headers).ok();
     let mut file_data: Option<Vec<u8>> = None;
     let mut file_name: Option<String> = None;
     let mut tenant_id: Option<String> = None;
@@ -113,14 +142,21 @@ async fn handle_upload(
     // Validate required fields
     let file_data = file_data.ok_or_else(|| BlobError::InvalidInput("Missing file field".to_string()))?;
     let file_name = file_name.unwrap_or_else(|| "uploaded_file".to_string());
-    let tenant_id = tenant_id.ok_or_else(|| BlobError::InvalidInput("Missing tenant_id field".to_string()))?;
-    let namespace = namespace.ok_or_else(|| BlobError::InvalidInput("Missing namespace field".to_string()))?;
+    
+    // Use context from headers if available, otherwise create from form fields
+    let ctx = if let Some(ctx) = ctx_opt {
+        ctx
+    } else {
+        // Fallback: extract from form fields (for backward compatibility)
+        let tenant_id = tenant_id.ok_or_else(|| BlobError::InvalidInput("Missing tenant_id (either in x-tenant-id header or form field)".to_string()))?;
+        let namespace = namespace.unwrap_or_else(|| "default".to_string());
+        RequestContext::new(tenant_id).with_namespace(namespace)
+    };
 
-    // Upload blob
+    // Upload blob (tenant_id and namespace from RequestContext)
     let metadata = blob_service
         .upload_blob(
-            &tenant_id,
-            &namespace,
+            &ctx,
             &file_name,
             file_data,
             content_type,
@@ -157,16 +193,20 @@ async fn handle_upload(
 /// Handle raw file download
 async fn handle_download_raw(
     axum::extract::State(blob_service): axum::extract::State<Arc<BlobService>>,
+    headers: HeaderMap,
     Path(blob_id): Path<String>,
 ) -> Result<impl IntoResponse, BlobError> {
-    // Get metadata
+    // Extract RequestContext from headers
+    let ctx = extract_context_from_headers(&headers)?;
+
+    // Get metadata (automatically filtered by tenant_id)
     let metadata = blob_service
-        .get_metadata(&blob_id)
+        .get_metadata(&ctx, &blob_id)
         .await?;
 
-    // Download blob data
+    // Download blob data (automatically filtered by tenant_id)
     let data = blob_service
-        .download_blob(&blob_id)
+        .download_blob(&ctx, &blob_id)
         .await?;
 
     // Build response with appropriate headers

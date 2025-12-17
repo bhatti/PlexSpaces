@@ -304,14 +304,6 @@ sequenceDiagram
     Actor->>TupleSpace: Write/Read Tuples (if needed)
     Actor-->>ActorRef: Reply (if ask)
     ActorRef-->>Client: Response
-    
-    style Client fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
-    style Node fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#fff
-    style ActorRef fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
-    style Actor fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
-    style Facets fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
-    style Journal fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
-    style TupleSpace fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
 ```
 
 ## Core Abstractions
@@ -406,31 +398,28 @@ sequenceDiagram
     participant Actor
     participant Behavior
     
-    Note over Sender,Behavior: Tell (Fire-and-Forget)
-    Sender->>ActorRef: tell(message)
-    ActorRef->>Node: Route Message
-    Node->>Mailbox: Enqueue Message
-    Mailbox->>Actor: Dequeue Message
-    Actor->>Behavior: handle_message()
-    Behavior-->>Actor: Ok(())
+    rect rgb(240, 240, 240)
+        Note over Sender,Behavior: Tell (Fire-and-Forget)
+        Sender->>ActorRef: tell(message)
+        ActorRef->>Node: Route Message
+        Node->>Mailbox: Enqueue Message
+        Mailbox->>Actor: Dequeue Message
+        Actor->>Behavior: handle_message()
+        Behavior-->>Actor: Ok(())
+    end
     
-    Note over Sender,Behavior: Ask (Request-Reply)
-    Sender->>ActorRef: ask(request, timeout)
-    ActorRef->>Node: Route Message (with correlation_id)
-    Node->>Mailbox: Enqueue Message
-    Mailbox->>Actor: Dequeue Message
-    Actor->>Behavior: handle_request()
-    Behavior-->>Actor: Reply
-    Actor->>Node: Send Reply (via correlation_id)
-    Node->>ActorRef: Match Reply
-    ActorRef-->>Sender: Response
-    
-    style Sender fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
-    style ActorRef fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
-    style Node fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#fff
-    style Mailbox fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
-    style Actor fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
-    style Behavior fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    rect rgb(240, 240, 240)
+        Note over Sender,Behavior: Ask (Request-Reply)
+        Sender->>ActorRef: ask(request, timeout)
+        ActorRef->>Node: Route Message (with correlation_id)
+        Node->>Mailbox: Enqueue Message
+        Mailbox->>Actor: Dequeue Message
+        Actor->>Behavior: handle_request()
+        Behavior-->>Actor: Reply
+        Actor->>Node: Send Reply (via correlation_id)
+        Node->>ActorRef: Match Reply
+        ActorRef-->>Sender: Response
+    end
 ```
 
 ### Tell (Fire-and-Forget)
@@ -476,11 +465,6 @@ sequenceDiagram
     Consumer2->>TupleSpace: take(pattern)
     TupleSpace-->>Consumer2: Tuple (destructive)
     Note over TupleSpace: Tuple Removed
-    
-    style Producer fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
-    style TupleSpace fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
-    style Consumer1 fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
-    style Consumer2 fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
 ```
 
 ## Design Principles

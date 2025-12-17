@@ -2,10 +2,11 @@
 // Comparison: Ray Parameter Server (Distributed ML Training with Elastic Pools)
 // Based on: https://docs.ray.io/en/latest/ray-core/examples/plot_parameter_server.html
 
-use plexspaces_actor::{ActorBuilder, ActorRef};
+use plexspaces_actor::{ActorBuilder, ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, Message, Reply};
+use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, Message};
 use plexspaces_node::NodeBuilder;
+use std::sync::Arc;
 use plexspaces_tuplespace::{Tuple, TupleField, Pattern, PatternField};
 use plexspaces_mailbox::Message as MailboxMessage;
 use serde::{Deserialize, Serialize};
@@ -111,9 +112,8 @@ impl Actor for ParameterServerActor {
         &mut self,
         ctx: &ActorContext,
         msg: MailboxMessage,
-        reply: &dyn Reply,
     ) -> Result<(), BehaviorError> {
-        <Self as GenServer>::route_message(self, ctx, msg, reply).await
+        <Self as GenServer>::route_message(self, ctx, msg).await
     }
 
     fn behavior_type(&self) -> BehaviorType {
@@ -125,28 +125,49 @@ impl Actor for ParameterServerActor {
 impl GenServer for ParameterServerActor {
     async fn handle_request(
         &mut self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
         msg: MailboxMessage,
-    ) -> Result<MailboxMessage, BehaviorError> {
+    ) -> Result<(), BehaviorError> {
         let ps_msg: ParameterServerMessage = serde_json::from_slice(msg.payload())
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
+        
+        let sender_id = match &msg.sender {
+            Some(id) => id,
+            None => return Ok(()), // No reply needed
+        };
         
         match ps_msg {
             ParameterServerMessage::ApplyGradients { gradients } => {
                 info!("[PARAMETER SERVER] Applying gradients from {} workers (iteration {})", 
                     gradients.len(), self.iteration);
                 self.apply_gradients(&gradients);
-                let reply = ParameterServerMessage::Weights {
+                let reply_msg = ParameterServerMessage::Weights {
                     weights: self.model_weights.clone(),
                 };
-                Ok(MailboxMessage::new(serde_json::to_vec(&reply).unwrap()))
+                let reply = MailboxMessage::new(serde_json::to_vec(&reply_msg).unwrap());
+                ctx.send_reply(
+                    msg.correlation_id.as_deref(),
+                    sender_id,
+                    msg.receiver.clone(),
+                    reply,
+                ).await
+                    .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                Ok(())
             }
             ParameterServerMessage::GetWeights => {
                 info!("[PARAMETER SERVER] Returning weights (iteration {})", self.iteration);
-                let reply = ParameterServerMessage::Weights {
+                let reply_msg = ParameterServerMessage::Weights {
                     weights: self.model_weights.clone(),
                 };
-                Ok(MailboxMessage::new(serde_json::to_vec(&reply).unwrap()))
+                let reply = MailboxMessage::new(serde_json::to_vec(&reply_msg).unwrap());
+                ctx.send_reply(
+                    msg.correlation_id.as_deref(),
+                    sender_id,
+                    msg.receiver.clone(),
+                    reply,
+                ).await
+                    .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                Ok(())
             }
             _ => Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         }
@@ -201,9 +222,8 @@ impl Actor for DataWorkerActor {
         &mut self,
         ctx: &ActorContext,
         msg: MailboxMessage,
-        reply: &dyn Reply,
     ) -> Result<(), BehaviorError> {
-        <Self as GenServer>::route_message(self, ctx, msg, reply).await
+        <Self as GenServer>::route_message(self, ctx, msg).await
     }
 
     fn behavior_type(&self) -> BehaviorType {
@@ -215,17 +235,30 @@ impl Actor for DataWorkerActor {
 impl GenServer for DataWorkerActor {
     async fn handle_request(
         &mut self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
         msg: MailboxMessage,
-    ) -> Result<MailboxMessage, BehaviorError> {
+    ) -> Result<(), BehaviorError> {
         let worker_msg: DataWorkerMessage = serde_json::from_slice(msg.payload())
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
+        
+        let sender_id = match &msg.sender {
+            Some(id) => id,
+            None => return Ok(()), // No reply needed
+        };
         
         match worker_msg {
             DataWorkerMessage::ComputeGradients { weights } => {
                 let gradients = self.compute_gradients(&weights);
-                let reply = DataWorkerMessage::Gradients { gradients };
-                Ok(MailboxMessage::new(serde_json::to_vec(&reply).unwrap()))
+                let reply_msg = DataWorkerMessage::Gradients { gradients };
+                let reply = MailboxMessage::new(serde_json::to_vec(&reply_msg).unwrap());
+                ctx.send_reply(
+                    msg.correlation_id.as_deref(),
+                    sender_id,
+                    msg.receiver.clone(),
+                    reply,
+                ).await
+                    .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                Ok(())
             }
             _ => Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         }
@@ -267,7 +300,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await;
     
-    let ps_ref = node.spawn_actor(actor).await?;
+    // Spawn using ActorFactory
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let ps_ref = plexspaces_core::ActorRef::new(actor_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     
     let mailbox = node.actor_registry()
         .lookup_mailbox(ps_ref.id())

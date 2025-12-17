@@ -230,7 +230,6 @@ async fn run_deployment_demo() -> Result<()> {
         module_bytes: demo_wasm.clone(),
         module_hash: String::new(), // Will be computed by server
         wit_interface: String::new(),
-        ..Default::default()
     };
 
     let request1 = DeployApplicationRequest {
@@ -260,7 +259,6 @@ async fn run_deployment_demo() -> Result<()> {
         module_bytes: demo_wasm.clone(),
         module_hash: String::new(),
         wit_interface: String::new(),
-        ..Default::default()
     };
 
     let request2 = DeployApplicationRequest {
@@ -401,7 +399,6 @@ async fn run_security_demo() -> Result<()> {
         module_bytes: demo_wasm.clone(),
         module_hash: String::new(),
         wit_interface: String::new(),
-        ..Default::default()
     };
 
     let deploy_request = DeployApplicationRequest {
@@ -867,7 +864,6 @@ async fn run_services_demo() -> Result<()> {
         module_bytes: demo_wasm,
         module_hash: String::new(),
         wit_interface: String::new(),
-        ..Default::default()
     };
 
     // Create application config with service capabilities

@@ -34,6 +34,7 @@ async fn test_chromosome_worker_with_durability_facet() {
         replay_on_activation: false,
         cache_side_effects: true,
         compression: plexspaces_journaling::CompressionType::None as i32,
+        state_schema_version: 1,
         backend_config: None,
     };
 
@@ -115,6 +116,7 @@ async fn test_chromosome_worker_crash_recovery_with_replay() {
         replay_on_activation: true, // Enable replay on activation
         cache_side_effects: true,
         compression: plexspaces_journaling::CompressionType::None as i32,
+        state_schema_version: 1,
         backend_config: None,
     };
 
@@ -285,6 +287,7 @@ async fn test_durability_overhead_measurement() {
             replay_on_activation: false,
             cache_side_effects: true,
             compression: plexspaces_journaling::CompressionType::None as i32,
+            state_schema_version: 1,
             backend_config: None,
         };
         let facet = Box::new(DurabilityFacet::new(storage.clone(), config));

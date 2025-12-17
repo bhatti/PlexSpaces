@@ -5,7 +5,7 @@
 
 #[cfg(feature = "firecracker")]
 mod firecracker_service_tests {
-    use plexspaces_node::{firecracker_service::FirecrackerVmServiceImpl, Node, NodeConfig, NodeId};
+    use plexspaces_node::{firecracker_service::FirecrackerVmServiceImpl, Node, NodeId, default_node_config};
     use plexspaces_proto::firecracker::v1::{
         firecracker_vm_service_server::FirecrackerVmService,
         CreateVmRequest, BootVmRequest, GetVmStateRequest, ListVmsRequest,
@@ -17,7 +17,7 @@ mod firecracker_service_tests {
 
     /// Helper to create a test node
     async fn create_test_node() -> Arc<Node> {
-        Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()))
+        Arc::new(Node::new(NodeId::new("test-node"), default_node_config()))
     }
 
     /// Helper to create Firecracker service

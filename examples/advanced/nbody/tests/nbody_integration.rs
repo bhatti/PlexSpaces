@@ -18,7 +18,7 @@
 
 //! Integration tests for N-Body Simulation
 
-use plexspaces_core::{ActorBehavior, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
@@ -56,7 +56,7 @@ impl BodyActor {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for BodyActor {
+impl ActorTrait for BodyActor {
     async fn handle_message(
         &mut self,
         _ctx: &ActorContext,
@@ -123,8 +123,11 @@ async fn test_body_actor_responds_to_get_state() {
 
     // Send get_state message (non-blocking, just verify it doesn't panic)
     let msg = Message::new(b"get_state".to_vec());
-    // Use try_tell or ignore errors for test simplicity
-    let _ = body_ref.tell(msg).await;
+    // Use ActorService to send message
+    let actor_service = node.service_locator().get_actor_service().await;
+    if let Some(service) = actor_service {
+        let _ = service.send(body_ref.id(), msg).await;
+    }
 
     // Give actor time to process
     sleep(Duration::from_millis(300)).await;
@@ -145,8 +148,8 @@ async fn test_multiple_body_actors() {
 
     let mut body_refs = Vec::new();
     for body in bodies {
-        let body_ref = node
-            ActorBuilder::new(Box::new(BodyActor::new(body)))
+        use plexspaces_actor::ActorBuilder;
+        let body_ref = ActorBuilder::new(Box::new(BodyActor::new(body)))
             .with_id(format!("body-{}@{}", body_refs.len() + 1, node.id().as_str()))
             .spawn(node.service_locator().clone())
             .await
@@ -160,11 +163,13 @@ async fn test_multiple_body_actors() {
     sleep(Duration::from_millis(200)).await;
 
     // Send messages to all actors (with delays to avoid mailbox overflow)
-    for body_ref in &body_refs {
-        let msg = Message::new(b"get_state".to_vec());
-        // Use try_tell or ignore errors for test simplicity
-        let _ = body_ref.tell(msg).await;
-        sleep(Duration::from_millis(100)).await; // Delay between messages
+    let actor_service = node.service_locator().get_actor_service().await;
+    if let Some(service) = actor_service {
+        for body_ref in &body_refs {
+            let msg = Message::new(b"get_state".to_vec());
+            let _ = service.send(body_ref.id(), msg).await;
+            sleep(Duration::from_millis(100)).await; // Delay between messages
+        }
     }
 
     sleep(Duration::from_millis(500)).await;

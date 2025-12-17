@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Comparison: Dapr (Unified Durable Workflows with Actors)
 
-use plexspaces_actor::{ActorBuilder, ActorRef};
+use plexspaces_actor::{ActorBuilder, ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_behavior::{GenServer, WorkflowBehavior};
-use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, ActorId, Message, Reply};
+use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, ActorId, Message};
 use plexspaces_journaling::{DurabilityFacet, DurabilityConfig, MemoryJournalStorage};
 use plexspaces_mailbox::Message as MailboxMessage;
 use plexspaces_node::NodeBuilder;
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::info;
@@ -45,7 +46,7 @@ impl Actor for OrderWorkflowActor {
         &mut self,
         ctx: &ActorContext,
         msg: MailboxMessage,
-        reply: &dyn Reply,
+        
     ) -> Result<(), BehaviorError> {
         // Delegate to WorkflowBehavior
         <Self as WorkflowBehavior>::route_workflow_message(self, ctx, msg, reply).await
@@ -131,7 +132,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .attach_facet(durability_facet, 50, serde_json::json!({}))
         .await?;
     
-    let actor_ref = node.spawn_actor(actor).await?;
+    // Spawn using ActorFactory
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = actor.id().clone();
+    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let actor_ref = plexspaces_core::ActorRef::new(actor_id)
+        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
 
     let mailbox = node.actor_registry()
         .lookup_mailbox(actor_ref.id())
@@ -197,7 +207,14 @@ mod tests {
         let durability_facet = Box::new(DurabilityFacet::new(storage, DurabilityConfig::default()));
         actor.attach_facet(durability_facet, 50, serde_json::json!({})).await.unwrap();
         
-        let actor_ref = node.spawn_actor(actor).await.unwrap();
+        // Spawn using ActorFactory
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = actor.id().clone();
+        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
+        let actor_ref = plexspaces_core::ActorRef::new(actor_id)
+            .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();
 
         let mailbox = node.actor_registry()
             .lookup_mailbox(actor_ref.id())

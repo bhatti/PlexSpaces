@@ -133,9 +133,13 @@ mod tests {
         let mut actor = CalculatorActor::new();
 
         // Create context using minimal constructor
-        let actor_ctx = Arc::new(ActorContext::minimal_with_config(
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        let actor_ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
             "test".to_string(),
+            "default".to_string(),
+            service_locator,
             None,
         ));
 
@@ -167,9 +171,13 @@ mod tests {
     async fn test_calculator_actor_division_by_zero() {
         let mut actor = CalculatorActor::new();
 
-        let actor_ctx = Arc::new(ActorContext::minimal_with_config(
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        let actor_ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
             "test".to_string(),
+            "default".to_string(),
+            service_locator,
             None,
         ));
 
@@ -193,9 +201,13 @@ mod tests {
     async fn test_calculator_actor_stats() {
         let mut actor = CalculatorActor::new();
 
-        let actor_ctx = Arc::new(ActorContext::minimal_with_config(
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        let actor_ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
             "test".to_string(),
+            "default".to_string(),
+            service_locator,
             None,
         ));
 

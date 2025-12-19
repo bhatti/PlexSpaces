@@ -158,6 +158,7 @@ async fn test_one_for_one_restart() {
                 "faulty-worker@localhost".to_string(),
                 Box::new(FaultyWorker::new(2)), // Crash after 2 messages
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))
@@ -177,6 +178,7 @@ async fn test_one_for_one_restart() {
                 "stable-worker@localhost".to_string(),
                 Box::new(CounterWorker::new()),
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))
@@ -260,6 +262,7 @@ async fn test_one_for_all_restart() {
                 "worker1@localhost".to_string(),
                 Box::new(FaultyWorker::new(1)), // Crash after 1 message
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))
@@ -279,6 +282,7 @@ async fn test_one_for_all_restart() {
                 "worker2@localhost".to_string(),
                 Box::new(CounterWorker::new()),
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))
@@ -345,6 +349,7 @@ async fn test_rest_for_one_restart() {
                     actor_id,
                     behavior,
                     mailbox,
+                    "test-tenant".to_string(),
                     "test".to_string(),
                     None, // node_id - will be set when spawned
                 ))
@@ -392,6 +397,7 @@ async fn test_restart_limits() {
                 "crasher@localhost".to_string(),
                 Box::new(FaultyWorker::new(0)), // Crash immediately
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))
@@ -454,6 +460,7 @@ async fn test_hierarchical_supervision() {
                 "leaf-worker@localhost".to_string(),
                 Box::new(CounterWorker::new()),
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))
@@ -498,6 +505,7 @@ async fn test_permanent_restart_policy() {
                 "permanent-worker@localhost".to_string(),
                 Box::new(FaultyWorker::new(1)),
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))
@@ -537,6 +545,7 @@ async fn test_temporary_restart_policy() {
                 "temp-worker@localhost".to_string(),
                 Box::new(FaultyWorker::new(1)),
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))
@@ -576,6 +585,7 @@ async fn test_transient_restart_policy() {
                 "transient-worker@localhost".to_string(),
                 Box::new(FaultyWorker::new(1)),
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None, // node_id
             ))

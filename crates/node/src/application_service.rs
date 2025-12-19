@@ -189,9 +189,26 @@ impl ApplicationService for ApplicationServiceImpl {
             Status::invalid_argument("config is required (WASM deployment not yet implemented)")
         })?;
 
-        // Handle release config if provided (merge with application config)
+        // Handle release config if provided
+        // 1. Extract NodeConfig from release_config.node and set it on Node (if not already set)
+        // 2. Merge release config with application config
         let mut merged_config = config.clone();
-        if let Some(release_config) = &req.release_config {
+        if let Some(ref release_config) = req.release_config {
+            // If Node doesn't have release_spec set yet, set it from the deployment request
+            // This allows gRPC deployments to configure the node
+            {
+                let node_release_spec = self.node.get_release_spec().await;
+                if node_release_spec.is_none() {
+                    // Set release config on node (this will update NodeConfig in ServiceLocator)
+                    self.node.set_release_spec(release_config.clone()).await;
+                    tracing::info!("Set release config on node from deployment request");
+                } else {
+                    // Node already has release config - log but don't override
+                    tracing::debug!("Node already has release config, not overriding from deployment request");
+                }
+            }
+            
+            // Merge release config with application config
             merge_release_config(&mut merged_config, release_config);
         }
 

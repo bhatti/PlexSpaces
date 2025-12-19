@@ -148,7 +148,7 @@ impl PrometheusExporter {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("PlexSpaces Lifecycle Event Observability Example\n");
     println!("This example demonstrates JavaNOW-inspired pub/sub for actor lifecycle events.\n");
 
@@ -176,10 +176,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use plexspaces_actor::ActorBuilder;
     let mut actors = Vec::new();
     for i in 1..=3 {
+        let ctx = plexspaces_core::RequestContext::internal();
         let actor_ref = ActorBuilder::new(Box::new(MockBehavior::new()))
             .with_id(format!("worker-{}@{}", i, node.id().as_str()))
-            .spawn(node.service_locator().clone())
-            .await?;
+            .spawn(&ctx, node.service_locator().clone())
+            .await
+            .map_err(|e| format!("Failed to spawn actor: {}", e))?;
         actors.push(actor_ref);
     }
 

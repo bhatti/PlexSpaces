@@ -49,15 +49,16 @@ fn extract_context_from_headers(headers: &HeaderMap) -> Result<RequestContext, B
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| BlobError::InvalidInput("Missing x-tenant-id header. JWT authentication required.".to_string()))?;
     
+    // namespace is REQUIRED - must be provided in header or use default from config
     let namespace = headers.get("x-namespace")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("default");
+        .filter(|s| !s.is_empty())
+        .unwrap_or(""); // Default namespace (can be empty)
     
     let user_id = headers.get("x-user-id")
         .and_then(|v| v.to_str().ok());
     
-    let mut ctx = RequestContext::new(tenant_id.to_string())
-        .with_namespace(namespace.to_string());
+    let mut ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
     
     if let Some(uid) = user_id {
         ctx = ctx.with_user_id(uid.to_string());
@@ -149,8 +150,11 @@ async fn handle_upload(
     } else {
         // Fallback: extract from form fields (for backward compatibility)
         let tenant_id = tenant_id.ok_or_else(|| BlobError::InvalidInput("Missing tenant_id (either in x-tenant-id header or form field)".to_string()))?;
-        let namespace = namespace.unwrap_or_else(|| "default".to_string());
-        RequestContext::new(tenant_id).with_namespace(namespace)
+        let namespace = namespace.ok_or_else(|| {
+            // TODO: Get default_namespace from config
+            BlobError::InvalidInput("Missing namespace (either in x-namespace header or form field)".to_string())
+        })?;
+        RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string())
     };
 
     // Upload blob (tenant_id and namespace from RequestContext)

@@ -196,13 +196,14 @@
 //! - No shared mutable state (immutable after creation)
 
 use chrono;
-use plexspaces_core::{ActorId, ReplyWaiter};
+use plexspaces_core::{ActorId, ReplyWaiter, MessageSender};
 use plexspaces_mailbox::{Mailbox, Message, MailboxConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use ulid::Ulid;
+use async_trait::async_trait;
 
 use plexspaces_core::ServiceLocator;
 
@@ -542,6 +543,14 @@ impl ActorRef {
         &self,
         message: Message,
     ) -> Result<(), ActorRefError> {
+        self.tell_impl(message).await
+    }
+
+    /// Internal implementation of tell() - used by both inherent method and MessageSender trait
+    async fn tell_impl(
+        &self,
+        message: Message,
+    ) -> Result<(), ActorRefError> {
         use plexspaces_core::monitoring;
         use std::time::Duration;
         use std::thread_local;
@@ -558,7 +567,7 @@ impl ActorRef {
         });
         
         // Safety check: prevent infinite recursion
-        const MAX_RECURSION_DEPTH: usize = 100;
+        const MAX_RECURSION_DEPTH: usize = 10;
         if depth > MAX_RECURSION_DEPTH {
             let _ = TELL_DEPTH.with(|d| d.set(0)); // Reset on error
             eprintln!("\n╔════════════════════════════════════════════════════════════════╗");
@@ -1683,6 +1692,15 @@ impl PartialEq for ActorRef {
     }
 }
 
+#[async_trait]
+impl MessageSender for ActorRef {
+    async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Call the internal implementation to avoid recursion
+        self.tell_impl(message).await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+}
+
 // =============================================================================
 // TESTS - Following TDD
 // =============================================================================
@@ -1699,16 +1717,17 @@ mod tests {
         Arc::new(Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string()).await.expect("Failed to create mailbox"))
     }
 
-    /// Helper to create a test ServiceLocator
-    pub(crate) fn create_test_service_locator() -> Arc<ServiceLocator> {
-        Arc::new(ServiceLocator::new())
+    /// Helper to create a test ServiceLocator with default services
+    pub(crate) async fn create_test_service_locator() -> Arc<ServiceLocator> {
+        use plexspaces_node::create_default_service_locator;
+        create_default_service_locator(Some("test-node".to_string()), None, None).await
     }
 
     /// TEST 1: Can create a local ActorRef
     #[tokio::test]
     async fn test_create_local_actor_ref() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor", mailbox, service_locator.clone());
 
         assert_eq!(actor_ref.id(), "test-actor");
@@ -1721,7 +1740,8 @@ mod tests {
     /// TEST 2: Can create a remote ActorRef
     #[tokio::test]
     async fn test_create_remote_actor_ref() {
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         let actor_ref = ActorRef::remote("remote-actor@node1", "node1", service_locator);
 
         assert_eq!(actor_ref.id(), "remote-actor@node1");
@@ -1734,7 +1754,7 @@ mod tests {
     async fn test_tell_sends_message_local() {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
 
         let message = Message::new(b"hello".to_vec());
@@ -1780,13 +1800,14 @@ impl MockActorService {
         use plexspaces_core::{ActorContext, ServiceLocator};
         use std::sync::Arc;
         
-        // Create ServiceLocator for test context
+        // Create minimal ServiceLocator for test context (sync function, can't use async)
         let service_locator = Arc::new(ServiceLocator::new());
         
         // Note: Services are not registered in test ServiceLocator
         // Tests that need services should register them explicitly
         ActorContext::new(
             node_id.to_string(),
+            String::new(), // tenant_id (empty if auth disabled)
             "test-ns".to_string(),
             service_locator,
             None,
@@ -1799,7 +1820,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_try_tell_not_supported() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor", mailbox, service_locator);
 
         let msg = Message::new(b"data".to_vec());
@@ -1813,7 +1834,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_try_tell_not_supported_terminated() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor", mailbox, service_locator);
 
         let message = Message::new(b"hello".to_vec());
@@ -1828,7 +1849,7 @@ impl MockActorService {
     async fn test_actor_ref_is_cloneable() {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref1 = ActorRef::local("test-actor@node1", mailbox, service_locator);
         // Clone it
         let actor_ref2 = actor_ref1.clone();
@@ -1856,7 +1877,7 @@ impl MockActorService {
     async fn test_actor_ref_equality() {
         let mailbox1 = create_test_mailbox().await;
         let mailbox2 = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
 
         let ref1 = ActorRef::local("actor-1", mailbox1.clone(), service_locator.clone());
         let ref2 = ActorRef::local("actor-1", mailbox1.clone(), service_locator.clone());
@@ -1870,7 +1891,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_debug_formatting() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor", mailbox, service_locator);
 
         let debug_str = format!("{:?}", actor_ref);
@@ -1937,7 +1958,7 @@ impl MockActorService {
     async fn test_tell_with_context_local() {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("target-actor@node1", mailbox, service_locator);
         let message = Message::new(b"hello".to_vec());
         let message_id = message.id.clone();
@@ -1973,7 +1994,8 @@ impl MockActorService {
         }
 
         // Create remote ActorRef with ServiceLocator
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         // Use actor crate's ActorRef for remote actors
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
@@ -1998,13 +2020,14 @@ impl MockActorService {
         use plexspaces_core::{ActorContext, ServiceLocator};
         use std::sync::Arc;
         
-        // Create ServiceLocator for test context
+        // Create minimal ServiceLocator for test context (sync function, can't use async)
         let service_locator = Arc::new(ServiceLocator::new());
         
         // Note: Services are not registered in test ServiceLocator
         // Tests that need services should register them explicitly
         ActorContext::new(
             node_id.to_string(),
+            String::new(), // tenant_id (empty if auth disabled)
             "test-ns".to_string(),
             service_locator,
             None,
@@ -2027,7 +2050,7 @@ impl MockActorService {
 
         // Create a local ActorRef that will receive the reply
         let target_mailbox_arc = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let target_ref = ActorRef::local("target@node1".to_string(), Arc::clone(&target_mailbox_arc), service_locator);
 
         // Send reply message with correlation_id (simulating reply from another actor)
@@ -2051,7 +2074,7 @@ impl MockActorService {
         // Test ask() pattern: basic timeout test (no reply sent)
         // Full ask() pattern with replies is tested in integration tests (ask_pattern_tests.rs)
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor@node1".to_string(), mailbox, service_locator);
 
         // Use unified ask() API - sends to self and waits for reply
@@ -2094,7 +2117,8 @@ impl MockActorService {
         }
 
         // Create remote ActorRef using actor crate's ActorRef
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
             "node2".to_string(),
@@ -2116,7 +2140,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_ask_with_context_timeout() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         // No need for ReplyTracker - ActorRef manages its own reply_waiters
 
         let actor_ref = ActorRef::local("target-actor@node1", mailbox, service_locator);
@@ -2147,7 +2171,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_ask_with_context_timeout_behavior() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         // No need for ReplyTracker - ActorRef manages its own reply_waiters
 
         let actor_ref = ActorRef::local("target-actor@node1", mailbox, service_locator);
@@ -2195,7 +2219,7 @@ impl MockActorService {
         // Test local (same node)
         let mailbox1 = create_test_mailbox().await;
         let mailbox1_clone = mailbox1.clone();
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref1 = ActorRef::local("actor@node1", mailbox1, service_locator.clone());
         actor_ref1.tell(Message::new(b"local".to_vec())).await.unwrap();
         assert!(mailbox1_clone.dequeue().await.is_some());
@@ -2253,7 +2277,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_try_notify_reply_waiter_basic() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
 
         // Create a ReplyWaiter and register it
@@ -2294,7 +2318,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_try_notify_reply_waiter_unknown_correlation_id() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
 
         // Try to notify with unknown correlation_id
@@ -2307,7 +2331,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_try_notify_reply_waiter_multiple_correlation_ids() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
 
         // Register multiple waiters
@@ -2367,7 +2391,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_try_notify_reply_waiter_concurrent() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
 
         // Register multiple waiters
@@ -2409,7 +2433,7 @@ impl MockActorService {
     #[tokio::test]
     async fn test_try_notify_reply_waiter_timeout() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator();
+        let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
 
         // Register a waiter

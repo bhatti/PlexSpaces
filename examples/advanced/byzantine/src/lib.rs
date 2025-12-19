@@ -16,19 +16,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Byzantine Generals Problem - Example demonstrating PlexSpaces capabilities
+//! Byzantine Generals Problem - Simple implementation based on Erlang version
 //!
-//! This example shows how to use PlexSpaces to solve the Byzantine Generals Problem,
-//! demonstrating all 5 foundational pillars:
-//!
-//! 1. **TupleSpace**: Coordination for vote collection
-//! 2. **Supervision**: Fault tolerance via automatic restart
-//! 3. **Journal**: Durable decisions and audit trail
-//! 4. **WASM Runtime**: (Future) Portable general logic
-//! 5. **Firecracker**: (Future) Isolated execution
+//! This is a simplified implementation that follows the Erlang algorithm closely:
+//! - Processes communicate via messages
+//! - Source process sends initial messages in round 0
+//! - Other processes relay messages in subsequent rounds
+//! - Processes vote and make decisions
+//! - Some processes can be faulty (traitors)
 
 // Re-export the implementation modules
-mod byzantine;
+pub mod byzantine;
 pub use byzantine::*;
 
 // Application framework integration (Phase 2.5)
@@ -37,3 +35,7 @@ pub mod application;
 // Configuration
 pub mod config;
 pub use config::ByzantineConfig;
+
+// BehaviorFactory for dynamic actor spawning
+pub mod behavior_factory;
+pub use behavior_factory::register_byzantine_behaviors;

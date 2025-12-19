@@ -78,7 +78,7 @@ impl GenServer for TestActor {
 #[tokio::test]
 async fn test_get_or_activate_with_virtual_facet_eager() {
     // Test: get_or_activate_actor with VirtualActorFacet (eager activation) should work with ask()
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
     // Get or activate actor with VirtualActorFacet (eager)
@@ -135,7 +135,7 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
 #[tokio::test]
 async fn test_get_or_activate_with_virtual_facet_lazy() {
     // Test: get_or_activate_actor with VirtualActorFacet (lazy activation) should activate on first message
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "test-actor-lazy@test-node".to_string();
     
     // Get or activate actor with VirtualActorFacet (lazy)

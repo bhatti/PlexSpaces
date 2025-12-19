@@ -253,11 +253,9 @@ pub use v1::tuplespace::{
     tuple_plex_space_service_server::TuplePlexSpaceServiceServer,
 };
 
-// Re-export v1 process groups service for convenience
+// Re-export v1 process groups types for convenience
 pub use v1::processgroups::{
-    process_group_service_client::ProcessGroupServiceClient,
-    process_group_service_server::ProcessGroupService,
-    process_group_service_server::ProcessGroupServiceServer, GroupMembership, ProcessGroup,
+    GroupMembership, ProcessGroup,
 };
 
 #[cfg(test)]

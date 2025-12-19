@@ -3,7 +3,9 @@
 //
 // Tests for ActorContext using services directly (convenience methods removed)
 
+use plexspaces_core::{ActorContext, ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider, ProcessGroupService, FacetService};
 use plexspaces_mailbox::Message;
+use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use std::sync::Arc;
 
 // Mock implementations
@@ -37,6 +39,15 @@ impl ActorService for MockActorService {
         self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
         Ok("msg-id".to_string())
     }
+    async fn send_reply(
+        &self,
+        _correlation_id: Option<&str>,
+        _sender_id: &plexspaces_core::ActorId,
+        _target_actor_id: plexspaces_core::ActorId,
+        _reply_message: Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
 }
 
 struct MockObjectRegistry;
@@ -45,7 +56,7 @@ impl ObjectRegistry for MockObjectRegistry {
     async fn lookup(&self, _tenant_id: &str, _object_id: &str, _namespace: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(None)
     }
-    async fn lookup_full(&self, _tenant_id: &str, _namespace: &str, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn lookup_full(&self, _ctx: &plexspaces_core::RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(None)
     }
     async fn register(&self, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -112,8 +123,6 @@ impl ProcessGroupService for MockProcessGroupService {
     }
 }
 
-#[async_trait::async_trait]
-
 struct MockFacetService;
 #[async_trait::async_trait]
 impl FacetService for MockFacetService {
@@ -130,22 +139,17 @@ fn create_test_context_with_services(
     actor_service: Arc<dyn ActorService>,
     process_group_service: Arc<dyn ProcessGroupService>,
 ) -> ActorContext {
-    let channel_service: Arc<dyn ChannelService> = Arc::new(MockChannelService);
-    let object_registry: Arc<dyn ObjectRegistry> = Arc::new(MockObjectRegistry);
-    let tuplespace: Arc<dyn TupleSpaceProvider> = Arc::new(MockTupleSpaceProvider);
-    let facet_service: Arc<dyn FacetService> = Arc::new(MockFacetService);
-
+    use plexspaces_core::ServiceLocator;
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    
+    // Register services in ServiceLocator (if needed for tests)
+    // For now, just create context with ServiceLocator
     ActorContext::new(
-        "test-actor".to_string(),
         "test-node".to_string(),
+        String::new(), // tenant_id (empty if auth disabled)
         "test-ns".to_string(),
-        channel_service,
-        actor_service,
-        object_registry,
-        tuplespace,
-        process_group_service,
-        node,
-        facet_service,
+        service_locator,
         None,
     )
 }
@@ -338,7 +342,7 @@ async fn test_reply_without_sender_id() {
     // In real code, sender_id would come from the message that triggered the reply
     // This test just verifies the context structure
     assert_eq!(ctx.node_id, "test-node");
-    assert_eq!(ctx.tenant_id(), "tenant-123");
+    assert_eq!(ctx.tenant_id, "tenant-123");
     
     // Verify no message was sent
     // (This test verifies the pattern, actual error handling depends on implementation)

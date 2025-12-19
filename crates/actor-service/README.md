@@ -287,9 +287,10 @@ let service = ActorServiceImpl::new(registry, "node1".to_string());
 let mailbox = Arc::new(Mailbox::new(MailboxConfig::default()));
 let actor_ref = ActorRef::new("counter@node1".to_string(), mailbox).unwrap();
 // Register actor directly with ActorRegistry
-use plexspaces_actor::RegularActorWrapper;
+// ActorRef now implements MessageSender directly
+use plexspaces_actor::ActorRef;
 use plexspaces_core::MessageSender;
-let sender: Arc<dyn MessageSender> = Arc::new(RegularActorWrapper::new(
+let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
     "counter@node1".to_string(),
     mailbox,
     service_locator.clone(),

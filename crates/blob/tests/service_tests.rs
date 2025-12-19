@@ -30,12 +30,9 @@ async fn create_test_service() -> (Arc<BlobService>, TempDir) {
     let temp_dir = TempDir::new().unwrap();
     let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
 
-    // Create SQLite repository
+    // Create SQLite repository - use in-memory to prevent concurrency issues
     use sqlx::AnyPool;
-    use tempfile::NamedTempFile;
-    let temp_file = NamedTempFile::new().unwrap();
-    let db_path = temp_file.path().to_str().unwrap();
-    let any_pool = AnyPool::connect(&format!("sqlite:{}", db_path)).await.unwrap();
+    let any_pool = AnyPool::connect("sqlite::memory:").await.unwrap();
     SqlBlobRepository::migrate(&any_pool).await.unwrap();
     let repository = Arc::new(SqlBlobRepository::new(any_pool));
 

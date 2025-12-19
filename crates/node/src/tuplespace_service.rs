@@ -960,10 +960,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_and_read_single_tuple() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-write-read"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-write-read").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write a tuple
@@ -1018,10 +1016,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_multiple_tuples() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-write-multiple"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-write-multiple").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write multiple tuples
@@ -1063,10 +1059,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_with_pattern_matching() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-pattern-match"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-pattern-match").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write tuples
@@ -1127,10 +1121,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_take_removes_tuple() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-take"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-take").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write a tuple
@@ -1196,10 +1188,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_count_matching_tuples() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-count"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-count").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write tuples
@@ -1256,10 +1246,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_exists_check() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-exists"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-exists").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Check exists before write - should be false
@@ -1313,10 +1301,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_clear_all_tuples() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-clear"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-clear").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write tuples
@@ -1369,10 +1355,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_stats() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-stats"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-stats").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Get initial stats
@@ -1447,10 +1431,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_validation_empty_tuples() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-validation"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-validation").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Try to write empty tuples array
@@ -1466,10 +1448,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_validation_missing_template() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-validation-read"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-validation-read").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Try to read without template
@@ -1490,10 +1470,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_unimplemented_methods() {
-        let node = Arc::new(Node::new(
-            crate::NodeId::new("test-unimplemented"),
-            crate::NodeConfig::default(),
-        ));
+        use crate::NodeBuilder;
+        let node = Arc::new(NodeBuilder::new("test-unimplemented").build());
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Test subscribe (unimplemented)

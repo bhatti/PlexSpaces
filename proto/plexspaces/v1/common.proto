@@ -640,4 +640,25 @@ message RequestContext {
   // Additional context for request processing.
   // Examples: "source_ip", "user_agent", "api_version"
   map<string, string> metadata = 7;
+
+  // Admin flag (from JWT, optional)
+  //
+  // When true, indicates the user has admin privileges.
+  // Admin users can bypass tenant filtering for administrative operations.
+  // Extracted from JWT claims (e.g., "admin" role or "is_admin" claim).
+  bool admin = 8;
+
+  // Internal flag (for system operations)
+  //
+  // When true, indicates this is an internal system operation.
+  // Internal operations bypass authn/authz and tenant filtering.
+  // Used for system-level operations like heartbeats, node registration, etc.
+  bool internal = 9;
+
+  // Auth enabled flag (from SecurityConfig)
+  //
+  // When true, indicates authentication is enabled.
+  // If auth is enabled and tenant_id is empty, RequestContext creation will fail.
+  // If auth is disabled, tenant_id can be empty.
+  bool auth_enabled = 10;
 }

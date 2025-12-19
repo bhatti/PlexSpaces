@@ -18,7 +18,7 @@
 
 //! Test helper functions to replace deprecated Node methods
 
-use plexspaces_actor::{ActorRef, RegularActorWrapper};
+use plexspaces_actor::ActorRef;
 use plexspaces_core::{ActorId, ActorRegistry, MessageSender};
 use plexspaces_node::Node;
 use std::sync::Arc;
@@ -122,9 +122,27 @@ where
         
         if let Some(routing_info) = routing {
             if routing_info.is_local {
-                // Local actor but not activated - create and spawn it
+                // Local actor but not activated - create and spawn it using spawn_actor
                 let actor = actor_factory().await?;
-                actor_factory_impl.spawn_built_actor(Arc::new(actor), None, None).await
+                let actor_id_from_actor = actor.id().clone();
+                // Extract actor_type from behavior
+                let behavior_type = actor.behavior().read().await.behavior_type();
+                let actor_type = match behavior_type {
+                    plexspaces_core::BehaviorType::GenServer => "GenServer",
+                    plexspaces_core::BehaviorType::GenEvent => "GenEvent",
+                    plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine",
+                    plexspaces_core::BehaviorType::Workflow => "Workflow",
+                    plexspaces_core::BehaviorType::Custom(s) => &s,
+                };
+                let ctx = plexspaces_core::RequestContext::internal();
+                actor_factory_impl.spawn_actor(
+                    &ctx,
+                    &actor_id_from_actor,
+                    actor_type,
+                    vec![], // initial_state
+                    None, // config
+                    std::collections::HashMap::new(), // labels
+                ).await
                     .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor: {}", e)))?;
                 
                 // Get ActorRef
@@ -139,10 +157,27 @@ where
                 ))
             }
         } else {
-            // Actor doesn't exist - create and spawn it
+            // Actor doesn't exist - create and spawn it using spawn_actor
             let actor = actor_factory().await?;
-            let actor_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(actor);
-            actor_factory_impl.spawn_built_actor(actor_any).await
+            let actor_id_from_actor = actor.id().clone();
+            // Extract actor_type from behavior
+            let behavior_type = actor.behavior().read().await.behavior_type();
+            let actor_type = match behavior_type {
+                plexspaces_core::BehaviorType::GenServer => "GenServer",
+                plexspaces_core::BehaviorType::GenEvent => "GenEvent",
+                plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine",
+                plexspaces_core::BehaviorType::Workflow => "Workflow",
+                plexspaces_core::BehaviorType::Custom(s) => &s,
+            };
+            let ctx = plexspaces_core::RequestContext::internal();
+            actor_factory_impl.spawn_actor(
+                &ctx,
+                &actor_id_from_actor,
+                actor_type,
+                vec![], // initial_state
+                None, // config
+                std::collections::HashMap::new(), // labels
+            ).await
                 .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor: {}", e)))?;
             
             // Get ActorRef
@@ -181,9 +216,9 @@ pub async fn register_actor_with_message_sender(
     actor_id: &str,
     mailbox: Arc<plexspaces_mailbox::Mailbox>,
 ) {
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let wrapper = Arc::new(RegularActorWrapper::new(
+    let wrapper = Arc::new(ActorRef::local(
         actor_id.to_string(),
         mailbox,
         node.service_locator().clone(),
@@ -251,11 +286,27 @@ pub async fn spawn_actor_helper(
             "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string()
         ))?;
     
-    // Extract actor ID before spawning
+    // Extract actor ID and actor_type before spawning
     let actor_id = actor.id().clone();
+    let behavior_type = actor.behavior().read().await.behavior_type();
+    let actor_type = match behavior_type {
+        plexspaces_core::BehaviorType::GenServer => "GenServer",
+        plexspaces_core::BehaviorType::GenEvent => "GenEvent",
+        plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine",
+        plexspaces_core::BehaviorType::Workflow => "Workflow",
+        plexspaces_core::BehaviorType::Custom(s) => &s,
+    };
+    let ctx = plexspaces_core::RequestContext::internal();
     
-    // Use ActorFactory to spawn the actor
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None).await
+    // Use ActorFactory to spawn the actor with spawn_actor
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        actor_type,
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor via ActorFactory: {}", e)))?;
     
     // Create ActorRef from the actor ID (actor is now registered in ActorRegistry)

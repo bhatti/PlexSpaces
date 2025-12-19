@@ -84,6 +84,15 @@ mod tests {
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
+        async fn send_reply(
+            &self,
+            _correlation_id: Option<&str>,
+            _sender_id: &plexspaces_core::ActorId,
+            _target_actor_id: plexspaces_core::ActorId,
+            _reply_message: Message,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
     }
 
     struct MockObjectRegistry;
@@ -102,8 +111,7 @@ mod tests {
 
         async fn lookup_full(
             &self,
-            _tenant_id: &str,
-            _namespace: &str,
+            _ctx: &plexspaces_core::RequestContext,
             _object_type: plexspaces_proto::object_registry::v1::ObjectType,
             _object_id: &str,
         ) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {

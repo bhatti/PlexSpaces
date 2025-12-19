@@ -985,6 +985,8 @@ message CreateActorRequest {
   bytes initial_state = 3;
   ActorConfig config = 4;
   map<string, string> labels = 5;
+  // Optional namespace. If not provided or empty, uses namespace from RequestContext
+  string namespace = 6;
 }
 
 message CreateActorResponse {
@@ -2215,22 +2217,7 @@ service ActorService {
   // - actor_type: Type of actor to invoke (used for lookup)
   rpc InvokeActor(InvokeActorRequest) returns (InvokeActorResponse) {
     option (google.api.http) = {
-      get: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
-      additional_bindings {
-        post: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
-        body: "*"
-      }
-      additional_bindings {
-        put: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
-        body: "*"
-      }
-      additional_bindings {
-        delete: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
-      }
-      // Additional bindings without tenant_id (defaults to "default")
-      additional_bindings {
-        get: "/api/v1/actors/{namespace}/{actor_type}"
-      }
+      get: "/api/v1/actors/{namespace}/{actor_type}"
       additional_bindings {
         post: "/api/v1/actors/{namespace}/{actor_type}"
         body: "*"
@@ -2446,59 +2433,52 @@ message InvokeActorRequest {
     json_schema: {
       title: "Invoke Actor Request"
       description: "Request to invoke an actor via HTTP-like interface"
-      required: ["namespace", "actor_type"]
+      required: ["actor_type"]
     }
   };
 
-  // Tenant ID (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type})
-  // Default: "default" if not provided in path or if no authentication provided
-  // When using path without tenant_id, this field will be empty and should default to "default"
-  string tenant_id = 1 [
+  // Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
+  // Can be empty - defaults to empty string if not provided
+  // Tenant ID comes from gRPC auth (JWT middleware) or default config, not from request
+  string namespace = 1 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
   ];
 
-  // Namespace (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type})
-  // Default: "default" if not specified
-  string namespace = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 128}
-  ];
-
-  // Actor type (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type})
+  // Actor type (extracted from path: /api/v1/actors/{namespace}/{actor_type})
   // Used to lookup actors via ActorRegistry discover_actors_by_type
-  string actor_type = 3 [
+  string actor_type = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 128}
   ];
 
   // HTTP method (GET, POST, PUT, or DELETE)
   // GET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)
-  string http_method = 4;
+  string http_method = 3;
 
   // Request payload
   // For GET/DELETE: JSON string of query parameters
   // For POST/PUT: Request body bytes
-  bytes payload = 5;
+  bytes payload = 4;
 
   // HTTP headers (for POST/PUT requests)
   // Converted from HTTP request headers
-  map<string, string> headers = 6;
+  map<string, string> headers = 5;
 
   // Query parameters (for GET/DELETE requests)
   // Converted to JSON and stored in payload
-  map<string, string> query_params = 7;
+  map<string, string> query_params = 6;
 
   // Full HTTP path for the request (optional)
-  // Example: "/api/v1/actors/default/default/counter/custom/path"
+  // Example: "/api/v1/actors/default/counter/custom/path"
   // Allows actors to perform custom routing based on the complete URL
-  string path = 9;
+  string path = 7;
 
   // Subpath after the actor_type segment (optional)
-  // Example: for "/api/v1/actors/default/default/counter/metrics/latest"
+  // Example: for "/api/v1/actors/default/counter/metrics/latest"
   //          subpath = "metrics/latest"
   // This will be used in future for advanced per-actor routing capabilities.
-  string subpath = 10;
+  string subpath = 8;
 }
 
 // Response from invoking an actor

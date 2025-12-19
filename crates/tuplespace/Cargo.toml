@@ -30,7 +30,7 @@ rand = "0.8"
 
 # Backend dependencies (optional)
 redis = { workspace = true, optional = true }
-sqlx = { workspace = true, optional = true }
+sqlx = { workspace = true, features = ["migrate"], optional = true }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]

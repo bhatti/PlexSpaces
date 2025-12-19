@@ -59,21 +59,21 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(&ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .lookup(tenant_id, namespace, object_type, object_id)
+            .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -114,7 +114,8 @@ async fn test_register_actor_with_message_sender() {
     });
     
     // Register actor with MessageSender
-    registry.register_actor(actor_id.clone(), sender, None, None, None).await;
+    let ctx = plexspaces_core::RequestContext::internal();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
     
     // Verify actor is registered
     let found = registry.lookup_actor(&actor_id).await;
@@ -139,7 +140,8 @@ async fn test_register_actor_mailbox_not_exposed() {
     });
     
     // Register actor
-    registry.register_actor(actor_id.clone(), sender, None, None, None).await;
+    let ctx = plexspaces_core::RequestContext::internal();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
     
     // Verify we can send messages via MessageSender
     let sender = registry.lookup_actor(&actor_id).await.unwrap();
@@ -168,7 +170,8 @@ async fn test_unregister_actor_removes_message_sender() {
         actor_id: actor_id.clone(),
         mailbox: mailbox.clone(),
     });
-    registry.register_actor(actor_id.clone(), sender, None, None, None).await;
+    let ctx = plexspaces_core::RequestContext::internal();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
     
     // Verify registered
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -195,7 +198,8 @@ async fn test_is_actor_activated_checks_message_sender() {
         actor_id: actor_id.clone(),
         mailbox: mailbox.clone(),
     });
-    registry.register_actor(actor_id.clone(), sender, None, None, None).await;
+    let ctx = plexspaces_core::RequestContext::internal();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
     
     // Now activated
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -213,7 +217,8 @@ async fn test_multiple_actors_registration() {
             actor_id: actor_id.clone(),
             mailbox: mailbox.clone(),
         });
-        registry.register_actor(actor_id.clone(), sender, None, None, None).await;
+        let ctx = plexspaces_core::RequestContext::internal();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
     }
     
     // Verify all are registered

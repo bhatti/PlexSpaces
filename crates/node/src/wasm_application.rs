@@ -399,11 +399,14 @@ impl WasmApplication {
             ))?;
         
         // Use ActorBuilder to build and spawn the actor with custom behavior
+        // Use internal context for WASM application actors (system-level)
         use plexspaces_actor::ActorBuilder;
+        use plexspaces_core::RequestContext;
+        let internal_ctx = RequestContext::internal();
+        // spawn() will extract tenant_id and namespace from RequestContext
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(actor_id.clone())
-            .with_namespace("default".to_string())
-            .spawn(service_locator)
+            .spawn(&internal_ctx, service_locator)
             .await
             .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to spawn actor: {}", e)))?;
 

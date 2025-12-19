@@ -18,6 +18,7 @@
 use crate::api_client::FirecrackerApiClient;
 use crate::error::{FirecrackerError, FirecrackerResult};
 use crate::vm::VmState;
+use plexspaces_core::RequestContext;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -138,10 +139,9 @@ impl VmRegistry {
     /// Register VM in ObjectRegistry
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// * `registry` - ObjectRegistry instance
     /// * `vm_entry` - VM registry entry to register
-    /// * `tenant_id` - Tenant ID (default: "default")
-    /// * `namespace` - Namespace (default: "default")
     ///
     /// ## Returns
     /// `Ok(())` on success
@@ -150,10 +150,9 @@ impl VmRegistry {
     /// Registers VM with ObjectTypeVm in the unified object registry.
     /// This enables VM discovery alongside actors, tuplespaces, and services.
     pub async fn register_in_object_registry(
+        ctx: &plexspaces_core::RequestContext,
         registry: &plexspaces_object_registry::ObjectRegistry,
         vm_entry: &VmRegistryEntry,
-        tenant_id: Option<&str>,
-        namespace: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType, HealthStatus};
 
@@ -172,8 +171,8 @@ impl VmRegistry {
             object_type: ObjectType::ObjectTypeVm as i32,
             object_category: "firecracker".to_string(),
             grpc_address: vm_entry.socket_path.clone(),
-            tenant_id: tenant_id.unwrap_or("default").to_string(),
-            namespace: namespace.unwrap_or("default").to_string(),
+            tenant_id: ctx.tenant_id().to_string(),
+            namespace: ctx.namespace().to_string(),
             health_status: health_status as i32,
             labels: vec!["firecracker".to_string(), "microvm".to_string()],
             ..Default::default()

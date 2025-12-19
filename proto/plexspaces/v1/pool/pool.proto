@@ -244,7 +244,7 @@ service PoolService {
   // Create a new pool
   rpc CreatePool(CreatePoolRequest) returns (CreatePoolResponse) {
     option (google.api.http) = {
-      post: "/v1/pools"
+      post: "/api/v1/pools"
       body: "*"
     };
   }
@@ -252,7 +252,7 @@ service PoolService {
   // Checkout an actor from pool
   rpc Checkout(CheckoutRequest) returns (CheckoutResponse) {
     option (google.api.http) = {
-      post: "/v1/pools/{pool_name}:checkout"
+      post: "/api/v1/pools/{pool_name}:checkout"
       body: "*"
     };
   }
@@ -260,7 +260,7 @@ service PoolService {
   // Checkin an actor to pool
   rpc Checkin(CheckinRequest) returns (CheckinResponse) {
     option (google.api.http) = {
-      post: "/v1/pools/{pool_name}:checkin"
+      post: "/api/v1/pools/{pool_name}:checkin"
       body: "*"
     };
   }
@@ -268,14 +268,14 @@ service PoolService {
   // Get pool statistics
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
     option (google.api.http) = {
-      get: "/v1/pools/{pool_name}/stats"
+      get: "/api/v1/pools/{pool_name}/stats"
     };
   }
 
   // Scale pool manually
   rpc Scale(ScaleRequest) returns (ScaleResponse) {
     option (google.api.http) = {
-      post: "/v1/pools/{pool_name}:scale"
+      post: "/api/v1/pools/{pool_name}:scale"
       body: "*"
     };
   }
@@ -283,7 +283,7 @@ service PoolService {
   // Pause auto-scaling
   rpc PauseScaling(PauseScalingRequest) returns (PauseScalingResponse) {
     option (google.api.http) = {
-      post: "/v1/pools/{pool_name}:pauseScaling"
+      post: "/api/v1/pools/{pool_name}:pauseScaling"
       body: "*"
     };
   }
@@ -291,7 +291,7 @@ service PoolService {
   // Resume auto-scaling
   rpc ResumeScaling(ResumeScalingRequest) returns (ResumeScalingResponse) {
     option (google.api.http) = {
-      post: "/v1/pools/{pool_name}:resumeScaling"
+      post: "/api/v1/pools/{pool_name}:resumeScaling"
       body: "*"
     };
   }
@@ -299,7 +299,7 @@ service PoolService {
   // Drain pool (stop accepting new checkouts)
   rpc Drain(DrainRequest) returns (DrainResponse) {
     option (google.api.http) = {
-      post: "/v1/pools/{pool_name}:drain"
+      post: "/api/v1/pools/{pool_name}:drain"
       body: "*"
     };
   }
@@ -307,14 +307,14 @@ service PoolService {
   // Delete pool
   rpc DeletePool(DeletePoolRequest) returns (DeletePoolResponse) {
     option (google.api.http) = {
-      delete: "/v1/pools/{pool_name}"
+      delete: "/api/v1/pools/{pool_name}"
     };
   }
 
   // Stream pool metrics (for monitoring)
   rpc StreamMetrics(StreamMetricsRequest) returns (stream PoolMetrics) {
     option (google.api.http) = {
-      get: "/v1/pools/{pool_name}/metrics/stream"
+      get: "/api/v1/pools/{pool_name}/metrics/stream"
     };
   }
 }

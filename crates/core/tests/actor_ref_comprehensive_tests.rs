@@ -6,6 +6,27 @@
 use plexspaces_core::{ActorRef, ActorError};
 
 #[test]
+fn test_actor_ref_new() {
+    let actor_ref = ActorRef::new("counter@node1".to_string()).unwrap();
+    
+    assert_eq!(actor_ref.id(), "counter@node1");
+    assert_eq!(actor_ref.actor_name(), "counter");
+    assert_eq!(actor_ref.node_id(), "node1");
+}
+
+#[test]
+fn test_actor_ref_new_invalid_id() {
+    let result = ActorRef::new("invalid".to_string());
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        ActorError::InvalidState(msg) => {
+            assert!(msg.contains("Invalid actor ID format"));
+        },
+        _ => panic!("Expected InvalidState error"),
+    }
+}
+
+#[test]
 fn test_actor_ref_getters() {
     let actor_ref = ActorRef::new("counter@node1".to_string()).unwrap();
     

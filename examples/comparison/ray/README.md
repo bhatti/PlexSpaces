@@ -290,7 +290,15 @@ for i in 0..4 {
     mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
     let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await?;
     let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(), None);
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer", // actor_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await?;
     processors.push(plexspaces_core::ActorRef::new(actor_id)?);
 }
 

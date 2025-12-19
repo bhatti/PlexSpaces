@@ -203,9 +203,11 @@ async fn test_vm_create_and_start_firecracker() {
 /// - VM transitions: Created → Ready → Booting → Running → Stopped
 /// - Boot completes in < 2 seconds (timeout)
 /// - VM responds to API queries
+/// Note: This tests basic lifecycle (4 states: Create → Start → Boot → Stop)
+/// For full lifecycle with pause/resume, see test_vm_full_lifecycle() in integration_comprehensive.rs
 #[tokio::test]
 #[ignore] // Requires Firecracker binary, kernel, rootfs
-async fn test_vm_full_lifecycle() {
+async fn test_vm_basic_lifecycle() {
     if let Err(e) = check_prerequisites() {
         eprintln!("Skipping test: {}", e);
         return;

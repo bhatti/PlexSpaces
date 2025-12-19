@@ -12,7 +12,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn test_node_creates_service_locator() {
     // Test: Node should create ServiceLocator in new()
-    let node = Node::new(NodeId::new("test-node"), default_node_config());
+    let node = NodeBuilder::new("test-node").build();
     
     // Verify ServiceLocator exists and can retrieve services
     let service_locator = node.service_locator();
@@ -42,7 +42,7 @@ async fn test_node_creates_service_locator() {
 #[tokio::test]
 async fn test_node_registers_actor_registry() {
     // Test: Node should register ActorRegistry in ServiceLocator
-    let node = Node::new(NodeId::new("test-node"), default_node_config());
+    let node = NodeBuilder::new("test-node").build();
     let service_locator = node.service_locator();
     
     // Wait for async registration - poll until ActorRegistry is available
@@ -66,7 +66,7 @@ async fn test_node_registers_actor_registry() {
 #[tokio::test]
 async fn test_node_registers_reply_tracker() {
     // Test: Node should register ReplyTracker in ServiceLocator
-    let node = Node::new(NodeId::new("test-node"), default_node_config());
+    let node = NodeBuilder::new("test-node").build();
     let service_locator = node.service_locator();
     
     // Wait for async registration - poll until ReplyTracker is available
@@ -90,7 +90,7 @@ async fn test_node_registers_reply_tracker() {
 #[tokio::test]
 async fn test_node_registers_firecracker_service() {
     // Test: Node should register FirecrackerVmServiceWrapper in ServiceLocator when firecracker feature is enabled
-    let node = Node::new(NodeId::new("test-node"), default_node_config());
+    let node = NodeBuilder::new("test-node").build();
     let service_locator = node.service_locator();
     
     // Wait for async registration - poll until FirecrackerVmServiceWrapper is available
@@ -115,7 +115,7 @@ async fn test_node_registers_firecracker_service() {
 #[tokio::test]
 async fn test_node_service_locator_shutdown() {
     // Test: Node shutdown should shutdown ServiceLocator (close gRPC clients)
-    let node = Node::new(NodeId::new("test-node"), default_node_config());
+    let node = NodeBuilder::new("test-node").build();
     let service_locator = node.service_locator();
     
     // Wait for async registration - poll until ActorRegistry is available

@@ -448,15 +448,22 @@ impl Actor {
         id: ActorId,
         behavior: Box<dyn plexspaces_core::Actor>,
         mailbox: Mailbox,
+        tenant_id: String,
         namespace: String,
         node_id: Option<String>,
     ) -> Self {
-        // Use minimal context - Node will update it with full services when spawning
-        let node_id_str = node_id.unwrap_or_else(|| "local".to_string());
-        let context = Arc::new(ActorContext::minimal(
-            id.clone(),
+        // Create context with ServiceLocator - Node will update it with full services when spawning
+        let node_id_str = node_id.clone().unwrap_or_else(|| "local".to_string());
+        // Note: This is a sync function, so we create a minimal ServiceLocator
+        // Node will replace it with full services when spawning
+        use plexspaces_core::ServiceLocator;
+        let service_locator = Arc::new(ServiceLocator::new());
+        let context = Arc::new(ActorContext::new(
             node_id_str,
+            tenant_id.clone(),
             namespace.clone(),
+            service_locator,
+            None,
         ));
 
         Actor {
@@ -1214,7 +1221,7 @@ mod tests {
         let behavior = Box::new(MockBehavior::new());
         let mailbox = Mailbox::new(MailboxConfig::default(), id.clone()).await.unwrap();
 
-        let mut actor = Actor::new(id.clone(), behavior, mailbox, "test-namespace".to_string(), None);
+        let mut actor = Actor::new(id.clone(), behavior, mailbox, String::new(), "test-namespace".to_string(), None);
 
         // Test initial state
         assert_eq!(actor.state().await, ActorState::Creating);
@@ -1247,6 +1254,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1269,6 +1277,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1290,6 +1299,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1319,6 +1329,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1343,6 +1354,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         )
@@ -1372,6 +1384,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         )
@@ -1394,6 +1407,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1417,6 +1431,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1437,6 +1452,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1463,6 +1479,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         )
@@ -1486,6 +1503,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1509,6 +1527,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1534,6 +1553,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1556,6 +1576,7 @@ mod tests {
             "test-actor-123".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1573,6 +1594,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1596,6 +1618,7 @@ mod tests {
             "test-actor".to_string(),
             behavior1,
             mailbox,
+            "test-tenant".to_string(),
             "test-namespace".to_string(),
             None,
         );
@@ -1615,6 +1638,7 @@ mod tests {
             "test-actor".to_string(),
             behavior1,
             mailbox,
+            "test-tenant".to_string(),
             "test-namespace".to_string(),
             None,
         );
@@ -1637,6 +1661,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1699,6 +1724,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1718,6 +1744,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1736,6 +1763,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1764,6 +1792,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1797,6 +1826,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1827,6 +1857,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1851,6 +1882,7 @@ mod tests {
             "receiver".to_string(),
             behavior,
             mailbox,
+            "test-tenant".to_string(),
             "test-namespace".to_string(),
             None,
         );
@@ -1907,6 +1939,7 @@ mod tests {
             "failing-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );
@@ -1939,6 +1972,7 @@ mod tests {
             "test-actor".to_string(),
             behavior,
             mailbox,
+            String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
             None,
         );

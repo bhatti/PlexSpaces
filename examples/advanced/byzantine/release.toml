@@ -88,6 +88,8 @@ dependencies = []  # No dependencies for this example
 # Environment variables
 [env]
 LOG_LEVEL = "info"
+BYZANTINE_GENERAL_COUNT = "4"
+BYZANTINE_FAULT_COUNT = "1"
 
 [byzantine]
 general_count = 4

@@ -13,22 +13,19 @@ use test_helpers::{find_actor_helper, unregister_actor_helper};
 
 /// Helper to create a test node
 fn create_test_node() -> Node {
-    Node::new(
-        NodeId::new("test-node"),
-        NodeConfig {
-            listen_addr: "127.0.0.1:0".to_string(),
-            max_connections: 10,
-            heartbeat_interval_ms: 1000,
-            clustering_enabled: false,
-            metadata: std::collections::HashMap::new(),
-        },
-    )
+    use plexspaces_node::NodeBuilder;
+    NodeBuilder::new("test-node")
+        .with_listen_address("127.0.0.1:0")
+        .with_max_connections(10)
+        .with_heartbeat_interval_ms(1000)
+        .with_clustering_enabled(false)
+        .build()
 }
 
 /// Helper to create a test actor ref
 async fn create_test_actor_ref(node: &Node, actor_id: &str) -> plexspaces_actor::ActorRef {
     use plexspaces_actor::ActorRef;
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
     
     let actor_id_full = format!("{}@test-node", actor_id);
@@ -37,7 +34,7 @@ async fn create_test_actor_ref(node: &Node, actor_id: &str) -> plexspaces_actor:
     let actor_ref = ActorRef::local(actor_id_full.clone(), mailbox.clone(), service_locator.clone());
     
     // Register actor with MessageSender (mailbox is internal)
-    let wrapper = Arc::new(RegularActorWrapper::new(
+    let wrapper = Arc::new(ActorRef::local(
         actor_id_full.clone(),
         mailbox,
         service_locator,

@@ -49,7 +49,7 @@ pub struct Coordinator {
 impl Coordinator {
     /// Create a new coordinator with default in-memory TupleSpace
     pub fn new(config: GridConfig) -> Self {
-        let tuplespace = Arc::new(TupleSpace::new());
+        let tuplespace = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
         Self::new_with_tuplespace(config, tuplespace)
     }
 
@@ -104,7 +104,15 @@ impl Coordinator {
                 let actor_factory: Arc<ActorFactoryImpl> = node.as_ref().service_locator().get_service().await
                     .ok_or_else(|| format!("ActorFactory not found"))?;
                 let actor_id = actor.id().clone();
-                let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+                let ctx = plexspaces_core::RequestContext::internal();
+                let _message_sender = actor_factory.spawn_actor(
+                    &ctx,
+                    &actor_id,
+                    "GenServer", // actor_type
+                    vec![], // initial_state
+                    None, // config
+                    std::collections::HashMap::new(), // labels
+                ).await
                     .map_err(|e| format!("Failed to spawn actor: {}", e))?;
                 let actor_ref = plexspaces_core::ActorRef::new(actor_id)
                     .map_err(|e| format!("Failed to create ActorRef: {}", e))?;

@@ -60,6 +60,7 @@
 //! - Concurrent writes: Sequential (single writer)
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use plexspaces_core::RequestContext;
 use plexspaces_keyvalue::{InMemoryKVStore, KeyValueStore};
 use std::sync::Arc;
 use std::time::Duration;
@@ -77,6 +78,12 @@ fn test_key(prefix: &str, i: usize) -> String {
 /// Create test value of specified size
 fn test_value(size: usize) -> Vec<u8> {
     vec![b'x'; size]
+}
+
+/// Create test RequestContext
+fn test_ctx() -> RequestContext {
+    RequestContext::new("bench-tenant".to_string())
+        .with_namespace("bench-namespace".to_string())
 }
 
 /// Benchmark configuration
@@ -128,8 +135,9 @@ fn bench_single_put(c: &mut Criterion) {
                 let key = test_key("bench", counter);
                 counter += 1;
 
+                let ctx = test_ctx();
                 async move {
-                    store.put(&key, value).await.unwrap();
+                    store.put(&ctx, &key, value).await.unwrap();
                 }
             });
         });
@@ -153,10 +161,11 @@ fn bench_single_get(c: &mut Criterion) {
             let value = test_value(size);
 
             // Pre-populate 1000 keys
+            let ctx = test_ctx();
             rt.block_on(async {
                 for i in 0..1000 {
                     let key = test_key("bench", i);
-                    store.put(&key, value.clone()).await.unwrap();
+                    store.put(&ctx, &key, value.clone()).await.unwrap();
                 }
             });
 
@@ -166,8 +175,9 @@ fn bench_single_get(c: &mut Criterion) {
                 let key = test_key("bench", counter % 1000);
                 counter += 1;
 
+                let ctx = test_ctx();
                 async move {
-                    let _ = black_box(store.get(&key).await.unwrap());
+                    let _ = black_box(store.get(&ctx, &key).await.unwrap());
                 }
             });
         });
@@ -187,10 +197,11 @@ fn bench_single_delete(c: &mut Criterion) {
         let value = test_value(config.small_value_size);
 
         // Pre-populate keys to delete
+        let ctx = test_ctx();
         rt.block_on(async {
             for i in 0..10000 {
                 let key = test_key("delete", i);
-                store.put(&key, value.clone()).await.unwrap();
+                store.put(&ctx, &key, value.clone()).await.unwrap();
             }
         });
 
@@ -200,8 +211,9 @@ fn bench_single_delete(c: &mut Criterion) {
             let key = test_key("delete", counter % 10000);
             counter += 1;
 
+            let ctx = test_ctx();
             async move {
-                store.delete(&key).await.unwrap();
+                store.delete(&ctx, &key).await.unwrap();
             }
         });
     });
@@ -220,10 +232,11 @@ fn bench_single_exists(c: &mut Criterion) {
         let value = test_value(config.small_value_size);
 
         // Pre-populate 1000 keys
+        let ctx = test_ctx();
         rt.block_on(async {
             for i in 0..1000 {
                 let key = test_key("bench", i);
-                store.put(&key, value.clone()).await.unwrap();
+                store.put(&ctx, &key, value.clone()).await.unwrap();
             }
         });
 
@@ -233,8 +246,9 @@ fn bench_single_exists(c: &mut Criterion) {
             let key = test_key("bench", counter % 1000);
             counter += 1;
 
+            let ctx = test_ctx();
             async move {
-                let _ = black_box(store.exists(&key).await.unwrap());
+                let _ = black_box(store.exists(&ctx, &key).await.unwrap());
             }
         });
     });
@@ -264,10 +278,11 @@ fn bench_bulk_put(c: &mut Criterion) {
             let store = Arc::new(InMemoryKVStore::new());
             let value = value.clone();
 
+            let ctx = test_ctx();
             async move {
                 for i in 0..config.operation_count {
                     let key = test_key("bulk", i);
-                    store.put(&key, value.clone()).await.unwrap();
+                    store.put(&ctx, &key, value.clone()).await.unwrap();
                 }
             }
         });
@@ -291,20 +306,22 @@ fn bench_bulk_get(c: &mut Criterion) {
         let value = test_value(config.small_value_size);
 
         // Pre-populate data
+        let ctx = test_ctx();
         rt.block_on(async {
             for i in 0..config.operation_count {
                 let key = test_key("bulk", i);
-                store.put(&key, value.clone()).await.unwrap();
+                store.put(&ctx, &key, value.clone()).await.unwrap();
             }
         });
 
         b.to_async(&rt).iter(|| {
             let store = store.clone();
 
+            let ctx = test_ctx();
             async move {
                 for i in 0..config.operation_count {
                     let key = test_key("bulk", i);
-                    let _ = black_box(store.get(&key).await.unwrap());
+                    let _ = black_box(store.get(&ctx, &key).await.unwrap());
                 }
             }
         });
@@ -337,10 +354,11 @@ fn bench_concurrent_reads(c: &mut Criterion) {
                 let value = test_value(config.small_value_size);
 
                 // Pre-populate data
+                let ctx = test_ctx();
                 rt.block_on(async {
                     for i in 0..config.operation_count {
                         let key = test_key("concurrent", i);
-                        store.put(&key, value.clone()).await.unwrap();
+                        store.put(&ctx, &key, value.clone()).await.unwrap();
                     }
                 });
 
@@ -355,7 +373,8 @@ fn bench_concurrent_reads(c: &mut Criterion) {
                             let handle = tokio::spawn(async move {
                                 for i in 0..config.operation_count {
                                     let key = test_key("concurrent", i);
-                                    let _ = black_box(store.get(&key).await.unwrap());
+                                    let ctx = test_ctx();
+                                    let _ = black_box(store.get(&ctx, &key).await.unwrap());
                                 }
                             });
                             handles.push(handle);
@@ -387,10 +406,11 @@ fn bench_mixed_workload(c: &mut Criterion) {
         let value = test_value(config.small_value_size);
 
         // Pre-populate some data
+        let ctx = test_ctx();
         rt.block_on(async {
             for i in 0..config.operation_count / 2 {
                 let key = test_key("mixed", i);
-                store.put(&key, value.clone()).await.unwrap();
+                store.put(&ctx, &key, value.clone()).await.unwrap();
             }
         });
 
@@ -398,6 +418,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
             let store = store.clone();
             let value = value.clone();
 
+            let ctx = test_ctx();
             async move {
                 for i in 0..config.operation_count {
                     let key = test_key("mixed", i);
@@ -405,10 +426,10 @@ fn bench_mixed_workload(c: &mut Criterion) {
                     // 80% reads, 20% writes
                     if i % 5 == 0 {
                         // Write
-                        store.put(&key, value.clone()).await.unwrap();
+                        store.put(&ctx, &key, value.clone()).await.unwrap();
                     } else {
                         // Read
-                        let _ = black_box(store.get(&key).await);
+                        let _ = black_box(store.get(&ctx, &key).await);
                     }
                 }
             }
@@ -437,21 +458,23 @@ fn bench_prefix_scan(c: &mut Criterion) {
             let value = test_value(config.small_value_size);
 
             // Pre-populate with multiple prefixes
+            let ctx = test_ctx();
             rt.block_on(async {
                 for i in 0..count {
                     let key = format!("prefix-a:{:08}", i);
-                    store.put(&key, value.clone()).await.unwrap();
+                    store.put(&ctx, &key, value.clone()).await.unwrap();
 
                     let key = format!("prefix-b:{:08}", i);
-                    store.put(&key, value.clone()).await.unwrap();
+                    store.put(&ctx, &key, value.clone()).await.unwrap();
                 }
             });
 
             b.to_async(&rt).iter(|| {
                 let store = store.clone();
+                let ctx = test_ctx();
 
                 async move {
-                    let keys = store.list("prefix-a:").await.unwrap();
+                    let keys = store.list(&ctx, "prefix-a:").await.unwrap();
                     black_box(keys);
                 }
             });
@@ -484,7 +507,8 @@ fn bench_put_with_ttl(c: &mut Criterion) {
             counter += 1;
 
             async move {
-                store.put_with_ttl(&key, value, ttl).await.unwrap();
+                let ctx = test_ctx();
+                store.put_with_ttl(&ctx, &key, value, ttl).await.unwrap();
             }
         });
     });

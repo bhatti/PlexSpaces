@@ -26,16 +26,21 @@
 //! - **Transactional**: ACID guarantees for operations
 //! - **TTL Support**: Automatic expiry via expiry column + background cleanup
 //! - **Atomic Operations**: CAS and increment using SQL transactions
+//! - **Multi-tenancy**: All operations filtered by tenant_id and namespace
 //!
 //! ## Schema (Optimized for Performance)
+//!
 //! ```sql
 //! -- SQLite schema
 //! CREATE TABLE kv_store (
-//!     key TEXT PRIMARY KEY,           -- Clustered index (automatic)
+//!     tenant_id TEXT NOT NULL,
+//!     namespace TEXT NOT NULL,
+//!     key TEXT NOT NULL,
 //!     value BLOB NOT NULL,
 //!     expires_at BIGINT,              -- Unix timestamp in seconds, NULL = no expiry
 //!     created_at BIGINT NOT NULL,
-//!     updated_at BIGINT NOT NULL
+//!     updated_at BIGINT NOT NULL,
+//!     PRIMARY KEY (tenant_id, namespace, key)
 //! );
 //!
 //! -- Composite index for efficient TTL cleanup (O(m) where m = expired keys)
@@ -61,6 +66,7 @@
 
 use crate::{KVError, KVEvent, KVEventType, KVResult, KVStats, KeyValueStore};
 use async_trait::async_trait;
+use plexspaces_core::RequestContext;
 use sqlx::{Pool, Postgres, Row, Sqlite};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -129,33 +135,11 @@ impl SqliteKVStore {
             .connect(&format!("sqlite:{}", path))
             .await?;
 
-        // Create table if not exists
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS kv_store (
-                key TEXT PRIMARY KEY,
-                value BLOB NOT NULL,
-                expires_at BIGINT,
-                created_at BIGINT NOT NULL,
-                updated_at BIGINT NOT NULL
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await?;
-
-        // Optimized indexes for read/write/query performance
-        // See PERFORMANCE_ANALYSIS.md for detailed rationale
-
-        // Index 1: TTL cleanup (composite for efficiency)
-        // Enables fast cleanup of expired keys without full table scan
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_kv_store_ttl_cleanup \
-             ON kv_store(expires_at, key) \
-             WHERE expires_at IS NOT NULL",
-        )
-        .execute(&pool)
-        .await?;
+        // Run migrations
+        sqlx::migrate!("./migrations/sqlite")
+            .run(&pool)
+            .await
+            .map_err(|e| KVError::BackendError(format!("Migration failed: {}", e)))?;
 
         // Enable SQLite performance optimizations
         // WAL mode: Better concurrency for read-heavy workloads
@@ -228,12 +212,14 @@ impl SqliteKVStore {
 
 #[async_trait]
 impl KeyValueStore for SqliteKVStore {
-    async fn get(&self, key: &str) -> KVResult<Option<Vec<u8>>> {
+    async fn get(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Vec<u8>>> {
         let now = Self::now_timestamp();
 
         let result = sqlx::query(
-            "SELECT value FROM kv_store WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -242,22 +228,24 @@ impl KeyValueStore for SqliteKVStore {
         Ok(result.map(|row| row.get::<Vec<u8>, _>("value")))
     }
 
-    async fn put(&self, key: &str, value: Vec<u8>) -> KVResult<()> {
+    async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>) -> KVResult<()> {
         let now = Self::now_timestamp();
 
         // Get old value for watch notification
-        let old_value = self.get(key).await?;
+        let old_value = self.get(ctx, key).await?;
 
         sqlx::query(
             r#"
-            INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-            VALUES (?, ?, NULL, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, ?, ?)
+            ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                 value = excluded.value,
                 expires_at = NULL,
                 updated_at = excluded.updated_at
             "#,
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(&value)
         .bind(now)
@@ -276,10 +264,12 @@ impl KeyValueStore for SqliteKVStore {
         Ok(())
     }
 
-    async fn delete(&self, key: &str) -> KVResult<()> {
-        let old_value = self.get(key).await?;
+    async fn delete(&self, ctx: &RequestContext, key: &str) -> KVResult<()> {
+        let old_value = self.get(ctx, key).await?;
 
-        sqlx::query("DELETE FROM kv_store WHERE key = ?")
+        sqlx::query("DELETE FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ?")
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .bind(key)
             .execute(&self.pool)
             .await?;
@@ -297,12 +287,14 @@ impl KeyValueStore for SqliteKVStore {
         Ok(())
     }
 
-    async fn exists(&self, key: &str) -> KVResult<bool> {
+    async fn exists(&self, ctx: &RequestContext, key: &str) -> KVResult<bool> {
         let now = Self::now_timestamp();
 
         let result = sqlx::query(
-            "SELECT 1 FROM kv_store WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            "SELECT 1 FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -311,44 +303,60 @@ impl KeyValueStore for SqliteKVStore {
         Ok(result.is_some())
     }
 
-    async fn list(&self, prefix: &str) -> KVResult<Vec<String>> {
+    async fn list(&self, ctx: &RequestContext, prefix: &str) -> KVResult<Vec<String>> {
         let now = Self::now_timestamp();
         let pattern = format!("{}%", prefix);
 
-        let rows = sqlx::query(
-            "SELECT key FROM kv_store WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?)",
-        )
-        .bind(pattern)
-        .bind(now)
-        .fetch_all(&self.pool)
-        .await?;
+        // Filter by namespace only if it's non-empty
+        let rows = if ctx.namespace().is_empty() {
+            sqlx::query(
+                "SELECT key FROM kv_store WHERE tenant_id = ? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(pattern)
+            .bind(now)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT key FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(pattern)
+            .bind(now)
+            .fetch_all(&self.pool)
+            .await?
+        };
 
         Ok(rows.into_iter().map(|row| row.get("key")).collect())
     }
 
-    async fn multi_get(&self, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
+    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
         let mut results = Vec::with_capacity(keys.len());
         for key in keys {
-            results.push(self.get(key).await?);
+            results.push(self.get(ctx, key).await?);
         }
         Ok(results)
     }
 
-    async fn multi_put(&self, pairs: &[(&str, Vec<u8>)]) -> KVResult<()> {
+    async fn multi_put(&self, ctx: &RequestContext, pairs: &[(&str, Vec<u8>)]) -> KVResult<()> {
         let mut tx = self.pool.begin().await?;
         let now = Self::now_timestamp();
 
         for (key, value) in pairs {
             sqlx::query(
                 r#"
-                INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-                VALUES (?, ?, NULL, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
+                INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, NULL, ?, ?)
+                ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                     value = excluded.value,
                     expires_at = NULL,
                     updated_at = excluded.updated_at
                 "#,
             )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .bind(key)
             .bind(value)
             .bind(now)
@@ -373,22 +381,24 @@ impl KeyValueStore for SqliteKVStore {
         Ok(())
     }
 
-    async fn put_with_ttl(&self, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()> {
+    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()> {
         let now = Self::now_timestamp();
         let expires_at = Self::expiry_from_ttl(ttl);
 
-        let old_value = self.get(key).await?;
+        let old_value = self.get(ctx, key).await?;
 
         sqlx::query(
             r#"
-            INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                 value = excluded.value,
                 expires_at = excluded.expires_at,
                 updated_at = excluded.updated_at
             "#,
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(&value)
         .bind(expires_at)
@@ -408,15 +418,17 @@ impl KeyValueStore for SqliteKVStore {
         Ok(())
     }
 
-    async fn refresh_ttl(&self, key: &str, ttl: Duration) -> KVResult<()> {
+    async fn refresh_ttl(&self, ctx: &RequestContext, key: &str, ttl: Duration) -> KVResult<()> {
         let now = Self::now_timestamp();
         let expires_at = Self::expiry_from_ttl(ttl);
 
         let result = sqlx::query(
-            "UPDATE kv_store SET expires_at = ?, updated_at = ? WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)"
+            "UPDATE kv_store SET expires_at = ?, updated_at = ? WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)"
         )
         .bind(expires_at)
         .bind(now)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .execute(&self.pool)
@@ -429,12 +441,14 @@ impl KeyValueStore for SqliteKVStore {
         Ok(())
     }
 
-    async fn get_ttl(&self, key: &str) -> KVResult<Option<Duration>> {
+    async fn get_ttl(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Duration>> {
         let now = Self::now_timestamp();
 
         let result = sqlx::query(
-            "SELECT expires_at FROM kv_store WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)"
+            "SELECT expires_at FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)"
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -448,6 +462,7 @@ impl KeyValueStore for SqliteKVStore {
 
     async fn cas(
         &self,
+        ctx: &RequestContext,
         key: &str,
         expected: Option<Vec<u8>>,
         new_value: Vec<u8>,
@@ -457,8 +472,10 @@ impl KeyValueStore for SqliteKVStore {
 
         // Check current value
         let current = sqlx::query(
-            "SELECT value FROM kv_store WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&mut *tx)
@@ -474,14 +491,16 @@ impl KeyValueStore for SqliteKVStore {
         if matches {
             sqlx::query(
                 r#"
-                INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-                VALUES (?, ?, NULL, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
+                INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, NULL, ?, ?)
+                ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                     value = excluded.value,
                     expires_at = NULL,
                     updated_at = excluded.updated_at
                 "#,
             )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .bind(key)
             .bind(&new_value)
             .bind(now)
@@ -506,14 +525,16 @@ impl KeyValueStore for SqliteKVStore {
         }
     }
 
-    async fn increment(&self, key: &str, delta: i64) -> KVResult<i64> {
+    async fn increment(&self, ctx: &RequestContext, key: &str, delta: i64) -> KVResult<i64> {
         let mut tx = self.pool.begin().await?;
         let now = Self::now_timestamp();
 
         // Get current value
         let current = sqlx::query(
-            "SELECT value FROM kv_store WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&mut *tx)
@@ -528,13 +549,15 @@ impl KeyValueStore for SqliteKVStore {
 
         sqlx::query(
             r#"
-            INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-            VALUES (?, ?, NULL, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, ?, ?)
+            ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                 value = excluded.value,
                 updated_at = excluded.updated_at
             "#,
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(&encoded)
         .bind(now)
@@ -555,11 +578,11 @@ impl KeyValueStore for SqliteKVStore {
         Ok(new_value)
     }
 
-    async fn decrement(&self, key: &str, delta: i64) -> KVResult<i64> {
-        self.increment(key, -delta).await
+    async fn decrement(&self, ctx: &RequestContext, key: &str, delta: i64) -> KVResult<i64> {
+        self.increment(ctx, key, -delta).await
     }
 
-    async fn watch(&self, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch(&self, ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: key.to_string(),
@@ -573,7 +596,7 @@ impl KeyValueStore for SqliteKVStore {
         Ok(rx)
     }
 
-    async fn watch_prefix(&self, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: prefix.to_string(),
@@ -587,10 +610,12 @@ impl KeyValueStore for SqliteKVStore {
         Ok(rx)
     }
 
-    async fn clear_prefix(&self, prefix: &str) -> KVResult<usize> {
+    async fn clear_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<usize> {
         let pattern = format!("{}%", prefix);
 
-        let result = sqlx::query("DELETE FROM kv_store WHERE key LIKE ?")
+        let result = sqlx::query("DELETE FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key LIKE ?")
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .bind(pattern)
             .execute(&self.pool)
             .await?;
@@ -598,13 +623,15 @@ impl KeyValueStore for SqliteKVStore {
         Ok(result.rows_affected() as usize)
     }
 
-    async fn count_prefix(&self, prefix: &str) -> KVResult<usize> {
+    async fn count_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<usize> {
         let now = Self::now_timestamp();
         let pattern = format!("{}%", prefix);
 
         let row = sqlx::query(
-            "SELECT COUNT(*) as count FROM kv_store WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?)"
+            "SELECT COUNT(*) as count FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?)"
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(pattern)
         .bind(now)
         .fetch_one(&self.pool)
@@ -613,12 +640,14 @@ impl KeyValueStore for SqliteKVStore {
         Ok(row.get::<i64, _>("count") as usize)
     }
 
-    async fn stats(&self) -> KVResult<KVStats> {
+    async fn get_stats(&self, ctx: &RequestContext) -> KVResult<KVStats> {
         let now = Self::now_timestamp();
 
         let row = sqlx::query(
-            "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE expires_at IS NULL OR expires_at > ?"
+            "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE tenant_id = ? AND namespace = ? AND (expires_at IS NULL OR expires_at > ?)"
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(now)
         .fetch_one(&self.pool)
         .await?;
@@ -673,36 +702,11 @@ impl PostgreSQLKVStore {
             .connect(connection_string)
             .await?;
 
-        // Create table if not exists
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS kv_store (
-                key TEXT PRIMARY KEY,
-                value BYTEA NOT NULL,
-                expires_at BIGINT,
-                created_at BIGINT NOT NULL,
-                updated_at BIGINT NOT NULL
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await?;
-
-        // Optimized indexes for read/write/query performance
-        // See PERFORMANCE_ANALYSIS.md for detailed rationale
-
-        // Index 1: TTL cleanup (composite for efficiency)
-        // Enables fast cleanup of expired keys without full table scan
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_kv_store_ttl_cleanup \
-             ON kv_store(expires_at, key) \
-             WHERE expires_at IS NOT NULL",
-        )
-        .execute(&pool)
-        .await?;
-
-        // Note: PRIMARY KEY on 'key' already provides index for point lookups
-        // No need for redundant idx_kv_store_prefix (removed)
+        // Run migrations
+        sqlx::migrate!("./migrations/postgres")
+            .run(&pool)
+            .await
+            .map_err(|e| KVError::BackendError(format!("Migration failed: {}", e)))?;
 
         Ok(Self {
             pool,
@@ -750,12 +754,14 @@ impl PostgreSQLKVStore {
 // PostgreSQL implementation is almost identical to SQLite, just using Postgres pool
 #[async_trait]
 impl KeyValueStore for PostgreSQLKVStore {
-    async fn get(&self, key: &str) -> KVResult<Option<Vec<u8>>> {
+    async fn get(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Vec<u8>>> {
         let now = Self::now_timestamp();
 
         let result = sqlx::query(
-            "SELECT value FROM kv_store WHERE key = $1 AND (expires_at IS NULL OR expires_at > $2)",
+            "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -764,20 +770,22 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(result.map(|row| row.get::<Vec<u8>, _>("value")))
     }
 
-    async fn put(&self, key: &str, value: Vec<u8>) -> KVResult<()> {
+    async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>) -> KVResult<()> {
         let now = Self::now_timestamp();
-        let old_value = self.get(key).await?;
+        let old_value = self.get(ctx, key).await?;
 
         sqlx::query(
             r#"
-            INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-            VALUES ($1, $2, NULL, $3, $4)
-            ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, NULL, $5, $6)
+            ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                 value = EXCLUDED.value,
                 expires_at = NULL,
                 updated_at = EXCLUDED.updated_at
             "#,
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(&value)
         .bind(now)
@@ -796,10 +804,12 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(())
     }
 
-    async fn delete(&self, key: &str) -> KVResult<()> {
-        let old_value = self.get(key).await?;
+    async fn delete(&self, ctx: &RequestContext, key: &str) -> KVResult<()> {
+        let old_value = self.get(ctx, key).await?;
 
-        sqlx::query("DELETE FROM kv_store WHERE key = $1")
+        sqlx::query("DELETE FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3")
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .bind(key)
             .execute(&self.pool)
             .await?;
@@ -817,12 +827,14 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(())
     }
 
-    async fn exists(&self, key: &str) -> KVResult<bool> {
+    async fn exists(&self, ctx: &RequestContext, key: &str) -> KVResult<bool> {
         let now = Self::now_timestamp();
 
         let result = sqlx::query(
-            "SELECT 1 FROM kv_store WHERE key = $1 AND (expires_at IS NULL OR expires_at > $2)",
+            "SELECT 1 FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -831,44 +843,60 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(result.is_some())
     }
 
-    async fn list(&self, prefix: &str) -> KVResult<Vec<String>> {
+    async fn list(&self, ctx: &RequestContext, prefix: &str) -> KVResult<Vec<String>> {
         let now = Self::now_timestamp();
         let pattern = format!("{}%", prefix);
 
-        let rows = sqlx::query(
-            "SELECT key FROM kv_store WHERE key LIKE $1 AND (expires_at IS NULL OR expires_at > $2)"
-        )
-        .bind(pattern)
-        .bind(now)
-        .fetch_all(&self.pool)
-        .await?;
+        // Filter by namespace only if it's non-empty
+        let rows = if ctx.namespace().is_empty() {
+            sqlx::query(
+                "SELECT key FROM kv_store WHERE tenant_id = $1 AND key LIKE $2 AND (expires_at IS NULL OR expires_at > $3)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(pattern)
+            .bind(now)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT key FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key LIKE $3 AND (expires_at IS NULL OR expires_at > $4)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(pattern)
+            .bind(now)
+            .fetch_all(&self.pool)
+            .await?
+        };
 
         Ok(rows.into_iter().map(|row| row.get("key")).collect())
     }
 
-    async fn multi_get(&self, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
+    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
         let mut results = Vec::with_capacity(keys.len());
         for key in keys {
-            results.push(self.get(key).await?);
+            results.push(self.get(ctx, key).await?);
         }
         Ok(results)
     }
 
-    async fn multi_put(&self, pairs: &[(&str, Vec<u8>)]) -> KVResult<()> {
+    async fn multi_put(&self, ctx: &RequestContext, pairs: &[(&str, Vec<u8>)]) -> KVResult<()> {
         let mut tx = self.pool.begin().await?;
         let now = Self::now_timestamp();
 
         for (key, value) in pairs {
             sqlx::query(
                 r#"
-                INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-                VALUES ($1, $2, NULL, $3, $4)
-                ON CONFLICT(key) DO UPDATE SET
+                INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, NULL, $5, $6)
+                ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                     value = EXCLUDED.value,
                     expires_at = NULL,
                     updated_at = EXCLUDED.updated_at
                 "#,
             )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .bind(key)
             .bind(value)
             .bind(now)
@@ -892,21 +920,23 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(())
     }
 
-    async fn put_with_ttl(&self, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()> {
+    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()> {
         let now = Self::now_timestamp();
         let expires_at = Self::expiry_from_ttl(ttl);
-        let old_value = self.get(key).await?;
+        let old_value = self.get(ctx, key).await?;
 
         sqlx::query(
             r#"
-            INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                 value = EXCLUDED.value,
                 expires_at = EXCLUDED.expires_at,
                 updated_at = EXCLUDED.updated_at
             "#,
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(&value)
         .bind(expires_at)
@@ -926,15 +956,17 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(())
     }
 
-    async fn refresh_ttl(&self, key: &str, ttl: Duration) -> KVResult<()> {
+    async fn refresh_ttl(&self, ctx: &RequestContext, key: &str, ttl: Duration) -> KVResult<()> {
         let now = Self::now_timestamp();
         let expires_at = Self::expiry_from_ttl(ttl);
 
         let result = sqlx::query(
-            "UPDATE kv_store SET expires_at = $1, updated_at = $2 WHERE key = $3 AND (expires_at IS NULL OR expires_at > $4)"
+            "UPDATE kv_store SET expires_at = $1, updated_at = $2 WHERE tenant_id = $3 AND namespace = $4 AND key = $5 AND (expires_at IS NULL OR expires_at > $6)"
         )
         .bind(expires_at)
         .bind(now)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .execute(&self.pool)
@@ -947,12 +979,14 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(())
     }
 
-    async fn get_ttl(&self, key: &str) -> KVResult<Option<Duration>> {
+    async fn get_ttl(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Duration>> {
         let now = Self::now_timestamp();
 
         let result = sqlx::query(
-            "SELECT expires_at FROM kv_store WHERE key = $1 AND (expires_at IS NULL OR expires_at > $2)"
+            "SELECT expires_at FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)"
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -966,6 +1000,7 @@ impl KeyValueStore for PostgreSQLKVStore {
 
     async fn cas(
         &self,
+        ctx: &RequestContext,
         key: &str,
         expected: Option<Vec<u8>>,
         new_value: Vec<u8>,
@@ -974,8 +1009,10 @@ impl KeyValueStore for PostgreSQLKVStore {
         let now = Self::now_timestamp();
 
         let current = sqlx::query(
-            "SELECT value FROM kv_store WHERE key = $1 AND (expires_at IS NULL OR expires_at > $2)",
+            "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&mut *tx)
@@ -991,14 +1028,16 @@ impl KeyValueStore for PostgreSQLKVStore {
         if matches {
             sqlx::query(
                 r#"
-                INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-                VALUES ($1, $2, NULL, $3, $4)
-                ON CONFLICT(key) DO UPDATE SET
+                INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, NULL, $5, $6)
+                ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                     value = EXCLUDED.value,
                     expires_at = NULL,
                     updated_at = EXCLUDED.updated_at
                 "#,
             )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .bind(key)
             .bind(&new_value)
             .bind(now)
@@ -1023,13 +1062,15 @@ impl KeyValueStore for PostgreSQLKVStore {
         }
     }
 
-    async fn increment(&self, key: &str, delta: i64) -> KVResult<i64> {
+    async fn increment(&self, ctx: &RequestContext, key: &str, delta: i64) -> KVResult<i64> {
         let mut tx = self.pool.begin().await?;
         let now = Self::now_timestamp();
 
         let current = sqlx::query(
-            "SELECT value FROM kv_store WHERE key = $1 AND (expires_at IS NULL OR expires_at > $2)",
+            "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(now)
         .fetch_optional(&mut *tx)
@@ -1044,13 +1085,15 @@ impl KeyValueStore for PostgreSQLKVStore {
 
         sqlx::query(
             r#"
-            INSERT INTO kv_store (key, value, expires_at, created_at, updated_at)
-            VALUES ($1, $2, NULL, $3, $4)
-            ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO kv_store (tenant_id, namespace, key, value, expires_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, NULL, $5, $6)
+            ON CONFLICT(tenant_id, namespace, key) DO UPDATE SET
                 value = EXCLUDED.value,
                 updated_at = EXCLUDED.updated_at
             "#,
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(key)
         .bind(&encoded)
         .bind(now)
@@ -1071,11 +1114,11 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(new_value)
     }
 
-    async fn decrement(&self, key: &str, delta: i64) -> KVResult<i64> {
-        self.increment(key, -delta).await
+    async fn decrement(&self, ctx: &RequestContext, key: &str, delta: i64) -> KVResult<i64> {
+        self.increment(ctx, key, -delta).await
     }
 
-    async fn watch(&self, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch(&self, ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: key.to_string(),
@@ -1089,7 +1132,7 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(rx)
     }
 
-    async fn watch_prefix(&self, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: prefix.to_string(),
@@ -1103,10 +1146,12 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(rx)
     }
 
-    async fn clear_prefix(&self, prefix: &str) -> KVResult<usize> {
+    async fn clear_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<usize> {
         let pattern = format!("{}%", prefix);
 
-        let result = sqlx::query("DELETE FROM kv_store WHERE key LIKE $1")
+        let result = sqlx::query("DELETE FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key LIKE $3")
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
             .bind(pattern)
             .execute(&self.pool)
             .await?;
@@ -1114,13 +1159,15 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(result.rows_affected() as usize)
     }
 
-    async fn count_prefix(&self, prefix: &str) -> KVResult<usize> {
+    async fn count_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<usize> {
         let now = Self::now_timestamp();
         let pattern = format!("{}%", prefix);
 
         let row = sqlx::query(
-            "SELECT COUNT(*) as count FROM kv_store WHERE key LIKE $1 AND (expires_at IS NULL OR expires_at > $2)"
+            "SELECT COUNT(*) as count FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key LIKE $3 AND (expires_at IS NULL OR expires_at > $4)"
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(pattern)
         .bind(now)
         .fetch_one(&self.pool)
@@ -1129,12 +1176,14 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(row.get::<i64, _>("count") as usize)
     }
 
-    async fn stats(&self) -> KVResult<KVStats> {
+    async fn get_stats(&self, ctx: &RequestContext) -> KVResult<KVStats> {
         let now = Self::now_timestamp();
 
         let row = sqlx::query(
-            "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE expires_at IS NULL OR expires_at > $1"
+            "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND (expires_at IS NULL OR expires_at > $3)"
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .bind(now)
         .fetch_one(&self.pool)
         .await?;
@@ -1151,58 +1200,100 @@ impl KeyValueStore for PostgreSQLKVStore {
 mod tests {
     use super::*;
 
+    fn test_ctx() -> RequestContext {
+        plexspaces_core::RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string())
+    }
+
     #[tokio::test]
     async fn test_sqlite_basic_operations() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        let ctx = test_ctx();
 
         // Put and get
-        kv.put("key1", b"value1".to_vec()).await.unwrap();
-        let value = kv.get("key1").await.unwrap();
+        kv.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
+        let value = kv.get(&ctx, "key1").await.unwrap();
         assert_eq!(value, Some(b"value1".to_vec()));
 
         // Exists
-        assert!(kv.exists("key1").await.unwrap());
-        assert!(!kv.exists("nonexistent").await.unwrap());
+        assert!(kv.exists(&ctx, "key1").await.unwrap());
+        assert!(!kv.exists(&ctx, "nonexistent").await.unwrap());
 
         // Delete
-        kv.delete("key1").await.unwrap();
-        assert!(!kv.exists("key1").await.unwrap());
+        kv.delete(&ctx, "key1").await.unwrap();
+        assert!(!kv.exists(&ctx, "key1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_tenant_isolation() {
+        let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "default".to_string());
+        let ctx2 = RequestContext::new_without_auth("tenant2".to_string(), "default".to_string());
+
+        // Put same key for different tenants
+        kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
+        kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
+
+        // Each tenant should see their own value
+        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
+        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+
+        // Delete from tenant1 should not affect tenant2
+        kv.delete(&ctx1, "key1").await.unwrap();
+        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), None);
+        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_namespace_isolation() {
+        let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
+        let ctx2 = RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string());
+
+        // Put same key for different namespaces
+        kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
+        kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
+
+        // Each namespace should see their own value
+        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
+        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
     }
 
     #[tokio::test]
     async fn test_sqlite_ttl() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        let ctx = test_ctx();
 
-        kv.put_with_ttl("key", b"value".to_vec(), Duration::from_secs(1))
+        kv.put_with_ttl(&ctx, "key", b"value".to_vec(), Duration::from_secs(1))
             .await
             .unwrap();
 
         // Should exist immediately
-        assert!(kv.exists("key").await.unwrap());
+        assert!(kv.exists(&ctx, "key").await.unwrap());
 
         // Check TTL
-        let ttl = kv.get_ttl("key").await.unwrap();
+        let ttl = kv.get_ttl(&ctx, "key").await.unwrap();
         assert!(ttl.is_some());
 
         // Wait for expiry
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(!kv.exists("key").await.unwrap());
+        assert!(!kv.exists(&ctx, "key").await.unwrap());
     }
 
     #[tokio::test]
     async fn test_sqlite_cas() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        let ctx = test_ctx();
 
         // Acquire lock
         let acquired = kv
-            .cas("lock:resource", None, b"node1".to_vec())
+            .cas(&ctx, "lock:resource", None, b"node1".to_vec())
             .await
             .unwrap();
         assert!(acquired);
 
         // Try to acquire again (should fail)
         let acquired2 = kv
-            .cas("lock:resource", None, b"node2".to_vec())
+            .cas(&ctx, "lock:resource", None, b"node2".to_vec())
             .await
             .unwrap();
         assert!(!acquired2);
@@ -1211,37 +1302,40 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_increment() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        let ctx = test_ctx();
 
-        let count = kv.increment("counter", 1).await.unwrap();
+        let count = kv.increment(&ctx, "counter", 1).await.unwrap();
         assert_eq!(count, 1);
 
-        let count = kv.increment("counter", 5).await.unwrap();
+        let count = kv.increment(&ctx, "counter", 5).await.unwrap();
         assert_eq!(count, 6);
 
-        let count = kv.decrement("counter", 3).await.unwrap();
+        let count = kv.decrement(&ctx, "counter", 3).await.unwrap();
         assert_eq!(count, 3);
     }
 
     #[tokio::test]
     async fn test_sqlite_list_prefix() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        let ctx = test_ctx();
 
-        kv.put("actor:alice", b"ref1".to_vec()).await.unwrap();
-        kv.put("actor:bob", b"ref2".to_vec()).await.unwrap();
-        kv.put("node:node1", b"info".to_vec()).await.unwrap();
+        kv.put(&ctx, "actor:alice", b"ref1".to_vec()).await.unwrap();
+        kv.put(&ctx, "actor:bob", b"ref2".to_vec()).await.unwrap();
+        kv.put(&ctx, "node:node1", b"info".to_vec()).await.unwrap();
 
-        let actors = kv.list("actor:").await.unwrap();
+        let actors = kv.list(&ctx, "actor:").await.unwrap();
         assert_eq!(actors.len(), 2);
     }
 
     #[tokio::test]
     async fn test_sqlite_stats() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        let ctx = test_ctx();
 
-        kv.put("k1", b"v1".to_vec()).await.unwrap();
-        kv.put("k2", b"v2".to_vec()).await.unwrap();
+        kv.put(&ctx, "k1", b"v1".to_vec()).await.unwrap();
+        kv.put(&ctx, "k2", b"v2".to_vec()).await.unwrap();
 
-        let stats = kv.stats().await.unwrap();
+        let stats = kv.get_stats(&ctx).await.unwrap();
         assert_eq!(stats.total_keys, 2);
         assert_eq!(stats.backend_type, "SQLite");
     }

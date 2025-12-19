@@ -91,7 +91,8 @@ pub mod shutdown_coordinator;
 pub mod node_builder;
 pub mod service_wrappers;
 pub mod virtual_actor_wrapper;
-pub mod regular_actor_wrapper;
+// TODO: regular_actor_wrapper module file missing - commented out until file is created
+// pub mod regular_actor_wrapper;
 pub use node_builder::NodeBuilder;
 
 // Make Node implement Service trait for ServiceLocator
@@ -101,8 +102,14 @@ impl plexspaces_core::Service for Node {}
 pub mod config_bootstrap;
 // TODO: Complete config_loader implementation - temporarily disabled due to proto mismatches
 pub mod config_loader;
+pub use config_loader::ConfigLoader;
 mod config_loader_yaml;
 mod config_loader_convert;
 pub mod metrics_helper;
+pub mod service_locator_helpers;
 pub use config_bootstrap::{ConfigBootstrap, ConfigError};
 pub use metrics_helper::CoordinationComputeTracker;
+pub use service_locator_helpers::create_default_service_locator;
+
+// Re-export for convenience
+pub use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};

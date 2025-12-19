@@ -105,7 +105,7 @@ impl GenServer for CounterActor {
 #[tokio::test]
 async fn test_lazy_activation_concurrent_requests() {
     // Test: Multiple concurrent activation requests should only activate once
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-concurrent@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -188,7 +188,7 @@ async fn test_lazy_activation_concurrent_requests() {
 #[tokio::test]
 async fn test_lazy_activation_pending_messages_processed() {
     // Test: Messages sent during activation should be queued and processed after activation
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-pending@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -244,7 +244,7 @@ async fn test_lazy_activation_pending_messages_processed() {
 async fn test_lazy_activation_activation_failure_handling() {
     // Test: If activation fails, subsequent messages should retry activation
     // Note: This is a simplified test - actual activation failures are rare
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-fail@test-node".to_string();
     
     // Create actor but don't register it yet
@@ -297,7 +297,7 @@ async fn test_lazy_activation_activation_failure_handling() {
 #[tokio::test]
 async fn test_lazy_activation_tell_then_ask() {
     // Test: tell() followed by ask() - both should work
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-tell-ask@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -357,7 +357,7 @@ async fn test_lazy_activation_tell_then_ask() {
 #[tokio::test]
 async fn test_eager_activation_immediate_availability() {
     // Test: Eager actor should be immediately available after creation
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-eager-immediate@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -406,7 +406,7 @@ async fn test_eager_activation_immediate_availability() {
 #[tokio::test]
 async fn test_eager_activation_multiple_actors() {
     // Test: Multiple eager actors should all activate immediately
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     
     let mut handles = Vec::new();
     for i in 0..5 {
@@ -464,7 +464,7 @@ async fn test_eager_activation_multiple_actors() {
 #[tokio::test]
 async fn test_passivation_idle_timeout_expiration() {
     // Test: Actor should be deactivated after idle timeout
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-idle@test-node".to_string();
     
     // Start idle timeout monitor
@@ -521,7 +521,7 @@ async fn test_passivation_idle_timeout_expiration() {
 #[tokio::test]
 async fn test_passivation_reactivation_after_timeout() {
     // Test: Actor should reactivate after passivation when message arrives
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-reactivate@test-node".to_string();
     
     node.start_idle_timeout_monitor();
@@ -605,7 +605,7 @@ async fn test_passivation_reactivation_after_timeout() {
 #[tokio::test]
 async fn test_passivation_message_resets_idle_timer() {
     // Test: Messages should reset idle timer, preventing passivation
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-reset@test-node".to_string();
     
     node.start_idle_timeout_monitor();
@@ -663,7 +663,7 @@ async fn test_passivation_message_resets_idle_timer() {
 #[tokio::test]
 async fn test_mixed_lazy_eager_actors() {
     // Test: Mix of lazy and eager actors should work correctly
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     
     // Create lazy actor
     let lazy_id: ActorId = "counter-lazy-mixed@test-node".to_string();
@@ -738,7 +738,7 @@ async fn test_mixed_lazy_eager_actors() {
 #[tokio::test]
 async fn test_virtual_actor_state_preservation() {
     // Test: Actor state should be preserved across activation/deactivation cycles
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-state@test-node".to_string();
     
     node.start_idle_timeout_monitor();
@@ -816,7 +816,7 @@ async fn test_virtual_actor_state_preservation() {
 #[tokio::test]
 async fn test_virtual_actor_not_found_error() {
     // Test: Accessing non-existent virtual actor should return appropriate error
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "nonexistent@test-node".to_string();
     
     // Check that actor doesn't exist
@@ -835,7 +835,7 @@ async fn test_virtual_actor_not_found_error() {
 #[tokio::test]
 async fn test_virtual_actor_manual_deactivation() {
     // Test: Manual deactivation should work
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-manual-deact@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -891,7 +891,7 @@ async fn test_virtual_actor_manual_deactivation() {
 #[tokio::test]
 async fn test_virtual_actor_full_lifecycle() {
     // Test: Complete lifecycle - create, activate, use, passivate, reactivate
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-lifecycle@test-node".to_string();
     
     node.start_idle_timeout_monitor();
@@ -974,7 +974,7 @@ async fn test_virtual_actor_full_lifecycle() {
 #[tokio::test]
 async fn test_virtual_actor_high_throughput() {
     // Test: High throughput scenario with many messages
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-throughput@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 

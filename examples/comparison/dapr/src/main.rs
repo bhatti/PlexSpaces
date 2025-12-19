@@ -132,13 +132,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .attach_facet(durability_facet, 50, serde_json::json!({}))
         .await?;
     
-    // Spawn using ActorFactory
+    // Spawn using ActorFactory with spawn_actor
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let actor_id = actor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "Workflow", // actor_type from WorkflowActor
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let actor_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
@@ -211,7 +219,15 @@ mod tests {
         let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
             .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
         let actor_id = actor.id().clone();
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        let _message_sender = let ctx = plexspaces_core::RequestContext::internal();
+            actor_factory.spawn_actor(
+                &ctx,
+                &actor.id().clone(),
+                "GenServer", // actor_type
+                vec![], // initial_state
+                None, // config
+                std::collections::HashMap::new(), // labels
+            ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         let actor_ref = plexspaces_core::ActorRef::new(actor_id)
             .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();

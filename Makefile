@@ -139,20 +139,50 @@ proto: proto-buf
 # Build all crates
 build:
 	@echo "Building all crates..."
-	@$(CARGO) build --all-features --workspace
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+	fi; \
+	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
+	$(CARGO) build --all-features --workspace --jobs $$CARGO_JOBS --message-format=short
 	@echo "Build complete!"
 
 # Build release version
 release:
 	@echo "Building release version..."
-	@$(CARGO) build --release --all-features --workspace
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+	fi; \
+	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
+	$(CARGO) build --release --all-features --workspace --jobs $$CARGO_JOBS --message-format=short
 	@echo "Release build complete!"
 
 # Build all examples
+# Uses shared target directory to avoid rebuilding common dependencies
 build-examples:
-	@echo "Building examples..."
-	@$(CARGO) build --examples
-	@echo "Examples build complete!"
+	@echo "Building examples (using shared target directory)..."
+	@echo "Target directory: $$(pwd)/target (shared across all examples)"
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+	fi; \
+	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
+	echo "Pre-building workspace dependencies for faster example builds..."; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
+	echo ""; \
+	echo "Building examples with shared target directory..."; \
+	PROJECT_ROOT=$$(pwd); \
+	EXAMPLES="advanced/byzantine advanced/nbody domains/finance-risk domains/genomic-workflow-pipeline domains/genomics-pipeline domains/order-processing intermediate/heat_diffusion intermediate/matrix_multiply intermediate/matrix_vector_mpi simple/durable_actor_example simple/firecracker_multi_tenant simple/faas_actor wasm-calculator"; \
+	for example in $$EXAMPLES; do \
+		if [ -d "examples/$$example" ] && [ -f "examples/$$example/Cargo.toml" ]; then \
+			echo "Building $$example..."; \
+			(cd "examples/$$example" && \
+				CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
+				$(CARGO) build --all-features --jobs $$CARGO_JOBS --message-format=short) || exit 1; \
+		fi; \
+	done; \
+	echo "Examples build complete!"
 
 # Run all examples (workspace examples + standalone examples)
 run-examples: run-workspace-examples
@@ -185,8 +215,12 @@ run-workspace-examples:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "Running workspace examples..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@for example in simple_working simple_test lifecycle_metrics node_discovery mobility_facet_demo; do \
-		if $(CARGO) build --example $$example 2>&1 | grep -q "Finished"; then \
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+	fi; \
+	for example in simple_working simple_test lifecycle_metrics node_discovery mobility_facet_demo; do \
+		if $(CARGO) build --example $$example --jobs $$CARGO_JOBS 2>&1 | grep -q "Finished"; then \
 			echo "\n=== Running workspace example: $$example ==="; \
 			$(CARGO) run --example $$example || echo "⚠️  Example $$example failed"; \
 		else \
@@ -218,16 +252,25 @@ run-standalone-examples:
 	@echo "  - wasm_showcase"
 
 # Run specific standalone example
+# Uses shared target directory for faster builds
 run-example-%:
 	@echo "Running standalone example: $*"
 	@if [ -d "examples/$*" ] && [ -f "examples/$*/Cargo.toml" ]; then \
+		PROJECT_ROOT=$$(pwd); \
+		CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+		if [ "$$CARGO_JOBS" = "0" ]; then \
+			CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+		fi; \
 		cd examples/$*; \
 		if [ -f "Cargo.toml" ] && grep -q "\[\[bin\]\]" Cargo.toml; then \
 			echo "⚠️  Example has multiple binaries, running default or first binary..."; \
-			$(CARGO) run --bin $$($(CARGO) read-manifest 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4) || \
-			$(CARGO) run || echo "⚠️  Example $* failed - try: cd examples/$* && cargo run --bin <name>"; \
+			CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
+			$(CARGO) run --jobs $$CARGO_JOBS --bin $$($(CARGO) read-manifest 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4) || \
+			CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
+			$(CARGO) run --jobs $$CARGO_JOBS || echo "⚠️  Example $* failed - try: cd examples/$* && cargo run --bin <name>"; \
 		else \
-			$(CARGO) run || echo "⚠️  Example $* failed"; \
+			CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
+			$(CARGO) run --jobs $$CARGO_JOBS || echo "⚠️  Example $* failed"; \
 		fi; \
 	else \
 		echo "❌ Example $* not found or not a standalone example"; \
@@ -238,11 +281,21 @@ run-example-%:
 	fi
 
 # Run all standalone examples (one by one)
+# Uses shared target directory for faster builds
 run-all-standalone-examples:
-	@echo "Running all standalone examples..."
+	@echo "Running all standalone examples (using shared target directory)..."
+	@echo "Target directory: $$(pwd)/target (shared across all examples)"
 	@echo "⚠️  Note: Some examples may require additional setup (databases, etc.)"
 	@echo ""
-	@for example in byzantine heat_diffusion heat_diffusion_wasm wasm-calculator order-processing finance-risk genomics-pipeline genomic-workflow-pipeline matrix_multiply matrix_vector_mpi config-updates wasm_showcase; do \
+	@PROJECT_ROOT=$$(pwd); \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+	fi; \
+	echo "Pre-building workspace dependencies for faster example builds..."; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
+	echo ""; \
+	for example in byzantine heat_diffusion heat_diffusion_wasm wasm-calculator order-processing finance-risk genomics-pipeline genomic-workflow-pipeline matrix_multiply matrix_vector_mpi config-updates wasm_showcase; do \
 		if [ -d "examples/$$example" ] && [ -f "examples/$$example/Cargo.toml" ]; then \
 			echo "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
 			echo "Running: $$example"; \
@@ -251,71 +304,146 @@ run-all-standalone-examples:
 			if [ -f "Cargo.toml" ] && grep -q "\[\[bin\]\]" Cargo.toml; then \
 				bin_name=$$($(CARGO) read-manifest 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4); \
 				if [ -n "$$bin_name" ]; then \
-					$(CARGO) run --bin $$bin_name || echo "⚠️  Example $$example failed"; \
+					CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
+					$(CARGO) run --jobs $$CARGO_JOBS --bin $$bin_name || echo "⚠️  Example $$example failed"; \
 				else \
-					$(CARGO) run || echo "⚠️  Example $$example failed - try: cd examples/$$example && cargo run --bin <name>"; \
+					CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
+					$(CARGO) run --jobs $$CARGO_JOBS || echo "⚠️  Example $$example failed - try: cd examples/$$example && cargo run --bin <name>"; \
 				fi; \
 			else \
-				$(CARGO) run || echo "⚠️  Example $$example failed"; \
+				CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
+				$(CARGO) run --jobs $$CARGO_JOBS || echo "⚠️  Example $$example failed"; \
 			fi; \
 			cd ../..; \
 		fi; \
 	done
 
 # Run all unit tests (excludes integration tests)
-# Use --test-threads=1 for tuplespace tests to avoid env var race conditions
+# Optimized for parallel execution - uses limited CPU cores (default: 4, override with CARGO_BUILD_JOBS env var)
+# Only tuplespace tests need --test-threads=1, so we run them separately
+# Usage: make test                    # Uses 4 cores (default)
+#        CARGO_BUILD_JOBS=8 make test # Uses 8 cores
+#        CARGO_BUILD_JOBS=0 make test # Uses all available cores
 test:
 	@echo "Running unit tests (excluding integration tests)..."
-	@$(CARGO) test --lib --all-features --workspace -- --test-threads=1
-	@echo "All unit tests passed!"
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+	fi; \
+	echo "Configuration: Using $$CARGO_JOBS CPU cores for building (override with CARGO_BUILD_JOBS env var)"; \
+	echo "Building workspace first for faster test execution (incremental build enabled)..."; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
+	echo ""; \
+	echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..."; \
+	$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS -- --test-threads=1 || exit 1; \
+	echo ""; \
+	echo "Running all other tests with parallel execution..."; \
+	$(CARGO) test --lib --all-features --workspace --jobs $$CARGO_JOBS \
+		-p plexspaces -p plexspaces-proto -p plexspaces-lattice -p plexspaces-mailbox \
+		-p plexspaces-persistence -p plexspaces-journaling -p plexspaces-keyvalue \
+		-p plexspaces-facet -p plexspaces-core -p plexspaces-behavior -p plexspaces-actor \
+		-p plexspaces-supervisor -p plexspaces-node -p plexspaces-wasm-runtime \
+		-p plexspaces-firecracker -p plexspaces-workflow -p plexspaces-process-groups \
+		-p plexspaces-channel -p plexspaces-object-registry -p plexspaces-elastic-pool \
+		-p plexspaces-circuit-breaker -p plexspaces-locks -p plexspaces-scheduler \
+		-p plexspaces-actor-service -p plexspaces-grpc-middleware -p plexspaces-blob \
+		-p plexspaces-tuplespace-service || exit 1; \
+	echo ""; \
+	echo "All unit tests passed!"
 
 # Run all example tests (examples with tests subdirectories)
 # Examples are standalone, so we test them from their directories
 # Use shared target directory to avoid rebuilding common dependencies
+# Runs with limited concurrency (default: 2 processes) and fails fast on errors
+# Usage: make test-examples                              # Uses 2 concurrent examples, 4 build cores (default)
+#        TEST_EXAMPLES_CONCURRENT=3 make test-examples   # Uses 3 concurrent examples
+#        CARGO_BUILD_JOBS=8 make test-examples           # Uses 8 cores for building
 test-examples:
 	@echo "Running all example tests (using shared target directory)..."
 	@echo "Target directory: $$(pwd)/target (shared across all examples)"
-	@echo ""
-	@echo "Testing advanced/byzantine..."
-	@cd examples/advanced/byzantine && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  advanced/byzantine tests failed or skipped"
-	@echo ""
-	@echo "Testing advanced/nbody..."
-	@cd examples/advanced/nbody && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  advanced/nbody tests failed or skipped"
-	@echo ""
-	@echo "Testing domains/finance-risk..."
-	@cd examples/domains/finance-risk && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  domains/finance-risk tests failed or skipped"
-	@echo ""
-	@echo "Testing domains/genomic-workflow-pipeline..."
-	@cd examples/domains/genomic-workflow-pipeline && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  domains/genomic-workflow-pipeline tests failed or skipped"
-	@echo ""
-	@echo "Testing domains/genomics-pipeline..."
-	@cd examples/domains/genomics-pipeline && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  domains/genomics-pipeline tests failed or skipped"
-	@echo ""
-	@echo "Testing domains/order-processing..."
-	@cd examples/domains/order-processing && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  domains/order-processing tests failed or skipped"
-	@echo ""
-	@echo "Testing intermediate/heat_diffusion..."
-	@cd examples/intermediate/heat_diffusion && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  intermediate/heat_diffusion tests failed or skipped"
-	@echo ""
-	@echo "Testing intermediate/matrix_multiply..."
-	@cd examples/intermediate/matrix_multiply && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  intermediate/matrix_multiply tests failed or skipped"
-	@echo ""
-	@echo "Testing intermediate/matrix_vector_mpi..."
-	@cd examples/intermediate/matrix_vector_mpi && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  intermediate/matrix_vector_mpi tests failed or skipped"
-	@echo ""
-	@echo "Testing simple/durable_actor_example..."
-	@cd examples/simple/durable_actor_example && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  simple/durable_actor_example tests failed or skipped"
-	@echo ""
-	@echo "Testing simple/firecracker_multi_tenant..."
-	@cd examples/simple/firecracker_multi_tenant && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  simple/firecracker_multi_tenant tests failed or skipped"
-	@echo ""
-	@echo "Testing simple/faas_actor..."
-	@cd examples/simple/faas_actor && CARGO_TARGET_DIR=../../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  simple/faas_actor tests failed or skipped"
-	@echo ""
-	@echo "Testing wasm-calculator..."
-	@cd examples/wasm-calculator && CARGO_TARGET_DIR=../../target $(CARGO) test --all-features --no-fail-fast || echo "⚠️  wasm-calculator tests failed or skipped"
-	@echo ""
-	@echo "All example tests completed!"
+	@MAX_CONCURRENT=$${TEST_EXAMPLES_CONCURRENT:-2}; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+	fi; \
+	echo "Concurrency: $$MAX_CONCURRENT processes (override with TEST_EXAMPLES_CONCURRENT env var)"; \
+	echo "Build jobs: $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
+	echo "Fail-fast: enabled (stops on first error)"; \
+	echo ""; \
+	echo "Pre-building workspace dependencies for faster example builds (incremental build enabled)..."; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
+	echo ""; \
+	PROJECT_ROOT=$$(pwd); \
+	EXAMPLES="advanced/byzantine advanced/nbody domains/finance-risk domains/genomic-workflow-pipeline domains/genomics-pipeline domains/order-processing intermediate/heat_diffusion intermediate/matrix_multiply intermediate/matrix_vector_mpi simple/durable_actor_example simple/firecracker_multi_tenant simple/faas_actor wasm-calculator"; \
+	FAILED=0; \
+	PIDS=(); \
+	EXAMPLE_NAMES=(); \
+	EXAMPLE_LOG_NAMES=(); \
+	for example in $$EXAMPLES; do \
+		if [ -d "examples/$$example" ] && [ -f "examples/$$example/Cargo.toml" ]; then \
+			if [ $$FAILED -eq 1 ]; then break; fi; \
+			while [ $${#PIDS[@]} -ge $$MAX_CONCURRENT ] && [ $$FAILED -eq 0 ]; do \
+				for i in "$${!PIDS[@]}"; do \
+					if ! kill -0 "$${PIDS[$$i]}" 2>/dev/null; then \
+						wait "$${PIDS[$$i]}" || { \
+							FAILED=1; \
+							FAILED_EXAMPLE="$${EXAMPLE_NAMES[$$i]}"; \
+							FAILED_LOG="$${EXAMPLE_LOG_NAMES[$$i]}"; \
+							echo "✗ $$FAILED_EXAMPLE failed!"; \
+							if [ -f "/tmp/test_$$FAILED_LOG.log" ]; then \
+								cat "/tmp/test_$$FAILED_LOG.log"; \
+							fi; \
+						}; \
+						unset PIDS[$$i]; \
+						unset EXAMPLE_NAMES[$$i]; \
+						unset EXAMPLE_LOG_NAMES[$$i]; \
+					fi; \
+				done; \
+				PIDS=("$${PIDS[@]}"); \
+				EXAMPLE_NAMES=("$${EXAMPLE_NAMES[@]}"); \
+				EXAMPLE_LOG_NAMES=("$${EXAMPLE_LOG_NAMES[@]}"); \
+				[ $$FAILED -eq 1 ] && break; \
+				sleep 0.1; \
+			done; \
+			[ $$FAILED -eq 1 ] && break; \
+			echo "Testing $$example..."; \
+			EXAMPLE_LOG_NAME=$$(echo "$$example" | tr '/' '-'); \
+			LOG_FILE="/tmp/test_$$EXAMPLE_LOG_NAME.log"; \
+			(cd "examples/$$example" && \
+				CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
+				$(CARGO) test --all-features --jobs $$CARGO_JOBS > "$$LOG_FILE" 2>&1 && \
+				echo "✓ $$example passed" || \
+				(echo "✗ $$example failed!"; [ -f "$$LOG_FILE" ] && cat "$$LOG_FILE" || echo "Log file not found: $$LOG_FILE"; exit 1)) & \
+			PIDS+=($$!); \
+			EXAMPLE_NAMES+=("$$example"); \
+			EXAMPLE_LOG_NAMES+=("$$EXAMPLE_LOG_NAME"); \
+		fi; \
+	done; \
+	if [ $$FAILED -eq 0 ]; then \
+		for i in "$${!PIDS[@]}"; do \
+			wait "$${PIDS[$$i]}" || { \
+				FAILED=1; \
+				FAILED_EXAMPLE="$${EXAMPLE_NAMES[$$i]}"; \
+				FAILED_LOG="$${EXAMPLE_LOG_NAMES[$$i]}"; \
+				echo "✗ $$FAILED_EXAMPLE failed!"; \
+				if [ -n "$$FAILED_LOG" ] && [ -f "/tmp/test_$$FAILED_LOG.log" ]; then \
+					cat "/tmp/test_$$FAILED_LOG.log"; \
+				else \
+					echo "Log file not available for $$FAILED_EXAMPLE"; \
+				fi; \
+				break; \
+			}; \
+		done; \
+	fi; \
+	if [ $$FAILED -eq 1 ]; then \
+		for pid in "$${PIDS[@]}"; do kill $$pid 2>/dev/null || true; done; \
+		echo ""; \
+		echo "❌ Example tests failed! Stopping early (fail-fast enabled)."; \
+		exit 1; \
+	else \
+		echo ""; \
+		echo "✅ All example tests passed!"; \
+	fi
 
 # Run tests with coverage (using cargo-llvm-cov - supports Rust 2024)
 # Excludes generated code (proto files, build artifacts)

@@ -30,11 +30,11 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::task::JoinHandle;
-use plexspaces_core::{ActorId, Service, ServiceLocator, ActorRegistry, MessageSender, VirtualActorManager, FacetManager, ActorContext};
+use plexspaces_core::{ActorId, Service, ServiceLocator, ActorRegistry, MessageSender, VirtualActorManager, FacetManager, ActorContext, RequestContext};
 use plexspaces_proto::ActorLifecycleEvent;
 use prost_types::Timestamp;
 use crate::{ActorFactory, Actor, ActorRef};
-use crate::{RegularActorWrapper, VirtualActorWrapper};
+use crate::{VirtualActorWrapper};
 
 /// ActorFactory implementation
 ///
@@ -245,8 +245,9 @@ impl ActorFactory for ActorFactoryImpl {
             // Remove from actor_instances before spawning (to allow unwrapping)
             manager.remove_actor_instance(&actor_id).await;
             
-            // Spawn the actor
-            let _actor_ref = self.spawn_built_actor(actor_arc, None, None, None).await?;
+            // Spawn the actor (use internal context for virtual actor activation)
+            let internal_ctx = RequestContext::internal();
+            let _actor_ref = self.spawn_built_actor(&internal_ctx, actor_arc, None).await?;
             
             // Process pending messages
             let pending_messages = manager.take_pending_messages(&actor_id).await;
@@ -261,6 +262,7 @@ impl ActorFactory for ActorFactoryImpl {
     
     async fn spawn_actor(
         &self,
+        ctx: &RequestContext,
         actor_id: &ActorId,
         actor_type: &str,
         initial_state: Vec<u8>,
@@ -268,62 +270,98 @@ impl ActorFactory for ActorFactoryImpl {
         labels: HashMap<String, String>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
         use crate::ActorBuilder;
-        use plexspaces_core::{Actor as ActorTrait, BehaviorType};
+        use plexspaces_core::{Actor as ActorTrait, BehaviorType, behavior_factory::BehaviorFactory};
         use async_trait::async_trait;
         
-        // Create a simple default behavior (same logic as create_spawn_callback)
-        struct SimpleBehavior {
-            actor_type: String,
-        }
-        #[async_trait]
-        impl ActorTrait for SimpleBehavior {
-            async fn handle_message(
-                &mut self,
-                _ctx: &plexspaces_core::ActorContext,
-                _msg: plexspaces_mailbox::Message,
-            ) -> Result<(), plexspaces_core::BehaviorError> {
-                Ok(())
+        // Try to get BehaviorFactory from ServiceLocator
+        // Note: BehaviorFactory is a trait, so we need to get it as Arc<dyn BehaviorFactory>
+        // But ServiceLocator stores by TypeId, so we need to check if BehaviorRegistry is registered
+        let behavior: Box<dyn ActorTrait> = {
+            // Try to get BehaviorRegistry (which implements BehaviorFactory) from ServiceLocator
+            if let Some(behavior_registry) = self.service_locator.get_service::<plexspaces_core::behavior_factory::BehaviorRegistry>().await {
+                // BehaviorFactory is registered - try to create behavior from it
+                match behavior_registry.create(actor_type, &initial_state).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        // BehaviorFactory couldn't create behavior - fall back to SimpleBehavior
+                        tracing::debug!(
+                            actor_type = %actor_type,
+                            error = %e,
+                            "BehaviorFactory failed to create behavior, falling back to SimpleBehavior"
+                        );
+                        // Fall through to SimpleBehavior creation below
+                        struct SimpleBehavior {
+                            actor_type: String,
+                        }
+                        #[async_trait]
+                        impl ActorTrait for SimpleBehavior {
+                            async fn handle_message(
+                                &mut self,
+                                _ctx: &plexspaces_core::ActorContext,
+                                _msg: plexspaces_mailbox::Message,
+                            ) -> Result<(), plexspaces_core::BehaviorError> {
+                                Ok(())
+                            }
+                            fn behavior_type(&self) -> BehaviorType {
+                                BehaviorType::Custom(self.actor_type.clone())
+                            }
+                        }
+                        Box::new(SimpleBehavior { 
+                            actor_type: actor_type.to_string() 
+                        })
+                    }
+                }
+            } else {
+                // No BehaviorFactory registered - use SimpleBehavior
+                struct SimpleBehavior {
+                    actor_type: String,
+                }
+                #[async_trait]
+                impl ActorTrait for SimpleBehavior {
+                    async fn handle_message(
+                        &mut self,
+                        _ctx: &plexspaces_core::ActorContext,
+                        _msg: plexspaces_mailbox::Message,
+                    ) -> Result<(), plexspaces_core::BehaviorError> {
+                        Ok(())
+                    }
+                    fn behavior_type(&self) -> BehaviorType {
+                        BehaviorType::Custom(self.actor_type.clone())
+                    }
+                }
+                Box::new(SimpleBehavior { 
+                    actor_type: actor_type.to_string() 
+                })
             }
-            fn behavior_type(&self) -> BehaviorType {
-                BehaviorType::Custom(self.actor_type.clone())
-            }
-        }
-        let behavior: Box<dyn ActorTrait> = Box::new(SimpleBehavior { 
-            actor_type: actor_type.to_string() 
-        });
+        };
+
+        // Extract tenant_id and namespace from context (required, no defaults)
+        let tenant_id = ctx.tenant_id().to_string();
+        let namespace = ctx.namespace().to_string();
 
         // Create Actor using ActorBuilder
         let mut builder = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone());
+            .with_id(actor_id.clone())
+            .with_namespace(namespace); // Use namespace from RequestContext
         
         // Apply config if provided
         if let Some(cfg) = config {
             builder = builder.with_config(Some(cfg));
         }
-        
-        // Extract namespace from labels if present
-        if let Some(namespace) = labels.get("namespace") {
-            builder = builder.with_namespace(namespace.clone());
-        }
 
         // Build actor
-        let actor = builder.build().await;
-        
-        // Extract tenant_id from labels or use "default"
-        let tenant_id = labels.get("tenant_id")
-            .cloned()
-            .unwrap_or_else(|| "default".to_string());
+        let actor = builder.build().await
+            .map_err(|e| format!("Failed to build actor: {}", e))?;
         
         // Spawn the built actor with type information
-        self.spawn_built_actor(Arc::new(actor), Some(actor_type.to_string()), Some(tenant_id), Some("default".to_string())).await
+        self.spawn_built_actor(ctx, Arc::new(actor), Some(actor_type.to_string())).await
     }
     
     async fn spawn_built_actor(
         &self,
+        ctx: &RequestContext,
         actor: Arc<Actor>,
         actor_type: Option<String>,
-        tenant_id: Option<String>,
-        namespace: Option<String>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
         // Unwrap the Arc to get the Actor
         let mut actor = Arc::try_unwrap(actor)
@@ -341,23 +379,25 @@ impl ActorFactory for ActorFactoryImpl {
         let local_node_id = registry.local_node_id();
         let mut actor_id = actor.id().clone();
         actor_id = self.normalize_actor_id(&actor_id, local_node_id);
-        let actor_namespace = namespace.as_ref().map(|s| s.clone()).unwrap_or_else(|| actor.context().namespace.clone());
-        
+        let actor_namespace = ctx.namespace().to_string();
+        let actor_tenant_id = ctx.tenant_id().to_string();
+
         // Extract actor config from context (if available)
         let actor_config = actor.context().config.clone();
-        
+
         // Create ActorContext (actor_id is no longer stored in context)
         let actor_context = ActorContext::new(
             local_node_id.to_string(),
+            actor_tenant_id.clone(),
             actor_namespace.clone(),
             self.service_locator.clone(),
             actor_config.clone(),
         );
-        
+
         // Update actor with full context
         actor = actor.set_context(Arc::new(actor_context));
-        
-        // Update metrics
+
+        // Update metrics before moving values into RequestContext
         metrics::gauge!("plexspaces_node_active_actors",
             "node_id" => local_node_id.to_string()
         ).increment(1.0);
@@ -368,6 +408,9 @@ impl ActorFactory for ActorFactoryImpl {
         ).increment(1);
         
         tracing::info!(actor_id = %actor_id, node_id = %local_node_id, namespace = %actor_namespace, "Actor spawned");
+
+        // Create RequestContext for registry operations (moves values)
+        let ctx = RequestContext::new_without_auth(actor_tenant_id, actor_namespace);
         
         // Emit Created event
         registry.publish_lifecycle_event(ActorLifecycleEvent {
@@ -431,12 +474,14 @@ impl ActorFactory for ActorFactoryImpl {
             });
             let virtual_facet_for_reg = VirtualActorFacet::new(facet_config);
             
-            // Register as virtual actor
-            let facet_box = Arc::new(tokio::sync::RwLock::new(
-                Box::new(virtual_facet_for_reg) as Box<dyn std::any::Any + Send + Sync>
-            ));
-            manager.register(actor_id.clone(), facet_box).await
-                .map_err(|e| format!("Failed to register virtual actor: {}", e))?;
+            // Register as virtual actor (only if not already registered)
+            if !manager.is_virtual(&actor_id).await {
+                let facet_box = Arc::new(tokio::sync::RwLock::new(
+                    Box::new(virtual_facet_for_reg) as Box<dyn std::any::Any + Send + Sync>
+                ));
+                manager.register(actor_id.clone(), facet_box).await
+                    .map_err(|e| format!("Failed to register virtual actor: {}", e))?;
+            }
             
             // Get mailbox (for creating ActorRef)
             let mailbox = actor.mailbox().clone();
@@ -446,8 +491,7 @@ impl ActorFactory for ActorFactoryImpl {
                 actor_id.clone(),
                 self.service_locator.clone(),
             ));
-            let effective_namespace = namespace.as_ref().map(|s| s.clone()).unwrap_or_else(|| actor_namespace.clone());
-            registry.register_actor(actor_id.clone(), virtual_wrapper, actor_type.clone(), tenant_id.clone(), Some(effective_namespace)).await;
+            registry.register_actor(&ctx, actor_id.clone(), virtual_wrapper, actor_type.clone()).await;
             
             // Create ActorRef
             let actor_ref = ActorRef::local(
@@ -501,11 +545,13 @@ impl ActorFactory for ActorFactoryImpl {
                 // Note: Facets NOT stored here - will be stored after activation
             }
             
-            return Ok(Arc::new(RegularActorWrapper::new(
+            // Create ActorRef for lazy virtual actor (implements MessageSender)
+            let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
                 actor_id.clone(),
                 mailbox.clone(),
                 self.service_locator.clone(),
-            )));
+            ));
+            return Ok(actor_ref);
         }
         
         // Normal actor - start immediately
@@ -516,14 +562,14 @@ impl ActorFactory for ActorFactoryImpl {
         // Get mailbox (for creating ActorRef)
         let mailbox = actor.mailbox().clone();
         
-        // Register RegularActorWrapper (MessageSender - mailbox is internal)
-        let regular_wrapper = Arc::new(RegularActorWrapper::new(
+        // Create ActorRef (implements MessageSender)
+        let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
             actor_id.clone(),
             mailbox.clone(),
             self.service_locator.clone(),
         ));
-        let effective_namespace = namespace.as_ref().map(|s| s.clone()).unwrap_or_else(|| actor_namespace.clone());
-        registry.register_actor(actor_id.clone(), regular_wrapper, actor_type, tenant_id, Some(effective_namespace)).await;
+        // Register ActorRef in registry (as MessageSender trait object)
+        registry.register_actor(&ctx, actor_id.clone(), actor_ref.clone(), actor_type).await;
         
         // Start actor
         let join_handle = actor.start().await
@@ -546,12 +592,12 @@ impl ActorFactory for ActorFactoryImpl {
             ),
         }).await;
         
-        // Create ActorRef
-        let actor_ref = ActorRef::local(
+        // Create ActorRef (implements MessageSender)
+        let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
             actor_id.clone(),
             mailbox.clone(),
             self.service_locator.clone(),
-        );
+        ));
         
         // Setup facets (skipped - requires journaling crate)
         // TODO: Call FacetSetupService if available
@@ -568,11 +614,8 @@ impl ActorFactory for ActorFactoryImpl {
         // Watch termination
         self.watch_actor_termination(actor_id.clone(), join_handle).await;
         
-        Ok(Arc::new(RegularActorWrapper::new(
-            actor_id.clone(),
-            mailbox.clone(),
-            self.service_locator.clone(),
-        )))
+        // Return ActorRef (implements MessageSender)
+        Ok(actor_ref)
     }
     
     async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -583,7 +626,9 @@ impl ActorFactory for ActorFactoryImpl {
         let local_node_id = registry.local_node_id();
         
         // Check if actor exists and is local
-        let routing = registry.lookup_routing(actor_id).await
+        // Use internal context for lookup (actor routing is system-level)
+        let internal_ctx = RequestContext::internal();
+        let routing = registry.lookup_routing(&internal_ctx, actor_id).await
             .map_err(|e| format!("Failed to lookup actor routing: {}", e))?;
         
         if routing.is_none() || !routing.as_ref().unwrap().is_local {

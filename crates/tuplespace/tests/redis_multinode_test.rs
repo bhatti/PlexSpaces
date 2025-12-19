@@ -68,7 +68,7 @@ mod redis_multinode_tests {
         let storage = storage::create_storage(config).await
             .expect("Failed to create Redis storage");
 
-        Arc::new(TupleSpace::with_storage(storage))
+        Arc::new(TupleSpace::with_storage_and_tenant(storage, "test-tenant", "test-namespace"))
     }
 
     /// Helper: Check if Redis is available

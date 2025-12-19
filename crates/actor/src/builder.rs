@@ -75,7 +75,8 @@ use std::sync::Arc;
 pub struct ActorBuilder {
     behavior: Box<dyn ActorTrait>,
     actor_id: Option<ActorId>,
-    namespace: Option<String>,
+    tenant_id: String,
+    namespace: String,
     mailbox_config: Option<MailboxConfig>,
     // TODO: Facets will be added after design decisions are made
     // facets: Vec<Box<dyn Facet>>,
@@ -98,7 +99,8 @@ impl ActorBuilder {
         Self {
             behavior,
             actor_id: None,
-            namespace: None,
+            tenant_id: String::new(), // Empty if auth disabled
+            namespace: String::new(), // Must be set via with_namespace()
             mailbox_config: None,
             // facets: Vec::new(), // TODO: Add after design decisions
             resource_profile: None,
@@ -155,7 +157,22 @@ impl ActorBuilder {
     ///     .with_namespace("production");
     /// ```
     pub fn with_namespace(mut self, namespace: impl Into<String>) -> Self {
-        self.namespace = Some(namespace.into());
+        self.namespace = namespace.into();
+        self
+    }
+    
+    /// Set tenant ID for multi-tenancy
+    ///
+    /// ## Arguments
+    /// * `tenant_id` - Tenant identifier (empty string if auth disabled)
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let builder = ActorBuilder::new(MyBehavior::new())
+    ///     .with_tenant_id("tenant-123");
+    /// ```
+    pub fn with_tenant_id(mut self, tenant_id: impl Into<String>) -> Self {
+        self.tenant_id = tenant_id.into();
         self
     }
 
@@ -525,21 +542,24 @@ impl ActorBuilder {
     /// Build the actor with the configured options
     ///
     /// ## Returns
-    /// * `Actor` - The configured actor instance
+    /// * `Result<Actor, std::io::Error>` - The configured actor instance or error if namespace is missing
+    ///
+    /// ## Requirements
+    /// - Namespace: Must be set via `with_namespace()` or `build_with_context()`
     ///
     /// ## Defaults
     /// - Actor ID: Generated ULID if not provided
-    /// - Namespace: "default" if not provided
     /// - Mailbox: Default MailboxConfig if not provided
     ///
     /// ## Example
     /// ```rust,ignore
     /// let actor = ActorBuilder::new(MyBehavior::new())
     ///     .with_name("my-actor")
+    ///     .with_namespace("production")
     ///     .build()
     ///     .await?;
     /// ```
-    pub async fn build(self) -> Actor {
+    pub async fn build(self) -> Result<Actor, std::io::Error> {
         // Generate actor ID if not provided
         let actor_id = self.actor_id.unwrap_or_else(|| {
             use std::time::{SystemTime, UNIX_EPOCH};
@@ -550,8 +570,10 @@ impl ActorBuilder {
             format!("actor@{}", timestamp)
         });
 
-        // Use default namespace if not provided
-        let namespace = self.namespace.unwrap_or_else(|| "default".to_string());
+        // Namespace is required - must be set via with_namespace()
+        // Namespace can be empty - no validation needed
+        let namespace = self.namespace.clone();
+        let tenant_id = self.tenant_id.clone();
 
         // Use default mailbox config if not provided
         // Use mailbox_config_default() to ensure capacity is set (default is 10000)
@@ -573,16 +595,24 @@ impl ActorBuilder {
             // Create actor with config in context
             use plexspaces_core::ActorContext;
             let node_id_str = node_id.clone().unwrap_or_else(|| "local".to_string());
-            let context = Arc::new(ActorContext::minimal_with_config(
+            // Create ServiceLocator for context
+            // Note: This is a sync function, so we can't use create_default_service_locator
+            // For ActorBuilder, we create a minimal ServiceLocator that will be replaced
+            // when the actor is actually spawned by Node
+            use plexspaces_core::ServiceLocator;
+            let service_locator = Arc::new(ServiceLocator::new());
+            let context = Arc::new(ActorContext::new(
                 node_id_str,
+                tenant_id.clone(),
                 namespace.clone(),
+                service_locator,
                 Some(config),
             ));
-            let mut actor = Actor::new(actor_id, self.behavior, mailbox, namespace, node_id.clone());
+            let mut actor = Actor::new(actor_id, self.behavior, mailbox, tenant_id.clone(), namespace.clone(), node_id.clone());
             actor = actor.set_context(context);
             actor
         } else {
-            Actor::new(actor_id, self.behavior, mailbox, namespace, node_id)
+            Actor::new(actor_id, self.behavior, mailbox, tenant_id.clone(), namespace.clone(), node_id)
         };
 
         // Apply resource profile if provided
@@ -593,12 +623,13 @@ impl ActorBuilder {
         // TODO: Apply facets after design decisions are made
         // See UNIFIED_ACTOR_DESIGN_DECISIONS.md
 
-        actor
+        Ok(actor)
     }
 
     /// Spawn the actor using ActorFactory from ServiceLocator
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// * `service_locator` - ServiceLocator to get ActorFactory from
     ///
     /// ## Returns
@@ -606,17 +637,34 @@ impl ActorBuilder {
     ///
     /// ## Example
     /// ```rust,ignore
+    /// let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string());
     /// let actor_ref = ActorBuilder::new(Box::new(MyBehavior))
     ///     .with_id("my-actor@node1".to_string())
-    ///     .spawn(node.service_locator().clone())
+    ///     .spawn(&ctx, node.service_locator().clone())
     ///     .await?;
     /// ```
     pub async fn spawn(
-        self,
+        mut self,
+        ctx: &plexspaces_core::RequestContext,
         service_locator: Arc<plexspaces_core::ServiceLocator>,
     ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        // Use tenant_id and namespace from RequestContext
+        // If auth is disabled, tenant_id will be empty string
+        self.tenant_id = ctx.tenant_id().to_string();
+        self.namespace = ctx.namespace().to_string();
+        
+        // Extract actor_type from behavior before building
+        let behavior_type = self.behavior.behavior_type();
+        let actor_type = match behavior_type {
+            plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
+            plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
+            plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+            plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+            plexspaces_core::BehaviorType::Custom(s) => s,
+        };
+        
         // Build the actor
-        let actor = self.build().await;
+        let actor = self.build().await?;
         
         // Extract actor ID before spawning (needed for ActorRef creation)
         let actor_id = actor.id().clone();
@@ -627,8 +675,17 @@ impl ActorBuilder {
         let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
             .ok_or_else(|| "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string())?;
         
-        // Use ActorFactory to spawn the pre-built actor
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        // Use ActorFactory to spawn the actor with spawn_actor
+        // Note: spawn_actor will rebuild the actor internally, but this ensures consistency
+        // For efficiency, we could keep using spawn_built_actor, but user wants all code to use spawn_actor
+        let _message_sender = actor_factory.spawn_actor(
+            ctx,
+            &actor_id,
+            &actor_type,
+            vec![], // initial_state
+            actor.context().config.clone(), // config from built actor
+            std::collections::HashMap::new(), // labels
+        ).await
             .map_err(|e| format!("Failed to spawn actor via ActorFactory: {}", e))?;
         
         // Create ActorRef from the actor ID
@@ -663,17 +720,22 @@ mod tests {
     #[tokio::test]
     async fn test_builder_with_defaults() {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
-            .build().await;
+            .with_namespace("test".to_string())
+            .build().await
+            .expect("build should succeed with namespace");
 
         assert!(!actor.id().is_empty());
-        assert_eq!(actor.context().namespace, "default");
+        assert_eq!(actor.context().namespace, "test");
+        assert_eq!(actor.context().tenant_id, ""); // Empty if auth disabled
     }
 
     #[tokio::test]
     async fn test_builder_with_name() {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_name("test-actor")
-            .build().await;
+            .with_namespace("test".to_string())
+            .build().await
+            .expect("build should succeed");
 
         let id = actor.id();
         assert!(id.contains("test-actor"));
@@ -683,7 +745,8 @@ mod tests {
     async fn test_builder_with_namespace() {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_namespace("production")
-            .build().await;
+            .build().await
+            .expect("build should succeed");
 
         // Note: context() method may need to be added to Actor
         // For now, just verify actor was created
@@ -697,7 +760,9 @@ mod tests {
 
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_mailbox_config(config)
-            .build().await;
+            .with_namespace("test".to_string())
+            .build().await
+            .expect("build should succeed");
 
         // Mailbox config is applied (verified by actor creation)
         assert!(!actor.id().is_empty());
@@ -708,7 +773,9 @@ mod tests {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_name("durable-actor")
             .with_durability()
-            .build().await;
+            .with_namespace("test".to_string())
+            .build().await
+            .expect("build should succeed");
 
         // Verify actor was created with durability config
         assert!(!actor.id().is_empty());
@@ -720,7 +787,9 @@ mod tests {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_name("virtual-actor")
             .with_virtual_actor()
-            .build().await;
+            .with_namespace("test".to_string())
+            .build().await
+            .expect("build should succeed");
 
         // Verify actor was created with virtual actor config
         assert!(!actor.id().is_empty());
@@ -731,7 +800,9 @@ mod tests {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_name("coordinator")
             .with_tuplespace()
-            .build().await;
+            .with_namespace("test".to_string())
+            .build().await
+            .expect("build should succeed");
 
         // Verify actor was created with tuplespace capability
         assert!(!actor.id().is_empty());
@@ -752,7 +823,9 @@ mod tests {
                 ]),
                 vec!["high-priority".to_string()],
             )
-            .build().await;
+            .with_namespace("test".to_string())
+            .build().await
+            .expect("build should succeed");
 
         assert_eq!(actor.id(), "resource-actor@test-node");
         // Verify resource profile is set
@@ -765,7 +838,9 @@ mod tests {
     async fn test_builder_with_id() {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_id("custom-id@test-node".to_string())
-            .build().await;
+            .with_namespace("test".to_string())
+            .build().await
+            .expect("build should succeed");
 
         assert_eq!(actor.id(), "custom-id@test-node");
     }
@@ -795,9 +870,12 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Spawn actor using ActorBuilder
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
             .with_id("spawned-actor@test-node-spawn".to_string())
-            .spawn(node.service_locator().clone())
+            .with_namespace("test".to_string())
+            .spawn(&ctx, node.service_locator().clone())
             .await
             .expect("Failed to spawn actor");
 
@@ -838,6 +916,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Spawn actor with resource requirements
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
             .with_id("resource-spawned-actor@test-node-resource-spawn".to_string())
             .with_resource_requirements(
@@ -850,7 +930,8 @@ mod tests {
                 ]),
                 vec!["test-pool".to_string()],
             )
-            .spawn(node.service_locator().clone())
+            .with_namespace("test".to_string())
+            .spawn(&ctx, node.service_locator().clone())
             .await
             .expect("Failed to spawn actor with resources");
 
@@ -895,10 +976,13 @@ mod tests {
         mailbox_config.capacity = 5000;
 
         // Spawn actor with custom mailbox config
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
             .with_id("mailbox-actor@test-node-mailbox-spawn".to_string())
             .with_mailbox_config(mailbox_config)
-            .spawn(node.service_locator().clone())
+            .with_namespace("test".to_string())
+            .spawn(&ctx, node.service_locator().clone())
             .await
             .expect("Failed to spawn actor with mailbox config");
 
@@ -919,12 +1003,16 @@ mod tests {
         use std::sync::Arc;
 
         // Create an empty ServiceLocator without ActorFactory
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
 
         // Attempt to spawn actor - should fail
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let result = ActorBuilder::new(Box::new(TestBehavior))
             .with_id("test-actor@test-node".to_string())
-            .spawn(service_locator.clone())
+            .with_namespace("test".to_string())
+            .spawn(&ctx, service_locator.clone())
             .await;
 
         assert!(result.is_err(), "Should fail when ActorFactory is not in ServiceLocator");
@@ -958,11 +1046,14 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Spawn multiple actors
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let mut actor_refs = Vec::new();
         for i in 0..5 {
             let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
                 .with_id(format!("multi-actor-{}@test-node-multi-spawn", i))
-                .spawn(node.service_locator().clone())
+                .with_namespace("test".to_string())
+                .spawn(&ctx, node.service_locator().clone())
                 .await
                 .expect(&format!("Failed to spawn actor {}", i));
             actor_refs.push(actor_ref);

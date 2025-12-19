@@ -33,7 +33,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::{ActorId, ActorRef, ServiceLocator};
+use crate::{ActorId, ActorRef, RequestContext, ServiceLocator};
 use plexspaces_mailbox::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use futures::stream::BoxStream;
@@ -257,14 +257,18 @@ pub trait ObjectRegistry: Send + Sync {
     /// * `tenant_id` - Tenant identifier
     /// * `namespace` - Namespace
     /// * `object_type` - Type of object
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
+    /// * `object_type` - Object type
     /// * `object_id` - Object ID
     ///
     /// ## Returns
     /// Object registration if found
+    ///
+    /// ## Note
+    /// If ctx.is_admin() is true, tenant filtering is bypassed for admin operations.
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>;
@@ -440,6 +444,9 @@ pub trait ProcessGroupService: Send + Sync {
 pub struct ActorContext {
     /// Reference to the node for distribution (static, set once)
     pub node_id: String,
+    /// Tenant ID for multi-tenancy (static, set once)
+    /// Empty string if auth is disabled
+    pub tenant_id: String,
     /// Namespace for isolation (static, set once)
     pub namespace: String,
     /// Metadata (static)
@@ -471,12 +478,14 @@ impl ActorContext {
     /// - `Actor.id` field for operations outside message handling
     pub fn new(
         node_id: String,
+        tenant_id: String,
         namespace: String,
         service_locator: Arc<ServiceLocator>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
     ) -> Self {
         Self {
             node_id,
+            tenant_id,
             namespace,
             metadata: HashMap::new(),
             config,
@@ -495,41 +504,6 @@ impl ActorContext {
     /// ## Note on actor_id
     /// Actor ID parameter is deprecated and ignored. Actors should get their ID from
     /// `Envelope.target_id` or `Actor.id` field.
-    #[deprecated(note = "Actor ID is no longer stored in context. Use new() instead.")]
-    pub fn minimal(_actor_id: ActorId, node_id: String, namespace: String) -> Self {
-        Self::minimal_with_config(node_id, namespace, None)
-    }
-
-    /// Create a minimal context with optional config (for backward compatibility)
-    ///
-    /// ## Purpose
-    /// Creates a minimal context with empty ServiceLocator and optional config.
-    /// This is used by ActorBuilder to set config before Node spawns the actor.
-    ///
-    /// ## Arguments
-    /// * `node_id` - Node identifier
-    /// * `namespace` - Namespace for isolation
-    /// * `config` - Optional actor configuration
-    ///
-    /// ## Note on actor_id
-    /// Actor ID is no longer stored in context. Actors should get their ID from
-    /// `Envelope.target_id` or `Actor.id` field.
-    pub fn minimal_with_config(
-        node_id: String,
-        namespace: String,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-    ) -> Self {
-        // Create empty ServiceLocator for minimal context
-        let service_locator = Arc::new(ServiceLocator::new());
-
-        Self {
-            node_id,
-            namespace,
-            metadata: HashMap::new(),
-            config,
-            service_locator,
-        }
-    }
 
     /// Send a reply message to the sender of the original message
     ///
@@ -722,8 +696,7 @@ impl ObjectRegistry for StubObjectRegistry {
 
     async fn lookup_full(
         &self,
-        _tenant_id: &str,
-        _namespace: &str,
+        _ctx: &RequestContext,
         _object_type: plexspaces_proto::object_registry::v1::ObjectType,
         _object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {

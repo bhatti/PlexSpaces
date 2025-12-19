@@ -141,11 +141,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mailbox_config.capacity = 10000; // Large capacity
         
         use plexspaces_actor::ActorBuilder;
+        let ctx = plexspaces_core::RequestContext::internal();
         let actor_ref = ActorBuilder::new(behavior)
             .with_id(format!("{}@{}", body.id, node.id().as_str()))
             .with_mailbox_config(mailbox_config)
-            .spawn(node.service_locator().clone())
-            .await?;
+            .spawn(&ctx, node.service_locator().clone())
+            .await
+            .map_err(|e| format!("Failed to spawn actor: {}", e))?;
         
         body_refs.push((body.id.clone(), actor_ref));
     }

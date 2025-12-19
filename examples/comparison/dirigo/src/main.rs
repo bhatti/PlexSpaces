@@ -294,12 +294,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     
     // Spawn using ActorFactory
+    // Note: Since map_actor has VirtualActorFacet attached, we use spawn_built_actor
+    // Virtual actor logic checks for the facet during spawn
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let actor_id = map_actor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(map_actor), None, None, None).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(map_actor), Some("GenServer".to_string())).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let map_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
@@ -342,10 +345,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     filter_actor.attach_facet(durability_facet, 50, serde_json::json!({})).await?;
     
     // Spawn using ActorFactory
+    // Note: Since filter_actor has VirtualActorFacet attached, we use spawn_built_actor
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let filter_id = filter_actor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(filter_actor), None, None, None).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(filter_actor), Some("GenServer".to_string())).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let filter_ref = plexspaces_core::ActorRef::new(filter_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
@@ -388,10 +393,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     reduce_actor.attach_facet(durability_facet, 50, serde_json::json!({})).await?;
     
     // Spawn using ActorFactory
+    // Note: Since reduce_actor has VirtualActorFacet attached, we use spawn_built_actor
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let reduce_id = reduce_actor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(reduce_actor), None, None, None).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(reduce_actor), Some("GenServer".to_string())).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let reduce_ref = plexspaces_core::ActorRef::new(reduce_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
@@ -573,10 +580,12 @@ mod tests {
         actor.attach_facet(durability_facet, 50, serde_json::json!({})).await.unwrap();
         
         // Spawn using ActorFactory
+        // Note: Since actor has VirtualActorFacet attached, we use spawn_built_actor
         let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
             .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
         let actor_id = actor.id().clone();
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
             .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         let actor_ref = plexspaces_core::ActorRef::new(actor_id)
             .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();

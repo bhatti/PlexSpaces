@@ -87,7 +87,15 @@ let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(
 
 let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
     .ok_or_else(|| "ActorFactory not found")?;
-let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+let ctx = plexspaces_core::RequestContext::internal();
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "Counter", // actor_type
+    vec![], // initial_state
+    None, // config
+    std::collections::HashMap::new(), // labels
+).await?;
 
 let actor_ref = node.get_actor_ref(&actor_id).await?;
 let reply = actor_ref.ask(CounterRequest::Get, Duration::from_secs(5)).await?;

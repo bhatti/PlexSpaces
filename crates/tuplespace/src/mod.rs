@@ -446,17 +446,25 @@ impl TupleSpaceStats {
 
 impl Default for TupleSpace {
     fn default() -> Self {
-        Self::new()
+        // Use internal tenant/namespace for default (system operations)
+        // Note: Can't use RequestContext here due to circular dependency (core -> tuplespace)
+        Self::with_tenant_namespace("internal", "system")
     }
 }
 
 impl TupleSpace {
-    /// Create a new in-memory tuple space
-    pub fn new() -> Self {
-        Self::with_tenant_namespace("default", "default")
-    }
-
+    /// Create a new in-memory tuple space with RequestContext
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// Create a new in-memory tuple space with specific tenant and namespace
+    ///
+    /// ## Arguments
+    /// * `tenant` - Tenant identifier (required, no defaults)
+    /// * `namespace` - Namespace identifier (required, no defaults)
+    ///
+    /// ## Returns
+    /// New TupleSpace instance
     pub fn with_tenant_namespace(tenant: &str, namespace: &str) -> Self {
         let mut capabilities = HashMap::new();
         capabilities.insert("storage".to_string(), "memory".to_string());
@@ -465,6 +473,9 @@ impl TupleSpace {
         capabilities.insert("replication".to_string(), "none".to_string());
         capabilities.insert("barriers".to_string(), "enabled".to_string());
         capabilities.insert("leases".to_string(), "enabled".to_string());
+
+        let tenant_str = tenant.to_string();
+        let namespace_str = namespace.to_string();
 
         TupleSpace {
             storage: TupleSpaceBackend::InMemory {
@@ -506,11 +517,15 @@ impl TupleSpace {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_storage(storage: Box<dyn crate::storage::TupleSpaceStorage>) -> Self {
-        Self::with_storage_and_tenant(storage, "default", "default")
-    }
-
     /// Create a TupleSpace with external storage and specific tenant/namespace
+    ///
+    /// ## Arguments
+    /// * `storage` - Storage backend implementation
+    /// * `tenant` - Tenant identifier (required, no defaults)
+    /// * `namespace` - Namespace identifier (required, no defaults)
+    ///
+    /// ## Returns
+    /// New TupleSpace instance with the given storage backend
     pub fn with_storage_and_tenant(
         storage: Box<dyn crate::storage::TupleSpaceStorage>,
         tenant: &str,
@@ -1260,7 +1275,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_basic_operations() {
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         // Write a tuple
         let tuple = Tuple::new(vec![
@@ -1288,7 +1303,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pattern_matching() {
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         // Write multiple tuples
         space
@@ -1322,7 +1337,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lease_expiry() {
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         // Write tuple with short lease
         let lease = Lease::new(Duration::milliseconds(100));
@@ -1345,7 +1360,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_watch() {
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         // Set up watcher
         let pattern = Pattern::new(vec![
@@ -1374,7 +1389,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_as_coordination() {
         // Revolutionary idea from Orbit: config as coordination!
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         // Write configuration as tuples
         space
@@ -1571,7 +1586,7 @@ mod tests {
     #[tokio::test]
     async fn test_tuplespace_count() {
         // Test count operation (lines 436-437, 439-440, 442, 447)
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         // Initially empty
         let pattern_all = Pattern::new(vec![PatternField::Wildcard]);
@@ -1602,7 +1617,7 @@ mod tests {
     #[tokio::test]
     async fn test_tuplespace_exists() {
         // Test exists operation (lines 489-490, 496)
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         let pattern = Pattern::new(vec![PatternField::Exact(TupleField::String(
             "test".to_string(),
@@ -1624,7 +1639,7 @@ mod tests {
     #[tokio::test]
     async fn test_tuplespace_clear() {
         // Test clear operation (lines 517-519, 522, 524-525, 527-529, 532-535)
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         // Write some tuples
         space
@@ -1653,7 +1668,7 @@ mod tests {
     #[tokio::test]
     async fn test_tuplespace_stats() {
         // Test stats operation (lines 539, 543-545, 547, 551, 556, 558, 560-561, 564)
-        let space = TupleSpace::new();
+        let space = TupleSpace::default();
 
         // Write some tuples
         for i in 0..5 {

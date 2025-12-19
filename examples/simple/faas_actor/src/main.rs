@@ -182,12 +182,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await;
     
-    // Spawn actor with type information directly
-    let _message_sender = actor_factory_impl.spawn_built_actor(
-        Arc::new(actor),
-        Some("counter".to_string()),  // actor_type
-        Some("default".to_string()),  // tenant_id
-        Some("default".to_string()),  // namespace
+    // Spawn actor with type information using spawn_actor
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory_impl.spawn_actor(
+        &ctx,
+        &actor_id,
+        "counter",  // actor_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
     ).await.map_err(|e| format!("Failed to spawn actor: {}", e))?;
     
     info!("✅ Counter actor spawned: {}", actor_id);

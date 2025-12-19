@@ -373,7 +373,7 @@ service ChannelService {
   // Create a new channel
   rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse) {
     option (google.api.http) = {
-      post: "/v1/channels"
+      post: "/api/v1/channels"
       body: "*"
     };
   }
@@ -381,7 +381,7 @@ service ChannelService {
   // Send message to channel
   rpc Send(SendRequest) returns (SendResponse) {
     option (google.api.http) = {
-      post: "/v1/channels/{channel_id}:send"
+      post: "/api/v1/channels/{channel_id}:send"
       body: "*"
     };
   }
@@ -389,7 +389,7 @@ service ChannelService {
   // Receive message from channel
   rpc Receive(ReceiveRequest) returns (ReceiveResponse) {
     option (google.api.http) = {
-      post: "/v1/channels/{channel_id}:receive"
+      post: "/api/v1/channels/{channel_id}:receive"
       body: "*"
     };
   }
@@ -397,7 +397,7 @@ service ChannelService {
   // Subscribe to channel (streaming)
   rpc Subscribe(SubscribeRequest) returns (stream ChannelMessage) {
     option (google.api.http) = {
-      post: "/v1/channels/{channel_id}:subscribe"
+      post: "/api/v1/channels/{channel_id}:subscribe"
       body: "*"
     };
   }
@@ -405,7 +405,7 @@ service ChannelService {
   // Publish to channel (for pub/sub pattern)
   rpc Publish(PublishRequest) returns (PublishResponse) {
     option (google.api.http) = {
-      post: "/v1/channels/{channel_id}:publish"
+      post: "/api/v1/channels/{channel_id}:publish"
       body: "*"
     };
   }
@@ -413,7 +413,7 @@ service ChannelService {
   // Acknowledge message (for at-least-once delivery)
   rpc Ack(AckRequest) returns (AckResponse) {
     option (google.api.http) = {
-      post: "/v1/channels/{channel_id}/messages/{message_id}:ack"
+      post: "/api/v1/channels/{channel_id}/messages/{message_id}:ack"
       body: "*"
     };
   }
@@ -421,7 +421,7 @@ service ChannelService {
   // Negative acknowledge (requeue message)
   rpc Nack(NackRequest) returns (NackResponse) {
     option (google.api.http) = {
-      post: "/v1/channels/{channel_id}/messages/{message_id}:nack"
+      post: "/api/v1/channels/{channel_id}/messages/{message_id}:nack"
       body: "*"
     };
   }
@@ -429,14 +429,14 @@ service ChannelService {
   // Get channel statistics
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
     option (google.api.http) = {
-      get: "/v1/channels/{channel_id}/stats"
+      get: "/api/v1/channels/{channel_id}/stats"
     };
   }
 
   // Delete channel
   rpc DeleteChannel(DeleteChannelRequest) returns (DeleteChannelResponse) {
     option (google.api.http) = {
-      delete: "/v1/channels/{channel_id}"
+      delete: "/api/v1/channels/{channel_id}"
     };
   }
 }

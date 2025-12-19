@@ -15,7 +15,7 @@
 //!
 //! These tests validate that Node can route messages to remote actors via gRPC
 
-use plexspaces_actor::{ActorRef, RegularActorWrapper};
+use plexspaces_actor::ActorRef;
 use plexspaces_core::{Message, MessageSender};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{grpc_service::ActorServiceImpl, Node, NodeId, default_node_config};
@@ -59,7 +59,7 @@ async fn start_test_server(node: Arc<Node>) -> String {
 #[tokio::test]
 async fn test_node_route_local_message() {
     // Setup: Create node with local actor
-    let node = Arc::new(Node::new(NodeId::new("node1"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("node1").build());
 
     // Use larger mailbox capacity to avoid "Mailbox is full" errors
     let mut mailbox_config = MailboxConfig::default();
@@ -69,9 +69,9 @@ async fn test_node_route_local_message() {
     let actor_ref = ActorRef::local("test-actor@node1".to_string(), mailbox.clone(), service_locator.clone());
 
     // Register actor with MessageSender (mailbox is internal)
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let wrapper = Arc::new(RegularActorWrapper::new(
+    let wrapper = Arc::new(ActorRef::local(
         "test-actor@node1".to_string(),
         mailbox.clone(),
         service_locator.clone(),
@@ -96,9 +96,9 @@ async fn test_node_route_local_message() {
 #[tokio::test]
 async fn test_node_route_remote_message() {
     // Setup: Create two nodes
-    let node1 = Arc::new(Node::new(NodeId::new("node1"), default_node_config()));
+    let node1 = Arc::new(NodeBuilder::new("node1").build());
 
-    let node2 = Arc::new(Node::new(NodeId::new("node2"), default_node_config()));
+    let node2 = Arc::new(NodeBuilder::new("node2").build());
 
     // Start gRPC server for node2
     let node2_address = start_test_server(node2.clone()).await;
@@ -111,9 +111,9 @@ async fn test_node_route_remote_message() {
     let actor_ref2 = ActorRef::local("remote-actor@node2".to_string(), mailbox2.clone(), service_locator2.clone());
     
     // Register actor with MessageSender (mailbox is internal)
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let wrapper2 = Arc::new(RegularActorWrapper::new(
+    let wrapper2 = Arc::new(ActorRef::local(
         "remote-actor@node2".to_string(),
         mailbox2.clone(),
         service_locator2.clone(),
@@ -150,7 +150,7 @@ async fn test_node_route_remote_message() {
 #[tokio::test]
 async fn test_node_route_to_unregistered_remote() {
     // Setup: Create node
-    let node = Arc::new(Node::new(NodeId::new("node1"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("node1").build());
 
     // Act: Try to send to actor on unregistered remote node
     let message = Message::new(vec![7, 8, 9]);
@@ -180,9 +180,9 @@ async fn test_node_route_to_unregistered_remote() {
 #[tokio::test]
 async fn test_connection_pooling() {
     // Setup: Create two nodes
-    let node1 = Arc::new(Node::new(NodeId::new("node1"), default_node_config()));
+    let node1 = Arc::new(NodeBuilder::new("node1").build());
 
-    let node2 = Arc::new(Node::new(NodeId::new("node2"), default_node_config()));
+    let node2 = Arc::new(NodeBuilder::new("node2").build());
 
     let node2_address = start_test_server(node2.clone()).await;
 
@@ -195,9 +195,9 @@ async fn test_connection_pooling() {
     
     // Register actor's mailbox in ActorRegistry first (required for route_message)
     // Register actor with MessageSender (mailbox is internal)
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let wrapper_pooled = Arc::new(RegularActorWrapper::new(
+    let wrapper_pooled = Arc::new(ActorRef::local(
         "pooled-actor@node2".to_string(),
         mailbox2.clone(),
         service_locator2.clone(),
@@ -238,9 +238,9 @@ async fn test_connection_pooling() {
 #[tokio::test]
 async fn test_node_discovery() {
     // Setup: Create two nodes
-    let node1 = Arc::new(Node::new(NodeId::new("node1"), default_node_config()));
+    let node1 = Arc::new(NodeBuilder::new("node1").build());
 
-    let node2 = Arc::new(Node::new(NodeId::new("node2"), default_node_config()));
+    let node2 = Arc::new(NodeBuilder::new("node2").build());
 
     let node2_address = start_test_server(node2.clone()).await;
 

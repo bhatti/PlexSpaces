@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber;
 
-use plexspaces_node::{Node, NodeId, NodeConfig};
+use plexspaces_node::Node;
 use finance_risk::{FinanceRiskApplication, StorageConfig};
 
 /// Command line arguments
@@ -115,17 +115,14 @@ async fn main() -> Result<()> {
     info!("Node ID: {}", node_id);
     info!("Listen address: {}", listen_addr);
 
-    // Create node configuration
-    let node_config = NodeConfig {
-        listen_addr: listen_addr.clone(),
-        max_connections: 100,
-        heartbeat_interval_ms: 5000,
-        clustering_enabled: true,
-        metadata: std::collections::HashMap::new(),
-    };
-
-    // Create and start node
-    let node = Arc::new(Node::new(NodeId::new(node_id.clone()), node_config));
+    // Create and start node using NodeBuilder
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new(node_id.clone())
+        .with_listen_address(listen_addr.clone())
+        .with_max_connections(100)
+        .with_heartbeat_interval_ms(5000)
+        .with_clustering_enabled(true)
+        .build());
 
     info!("Starting node: {}", node_id);
 

@@ -89,7 +89,8 @@ async fn test_message_ttl_preserved_in_proto_conversion() {
 async fn test_actor_ref_tell_with_ttl_message() {
     // Create actor ref and mailbox
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "test@node1".to_string()).await.unwrap());
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let actor_ref = ActorRef::local("test@node1".to_string(), Arc::clone(&mailbox), service_locator);
     
     // Create message with TTL

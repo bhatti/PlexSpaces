@@ -49,11 +49,10 @@ pub use builder::ActorBuilder;
 // Actor factory for spawning actors
 pub mod actor_factory;
 pub mod actor_factory_impl;
-pub mod regular_actor_wrapper;
+// regular_actor_wrapper removed - ActorRef now implements MessageSender directly
 pub mod virtual_actor_wrapper;
 pub use actor_factory::ActorFactory;
 pub use actor_factory_impl::ActorFactoryImpl;
-pub use regular_actor_wrapper::RegularActorWrapper;
 pub use virtual_actor_wrapper::VirtualActorWrapper;
 
 // Actor registry

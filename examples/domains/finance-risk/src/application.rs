@@ -511,6 +511,10 @@ impl Application for FinanceRiskApplication {
         // For this simplified example, always return healthy
         HealthStatus::HealthStatusHealthy
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -532,20 +536,8 @@ mod tests {
             &self.addr
         }
 
-        async fn spawn_actor(
-            &self,
-            actor_id: String,
-            _behavior: Box<dyn plexspaces_core::Actor>,
-            _namespace: String,
-        ) -> Result<String, ApplicationError> {
-            // Mock implementation for tests
-            Ok(actor_id)
-        }
-
-        async fn stop_actor(&self, _actor_id: &str) -> Result<(), ApplicationError> {
-            // Mock implementation for tests
-            Ok(())
-        }
+        // Note: spawn_actor and stop_actor are not part of ApplicationNode trait
+        // These methods were removed - use ActorFactory instead
     }
 
     #[tokio::test]

@@ -116,8 +116,11 @@ async fn test_ask_pattern_basic() {
     // Create and spawn actor
     let actor_id = "test-server@test-node-ask".to_string();
     let behavior: Box<dyn plexspaces_core::Actor> = Box::new(TestGenServer::new());
-    let _core_ref = node
-        .spawn_actor(actor_id.clone(), behavior, "default".to_string())
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _core_ref = plexspaces_actor::ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
+        .with_namespace("default".to_string())
+        .spawn(&ctx, node.service_locator().clone())
         .await
         .unwrap();
     
@@ -173,8 +176,11 @@ async fn test_ask_pattern_multiple_requests() {
     // Create and spawn actor
     let actor_id = "test-server-multi@test-node-ask-multi".to_string();
     let behavior: Box<dyn plexspaces_core::Actor> = Box::new(TestGenServer::new());
-    let _core_ref = node
-        .spawn_actor(actor_id.clone(), behavior, "default".to_string())
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _core_ref = plexspaces_actor::ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
+        .with_namespace("default".to_string())
+        .spawn(&ctx, node.service_locator().clone())
         .await
         .unwrap();
     

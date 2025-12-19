@@ -96,20 +96,43 @@ pub struct ServiceLocator {
     /// This allows monitoring helpers to update NodeMetrics without depending on Node type
     node_metrics_updater: Arc<RwLock<Option<Arc<dyn NodeMetricsUpdater + Send + Sync>>>>,
     
+    /// Node configuration (for accessing default_tenant_id, default_namespace, auth settings)
+    /// Read-only after initialization, uses Mutex for one-time initialization
+    node_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::NodeConfig>>>,
+    
     /// Cached gRPC clients (node_id -> ActorServiceClient)
     grpc_clients: Arc<RwLock<HashMap<String, ActorServiceClient<Channel>>>>,
 }
 
 impl ServiceLocator {
-    /// Create a new ServiceLocator
+    /// Create a new ServiceLocator (empty, no services registered)
+    ///
+    /// ## Note
+    /// For tests and examples, use `create_default()` instead which registers all essential services.
+    /// This method should only be used internally by Node or when you need a completely empty ServiceLocator.
     pub fn new() -> Self {
         Self {
             services: Arc::new(RwLock::new(HashMap::new())),
             actor_service: Arc::new(RwLock::new(None)),
             tuplespace_provider: Arc::new(RwLock::new(None)),
             node_metrics_updater: Arc::new(RwLock::new(None)),
+            node_config: Arc::new(tokio::sync::Mutex::new(None)),
             grpc_clients: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+    
+    
+    /// Register NodeConfig for accessing default tenant/namespace and auth settings
+    /// Note: This should be called once during node initialization
+    pub async fn register_node_config(&self, config: plexspaces_proto::node::v1::NodeConfig) {
+        let mut node_config = self.node_config.lock().await;
+        *node_config = Some(config);
+    }
+    
+    /// Get NodeConfig (for accessing default_tenant_id, default_namespace, auth settings)
+    pub async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig> {
+        let node_config = self.node_config.lock().await;
+        node_config.clone()
     }
 
     /// Register a service
@@ -271,8 +294,10 @@ impl ServiceLocator {
             .await
             .ok_or_else(|| "ActorRegistry not registered")?;
 
+        use crate::RequestContext;
+        let ctx = RequestContext::internal();
         let node_address = actor_registry
-            .lookup_node_address(node_id)
+            .lookup_node_address(&ctx, node_id)
             .await
             .map_err(|e| format!("Failed to lookup node address: {}", e))?
             .ok_or_else(|| format!("Node not found: {}", node_id))?;

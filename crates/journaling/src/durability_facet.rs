@@ -432,10 +432,19 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
                     // For replay, we need tenant_id from the actor's context
                     // This is a placeholder - in production, tenant_id should come from actor's actual context
                     // Note: This is acceptable here as it's internal replay logic
-                    let dummy_context = ActorContext::minimal(
-                        actor_id.to_string(),
+                    // Use internal context for system operations
+                    use plexspaces_core::RequestContext;
+                    let internal_ctx = RequestContext::internal();
+                    // Create minimal ServiceLocator for replay context
+                    // This is used internally for replay operations, not for production actor context
+                    use plexspaces_core::ServiceLocator;
+                    let service_locator = Arc::new(ServiceLocator::new());
+                    let dummy_context = ActorContext::new(
                         "local".to_string(),
-                        "default".to_string(), // namespace
+                        internal_ctx.namespace().to_string(),
+                        internal_ctx.tenant_id().to_string(),
+                        service_locator,
+                        None,
                     );
                     handler.replay_message(message, &dummy_context).await
                         .map_err(|e| JournalError::Replay(format!("Replay failed: {}", e)))?;

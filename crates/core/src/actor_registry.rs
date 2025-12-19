@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{mpsc, RwLock};
 
-use crate::{ActorId, ActorRef, MessageSender, ActorMetricsHandle, ActorMetrics, ActorMetricsExt};
+use crate::{ActorId, ActorRef, MessageSender, RequestContext, ActorMetricsHandle, ActorMetrics, ActorMetricsExt};
 use crate::actor_context::ObjectRegistry;
 use crate::actor_context::ObjectRegistration;
 use crate::service_locator::Service;
@@ -329,35 +329,33 @@ impl ActorRegistry {
     ///
     /// ## Purpose
     /// Stores MessageSender trait object in registry. For virtual actors, this is a VirtualActorWrapper
-    /// that automatically handles activation. For regular actors, this is a RegularActorWrapper.
+    /// that automatically handles activation. For regular actors, this is an ActorRef (implements MessageSender).
     /// Also maintains actor-type index for efficient FaaS-style actor invocation when type information is provided.
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// * `actor_id` - Actor ID
     /// * `sender` - MessageSender trait object
     /// * `actor_type` - Optional actor type (for efficient type-based lookup via hashmap index)
-    /// * `tenant_id` - Optional tenant ID (defaults to "default" if not provided, used for type index)
-    /// * `namespace` - Optional namespace (defaults to "default" if not provided, used for type index)
     ///
     /// ## Performance
-    /// When `actor_type`, `tenant_id`, and `namespace` are provided, the actor is indexed for O(1) lookup
+    /// When `actor_type` is provided, the actor is indexed for O(1) lookup
     /// by type, enabling efficient FaaS-style actor invocation.
     pub async fn register_actor(
         &self,
+        ctx: &RequestContext,
         actor_id: ActorId,
         sender: Arc<dyn MessageSender>,
         actor_type: Option<String>,
-        tenant_id: Option<String>,
-        namespace: Option<String>,
     ) {
         let mut actors = self.actors.write().await;
         let was_new = actors.insert(actor_id.clone(), sender).is_none();
         drop(actors);
         
         // Update actor-type index if type information is provided
-        if let (Some(actor_type), Some(tenant_id), Some(namespace)) = (actor_type, tenant_id, namespace) {
+        if let Some(actor_type) = actor_type {
             let mut index = self.actor_type_index.write().await;
-            let key = (tenant_id, namespace, actor_type);
+            let key = (ctx.tenant_id().to_string(), ctx.namespace().to_string(), actor_type);
             index.entry(key).or_insert_with(Vec::new).push(actor_id.clone());
         }
         
@@ -387,7 +385,7 @@ impl ActorRegistry {
 
     /// Look up node address with caching
     /// Uses cache first (TTL: 30-60 seconds), then falls back to ObjectRegistry
-    pub async fn lookup_node_address(&self, node_id: &str) -> Result<Option<String>, ActorRegistryError> {
+    pub async fn lookup_node_address(&self, ctx: &RequestContext, node_id: &str) -> Result<Option<String>, ActorRegistryError> {
         // Check cache first
         {
             let cache = self.node_cache.read().await;
@@ -400,9 +398,11 @@ impl ActorRegistry {
         }
 
         // Cache miss or expired - lookup in ObjectRegistry
+        // For node lookups, use internal context (nodes are registered with internal/system)
         let node_object_id = format!("_node@{}", node_id);
+        let internal_ctx = RequestContext::internal();
         let registration = self.object_registry
-            .lookup_full("default", "default", ObjectType::ObjectTypeService, &node_object_id)
+            .lookup_full(&internal_ctx, ObjectType::ObjectTypeService, &node_object_id)
             .await
             .map_err(|e| ActorRegistryError::LookupFailed(e.to_string()))?;
 
@@ -423,7 +423,7 @@ impl ActorRegistry {
 
     /// Look up actor routing info (for remote actors)
     /// Uses cached node lookups (TTL: 30-60 seconds) to avoid frequent DB queries
-    pub async fn lookup_routing(&self, actor_id: &ActorId) -> Result<Option<ActorRoutingInfo>, ActorRegistryError> {
+    pub async fn lookup_routing(&self, ctx: &RequestContext, actor_id: &ActorId) -> Result<Option<ActorRoutingInfo>, ActorRegistryError> {
         let (_, node_id) = ActorRef::parse_actor_id(actor_id)
             .map_err(|e| ActorRegistryError::LookupFailed(e.to_string()))?;
 
@@ -436,7 +436,7 @@ impl ActorRegistry {
             }))
         } else {
             // Remote actor - look up node address (with caching)
-            let node_address = self.lookup_node_address(&node_id).await?;
+            let node_address = self.lookup_node_address(ctx, &node_id).await?;
 
             if let Some(address) = node_address {
                 Ok(Some(ActorRoutingInfo {
@@ -731,7 +731,7 @@ impl ActorRegistry {
     /// Used for FaaS-like actor invocation where we need to find any actor of a given type.
     ///
     /// ## Arguments
-    /// * `tenant_id` - Tenant identifier
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// * `actor_type` - Actor type to search for
     ///
     /// ## Returns
@@ -741,12 +741,11 @@ impl ActorRegistry {
     /// O(1) lookup using hashmap index, much faster than scanning ObjectRegistry
     pub async fn discover_actors_by_type(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         actor_type: &str,
     ) -> Vec<ActorId> {
         let index = self.actor_type_index.read().await;
-        let key = (tenant_id.to_string(), namespace.to_string(), actor_type.to_string());
+        let key = (ctx.tenant_id().to_string(), ctx.namespace().to_string(), actor_type.to_string());
         index.get(&key).cloned().unwrap_or_default()
     }
 

@@ -42,7 +42,7 @@ rdkafka = { version = "0.36", optional = true }
 async-nats = { version = "0.45", optional = true }
 
 # Optional: SQLite backend (feature-gated, for testing durability)
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite"], optional = true }
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"], optional = true }
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }

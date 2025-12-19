@@ -114,7 +114,7 @@ impl Application for MatrixVectorApplication {
         tracing::info!("   Workers: {}", self.num_workers);
 
         // Create TupleSpace
-        let space = Arc::new(TupleSpace::new());
+        let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
         {
             let mut ts_guard = self.tuplespace.write().await;
             *ts_guard = Some(space.clone());
@@ -163,7 +163,15 @@ impl Application for MatrixVectorApplication {
             let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
                 .ok_or_else(|| ApplicationError::StartupFailed(format!("ActorFactory not found in ServiceLocator")))?;
             
-            actor_factory.spawn_built_actor(Arc::new(actor), None, None, Some("matrix-vector-mpi".to_string())).await
+            let ctx = plexspaces_core::RequestContext::internal();
+            actor_factory.spawn_actor(
+                &ctx,
+                &actor_id,
+                "matrix-vector-mpi", // actor_type
+                vec![], // initial_state
+                None, // config
+                std::collections::HashMap::new(), // labels
+            ).await
                 .map_err(|e| ApplicationError::StartupFailed(format!("Failed to spawn worker {}: {}", worker_id, e)))?;
             
             worker_actor_ids.push(actor_id);

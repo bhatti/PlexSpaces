@@ -126,7 +126,8 @@ mod tests {
 
         // Create ServiceLocator with ActorRegistry for envelope.send_reply() to work
         use plexspaces_core::ObjectRegistry;
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         // Create a stub ObjectRegistry for ActorRegistry (from actor_context module)
         // Note: We can't easily create a real ObjectRegistry in tests, so we'll skip ActorRegistry for now
         // and handle the case where envelope.send_reply() fails gracefully in tests
@@ -135,6 +136,7 @@ mod tests {
         // Create context with ServiceLocator
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
+            String::new(), // tenant_id (empty if auth disabled)
             "test-ns".to_string(),
             service_locator,
             None,

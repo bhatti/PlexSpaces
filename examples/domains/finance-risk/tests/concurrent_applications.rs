@@ -399,16 +399,16 @@ struct TestCoordinator {}
 impl TestCoordinator {
     async fn submit_application(
         &self,
-        application_id: &str,
-        loan_data: LoanApplicationData,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+        _application_id: &str,
+        _loan_data: LoanApplicationData,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
 
     async fn get_application_status(
         &self,
-        application_id: &str,
-    ) -> Result<ApplicationStatus, Box<dyn std::error::Error>> {
+        _application_id: &str,
+    ) -> Result<ApplicationStatus, Box<dyn std::error::Error + Send + Sync>> {
         Ok(ApplicationStatus {
             current_step: "completed".to_string(),
         })

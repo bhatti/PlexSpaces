@@ -63,6 +63,19 @@ pub struct NodeConfig {
     /// e.g., \["node1.cluster.local:9001", "node2.cluster.local:9001"\]
     #[prost(string, repeated, tag="3")]
     pub cluster_seed_nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Default tenant ID for this node
+    ///
+    /// Used when auth is disabled or when creating actors from embedded applications.
+    /// If not set and auth is disabled, will use "default".
+    /// If auth is enabled and tenant_id is not provided, will error.
+    #[prost(string, tag="4")]
+    pub default_tenant_id: ::prost::alloc::string::String,
+    /// Default namespace for this node
+    ///
+    /// Used when namespace is not specified in requests.
+    /// Defaults to "default" if not set.
+    #[prost(string, tag="5")]
+    pub default_namespace: ::prost::alloc::string::String,
 }
 /// Runtime configuration
 ///

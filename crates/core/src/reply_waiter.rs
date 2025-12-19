@@ -39,8 +39,7 @@ use crate::service_locator::Service;
 /// Reply waiter using async condition variables for high-performance ask pattern
 ///
 /// ## Purpose
-/// Replaces ReplyTracker with async condition variables for better performance
-/// and simpler design. Uses tokio::sync::Notify for async-compatible wait/notify.
+/// Uses tokio::sync::Notify for async-compatible wait/notify.
 ///
 /// ## Design
 /// - Uses Mutex + Notify for async-compatible waiting

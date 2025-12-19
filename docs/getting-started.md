@@ -102,7 +102,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| "ActorFactory not found")?;
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "Counter", // actor_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await?;
     
     // Get actor reference
     let actor_ref = plexspaces_core::ActorRef::new(actor_id.clone())?;

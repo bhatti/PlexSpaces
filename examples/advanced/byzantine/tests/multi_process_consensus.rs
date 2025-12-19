@@ -32,7 +32,7 @@ fn start_byzantine_node(
     Command::new("cargo")
         .arg("run")
         .arg("--bin")
-        .arg("byzantine_node")
+        .arg("byzantine")
         .arg("--")
         .arg("--node-id")
         .arg(node_id)
@@ -152,10 +152,10 @@ async fn test_node_binary_exists() {
     let result = Command::new("cargo")
         .arg("build")
         .arg("--bin")
-        .arg("byzantine_node")
+        .arg("byzantine")
         .output();
 
-    assert!(result.is_ok(), "Failed to build byzantine_node binary");
+    assert!(result.is_ok(), "Failed to build byzantine binary");
     let output = result.unwrap();
     assert!(output.status.success(), "Binary build failed: {:?}", String::from_utf8_lossy(&output.stderr));
 }

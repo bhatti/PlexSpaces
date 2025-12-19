@@ -1,0 +1,523 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces KeyValue Store API
+//
+// ## Purpose
+// Provides gRPC service for key-value storage operations with multi-tenancy support.
+// This service exposes the KeyValueStore trait functionality via gRPC.
+//
+// ## Architecture Context
+// This proto file provides the gRPC API for the KeyValueStore trait defined in
+// crates/keyvalue/src/lib.rs. All operations support tenant and namespace isolation.
+//
+// ## Design Decisions
+// - **Tenant Isolation**: All operations require tenant_id (from RequestContext)
+// - **Namespace Support**: Optional namespace for logical grouping within tenant
+// - **Proto-First**: All operations defined in proto for type safety
+// - **RequestContext**: All operations use RequestContext for tenant/namespace/user_id
+
+syntax = "proto3";
+
+package plexspaces.keyvalue.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/duration.proto";
+import "buf/validate/validate.proto";
+import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option java_package = "com.bhatti.plexspaces.keyvalue.v1";
+option java_multiple_files = true;
+
+// KeyValue service for key-value storage operations
+service KeyValueService {
+  // Get value by key
+  rpc Get(GetRequest) returns (GetResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/keyvalue/{key}"
+    };
+  }
+
+  // Put key-value pair
+  rpc Put(PutRequest) returns (PutResponse) {
+    option (google.api.http) = {
+      put: "/api/v1/keyvalue/{key}"
+      body: "*"
+    };
+  }
+
+  // Delete key
+  rpc Delete(DeleteRequest) returns (DeleteResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/keyvalue/{key}"
+    };
+  }
+
+  // Check if key exists
+  rpc Exists(ExistsRequest) returns (ExistsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/keyvalue/{key}:exists"
+    };
+  }
+
+  // List all keys with prefix
+  rpc List(ListRequest) returns (ListResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/keyvalue"
+    };
+  }
+
+  // Get multiple keys at once
+  rpc MultiGet(MultiGetRequest) returns (MultiGetResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/keyvalue:multiGet"
+      body: "*"
+    };
+  }
+
+  // Put multiple key-value pairs
+  rpc MultiPut(MultiPutRequest) returns (MultiPutResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/keyvalue:multiPut"
+      body: "*"
+    };
+  }
+
+  // Put with time-to-live
+  rpc PutWithTtl(PutWithTtlRequest) returns (PutWithTtlResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/keyvalue/{key}:putWithTtl"
+      body: "*"
+    };
+  }
+
+  // Refresh TTL for existing key
+  rpc RefreshTtl(RefreshTtlRequest) returns (RefreshTtlResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/keyvalue/{key}:refreshTtl"
+      body: "*"
+    };
+  }
+
+  // Get TTL remaining for key
+  rpc GetTtl(GetTtlRequest) returns (GetTtlResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/keyvalue/{key}/ttl"
+    };
+  }
+
+  // Compare-and-swap
+  rpc Cas(CasRequest) returns (CasResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/keyvalue/{key}:cas"
+      body: "*"
+    };
+  }
+
+  // Atomic increment
+  rpc Increment(IncrementRequest) returns (IncrementResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/keyvalue/{key}:increment"
+      body: "*"
+    };
+  }
+
+  // Atomic decrement
+  rpc Decrement(DecrementRequest) returns (DecrementResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/keyvalue/{key}:decrement"
+      body: "*"
+    };
+  }
+
+  // Clear all keys with prefix
+  rpc ClearPrefix(ClearPrefixRequest) returns (ClearPrefixResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/keyvalue:clearPrefix"
+    };
+  }
+
+  // Count keys with prefix
+  rpc CountPrefix(CountPrefixRequest) returns (CountPrefixResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/keyvalue:countPrefix"
+    };
+  }
+
+  // Get storage statistics
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/keyvalue/stats"
+    };
+  }
+}
+
+// Get request
+message GetRequest {
+  // Key to get
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Get response
+message GetResponse {
+  // Value if key exists
+  bytes value = 1;
+  
+  // Whether key exists
+  bool exists = 2;
+}
+
+// Put request
+message PutRequest {
+  // Key to put
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Value to store
+  bytes value = 2 [(google.api.field_behavior) = REQUIRED];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Put response
+message PutResponse {
+  // Success flag
+  bool success = 1;
+}
+
+// Delete request
+message DeleteRequest {
+  // Key to delete
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Delete response
+message DeleteResponse {
+  // Whether key was deleted (false if key didn't exist)
+  bool deleted = 1;
+}
+
+// Exists request
+message ExistsRequest {
+  // Key to check
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Exists response
+message ExistsResponse {
+  // Whether key exists
+  bool exists = 1;
+}
+
+// List request
+message ListRequest {
+  // Prefix to list keys with
+  string prefix = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 1024
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// List response
+message ListResponse {
+  // List of keys matching prefix
+  repeated string keys = 1;
+}
+
+// MultiGet request
+message MultiGetRequest {
+  // Keys to get
+  repeated string keys = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {min_items: 1, max_items: 1000, items: {string: {min_len: 1, max_len: 1024}}}
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// MultiGet response
+message MultiGetResponse {
+  // Values (same order as request, None for missing keys)
+  repeated KeyValueEntry entries = 1;
+}
+
+// Key-value entry
+message KeyValueEntry {
+  // Key
+  string key = 1;
+  
+  // Value if exists
+  bytes value = 2;
+  
+  // Whether key exists
+  bool exists = 3;
+}
+
+// MultiPut request
+message MultiPutRequest {
+  // Key-value pairs to put
+  repeated KeyValuePair pairs = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {min_items: 1, max_items: 1000}
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Key-value pair
+message KeyValuePair {
+  // Key
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Value
+  bytes value = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// MultiPut response
+message MultiPutResponse {
+  // Success flag
+  bool success = 1;
+}
+
+// PutWithTtl request
+message PutWithTtlRequest {
+  // Key to put
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Value to store
+  bytes value = 2 [(google.api.field_behavior) = REQUIRED];
+  
+  // Time-to-live
+  google.protobuf.Duration ttl = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 2592000}}  // 1s to 30 days
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 4 [(google.api.field_behavior) = REQUIRED];
+}
+
+// PutWithTtl response
+message PutWithTtlResponse {
+  // Success flag
+  bool success = 1;
+}
+
+// RefreshTtl request
+message RefreshTtlRequest {
+  // Key to refresh
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // New TTL
+  google.protobuf.Duration ttl = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 2592000}}  // 1s to 30 days
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// RefreshTtl response
+message RefreshTtlResponse {
+  // Success flag
+  bool success = 1;
+}
+
+// GetTtl request
+message GetTtlRequest {
+  // Key to check
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// GetTtl response
+message GetTtlResponse {
+  // TTL remaining if key exists with TTL
+  google.protobuf.Duration ttl = 1;
+  
+  // Whether key exists
+  bool exists = 2;
+}
+
+// Cas request
+message CasRequest {
+  // Key for CAS operation
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Expected value (None means key must not exist)
+  bytes expected_value = 2;  // Empty bytes = None
+  
+  // New value
+  bytes new_value = 3 [(google.api.field_behavior) = REQUIRED];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 4 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Cas response
+message CasResponse {
+  // Whether swap succeeded
+  bool success = 1;
+}
+
+// Increment request
+message IncrementRequest {
+  // Key for counter
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Delta to add
+  int64 delta = 2;
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Increment response
+message IncrementResponse {
+  // New value after increment
+  int64 value = 1;
+}
+
+// Decrement request
+message DecrementRequest {
+  // Key for counter
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+  ];
+  
+  // Delta to subtract
+  int64 delta = 2;
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Decrement response
+message DecrementResponse {
+  // New value after decrement
+  int64 value = 1;
+}
+
+// ClearPrefix request
+message ClearPrefixRequest {
+  // Prefix to clear
+  string prefix = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 1024
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// ClearPrefix response
+message ClearPrefixResponse {
+  // Number of keys deleted
+  uint64 deleted_count = 1;
+}
+
+// CountPrefix request
+message CountPrefixRequest {
+  // Prefix to count
+  string prefix = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 1024
+  ];
+  
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// CountPrefix response
+message CountPrefixResponse {
+  // Number of keys with prefix
+  uint64 count = 1;
+}
+
+// GetStats request
+message GetStatsRequest {
+  // Request context (contains tenant_id, namespace, user_id)
+  plexspaces.common.v1.RequestContext context = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// GetStats response
+message GetStatsResponse {
+  // Total number of keys
+  uint64 total_keys = 1;
+  
+  // Total size in bytes (approximate)
+  uint64 total_size_bytes = 2;
+  
+  // Backend type (e.g., "InMemory", "SQLite", "Redis", "PostgreSQL")
+  string backend_type = 3;
+}
+
+
+
+
+

@@ -154,7 +154,7 @@ pub mod system_service_client {
  ## Design Notes
  - Includes both critical and non-critical dependency checks
  - Supports partial failure scenarios (non-critical dependencies can fail)
- - HTTP endpoint: GET /v1/system/health/detailed
+ - HTTP endpoint: GET /api/v1/system/health/detailed
 */
         pub async fn get_detailed_health(
             &mut self,
@@ -739,7 +739,7 @@ pub mod system_service_server {
  ## Design Notes
  - Includes both critical and non-critical dependency checks
  - Supports partial failure scenarios (non-critical dependencies can fail)
- - HTTP endpoint: GET /v1/system/health/detailed
+ - HTTP endpoint: GET /api/v1/system/health/detailed
 */
         async fn get_detailed_health(
             &self,

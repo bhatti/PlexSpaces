@@ -58,7 +58,7 @@ use tokio::time::{timeout, Duration};
 /// 4. Verify both rounds complete successfully
 #[tokio::test]
 async fn test_barrier_auto_reset_single_space() {
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::default());
 
     // Barrier configuration
     let barrier_name = "iteration-barrier".to_string();
@@ -191,7 +191,7 @@ async fn test_barrier_auto_reset_single_space() {
 /// - Barrier should auto-reset and work with new count
 #[tokio::test]
 async fn test_barrier_auto_reset_with_different_counts() {
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::default());
     let barrier_name = "dynamic-barrier".to_string();
 
     let pattern = Pattern::new(vec![
@@ -294,7 +294,7 @@ async fn test_barrier_auto_reset_with_different_counts() {
 /// each requiring barrier synchronization
 #[tokio::test]
 async fn test_barrier_multi_iteration_loop() {
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::default());
     let barrier_name = "jacobi-iteration".to_string();
     let participant_count = 4;
     let iterations = 10;

@@ -80,11 +80,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mailbox_config = plexspaces_mailbox::mailbox_config_default();
     mailbox_config.capacity = 10000;
     use plexspaces_actor::ActorBuilder;
+    let ctx = plexspaces_core::RequestContext::internal();
     let coordinator_ref = ActorBuilder::new(coordinator_behavior)
         .with_id(format!("loan-coordinator@{}", node.id().as_str()))
         .with_mailbox_config(mailbox_config)
-        .spawn(node.service_locator().clone())
-        .await?;
+        .spawn(&ctx, node.service_locator().clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to spawn coordinator: {}", e))?;
     metrics_tracker.end_coordinate();
     info!("✅ Coordinator spawned: {}", coordinator_ref.id());
     println!();
@@ -96,14 +98,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Credit check workers
     let mut worker_mailbox_config = plexspaces_mailbox::mailbox_config_default();
     worker_mailbox_config.capacity = 10000;
+    let ctx = plexspaces_core::RequestContext::internal();
     for i in 0..config.worker_pools.credit_check {
         let worker = CreditCheckWorker::new(format!("credit-worker-{}", i));
         let behavior = Box::new(worker);
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(format!("credit-worker-{}@{}", i, node.id().as_str()))
             .with_mailbox_config(worker_mailbox_config.clone())
-            .spawn(node.service_locator().clone())
-            .await?;
+            .spawn(&ctx, node.service_locator().clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn credit-worker-{}: {}", i, e))?;
     }
 
     // Bank analysis workers
@@ -113,8 +117,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(format!("bank-worker-{}@{}", i, node.id().as_str()))
             .with_mailbox_config(worker_mailbox_config.clone())
-            .spawn(node.service_locator().clone())
-            .await?;
+            .spawn(&ctx, node.service_locator().clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn bank-worker-{}: {}", i, e))?;
     }
 
     // Employment workers
@@ -124,8 +129,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(format!("employment-worker-{}@{}", i, node.id().as_str()))
             .with_mailbox_config(worker_mailbox_config.clone())
-            .spawn(node.service_locator().clone())
-            .await?;
+            .spawn(&ctx, node.service_locator().clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn employment-worker-{}: {}", i, e))?;
     }
 
     // Risk scoring workers
@@ -135,8 +141,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(format!("risk-worker-{}@{}", i, node.id().as_str()))
             .with_mailbox_config(worker_mailbox_config.clone())
-            .spawn(node.service_locator().clone())
-            .await?;
+            .spawn(&ctx, node.service_locator().clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn risk-worker-{}: {}", i, e))?;
     }
 
     // Decision engine worker
@@ -145,8 +152,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _decision_ref = ActorBuilder::new(behavior)
         .with_id(format!("decision-worker-0@{}", node.id().as_str()))
         .with_mailbox_config(worker_mailbox_config.clone())
-        .spawn(node.service_locator().clone())
-        .await?;
+        .spawn(&ctx, node.service_locator().clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to spawn decision-worker: {}", e))?;
 
     // Document workers
     for i in 0..config.worker_pools.document {
@@ -155,8 +163,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(format!("document-worker-{}@{}", i, node.id().as_str()))
             .with_mailbox_config(worker_mailbox_config.clone())
-            .spawn(node.service_locator().clone())
-            .await?;
+            .spawn(&ctx, node.service_locator().clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn document-worker-{}: {}", i, e))?;
     }
 
     // Notification workers
@@ -166,8 +175,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(format!("notification-worker-{}@{}", i, node.id().as_str()))
             .with_mailbox_config(worker_mailbox_config.clone())
-            .spawn(node.service_locator().clone())
-            .await?;
+            .spawn(&ctx, node.service_locator().clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn notification-worker-{}: {}", i, e))?;
     }
 
     // Audit worker
@@ -176,8 +186,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _audit_ref = ActorBuilder::new(behavior)
         .with_id(format!("audit-worker-0@{}", node.id().as_str()))
         .with_mailbox_config(worker_mailbox_config.clone())
-        .spawn(node.service_locator().clone())
-        .await?;
+        .spawn(&ctx, node.service_locator().clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to spawn audit-worker: {}", e))?;
 
     metrics_tracker.end_coordinate();
     info!("✅ All workers spawned");
@@ -208,8 +219,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let payload = serde_json::to_vec(&coordinator_msg)?;
     let message = Message::new(payload);
 
+    // Send message using ActorService
+    use plexspaces_core::ActorService;
+    let actor_service: Arc<dyn ActorService> = node.service_locator()
+        .get_actor_service()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("ActorService not found"))?;
+    
     metrics_tracker.start_coordinate();
-    coordinator_ref.tell(message).await?;
+    actor_service.send(coordinator_ref.id(), message).await
+        .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
     metrics_tracker.end_coordinate();
 
     info!("✅ Application submitted: {}", sample_app.application_id);

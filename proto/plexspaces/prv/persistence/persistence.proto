@@ -645,7 +645,7 @@ service PersistenceService {
   // Append events to journal
   rpc AppendEvents(AppendEventsRequest) returns (AppendEventsResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/events"
+      post: "/api/v1/actors/{actor_id.id}/events"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -658,7 +658,7 @@ service PersistenceService {
   // Read events from journal
   rpc ReadEvents(ReadEventsRequest) returns (ReadEventsResponse) {
     option (google.api.http) = {
-      get: "/v1/actors/{actor_id.id}/events"
+      get: "/api/v1/actors/{actor_id.id}/events"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Read Events"
@@ -670,7 +670,7 @@ service PersistenceService {
   // Save state snapshot
   rpc SaveSnapshot(SaveSnapshotRequest) returns (SaveSnapshotResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{snapshot.actor_id.id}/snapshots"
+      post: "/api/v1/actors/{snapshot.actor_id.id}/snapshots"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -683,7 +683,7 @@ service PersistenceService {
   // Load state snapshot
   rpc LoadSnapshot(LoadSnapshotRequest) returns (LoadSnapshotResponse) {
     option (google.api.http) = {
-      get: "/v1/actors/{actor_id.id}/snapshots/latest"
+      get: "/api/v1/actors/{actor_id.id}/snapshots/latest"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Load Snapshot"
@@ -695,7 +695,7 @@ service PersistenceService {
   // Create checkpoint
   rpc CreateCheckpoint(CreateCheckpointRequest) returns (CreateCheckpointResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/checkpoints"
+      post: "/api/v1/actors/{actor_id.id}/checkpoints"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -721,7 +721,7 @@ service PersistenceService {
   // - On recovery, runtime checks journal to skip duplicate messages
   rpc RecordMessageReceived(RecordMessageReceivedRequest) returns (RecordMessageReceivedResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/journal/messages/received"
+      post: "/api/v1/actors/{actor_id.id}/journal/messages/received"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -747,7 +747,7 @@ service PersistenceService {
   // - Failed messages can be retried or sent to dead letter queue
   rpc RecordMessageProcessed(RecordMessageProcessedRequest) returns (RecordMessageProcessedResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/journal/messages/processed"
+      post: "/api/v1/actors/{actor_id.id}/journal/messages/processed"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -773,7 +773,7 @@ service PersistenceService {
   // - Periodic snapshots reduce replay time
   rpc RecordStateChange(RecordStateChangeRequest) returns (RecordStateChangeResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/journal/state-changes"
+      post: "/api/v1/actors/{actor_id.id}/journal/state-changes"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -804,7 +804,7 @@ service PersistenceService {
   // - Current time access (replay uses journaled timestamp)
   rpc RecordSideEffect(RecordSideEffectRequest) returns (RecordSideEffectResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/journal/side-effects"
+      post: "/api/v1/actors/{actor_id.id}/journal/side-effects"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -836,7 +836,7 @@ service PersistenceService {
   // - Timeout-based workflows (promise rejects after duration)
   rpc RecordPromiseCreated(RecordPromiseCreatedRequest) returns (RecordPromiseCreatedResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/journal/promises"
+      post: "/api/v1/actors/{actor_id.id}/journal/promises"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -867,7 +867,7 @@ service PersistenceService {
   // - Timeout occurred -> promise rejected with timeout
   rpc RecordPromiseResolved(RecordPromiseResolvedRequest) returns (RecordPromiseResolvedResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/journal/promises/{promise_id}/resolve"
+      post: "/api/v1/actors/{actor_id.id}/journal/promises/{promise_id}/resolve"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -898,7 +898,7 @@ service PersistenceService {
   // - Can be safely called concurrently with other journal ops
   rpc TruncateJournal(TruncateJournalRequest) returns (TruncateJournalResponse) {
     option (google.api.http) = {
-      post: "/v1/actors/{actor_id.id}/journal/truncate"
+      post: "/api/v1/actors/{actor_id.id}/journal/truncate"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {

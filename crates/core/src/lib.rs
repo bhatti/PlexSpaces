@@ -34,6 +34,7 @@ pub use plexspaces_mailbox::{Mailbox, Message};
 // Public modules
 pub mod application;
 pub mod behavior_factory;
+pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegistry};
 // registry module removed - replaced by object-registry
 pub mod actor_context;
 pub mod actor_registry;

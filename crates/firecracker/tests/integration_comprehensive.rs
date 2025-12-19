@@ -138,62 +138,6 @@ async fn test_vm_full_lifecycle() {
 }
 
 // ============================================================================
-// VM Registry Tests
-// ============================================================================
-
-#[tokio::test]
-async fn test_vm_registry_discover_empty() {
-    let vms = VmRegistry::discover_vms().await.unwrap();
-    assert!(vms.len() >= 0);
-}
-
-#[tokio::test]
-async fn test_vm_registry_find_nonexistent() {
-    let result = VmRegistry::find_vm("non-existent-vm-id").await.unwrap();
-    assert!(result.is_none());
-}
-
-#[tokio::test]
-async fn test_vm_registry_get_socket_path_nonexistent() {
-    let result = VmRegistry::get_vm_socket_path("non-existent-vm-id").await.unwrap();
-    assert!(result.is_none());
-}
-
-#[tokio::test]
-#[ignore] // Requires running VM
-async fn test_vm_registry_discover_running_vm() {
-    if !check_prerequisites() {
-        eprintln!("Skipping: Firecracker not available");
-        return;
-    }
-
-    let vm_id = ulid::Ulid::new().to_string();
-    let config = VmConfig {
-        vm_id: vm_id.clone(),
-        vcpu_count: 1,
-        mem_size_mib: 256,
-        kernel_image_path: "/var/lib/firecracker/vmlinux".to_string(),
-        rootfs: plexspaces_firecracker::config::DriveConfig {
-            path_on_host: "/var/lib/firecracker/rootfs.ext4".to_string(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let mut vm = FirecrackerVm::create(config).await.unwrap();
-    vm.start_firecracker().await.unwrap();
-    vm.boot().await.unwrap();
-
-    sleep(Duration::from_millis(500)).await;
-
-    let vms = VmRegistry::discover_vms().await.unwrap();
-    let found = vms.iter().find(|v| v.vm_id == vm_id);
-    assert!(found.is_some(), "Should discover running VM");
-
-    vm.stop().await.unwrap();
-}
-
-// ============================================================================
 // Application Deployment Tests
 // ============================================================================
 

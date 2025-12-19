@@ -52,6 +52,12 @@
 //! - [`KVEvent`]: Watch notification events
 //! - [`KVStats`]: Storage statistics
 //!
+//! ## Multi-Tenancy
+//!
+//! All operations require a [`RequestContext`] with `tenant_id` and `namespace` for proper
+//! data isolation. Keys are automatically scoped to tenant and namespace, ensuring complete
+//! isolation between tenants and namespaces.
+//!
 //! ## Backend Support
 //!
 //! - **InMemory**: HashMap-based (always available)
@@ -64,17 +70,19 @@
 //! ### Basic Usage
 //! ```rust
 //! use plexspaces_keyvalue::{KeyValueStore, InMemoryKVStore};
+//! use plexspaces_core::RequestContext;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let kv = InMemoryKVStore::new();
+//! let ctx = RequestContext::new("tenant".to_string()).with_namespace("default".to_string());
 //!
 //! // Basic operations
-//! kv.put("key", b"value".to_vec()).await?;
-//! let value = kv.get("key").await?;
+//! kv.put(&ctx, "key", b"value".to_vec()).await?;
+//! let value = kv.get(&ctx, "key").await?;
 //! assert_eq!(value, Some(b"value".to_vec()));
 //!
-//! kv.delete("key").await?;
-//! assert!(!kv.exists("key").await?);
+//! kv.delete(&ctx, "key").await?;
+//! assert!(!kv.exists(&ctx, "key").await?);
 //! # Ok(())
 //! # }
 //! ```
@@ -164,6 +172,7 @@
 #![warn(clippy::all)]
 
 use async_trait::async_trait;
+use plexspaces_core::RequestContext;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 
@@ -218,7 +227,11 @@ pub use redis::RedisKVStore;
 /// - `watch()`, `watch_prefix()`
 ///
 /// ### Maintenance Operations (Cleanup, Snapshots)
-/// - `clear_prefix()`, `count_prefix()`, `stats()`
+/// - `clear_prefix()`, `count_prefix()`, `get_stats()`
+///
+/// ## Multi-Tenancy
+/// All methods require a `RequestContext` parameter that provides `tenant_id` and `namespace`
+/// for data isolation. Keys are automatically scoped to the tenant and namespace.
 #[async_trait]
 pub trait KeyValueStore: Send + Sync {
     // =========================================================================
@@ -243,7 +256,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn get(&self, key: &str) -> KVResult<Option<Vec<u8>>>;
+    async fn get(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Vec<u8>>>;
 
     /// Put key-value pair.
     ///
@@ -260,7 +273,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn put(&self, key: &str, value: Vec<u8>) -> KVResult<()>;
+    async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>) -> KVResult<()>;
 
     /// Delete key.
     ///
@@ -278,7 +291,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn delete(&self, key: &str) -> KVResult<()>;
+    async fn delete(&self, ctx: &RequestContext, key: &str) -> KVResult<()>;
 
     /// Check if key exists.
     ///
@@ -296,7 +309,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn exists(&self, key: &str) -> KVResult<bool>;
+    async fn exists(&self, ctx: &RequestContext, key: &str) -> KVResult<bool>;
 
     // =========================================================================
     // Query Operations (Registry, Config, Workflow)
@@ -318,7 +331,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn list(&self, prefix: &str) -> KVResult<Vec<String>>;
+    async fn list(&self, ctx: &RequestContext, prefix: &str) -> KVResult<Vec<String>>;
 
     /// Get multiple keys at once (batch read).
     ///
@@ -340,7 +353,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn multi_get(&self, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>>;
+    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>>;
 
     /// Put multiple key-value pairs atomically (batch write).
     ///
@@ -360,7 +373,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn multi_put(&self, pairs: &[(&str, Vec<u8>)]) -> KVResult<()>;
+    async fn multi_put(&self, ctx: &RequestContext, pairs: &[(&str, Vec<u8>)]) -> KVResult<()>;
 
     // =========================================================================
     // TTL Operations (Leases, Sessions, Metrics)
@@ -382,7 +395,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn put_with_ttl(&self, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()>;
+    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()>;
 
     /// Refresh TTL for existing key (lease renewal).
     ///
@@ -401,7 +414,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn refresh_ttl(&self, key: &str, ttl: Duration) -> KVResult<()>;
+    async fn refresh_ttl(&self, ctx: &RequestContext, key: &str, ttl: Duration) -> KVResult<()>;
 
     /// Get TTL remaining for key.
     ///
@@ -421,7 +434,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn get_ttl(&self, key: &str) -> KVResult<Option<Duration>>;
+    async fn get_ttl(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Duration>>;
 
     // =========================================================================
     // Atomic Operations (Leases, Distributed Locks)
@@ -452,7 +465,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn cas(&self, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>)
+    async fn cas(&self, ctx: &RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>)
         -> KVResult<bool>;
 
     /// Atomic increment (for counters/metrics).
@@ -476,7 +489,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn increment(&self, key: &str, delta: i64) -> KVResult<i64>;
+    async fn increment(&self, ctx: &RequestContext, key: &str, delta: i64) -> KVResult<i64>;
 
     /// Atomic decrement (for counters/metrics).
     ///
@@ -498,7 +511,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn decrement(&self, key: &str, delta: i64) -> KVResult<i64>;
+    async fn decrement(&self, ctx: &RequestContext, key: &str, delta: i64) -> KVResult<i64>;
 
     // =========================================================================
     // Watch/Notification (Config hot reload, Feature flags)
@@ -526,7 +539,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn watch(&self, key: &str) -> KVResult<Receiver<KVEvent>>;
+    async fn watch(&self, ctx: &RequestContext, key: &str) -> KVResult<Receiver<KVEvent>>;
 
     /// Watch for changes to all keys with prefix.
     ///
@@ -541,7 +554,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn watch_prefix(&self, prefix: &str) -> KVResult<Receiver<KVEvent>>;
+    async fn watch_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<Receiver<KVEvent>>;
 
     // =========================================================================
     // Maintenance Operations (Cleanup, Snapshots)
@@ -564,7 +577,7 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn clear_prefix(&self, prefix: &str) -> KVResult<usize>;
+    async fn clear_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<usize>;
 
     /// Count keys with prefix.
     ///
@@ -580,21 +593,23 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn count_prefix(&self, prefix: &str) -> KVResult<usize>;
+    async fn count_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<usize>;
 
     /// Get storage statistics.
     ///
     /// ## Examples
     /// ```rust
     /// # use plexspaces_keyvalue::{KeyValueStore, InMemoryKVStore};
+    /// # use plexspaces_core::RequestContext;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let kv = InMemoryKVStore::new();
-    /// let stats = kv.stats().await?;
+    /// let ctx = RequestContext::new("tenant".to_string()).with_namespace("default".to_string());
+    /// let stats = kv.get_stats(&ctx).await?;
     /// assert_eq!(stats.backend_type, "InMemory");
     /// # Ok(())
     /// # }
     /// ```
-    async fn stats(&self) -> KVResult<KVStats>;
+    async fn get_stats(&self, ctx: &RequestContext) -> KVResult<KVStats>;
 }
 
 /// Event emitted by watch operations.

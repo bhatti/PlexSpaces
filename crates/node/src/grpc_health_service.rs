@@ -70,10 +70,10 @@ pub async fn start_health_monitoring(
             interval_timer.tick().await;
 
             // Check liveness
-            let is_alive = reporter.is_alive().await;
+            let _is_alive = reporter.is_alive().await;
             
             // Check readiness
-            let (is_ready, _reason) = reporter.check_readiness().await;
+            let (_is_ready, _reason) = reporter.check_readiness().await;
 
             // Update health reporter status based on checks
             // Note: The standard tonic-health HealthReporter doesn't support

@@ -220,10 +220,12 @@ impl SpecApplication {
                         
                         // Use ActorBuilder to build and spawn the actor with custom behavior
                         use plexspaces_actor::ActorBuilder;
+                        use plexspaces_core::RequestContext;
+                        let ctx = RequestContext::new_without_auth("internal".to_string(), self.spec.name.clone());
+                        // spawn() will extract tenant_id and namespace from RequestContext
                         match ActorBuilder::new(behavior)
                             .with_id(actor_id.clone())
-                            .with_namespace(self.spec.name.clone())
-                            .spawn(service_locator.clone())
+                            .spawn(&ctx, service_locator.clone())
                             .await
                         {
                             Ok(_actor_ref) => {
@@ -575,13 +577,15 @@ mod tests {
     }
 
     impl MockNode {
-        fn new(id: impl Into<String>) -> Self {
+        async fn new(id: impl Into<String>) -> Self {
+            use crate::create_default_service_locator;
+            let id_str = id.into();
             Self {
-                id: id.into(),
+                id: id_str.clone(),
                 addr: "0.0.0.0:9001".to_string(),
                 spawned_actors: Arc::new(RwLock::new(Vec::new())),
                 stopped_actors: Arc::new(RwLock::new(Vec::new())),
-                service_locator: Arc::new(plexspaces_core::ServiceLocator::new()),
+                service_locator: create_default_service_locator(Some(id_str), None, None).await,
             }
         }
 
@@ -683,7 +687,7 @@ mod tests {
     async fn test_start_application_no_supervisor() {
         let spec = create_test_spec_no_supervisor();
         let mut app = SpecApplication::new(spec);
-        let node = Arc::new(MockNode::new("test-node"));
+        let node = Arc::new(MockNode::new("test-node").await);
 
         app.start(node).await.unwrap();
 
@@ -697,7 +701,7 @@ mod tests {
     async fn test_start_application_with_supervisor() {
         let spec = create_test_spec_with_supervisor();
         let mut app = SpecApplication::new(spec);
-        let node = Arc::new(MockNode::new("test-node"));
+        let node = Arc::new(MockNode::new("test-node").await);
 
         // Start should succeed (validates spec but logs warning about native spawning)
         app.start(node.clone()).await.unwrap();
@@ -716,7 +720,7 @@ mod tests {
     async fn test_start_already_running_application_fails() {
         let spec = create_test_spec_no_supervisor();
         let mut app = SpecApplication::new(spec);
-        let node = Arc::new(MockNode::new("test-node"));
+        let node = Arc::new(MockNode::new("test-node").await);
 
         app.start(node.clone()).await.unwrap();
 
@@ -734,7 +738,7 @@ mod tests {
     async fn test_stop_application() {
         let spec = create_test_spec_no_supervisor();
         let mut app = SpecApplication::new(spec);
-        let node = Arc::new(MockNode::new("test-node"));
+        let node = Arc::new(MockNode::new("test-node").await);
 
         app.start(node.clone()).await.unwrap();
         app.stop().await.unwrap();
@@ -763,7 +767,7 @@ mod tests {
     async fn test_health_check_running() {
         let spec = create_test_spec_no_supervisor();
         let mut app = SpecApplication::new(spec);
-        let node = Arc::new(MockNode::new("test-node"));
+        let node = Arc::new(MockNode::new("test-node").await);
 
         app.start(node).await.unwrap();
 
@@ -790,7 +794,7 @@ mod tests {
         }
 
         let mut app = SpecApplication::new(spec);
-        let node = Arc::new(MockNode::new("test-node"));
+        let node = Arc::new(MockNode::new("test-node").await);
 
         let result = app.start(node).await;
         assert!(result.is_err());
@@ -809,7 +813,7 @@ mod tests {
         }
 
         let mut app = SpecApplication::new(spec);
-        let node = Arc::new(MockNode::new("test-node"));
+        let node = Arc::new(MockNode::new("test-node").await);
 
         let result = app.start(node).await;
         assert!(result.is_err());

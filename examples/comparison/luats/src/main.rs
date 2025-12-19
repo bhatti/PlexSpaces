@@ -186,13 +186,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await;
     
-    // Spawn using ActorFactory
+    // Spawn using ActorFactory with spawn_actor
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
-    let actor_id = coordinator_actor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(coordinator_actor), None, None, None).await
+    let actor_id = coordinator_id.clone();
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenEvent", // actor_type from EventCoordinatorActor
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let coordinator_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
@@ -208,16 +216,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         node.service_locator().clone(),
     );
 
-    // Create subscriber
+    // Create subscriber using spawn_actor
     let subscriber_id: ActorId = "event-subscriber/luats-1@comparison-node-1".to_string();
-    let behavior = Box::new(EventSubscriberActor::new());
-    let subscriber_actor = ActorBuilder::new(behavior)
-        .with_id(subscriber_id.clone())
-        .build()
-        .await;
-    
-    let actor_id2 = subscriber_actor.id().clone();
-    let _message_sender2 = actor_factory.spawn_built_actor(Arc::new(subscriber_actor), None, None, None).await
+    let _message_sender2 = actor_factory.spawn_actor(
+        &ctx,
+        &subscriber_id,
+        "GenEvent", // actor_type from EventSubscriberActor
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let subscriber_ref = plexspaces_core::ActorRef::new(actor_id2)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
@@ -307,17 +315,19 @@ mod tests {
             .build();
 
         let actor_id: ActorId = "event-coordinator/test-1@test-node".to_string();
-        let behavior = Box::new(EventCoordinatorActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await;
         
-        // Spawn using ActorFactory
+        // Spawn using ActorFactory with spawn_actor
         let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
             .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
-        let actor_id = actor.id().clone();
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenEvent", // actor_type from EventCoordinatorActor
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+        ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         let actor_ref = plexspaces_core::ActorRef::new(actor_id)
             .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();

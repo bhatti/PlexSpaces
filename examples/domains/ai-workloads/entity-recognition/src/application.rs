@@ -112,7 +112,15 @@ impl Application for EntityRecognitionApplication {
             
             let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
             
-            actor_factory.spawn_built_actor(Arc::new(actor), None, None, Some("entity-recognition".to_string())).await
+            let ctx = plexspaces_core::RequestContext::internal();
+            actor_factory.spawn_actor(
+                &ctx,
+                &actor_id,
+                "entity-recognition", // actor_type
+                vec![], // initial_state
+                None, // config
+                std::collections::HashMap::new(), // labels
+            ).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             
             self.actor_refs.write().await.push(actor_id.clone());
@@ -130,7 +138,15 @@ impl Application for EntityRecognitionApplication {
             
             let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
             
-            actor_factory.spawn_built_actor(Arc::new(actor), None, None, Some("entity-recognition".to_string())).await
+            let ctx = plexspaces_core::RequestContext::internal();
+            actor_factory.spawn_actor(
+                &ctx,
+                &actor_id,
+                "entity-recognition", // actor_type
+                vec![], // initial_state
+                None, // config
+                std::collections::HashMap::new(), // labels
+            ).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             
             self.actor_refs.write().await.push(actor_id.clone());
@@ -148,7 +164,15 @@ impl Application for EntityRecognitionApplication {
             
             let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
             
-            actor_factory.spawn_built_actor(Arc::new(actor), None, None, Some("entity-recognition".to_string())).await
+            let ctx = plexspaces_core::RequestContext::internal();
+            actor_factory.spawn_actor(
+                &ctx,
+                &actor_id,
+                "entity-recognition", // actor_type
+                vec![], // initial_state
+                None, // config
+                std::collections::HashMap::new(), // labels
+            ).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             
             self.actor_refs.write().await.push(actor_id.clone());

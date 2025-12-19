@@ -30,7 +30,7 @@
 //! ## Usage
 //! ```rust,ignore
 //! // Regular actor wrapper implements MessageSender trait
-//! let regular_sender = RegularActorWrapper::new(actor_id, mailbox, service_locator);
+//! let regular_sender = ActorRef::local(actor_id, mailbox, service_locator);
 //! regular_sender.tell(message).await?; // Sends to mailbox
 //!
 //! // Virtual actor wrapper automatically handles activation

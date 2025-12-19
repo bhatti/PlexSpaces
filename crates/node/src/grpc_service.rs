@@ -79,48 +79,6 @@ impl ActorServiceImpl {
         }
         Ok(())
     }
-    
-    /// Extract tenant_id from request metadata
-    ///
-    /// ## Purpose
-    /// Extracts tenant_id from gRPC request metadata. This is the ONLY place where
-    /// tenant_id can be defaulted - at the HTTP/gRPC API invocation boundary.
-    ///
-    /// ## Sources (in order of precedence):
-    /// 1. `x-tenant-id` header (from JWT middleware)
-    /// 2. `tenant_id` in request labels/metadata
-    /// 3. Returns error if not found (tenant_id is REQUIRED)
-    ///
-    /// ## Returns
-    /// tenant_id or error if not found
-    fn extract_tenant_id_from_request(
-        &self,
-        request: &Request<impl std::fmt::Debug>,
-        labels: &std::collections::HashMap<String, String>,
-    ) -> Result<String, Status> {
-        // First, try to get from metadata headers (from JWT middleware)
-        if let Some(tenant_id_header) = request.metadata().get("x-tenant-id") {
-            if let Ok(tenant_id) = tenant_id_header.to_str() {
-                if !tenant_id.is_empty() {
-                    return Ok(tenant_id.to_string());
-                }
-            }
-        }
-        
-        // Second, try to get from labels
-        if let Some(tenant_id) = labels.get("tenant_id") {
-            if !tenant_id.is_empty() {
-                return Ok(tenant_id.clone());
-            }
-        }
-        
-        // tenant_id is REQUIRED - return error if not found
-        // This is the ONLY exception: at HTTP API invocation boundary, we might not have tenant_id yet
-        // But for production, we should always have it from JWT
-        Err(Status::invalid_argument(
-            "tenant_id is required but not found in request metadata (x-tenant-id header) or labels. Ensure JWT middleware is configured and tenant_id is in JWT claims."
-        ))
-    }
 }
 
 #[tonic::async_trait]
@@ -132,45 +90,46 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
-        // Extract metadata before consuming request
-        let metadata = request.metadata().clone();
-        let req = request.into_inner();
+        // Extract labels before consuming request (needed for context creation)
+        let labels_for_ctx = request.get_ref().labels.clone();
         
-        // Extract tenant_id from request (REQUIRED - only exception is at HTTP API invocation boundary)
-        // At HTTP API invocation boundary, if tenant_id is not available, we use a placeholder
-        // This should only happen during development/testing - production should always have JWT with tenant_id
-        let tenant_id = if let Some(tenant_id_header) = metadata.get("x-tenant-id") {
-            tenant_id_header.to_str().unwrap_or("api-invocation-tenant").to_string()
-        } else if let Some(tenant_id) = req.labels.get("tenant_id") {
-            tenant_id.clone()
-        } else {
-            // At HTTP API invocation boundary only - use placeholder
-            "api-invocation-tenant".to_string()
-        };
+        // Create RequestContext from gRPC request (before consuming request)
+        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+            request.metadata(),
+            &labels_for_ctx,
+            &self.node.service_locator(),
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
+        // Now consume request
+        let req = request.into_inner();
         
         // Validate actor_type
         if req.actor_type.is_empty() {
             return Err(Status::invalid_argument("Missing actor_type"));
         }
         
+        // Use namespace from CreateActorRequest if non-empty, otherwise use RequestContext namespace
+        let ctx = if !req.namespace.is_empty() {
+            ctx.clone().with_namespace(req.namespace.clone())
+        } else {
+            ctx
+        };
+        
         // Use spawn_actor to create and spawn actor
         let actor_id = format!("{}@{}", ulid::Ulid::new(), self.node.id().as_str());
         
-        // Extract namespace from labels if present, otherwise use "default"
-        let namespace = req.labels.get("namespace")
-            .cloned()
-            .unwrap_or_else(|| "default".to_string());
-        
-        // Build labels for spawn_actor (include namespace and tenant_id)
-        let mut labels = req.labels.clone();
-        labels.insert("namespace".to_string(), namespace.clone());
-        labels.insert("tenant_id".to_string(), tenant_id.clone());
+        // Build labels for spawn_actor (no need to include namespace/tenant_id - they're in ctx)
+        let labels = req.labels.clone();
         
         // Spawn actor using ActorFactory::spawn_actor
         let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
         let _message_sender = actor_factory.spawn_actor(
+            &ctx,
             &actor_id,
             &req.actor_type,
             req.initial_state.clone(),
@@ -229,8 +188,20 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         &self,
         request: Request<SpawnActorRequest>,
     ) -> Result<Response<SpawnActorResponse>, Status> {
-        // Extract metadata before consuming request
-        let metadata = request.metadata().clone();
+        // Extract labels before consuming request (needed for context creation)
+        let labels_for_ctx = request.get_ref().labels.clone();
+        
+        // Create RequestContext from gRPC request (before consuming request)
+        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+            request.metadata(),
+            &labels_for_ctx,
+            &self.node.service_locator(),
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
+        // Now consume request
         let req = request.into_inner();
 
         // Validate actor_type
@@ -254,41 +225,24 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
             // Server-generated ID (ULID)
             format!("{}@{}", ulid::Ulid::new(), node_id)
         };
-
+        
         // Create actor based on actor_type
         // Phase 1: Simple implementation - spawn simple actor as placeholder
         // Future: Use actor registry to look up actor factory by type
         use plexspaces_actor::Actor;
         use plexspaces_core::Actor as ActorTrait;
-        // Extract tenant_id from request (REQUIRED - only exception is at HTTP API invocation boundary)
-        let tenant_id = if let Some(tenant_id_header) = metadata.get("x-tenant-id") {
-            tenant_id_header.to_str().unwrap_or("api-invocation-tenant").to_string()
-        } else if let Some(tenant_id) = req.labels.get("tenant_id") {
-            tenant_id.clone()
-        } else {
-            return Err(Status::invalid_argument("tenant_id is required (either in x-tenant-id header or request labels)"));
-        };
-
-        // Extract namespace from labels if present, otherwise use "default"
-        let namespace = req.labels.get("namespace")
-            .cloned()
-            .unwrap_or_else(|| "default".to_string());
-        
-        // Build labels for spawn_actor (include namespace and tenant_id)
-        let mut labels = req.labels.clone();
-        labels.insert("namespace".to_string(), namespace.clone());
-        labels.insert("tenant_id".to_string(), tenant_id.clone());
         
         // Spawn actor using ActorFactory::spawn_actor
         let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
         let _message_sender = actor_factory.spawn_actor(
+            &ctx,
             &actor_id,
             &req.actor_type,
             req.initial_state.clone(),
             req.config.clone(),
-            labels,
+            req.labels.clone(),
         ).await
             .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
 
@@ -332,7 +286,9 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
-        let routing = actor_registry.lookup_routing(&actor_id).await
+        // Create RequestContext for routing lookup (use internal context for system operations)
+        let internal_ctx = plexspaces_core::RequestContext::internal();
+        let routing = actor_registry.lookup_routing(&internal_ctx, &actor_id).await
             .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
         
         let location = if let Some(routing_info) = routing {
@@ -457,7 +413,9 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
             )
         } else {
             // Check routing for remote actors
-            let routing = actor_registry.lookup_routing(&proto_msg.receiver_id).await
+            // Use internal context for routing lookup (system-level operation)
+            let internal_ctx = plexspaces_core::RequestContext::internal();
+            let routing = actor_registry.lookup_routing(&internal_ctx, &proto_msg.receiver_id).await
                 .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
             
             if let Some(routing_info) = routing {
@@ -546,7 +504,9 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
-        let routing = actor_registry.lookup_routing(&actor_id).await
+        // Create RequestContext for routing lookup (use internal context for system operations)
+        let internal_ctx = plexspaces_core::RequestContext::internal();
+        let routing = actor_registry.lookup_routing(&internal_ctx, &actor_id).await
             .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
         
         match routing {
@@ -630,6 +590,10 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
+        // Create RequestContext for lookup operations
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::internal();
+        
         let req = request.into_inner();
 
         // Verify both actors exist locally using ActorRegistry
@@ -637,7 +601,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
         // Check first actor
-        let routing1 = actor_registry.lookup_routing(&req.actor_id).await
+        let routing1 = actor_registry.lookup_routing(&ctx, &req.actor_id).await
             .map_err(|e| Status::not_found(format!("Actor {} not found: {}", req.actor_id, e)))?;
         if !routing1.map(|r| r.is_local).unwrap_or(false) || actor_registry.lookup_actor(&req.actor_id).await.is_none() {
             return Err(Status::not_found(format!(
@@ -647,7 +611,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         }
         
         // Check second actor
-        let routing2 = actor_registry.lookup_routing(&req.linked_actor_id).await
+        let routing2 = actor_registry.lookup_routing(&ctx, &req.linked_actor_id).await
             .map_err(|e| Status::not_found(format!("Actor {} not found: {}", req.linked_actor_id, e)))?;
         if !routing2.map(|r| r.is_local).unwrap_or(false) || actor_registry.lookup_actor(&req.linked_actor_id).await.is_none() {
             return Err(Status::not_found(format!(
@@ -860,24 +824,29 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
-        // Extract metadata before consuming request
-        let metadata = request.metadata().clone();
+        // Create RequestContext from gRPC request (before consuming request)
+        // GetOrActivateActorRequest doesn't have labels field, use empty map
+        let labels_for_ctx = std::collections::HashMap::new();
+        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+            request.metadata(),
+            &labels_for_ctx,
+            &self.node.service_locator(),
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
+        // Now consume request
         let req = request.into_inner();
         let actor_id: plexspaces_core::ActorId = req.actor_id.clone();
-        
-        // Extract tenant_id from request (REQUIRED - only exception is at HTTP API invocation boundary)
-        let tenant_id = if let Some(tenant_id_header) = metadata.get("x-tenant-id") {
-            tenant_id_header.to_str().unwrap_or("api-invocation-tenant").to_string()
-        } else {
-            // At HTTP API invocation boundary only - use placeholder
-            "api-invocation-tenant".to_string()
-        };
 
         // Check if actor exists and is active using ActorRegistry
         let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
-        let routing = actor_registry.lookup_routing(&actor_id).await
+        // Create RequestContext for routing lookup (use internal context for system operations)
+        let internal_ctx = plexspaces_core::RequestContext::internal();
+        let routing = actor_registry.lookup_routing(&internal_ctx, &actor_id).await
             .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
         
         let was_activated = match routing {
@@ -939,12 +908,14 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                 let behavior = Box::new(SimpleBehavior);
                 
                 // Use ActorBuilder.spawn() which handles spawning properly
+                use plexspaces_core::RequestContext;
+                let ctx = RequestContext::internal();
                 let service_locator = self.node.service_locator();
                 
+                // spawn() will extract tenant_id and namespace from RequestContext
                 let _actor_ref = ActorBuilder::new(behavior)
                     .with_id(actor_id.clone())
-                    .with_namespace("default".to_string())
-                    .spawn(service_locator)
+                    .spawn(&ctx, service_locator)
                     .await
                     .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
 

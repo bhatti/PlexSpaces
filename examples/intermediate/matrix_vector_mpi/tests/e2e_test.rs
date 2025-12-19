@@ -58,7 +58,7 @@ async fn test_matrix_vector_2x2_workers() {
 
     let matrix = create_test_matrix(num_rows, num_cols);
     let vector = create_test_vector(num_cols);
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
 
     let mut metrics = ComputeMetrics::new(num_rows, num_cols, num_workers);
 
@@ -127,7 +127,7 @@ async fn test_matrix_vector_4_workers() {
 
     let matrix = create_test_matrix(num_rows, num_cols);
     let vector = create_test_vector(num_cols);
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
 
     let mut metrics = ComputeMetrics::new(num_rows, num_cols, num_workers);
 
@@ -187,7 +187,7 @@ async fn test_matrix_vector_large_problem() {
 
     let matrix = create_test_matrix(num_rows, num_cols);
     let vector = create_test_vector(num_cols);
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
 
     let mut metrics = ComputeMetrics::new(num_rows, num_cols, num_workers);
 
@@ -258,7 +258,7 @@ async fn test_granularity_comparison() {
 
         let matrix = create_test_matrix(num_rows, num_cols);
         let vector = create_test_vector(num_cols);
-        let space = Arc::new(TupleSpace::new());
+        let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
 
         let mut metrics = ComputeMetrics::new(num_rows, num_cols, num_workers);
 
@@ -316,7 +316,7 @@ async fn test_latency_breakdown() {
 
     let matrix = create_test_matrix(num_rows, num_cols);
     let vector = create_test_vector(num_cols);
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
 
     let mut metrics = ComputeMetrics::new(num_rows, num_cols, num_workers);
 

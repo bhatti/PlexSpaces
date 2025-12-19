@@ -417,7 +417,7 @@ service WorkflowService {
   // Create workflow definition
   rpc CreateDefinition(CreateDefinitionRequest) returns (CreateDefinitionResponse) {
     option (google.api.http) = {
-      post: "/v1/workflows/definitions"
+      post: "/api/v1/workflows/definitions"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -430,7 +430,7 @@ service WorkflowService {
   // Get workflow definition
   rpc GetDefinition(GetDefinitionRequest) returns (GetDefinitionResponse) {
     option (google.api.http) = {
-      get: "/v1/workflows/definitions/{id}/versions/{version}"
+      get: "/api/v1/workflows/definitions/{id}/versions/{version}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Workflow Definition"
@@ -442,7 +442,7 @@ service WorkflowService {
   // List workflow definitions
   rpc ListDefinitions(ListDefinitionsRequest) returns (ListDefinitionsResponse) {
     option (google.api.http) = {
-      get: "/v1/workflows/definitions"
+      get: "/api/v1/workflows/definitions"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Workflow Definitions"
@@ -454,7 +454,7 @@ service WorkflowService {
   // Update workflow definition
   rpc UpdateDefinition(UpdateDefinitionRequest) returns (UpdateDefinitionResponse) {
     option (google.api.http) = {
-      put: "/v1/workflows/definitions/{definition.id}/versions/{definition.version}"
+      put: "/api/v1/workflows/definitions/{definition.id}/versions/{definition.version}"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -467,7 +467,7 @@ service WorkflowService {
   // Delete workflow definition
   rpc DeleteDefinition(DeleteDefinitionRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      delete: "/v1/workflows/definitions/{id}/versions/{version}"
+      delete: "/api/v1/workflows/definitions/{id}/versions/{version}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Delete Workflow Definition"
@@ -479,7 +479,7 @@ service WorkflowService {
   // Start workflow execution
   rpc StartExecution(StartExecutionRequest) returns (StartExecutionResponse) {
     option (google.api.http) = {
-      post: "/v1/workflows/executions"
+      post: "/api/v1/workflows/executions"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -492,7 +492,7 @@ service WorkflowService {
   // Get workflow execution
   rpc GetExecution(GetExecutionRequest) returns (GetExecutionResponse) {
     option (google.api.http) = {
-      get: "/v1/workflows/executions/{execution_id}"
+      get: "/api/v1/workflows/executions/{execution_id}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Workflow Execution"
@@ -504,7 +504,7 @@ service WorkflowService {
   // List workflow executions
   rpc ListExecutions(ListExecutionsRequest) returns (ListExecutionsResponse) {
     option (google.api.http) = {
-      get: "/v1/workflows/executions"
+      get: "/api/v1/workflows/executions"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Workflow Executions"
@@ -516,7 +516,7 @@ service WorkflowService {
   // Cancel workflow execution
   rpc CancelExecution(CancelExecutionRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      post: "/v1/workflows/executions/{execution_id}/cancel"
+      post: "/api/v1/workflows/executions/{execution_id}/cancel"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -529,7 +529,7 @@ service WorkflowService {
   // Send signal to workflow
   rpc SignalExecution(SignalExecutionRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      post: "/v1/workflows/executions/{execution_id}/signals"
+      post: "/api/v1/workflows/executions/{execution_id}/signals"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -542,7 +542,7 @@ service WorkflowService {
   // Query workflow execution state
   rpc QueryExecution(QueryExecutionRequest) returns (QueryExecutionResponse) {
     option (google.api.http) = {
-      post: "/v1/workflows/executions/{execution_id}/query"
+      post: "/api/v1/workflows/executions/{execution_id}/query"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -555,7 +555,7 @@ service WorkflowService {
   // Get step execution history
   rpc GetStepExecutions(GetStepExecutionsRequest) returns (GetStepExecutionsResponse) {
     option (google.api.http) = {
-      get: "/v1/workflows/executions/{execution_id}/steps"
+      get: "/api/v1/workflows/executions/{execution_id}/steps"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Step Executions"

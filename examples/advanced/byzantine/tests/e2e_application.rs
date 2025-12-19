@@ -33,7 +33,6 @@
 //! ## Phase 2.5 Verification
 //! These tests verify the Application/Release framework (70% complete → 100%)
 
-use std::sync::Arc;
 use plexspaces::release::Release;
 use plexspaces::plexspaces_node::PlexSpacesNode;
 use byzantine_generals::application::ByzantineApplication;
@@ -79,8 +78,8 @@ async fn test_byzantine_application_e2e() {
 
     // 3. Register ByzantineApplication
     println!("\n📝 Step 3: Registering ByzantineApplication...");
-    let app = Arc::new(ByzantineApplication::new(4, 1)); // 4 generals, 1 Byzantine
-    node.register_application("byzantine-generals", app).await;
+    let app = ByzantineApplication::new(4, 1); // 4 generals, 1 Byzantine
+    node.register_application("byzantine-generals", Box::new(app)).await;
     println!("   ✅ Application registered");
 
     // 4. Start node
@@ -134,8 +133,8 @@ async fn test_application_environment_configuration() {
 
     // Create node and register app
     let node = PlexSpacesNode::new(release);
-    let app = Arc::new(ByzantineApplication::new(4, 1));
-    node.register_application("byzantine-generals", app).await;
+    let app = ByzantineApplication::new(4, 1);
+    node.register_application("byzantine-generals", Box::new(app)).await;
 
     // Start and shutdown
     node.start().await.expect("Failed to start");
@@ -213,8 +212,8 @@ async fn test_graceful_shutdown_with_timeout() {
     println!("   ⏱️  Grace period: {}s", shutdown.grace_period_seconds);
 
     let node = PlexSpacesNode::new(release);
-    let app = Arc::new(ByzantineApplication::new(4, 1));
-    node.register_application("byzantine-generals", app).await;
+    let app = ByzantineApplication::new(4, 1);
+    node.register_application("byzantine-generals", Box::new(app)).await;
 
     // Start
     let _start_time = std::time::Instant::now();

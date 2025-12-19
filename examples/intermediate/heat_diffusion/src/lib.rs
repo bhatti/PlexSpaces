@@ -113,6 +113,6 @@ pub async fn create_tuplespace_from_config(config: TupleSpaceConfig) -> Result<A
 /// # }
 /// ```
 pub async fn create_in_memory_tuplespace() -> Result<Arc<TupleSpace>, Box<dyn std::error::Error>> {
-    let tuplespace = TupleSpace::new();
+    let tuplespace = TupleSpace::with_tenant_namespace("internal", "system");
     Ok(Arc::new(tuplespace))
 }

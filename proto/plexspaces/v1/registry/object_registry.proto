@@ -346,7 +346,7 @@ service ObjectRegistry {
   // Register object (actor, tuplespace, or service)
   rpc Register(RegisterRequest) returns (RegisterResponse) {
     option (google.api.http) = {
-      post: "/v1/registry/objects"
+      post: "/api/v1/registry/objects"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -358,7 +358,7 @@ service ObjectRegistry {
 
   // Unregister object
   rpc Unregister(UnregisterRequest) returns (UnregisterResponse) {
-    option (google.api.http) = {delete: "/v1/registry/objects/{object_id}"};
+    option (google.api.http) = {delete: "/api/v1/registry/objects/{object_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Unregister Object"
       description: "Remove object from registry"
@@ -368,7 +368,7 @@ service ObjectRegistry {
 
   // Lookup single object by ID and type
   rpc Lookup(LookupRequest) returns (LookupResponse) {
-    option (google.api.http) = {get: "/v1/registry/objects/{object_id}"};
+    option (google.api.http) = {get: "/api/v1/registry/objects/{object_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Lookup Object"
       description: "Get object registration by ID"
@@ -379,8 +379,8 @@ service ObjectRegistry {
   // Discover objects by filters (with pagination)
   rpc Discover(DiscoverRequest) returns (DiscoverResponse) {
     option (google.api.http) = {
-      get: "/v1/registry/objects"
-      additional_bindings {post: "/v1/registry/objects:discover"}
+      get: "/api/v1/registry/objects"
+      additional_bindings {post: "/api/v1/registry/objects:discover"}
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Discover Objects"
@@ -392,7 +392,7 @@ service ObjectRegistry {
   // Update object health (heartbeat mechanism)
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {
     option (google.api.http) = {
-      post: "/v1/registry/objects/{object_id}/heartbeat"
+      post: "/api/v1/registry/objects/{object_id}/heartbeat"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -405,7 +405,7 @@ service ObjectRegistry {
   // Batch heartbeat for multiple objects (efficiency)
   rpc BatchHeartbeat(BatchHeartbeatRequest) returns (BatchHeartbeatResponse) {
     option (google.api.http) = {
-      post: "/v1/registry/heartbeat"
+      post: "/api/v1/registry/heartbeat"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -417,7 +417,7 @@ service ObjectRegistry {
 
   // List all object types (admin/debug)
   rpc ListObjectTypes(ListObjectTypesRequest) returns (ListObjectTypesResponse) {
-    option (google.api.http) = {get: "/v1/registry/types"};
+    option (google.api.http) = {get: "/api/v1/registry/types"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Object Types"
       description: "Get all registered object types with counts"

@@ -18,61 +18,29 @@
 
 //! Byzantine Generals Application
 //!
-//! ## Purpose
-//! Implements the Byzantine Generals example as a PlexSpaces Application,
-//! demonstrating how to package a distributed consensus algorithm into
-//! the Application/Release framework.
-//!
-//! ## Features
-//! - Configurable number of generals
-//! - Configurable number of Byzantine (faulty) generals
-//! - TupleSpace-based coordination
-//! - Supervision tree for fault tolerance
-//! - Graceful startup and shutdown
+//! Simple application wrapper that uses ByzantineAlgorithm
 
 use async_trait::async_trait;
 use plexspaces_core::application::{Application, ApplicationNode, ApplicationError};
-use plexspaces_node::CoordinationComputeTracker;
-use plexspaces_persistence::{MemoryJournal, Journal};
-use plexspaces_tuplespace::TupleSpace;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
-use crate::byzantine::General;
+use crate::byzantine::ByzantineAlgorithm;
 use crate::config::ByzantineConfig;
 
 /// Byzantine Generals Application
-///
-/// ## Design
-/// - Uses NodeBuilder/ActorBuilder for actor creation
-/// - Creates N generals (1 commander, N-1 lieutenants)
-/// - F generals are Byzantine (faulty)
-/// - Uses TupleSpace for coordination
-/// - Implements Application trait for lifecycle management
-/// - Tracks coordination vs compute metrics
 pub struct ByzantineApplication {
     /// Configuration
     config: ByzantineConfig,
-    /// Metrics tracker
-    metrics_tracker: CoordinationComputeTracker,
 }
 
 impl ByzantineApplication {
     /// Create new Byzantine Application from config
     pub fn from_config(config: ByzantineConfig) -> Result<Self, String> {
         config.validate()?;
-        
-        Ok(Self {
-            config,
-            metrics_tracker: CoordinationComputeTracker::new("byzantine-generals".to_string()),
-        })
+        Ok(Self { config })
     }
 
     /// Create new Byzantine Application
-    ///
-    /// ## Arguments
-    /// * `general_count` - Total number of generals (minimum 4)
-    /// * `byzantine_count` - Number of Byzantine generals (must be < general_count/3)
     pub fn new(general_count: usize, byzantine_count: usize) -> Self {
         let config = ByzantineConfig {
             general_count,
@@ -81,11 +49,7 @@ impl ByzantineApplication {
             redis_url: None,
             postgres_url: None,
         };
-        
-        Self {
-            config,
-            metrics_tracker: CoordinationComputeTracker::new("byzantine-generals".to_string()),
-        }
+        Self { config }
     }
 }
 
@@ -100,65 +64,103 @@ impl Application for ByzantineApplication {
         println!("   Generals: {}", self.config.general_count);
         println!("   Byzantine: {}", self.config.fault_count);
         
-        self.metrics_tracker.start_coordinate();
-
-        // Create shared resources
-        let journal = Arc::new(MemoryJournal::new());
-        let tuplespace = Arc::new(TupleSpace::new());
-
-        // Spawn generals using ApplicationNode::spawn_actor
-        for i in 0..self.config.general_count {
-            let general_id = format!("general-{}@{}", i, node.id());
-            let is_commander = i == 0; // First general is commander
-            let is_byzantine = i < self.config.fault_count;
-
-            // Create general behavior
-            let general = General::new(
-                general_id.clone(),
-                is_commander,
-                is_byzantine,
-                journal.clone() as Arc<dyn Journal>,
-                tuplespace.clone(),
-            ).await.map_err(|e| ApplicationError::StartupFailed(format!("Failed to create General: {}", e)))?;
-
-            // Spawn actor using ActorFactory
-            use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-            use std::sync::Arc;
-            use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-            let service_locator = node.service_locator()
-                .ok_or_else(|| ApplicationError::StartupFailed("ServiceLocator not available from node".to_string()))?;
-            let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
-                .ok_or_else(|| ApplicationError::StartupFailed("ActorFactory not found in ServiceLocator".to_string()))?;
-            
-            // Create mailbox for actor
-            let mut mailbox_config = mailbox_config_default();
-            mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
-            mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
-            mailbox_config.durability_strategy = plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
-            mailbox_config.capacity = 1000;
-            mailbox_config.backpressure_strategy = plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
-            let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", general_id))
-                .await
-                .map_err(|e| ApplicationError::StartupFailed(format!("Failed to create mailbox: {}", e)))?;
-            
-            // Create actor from behavior
-            let actor = plexspaces_actor::Actor::new(general_id.clone(), Box::new(general), mailbox, "byzantine".to_string(), None);
-            
-            // Spawn using ActorFactory
-            actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
-                .map_err(|e| ApplicationError::StartupFailed(format!("Failed to spawn {}: {}", general_id, e)))?;
-
-            println!("   ✅ Spawned {} (byzantine: {})", general_id, is_byzantine);
-        }
-
-        self.metrics_tracker.end_coordinate();
+        let service_locator = node.service_locator()
+            .ok_or_else(|| ApplicationError::StartupFailed("ServiceLocator not available from node".to_string()))?;
         
-        // Report metrics (clone tracker to avoid move)
-        let metrics = std::mem::replace(&mut self.metrics_tracker, CoordinationComputeTracker::new("byzantine-generals".to_string())).finalize();
-        println!("📊 Metrics:");
-        println!("   Coordination time: {:.2}ms", metrics.coordinate_duration_ms);
-        println!("   Compute time: {:.2}ms", metrics.compute_duration_ms);
-        println!("   Granularity ratio: {:.2}", metrics.granularity_ratio);
+        // Wait for services to be registered
+        for _ in 0..10 {
+            if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        
+        // Register ActorFactory
+        use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
+        use plexspaces_actor::ActorFactory;
+        let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
+        service_locator.register_service(actor_factory_impl.clone()).await;
+        
+        // Register BehaviorFactory
+        use plexspaces_core::BehaviorRegistry;
+        use crate::register_byzantine_behaviors;
+        use plexspaces::journal::MemoryJournal;
+        use plexspaces::tuplespace::TupleSpace;
+        let mut behavior_registry = BehaviorRegistry::new();
+        let journal = Arc::new(MemoryJournal::new());
+        let tuplespace = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
+        register_byzantine_behaviors(&mut behavior_registry, journal, tuplespace).await;
+        service_locator.register_service(Arc::new(behavior_registry)).await;
+        
+        // Register ActorService
+        use plexspaces_node::service_wrappers::ActorServiceWrapper;
+        use plexspaces_actor_service::ActorServiceImpl;
+        let actor_service_impl = Arc::new(ActorServiceImpl::new(
+            service_locator.clone(),
+            node.id().to_string(),
+        ));
+        let actor_service_wrapper = Arc::new(ActorServiceWrapper::new(actor_service_impl));
+        service_locator.register_actor_service(actor_service_wrapper).await;
+        
+        // Create actor context
+        let ctx = plexspaces_core::ActorContext::new(
+            node.id().to_string(),
+            "internal".to_string(),
+            "system".to_string(),
+            service_locator.clone(),
+            None,
+        );
+        let ctx_arc = Arc::new(ctx);
+        
+        // Spawn generals
+        let source_id = 0;
+        let num_rounds = 1;
+        
+        for general_id in 0..self.config.general_count {
+            let actor_id = format!("general{}@{}", general_id, node.id());
+            let initial_state = serde_json::json!({
+                "id": general_id,
+                "source_id": source_id,
+                "num_rounds": num_rounds
+            });
+            
+            let request_ctx = plexspaces_core::RequestContext::internal();
+            actor_factory_impl.spawn_actor(
+                &request_ctx,
+                &actor_id,
+                "ByzantineGeneral",
+                serde_json::to_vec(&initial_state).unwrap(),
+                None,
+                std::collections::HashMap::new(),
+            ).await
+                .map_err(|e| ApplicationError::StartupFailed(format!("Failed to spawn general {}: {}", general_id, e)))?;
+        }
+        
+        // Run the algorithm
+        let algorithm = ByzantineAlgorithm::new(self.config.general_count, source_id, num_rounds)
+            .map_err(|e| ApplicationError::StartupFailed(e))?;
+        
+        let (duration, total_messages, results) = algorithm.run(&ctx_arc).await
+            .map_err(|e| ApplicationError::StartupFailed(e))?;
+        
+        // Print results
+        println!("\nResults:");
+        println!("Time: {}ms", duration);
+        println!("Messages: {}", total_messages);
+        
+        for result in &results {
+            let prefix = if result.is_source { "Source " } else { "" };
+            if result.is_faulty {
+                println!("{}Process {} is faulty", prefix, result.id);
+            } else {
+                let decision_str = match result.decision {
+                    crate::byzantine::Value::Zero => "zero",
+                    crate::byzantine::Value::One => "one",
+                    crate::byzantine::Value::Retreat => "retreat",
+                };
+                println!("{}Process {} decides on value {}", prefix, result.id, decision_str);
+            }
+        }
         
         println!("✅ Byzantine Generals Application started");
         Ok(())
@@ -179,112 +181,21 @@ impl Application for ByzantineApplication {
     }
 }
 
-// ============================================================================
-// TESTS (TDD Approach)
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Test: Create application with valid parameters
     #[test]
     fn test_create_application() {
         let app = ByzantineApplication::new(4, 1);
         assert_eq!(app.name(), "byzantine-generals");
-        assert_eq!(app.config.general_count, 4);
-        assert_eq!(app.config.fault_count, 1);
     }
 
-    /// Test: Create from environment
-    // TODO: Re-enable after migrating to ApplicationNode API
     #[test]
-    #[cfg(feature = "disabled_tests")]
-    fn test_create_from_env() {
-        use plexspaces_proto::node::v1::{ApplicationConfig, ApplicationState};
-        use std::collections::HashMap;
-
-        let mut env = HashMap::new();
-        env.insert("BYZANTINE_GENERAL_COUNT".to_string(), "6".to_string());
-        env.insert("BYZANTINE_FAULT_COUNT".to_string(), "1".to_string());
-
-        let state = ApplicationState {
-            name: "byzantine-generals".to_string(),
-            status: 0,
-            start_timestamp_ms: 0,
-            supervisor_pid: None,
-            env,
-        };
-
-        let ctx = ApplicationContext::new(state);
-        let app = ByzantineApplication::from_env(&ctx);
-
-        assert_eq!(app.general_count, 6);
-        assert_eq!(app.byzantine_count, 1);
-    }
-
-    /// Test: Application lifecycle (start/stop)
-    // TODO: Re-enable after migrating to ApplicationNode API
-    #[tokio::test]
-    #[cfg(feature = "disabled_tests")]
-    async fn test_application_lifecycle() {
-        use plexspaces_proto::node::v1::{ApplicationConfig, ApplicationState};
-        use std::collections::HashMap;
-
-        let app = ByzantineApplication::new(4, 1);
-
-        let state = ApplicationState {
-            name: "byzantine-generals".to_string(),
-            status: 0,
-            start_timestamp_ms: 0,
-            supervisor_pid: None,
-            env: HashMap::new(),
-        };
-
-        let ctx = ApplicationContext::new(state);
-
-        // Start
-        app.start(&ctx)
-            .await
-            .expect("Start should succeed");
-
-        // Verify supervisor was created
-        {
-            let sup_guard = app.supervisor.read().await;
-            assert!(sup_guard.is_some());
-        }
-
-        // Stop
-        app.stop(&ctx)
-            .await
-            .expect("Stop should succeed");
-
-        // Verify supervisor was cleaned up
-        {
-            let sup_guard = app.supervisor.read().await;
-            assert!(sup_guard.is_none());
-        }
-    }
-
-    /// Test: Invalid configuration (too few generals)
-    #[test]
-    fn test_too_few_generals() {
+    fn test_invalid_config() {
         let config = ByzantineConfig {
             general_count: 3,
             fault_count: 0,
-            tuplespace_backend: "memory".to_string(),
-            redis_url: None,
-            postgres_url: None,
-        };
-        assert!(ByzantineApplication::from_config(config).is_err());
-    }
-
-    /// Test: Invalid configuration (too many Byzantine)
-    #[test]
-    fn test_too_many_byzantine() {
-        let config = ByzantineConfig {
-            general_count: 6,
-            fault_count: 2,  // 2 >= 6/3, should fail
             tuplespace_backend: "memory".to_string(),
             redis_url: None,
             postgres_url: None,

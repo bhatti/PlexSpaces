@@ -233,14 +233,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("Failed to attach TimerFacet: {}", e))?;
 
-    // Spawn using ActorFactory (spawn_built_actor is called internally by ActorFactory::spawn_actor)
-    // For built actors, we use ActorFactory::spawn_built_actor directly
+    // Spawn using ActorFactory with spawn_actor
+    // Note: TimerFacet can be attached after spawning, but for simplicity we attach before
+    // and use spawn_built_actor. For cases without facets, use spawn_actor directly.
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let actor_id = actor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    // Since we have TimerFacet attached, use spawn_built_actor
+    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let actor_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;

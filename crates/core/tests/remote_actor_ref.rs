@@ -5,50 +5,6 @@
 
 use plexspaces_core::{ActorRef, ActorError};
 
-/// Test: Parse actor ID format
-#[test]
-fn test_parse_actor_id_success() {
-    let (name, node) = ActorRef::parse_actor_id("actor@node1").unwrap();
-    assert_eq!(name, "actor");
-    assert_eq!(node, "node1");
-    
-    let (name, node) = ActorRef::parse_actor_id("complex-actor-name@prod-node-5").unwrap();
-    assert_eq!(name, "complex-actor-name");
-    assert_eq!(node, "prod-node-5");
-}
-
-/// Test: Parse actor ID failure
-#[test]
-fn test_parse_actor_id_failure() {
-    let result = ActorRef::parse_actor_id("invalid");
-    assert!(result.is_err());
-    match result.unwrap_err() {
-        ActorError::InvalidState(msg) => {
-            assert!(msg.contains("Invalid actor ID format"));
-        },
-        _ => panic!("Expected InvalidState error"),
-    }
-}
-
-/// Test: Parse actor ID edge cases
-#[test]
-fn test_parse_actor_id_edge_cases() {
-    // Empty actor name
-    let (name, node) = ActorRef::parse_actor_id("@node1").unwrap();
-    assert_eq!(name, "");
-    assert_eq!(node, "node1");
-    
-    // Empty node name
-    let (name, node) = ActorRef::parse_actor_id("actor@").unwrap();
-    assert_eq!(name, "actor");
-    assert_eq!(node, "");
-    
-    // Multiple @ symbols (should split on first)
-    let (name, node) = ActorRef::parse_actor_id("actor@node@extra").unwrap();
-    assert_eq!(name, "actor");
-    assert_eq!(node, "node@extra");
-}
-
 /// Test: Check if actor is remote (static helper)
 #[test]
 fn test_is_remote_actor() {

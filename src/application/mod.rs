@@ -94,10 +94,10 @@ pub enum ApplicationError {
     NotFound(String),
 
     /// Invalid state transition
-    #[error("Invalid state transition from {from:?} to {to:?}")]
+    #[error("Invalid state transition from {from} to {to}")]
     InvalidStateTransition {
-        from: ApplicationStatus,
-        to: ApplicationStatus,
+        from: i32,
+        to: i32,
     },
 
     /// Dependency not satisfied

@@ -2623,31 +2623,16 @@ mod tests {
     #[cfg(feature = "sqlite-backend")]
     async fn test_mailbox_sqlite_backend() {
         use plexspaces_proto::channel::v1::{ChannelConfig, SqliteConfig};
-        use std::path::PathBuf;
         
-        // Create persistent test directory (not auto-deleted)
-        let temp_base = std::env::temp_dir();
-        let test_dir = temp_base.join(format!("plexspaces_mailbox_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        std::fs::create_dir_all(&test_dir).unwrap();
-        let db_path = test_dir.join("test_mailbox.db");
-        
-        // Keep test_dir alive
-        let _keep_alive = &test_dir;
-        
-        // Get absolute path as string
-        let db_path_str = db_path.to_str().unwrap().to_string();
-        
-        // Touch the database file to ensure it exists (sqlx should create it, but this helps)
-        if !db_path.exists() {
-            std::fs::File::create(&db_path).unwrap();
-        }
+        // Use in-memory database to prevent concurrency issues
+        let db_path_str = ":memory:".to_string();
         
         let mut config = mailbox_config_default();
         config.channel_backend = ChannelBackend::ChannelBackendSqlite as i32;
         
         let sqlite_config = SqliteConfig {
             database_path: db_path_str,
-            table_name: "mailbox_messages".to_string(),
+            table_name: "channel_messages".to_string(),
             wal_mode: true,
             cleanup_acked: true,
             cleanup_age_seconds: 3600,
@@ -2770,7 +2755,7 @@ mod tests {
             
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
-                table_name: "recovery_messages".to_string(),
+                table_name: "channel_messages".to_string(),
                 wal_mode: true,
                 cleanup_acked: false, // Don't cleanup for recovery test
                 cleanup_age_seconds: 0,
@@ -2805,7 +2790,7 @@ mod tests {
             
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
-                table_name: "recovery_messages".to_string(),
+                table_name: "channel_messages".to_string(),
                 wal_mode: true,
                 cleanup_acked: false,
                 cleanup_age_seconds: 0,
@@ -2874,7 +2859,7 @@ mod tests {
             
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
-                table_name: "recovery_messages".to_string(),
+                table_name: "channel_messages".to_string(),
                 wal_mode: true,
                 cleanup_acked: false, // Don't cleanup for recovery test
                 cleanup_age_seconds: 0,
@@ -2911,7 +2896,7 @@ mod tests {
             // Use the same db_path_str from Phase 1
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
-                table_name: "recovery_messages".to_string(),
+                table_name: "channel_messages".to_string(),
                 wal_mode: true,
                 cleanup_acked: false,
                 cleanup_age_seconds: 0,
@@ -2984,7 +2969,7 @@ mod tests {
         
         let sqlite_config = SqliteConfig {
             database_path: db_path_str,
-            table_name: "multi_messages".to_string(),
+                table_name: "channel_messages".to_string(),
             wal_mode: true,
             cleanup_acked: false,
             cleanup_age_seconds: 0,

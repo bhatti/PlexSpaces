@@ -142,9 +142,19 @@ impl PlexSpacesNode {
             .map(|n| n.listen_address.clone())
             .unwrap_or_else(|| "0.0.0.0:9001".to_string());
         
+        // Create ServiceLocator for applications
+        use plexspaces_node::create_default_service_locator;
+        let node_config = self.release.spec().node.clone();
+        let service_locator = create_default_service_locator(
+            Some(node_id.clone()),
+            node_config,
+            Some(self.release.spec().clone()),
+        ).await;
+        
         self.controller.set_node(Arc::new(PlexSpacesNodeApplicationNode {
             node_id,
             listen_addr,
+            service_locator,
         })).await;
 
         // Get applications from release (proto ReleaseSpec)
@@ -257,6 +267,7 @@ impl PlexSpacesNode {
 struct PlexSpacesNodeApplicationNode {
     node_id: String,
     listen_addr: String,
+    service_locator: Arc<plexspaces_core::ServiceLocator>,
 }
 
 #[async_trait]
@@ -267,6 +278,10 @@ impl ApplicationNode for PlexSpacesNodeApplicationNode {
 
     fn listen_addr(&self) -> &str {
         &self.listen_addr
+    }
+
+    fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        Some(self.service_locator.clone())
     }
 }
 
@@ -364,6 +379,8 @@ mod tests {
                 id: "node1".to_string(),
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
+                default_tenant_id: "internal".to_string(),
+                default_namespace: "system".to_string(),
             }),
             runtime: Some({
                 let mut runtime_config = RuntimeConfig {

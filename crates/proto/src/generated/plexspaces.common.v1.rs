@@ -427,6 +427,27 @@ pub struct RequestContext {
     /// Examples: "source_ip", "user_agent", "api_version"
     #[prost(map="string, string", tag="7")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Admin flag (from JWT, optional)
+    ///
+    /// When true, indicates the user has admin privileges.
+    /// Admin users can bypass tenant filtering for administrative operations.
+    /// Extracted from JWT claims (e.g., "admin" role or "is_admin" claim).
+    #[prost(bool, tag="8")]
+    pub admin: bool,
+    /// Internal flag (for system operations)
+    ///
+    /// When true, indicates this is an internal system operation.
+    /// Internal operations bypass authn/authz and tenant filtering.
+    /// Used for system-level operations like heartbeats, node registration, etc.
+    #[prost(bool, tag="9")]
+    pub internal: bool,
+    /// Auth enabled flag (from SecurityConfig)
+    ///
+    /// When true, indicates authentication is enabled.
+    /// If auth is enabled and tenant_id is empty, RequestContext creation will fail.
+    /// If auth is disabled, tenant_id can be empty.
+    #[prost(bool, tag="10")]
+    pub auth_enabled: bool,
 }
 /// Quality of Service levels
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

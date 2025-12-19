@@ -87,7 +87,7 @@ impl MessageSender for VirtualActorWrapper {
         }
         
         // Actor is activated - use MessageSender from registry
-        // Get MessageSender (which will be RegularActorWrapper for activated actors)
+        // Get MessageSender (which will be ActorRef for activated actors)
         use plexspaces_core::ActorRegistry;
         let registry: Arc<ActorRegistry> = self.service_locator.get_service().await
             .ok_or_else(|| "ActorRegistry not registered in ServiceLocator".to_string())?;

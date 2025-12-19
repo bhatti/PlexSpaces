@@ -24,22 +24,23 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         namespace: &str,
         object_type: Option<ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_core::RequestContext;
         let obj_type = object_type.unwrap_or(ObjectType::ObjectTypeUnspecified);
+        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(&ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .lookup(tenant_id, namespace, object_type, object_id)
+            .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -58,7 +59,8 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 #[tokio::test]
 async fn test_remote_actor_ref_node_not_found() {
     // Test: Remote ActorRef should handle node not found in registry
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
         Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
     ));
@@ -89,7 +91,8 @@ async fn test_remote_actor_ref_node_not_found() {
 #[tokio::test]
 async fn test_remote_actor_ref_connection_failure() {
     // Test: Remote ActorRef should handle connection failures gracefully
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
         Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
     ));
@@ -133,7 +136,8 @@ async fn test_remote_actor_ref_connection_failure() {
 #[tokio::test]
 async fn test_remote_actor_ref_ask_timeout() {
     // Test: Remote ActorRef.ask() should timeout when no response
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
         Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
     ));
@@ -175,7 +179,8 @@ async fn test_remote_actor_ref_ask_timeout() {
 #[tokio::test]
 async fn test_remote_actor_ref_service_locator_client_caching() {
     // Test: Multiple ActorRefs to same node should share gRPC client via ServiceLocator
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
         Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
     ));

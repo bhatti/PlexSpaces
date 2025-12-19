@@ -35,7 +35,7 @@ use std::time::Duration;
 /// Test 1: Basic watch() - single watcher receives notification
 #[tokio::test]
 async fn test_watch_single_tuple_added() {
-    let space = TupleSpace::new();
+    let space = TupleSpace::default();
 
     // Create pattern to watch: ("event", _)
     let pattern = Pattern::new(vec![
@@ -78,7 +78,7 @@ async fn test_watch_single_tuple_added() {
 /// Test 2: Multiple watchers - all receive notifications
 #[tokio::test]
 async fn test_watch_multiple_watchers() {
-    let space = TupleSpace::new();
+    let space = TupleSpace::default();
 
     // Create pattern
     let pattern = Pattern::new(vec![
@@ -120,7 +120,7 @@ async fn test_watch_multiple_watchers() {
 /// Test 3: Pattern matching - only matching tuples trigger notifications
 #[tokio::test]
 async fn test_watch_pattern_matching() {
-    let space = TupleSpace::new();
+    let space = TupleSpace::default();
 
     // Watch for ("sensor", "temp", _)
     let pattern = Pattern::new(vec![
@@ -175,7 +175,7 @@ async fn test_watch_pattern_matching() {
 /// Test 4: Multiple tuples - watcher receives all matching events
 #[tokio::test]
 async fn test_watch_multiple_tuples() {
-    let space = TupleSpace::new();
+    let space = TupleSpace::default();
 
     let pattern = Pattern::new(vec![
         PatternField::Exact(TupleField::String("log".to_string())),
@@ -216,7 +216,7 @@ async fn test_watch_multiple_tuples() {
 async fn test_watch_concurrent_writes() {
     use std::sync::Arc;
 
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::default());
 
     let pattern = Pattern::new(vec![
         PatternField::Exact(TupleField::String("concurrent".to_string())),
@@ -271,7 +271,7 @@ async fn test_watch_concurrent_writes() {
 /// Test 6: Barrier pattern using watch() + count()
 #[tokio::test]
 async fn test_watch_barrier_pattern() {
-    let space = TupleSpace::new();
+    let space = TupleSpace::default();
 
     let barrier_pattern = Pattern::new(vec![
         PatternField::Exact(TupleField::String("barrier".to_string())),
@@ -320,7 +320,7 @@ async fn test_watch_barrier_pattern() {
 /// Test 7: Wildcard patterns - flexible matching
 #[tokio::test]
 async fn test_watch_wildcard_patterns() {
-    let space = TupleSpace::new();
+    let space = TupleSpace::default();
 
     // Watch for (_, "status", _) - matches any first field, exact "status", any third field
     let pattern = Pattern::new(vec![
@@ -378,7 +378,7 @@ async fn test_watch_wildcard_patterns() {
 #[tokio::test]
 #[ignore] // Disabled - performance issue (>60s runtime)
 async fn test_watch_channel_capacity() {
-    let space = TupleSpace::new();
+    let space = TupleSpace::default();
 
     let pattern = Pattern::new(vec![
         PatternField::Exact(TupleField::String("rapid".to_string())),

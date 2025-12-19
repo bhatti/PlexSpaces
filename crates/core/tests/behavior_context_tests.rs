@@ -9,11 +9,14 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_behavior_context_creation() {
-    let ctx = ActorContext::minimal(
-        "test-actor".to_string(),
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let ctx = ActorContext::new(
         "test-node".to_string(),
-        "default".to_string(), // namespace
-        "test-tenant".to_string(), // tenant_id (required)
+        "default".to_string(),
+        "test-tenant".to_string(),
+        service_locator,
+        None,
     );
     let ctx_arc = Arc::new(ctx);
 
@@ -38,11 +41,14 @@ async fn test_behavior_context_with_sender() {
     use plexspaces_core::ActorRef;
     use plexspaces_mailbox::{Mailbox, mailbox_config_default};
 
-    let ctx = ActorContext::minimal(
-        "test-actor".to_string(),
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let ctx = ActorContext::new(
         "test-node".to_string(),
-        "default".to_string(), // namespace
-        "test-tenant".to_string(), // tenant_id (required)
+        "default".to_string(),
+        "test-tenant".to_string(),
+        service_locator,
+        None,
     );
     let ctx_arc = Arc::new(ctx);
 

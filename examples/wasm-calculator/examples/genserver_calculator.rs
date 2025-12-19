@@ -286,9 +286,13 @@ mod tests {
 
     fn create_test_context() -> Arc<ActorContext> {
         // Use minimal_with_config to avoid deprecated minimal() with actor_id
-        Arc::new(ActorContext::minimal_with_config(
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+        Arc::new(ActorContext::new(
             "node1".to_string(),
             "test".to_string(),
+            "default".to_string(),
+            service_locator,
             None,
         ))
     }

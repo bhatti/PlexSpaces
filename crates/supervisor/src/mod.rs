@@ -1478,6 +1478,8 @@ impl SupervisorBuilder {
         let (mut supervisor, event_rx) = Supervisor::new(self.id, self.strategy);
         
         // Set ServiceLocator for the supervisor (required for add_child)
+        // For tests, create a minimal ServiceLocator
+        // Tests that need full services should register them explicitly
         let service_locator = Arc::new(ServiceLocator::new());
         supervisor = supervisor.with_service_locator(service_locator);
 
@@ -1525,6 +1527,7 @@ mod tests {
                     id.clone(),
                     Box::new(MockBehavior::new()),
                     mailbox,
+                    "test-tenant".to_string(),
                     "test".to_string(),
                     None,
                 ))
@@ -1573,6 +1576,7 @@ mod tests {
                     id_clone.clone(),
                     Box::new(MockBehavior::new()),
                     mailbox,
+                    "test-tenant".to_string(),
                     "test".to_string(),
                     None,
                 ))
@@ -2161,6 +2165,7 @@ mod tests {
                     id.clone(),
                     Box::new(MockBehavior::new()),
                     mailbox,
+                    "test-tenant".to_string(),
                     "test".to_string(),
                     None,
                 ))

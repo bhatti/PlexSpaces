@@ -66,8 +66,11 @@
 syntax = "proto3";
 package plexspaces.wasm.v1;
 
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "buf/validate/validate.proto";
 import "plexspaces/v1/common.proto";
 
 // WebAssembly module definition
@@ -336,7 +339,7 @@ message WasmConfig {
 // - Idempotent: Re-deploying same module (same hash) is no-op
 message DeployWasmModuleRequest {
   // WASM module to deploy
-  WasmModule module = 1;
+  WasmModule module = 1 [(google.api.field_behavior) = REQUIRED];
 
   // Pre-warm strategy
   enum PreWarmStrategy {
@@ -357,7 +360,7 @@ message DeployWasmModuleRequest {
   PreWarmStrategy pre_warm = 2;
 
   // Node tags for PUSH_TAGGED strategy (e.g., ["us-east-1", "production"])
-  repeated string target_node_tags = 3;
+  repeated string target_node_tags = 3 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 128}}}];
 }
 
 // Deploy WASM module response
@@ -399,12 +402,18 @@ message InstantiateActorRequest {
   // Supports both:
   // - Name: "counter-actor@1.2.3" (fetches from registry)
   // - Hash: "a1b2c3d4..." (direct cache lookup)
-  string module_ref = 1;
+  string module_ref = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Actor ID to assign to this instance
   //
   // Format: ULID for sortability (see CLAUDE.md Core Principle 0)
-  string actor_id = 2;
+  string actor_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Initial state bytes (opaque to runtime)
   //
@@ -423,7 +432,7 @@ message InstantiateActorRequest {
   // Node ID to instantiate on (optional)
   //
   // If not provided, scheduler chooses node based on load balancing.
-  string target_node_id = 5;
+  string target_node_id = 5 [(buf.validate.field).string.max_len = 255];
 }
 
 // Instantiate WASM actor response
@@ -464,13 +473,22 @@ message InstantiateActorResponse {
 // - Atomic migration: Source actor paused until destination ready
 message MigrateActorRequest {
   // Actor ID to migrate
-  string actor_id = 1;
+  string actor_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Source node ID (current location)
-  string source_node_id = 2;
+  string source_node_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Destination node ID (target location)
-  string target_node_id = 3;
+  string target_node_id = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Include journal entries (for durable actors)
   //
@@ -655,11 +673,26 @@ message WasmError {
 // - Actor placement can use consistent hashing or load-based scheduling
 service WasmRuntimeService {
   // Deploy WASM module to cluster registry
-  rpc DeployModule(DeployWasmModuleRequest) returns (DeployWasmModuleResponse);
+  rpc DeployModule(DeployWasmModuleRequest) returns (DeployWasmModuleResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/wasm/modules"
+      body: "*"
+    };
+  }
 
   // Instantiate actor from deployed module
-  rpc InstantiateActor(InstantiateActorRequest) returns (InstantiateActorResponse);
+  rpc InstantiateActor(InstantiateActorRequest) returns (InstantiateActorResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/wasm/actors"
+      body: "*"
+    };
+  }
 
   // Migrate actor to different node
-  rpc MigrateActor(MigrateActorRequest) returns (MigrateActorResponse);
+  rpc MigrateActor(MigrateActorRequest) returns (MigrateActorResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/wasm/actors/{actor_id}:migrate"
+      body: "*"
+    };
+  }
 }

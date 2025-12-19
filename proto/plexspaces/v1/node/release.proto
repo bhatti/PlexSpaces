@@ -102,6 +102,19 @@ message NodeConfig {
   // Cluster seed nodes for discovery
   // e.g., ["node1.cluster.local:9001", "node2.cluster.local:9001"]
   repeated string cluster_seed_nodes = 3;
+
+  // Default tenant ID for this node
+  //
+  // Used when auth is disabled or when creating actors from embedded applications.
+  // If not set and auth is disabled, will use "default".
+  // If auth is enabled and tenant_id is not provided, will error.
+  string default_tenant_id = 4;
+
+  // Default namespace for this node
+  //
+  // Used when namespace is not specified in requests.
+  // Defaults to "default" if not set.
+  string default_namespace = 5;
 }
 
 // Runtime configuration

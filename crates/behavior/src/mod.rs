@@ -917,10 +917,14 @@ mod tests {
         // Test with no handlers (should succeed) - Go-style: context first, then message
         use plexspaces_core::ActorContext;
         use std::sync::Arc;
-        let ctx = Arc::new(ActorContext::minimal(
-            "test".to_string(),
+        use plexspaces_core::ServiceLocator;
+        let service_locator = Arc::new(ServiceLocator::new());
+        let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
-            "test-ns".to_string(), // namespace
+            "test-ns".to_string(),
+            String::new(), // tenant_id (empty if auth disabled)
+            service_locator,
+            None,
         ));
         let msg = Message::new(vec![]);
         behavior.handle_message(&*ctx, msg).await.unwrap();

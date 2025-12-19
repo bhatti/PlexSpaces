@@ -21,6 +21,7 @@
 use crate::capacity_tracker::CapacityTracker;
 use crate::state_store::SchedulingStateStore;
 use plexspaces_channel::Channel;
+use plexspaces_core::RequestContext;
 use plexspaces_proto::{
     channel::v1::ChannelMessage,
     prost_types,
@@ -60,6 +61,7 @@ impl SchedulingServiceImpl {
             capacity_tracker,
         }
     }
+    
 }
 
 #[tonic::async_trait]
@@ -161,12 +163,18 @@ impl SchedulingService for SchedulingServiceImpl {
         &self,
         request: Request<GetNodeCapacityRequest>,
     ) -> Result<Response<GetNodeCapacityResponse>, Status> {
+        // Create RequestContext from request metadata (before consuming request)
+        // Scheduler uses internal context for system-level operations
+        // Scheduler operations always use internal context
+        let ctx = RequestContext::internal();
+        
+        // Now consume request
         let req = request.into_inner();
 
         // Query capacity tracker for node capacity
         let capacity = self
             .capacity_tracker
-            .get_node_capacity(&req.node_id)
+            .get_node_capacity(&ctx, &req.node_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to get node capacity: {}", e)))?
             .ok_or_else(|| Status::not_found(format!("Node {} not found", req.node_id)))?;
@@ -180,6 +188,12 @@ impl SchedulingService for SchedulingServiceImpl {
         &self,
         request: Request<ListNodeCapacitiesRequest>,
     ) -> Result<Response<ListNodeCapacitiesResponse>, Status> {
+        // Create RequestContext from request metadata (before consuming request)
+        // Scheduler uses internal context for system-level operations
+        // Scheduler operations always use internal context
+        let ctx = RequestContext::internal();
+        
+        // Now consume request
         let req = request.into_inner();
 
         // Extract filters
@@ -192,7 +206,7 @@ impl SchedulingService for SchedulingServiceImpl {
         // Query capacity tracker for node capacities (no min_resources filter for now)
         let capacities = self
             .capacity_tracker
-            .list_node_capacities(label_filter.as_ref(), None)
+            .list_node_capacities(&ctx, label_filter.as_ref(), None)
             .await
             .map_err(|e| Status::internal(format!("Failed to list node capacities: {}", e)))?;
 

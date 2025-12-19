@@ -92,7 +92,6 @@ use plexspaces_core::{ActorId, ActorRegistry, ReplyTracker, ServiceLocator, acto
 use std::collections::HashMap;
 use plexspaces_actor::ActorFactory;
 use plexspaces_actor::ActorRef as ActorRefImpl;
-use plexspaces_actor::RegularActorWrapper;
 use plexspaces_mailbox::{Message, Mailbox};
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -239,6 +238,7 @@ impl ActorServiceImpl {
     /// use Node::spawn_actor() or the CreateActor gRPC RPC.
     pub async fn spawn_actor(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         actor_id: &str,
         actor_type: &str,
         initial_state: Vec<u8>,
@@ -278,6 +278,7 @@ impl ActorServiceImpl {
         // The actor is already registered in ActorRegistry, so we can create ActorRefImpl
         // that uses MessageSender internally
         actor_factory.spawn_actor(
+            &ctx,
             &local_actor_id,
             actor_type,
             initial_state,
@@ -1079,6 +1080,21 @@ impl ActorServiceTrait for ActorServiceImpl {
         // This is the gRPC handler - it spawns locally on this node
         // gRPC is already remote, so "remote" in the name was redundant
         // The actor is spawned locally on THIS node (the one receiving the gRPC request)
+        
+        // Extract labels from request before consuming it (needed for context creation)
+        let labels_for_ctx = request.get_ref().labels.clone();
+        
+        // Create RequestContext from request metadata (before consuming request)
+        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+            request.metadata(),
+            &labels_for_ctx,
+            &self.service_locator,
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
+        // Now consume request to get inner data
         let req = request.into_inner();
         
         // Validate actor_type
@@ -1116,6 +1132,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         if let Some(factory) = actor_factory_opt {
             // Spawn actor using ActorFactory
             factory.spawn_actor(
+                &ctx,
                 &actor_id,
                 &actor_type,
                 initial_state.clone(),
@@ -1270,68 +1287,50 @@ impl ActorServiceTrait for ActorServiceImpl {
     ) -> Result<Response<InvokeActorResponse>, Status> {
         let start_time = std::time::Instant::now();
         let metadata = request.metadata().clone();
+        let req = request.get_ref().clone(); // Clone to avoid moving request
+        
+        // Create RequestContext from gRPC request - uses shared validation from RequestContext
+        // tenant_id comes from auth or default config, not from request body
+        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &self.service_locator,
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
+        // Get request body (tenant_id is no longer in request)
         let req = request.into_inner();
         
-        // OBSERVABILITY: Start tracing span
+        // Extract tenant_id and namespace from RequestContext (from auth/default config)
+        let tenant_id = ctx.tenant_id().to_string();
+        let namespace = ctx.namespace().to_string();
+        
+        // OBSERVABILITY: Start tracing span (clone for span to avoid moving)
+        let tenant_id_for_span = tenant_id.clone();
+        let namespace_for_span = namespace.clone();
         let span = tracing::span!(
             tracing::Level::INFO,
             "actor_service.invoke_actor",
-            tenant_id = %req.tenant_id,
-            namespace = %req.namespace,
+            tenant_id = %tenant_id_for_span,
+            namespace = %namespace_for_span,
             actor_type = %req.actor_type,
             http_method = %req.http_method
         );
         let _guard = span.enter();
-
+        
         tracing::info!(
-            "🟦 [INVOKE_ACTOR] START: tenant_id={} (from path), namespace={}, actor_type={}, http_method={}",
-            if req.tenant_id.is_empty() { "default (not in path)" } else { &req.tenant_id },
-            req.namespace, req.actor_type, req.http_method
+            "🟦 [INVOKE_ACTOR] START: tenant_id={}, namespace={}, actor_type={}, http_method={}",
+            &tenant_id, &namespace, req.actor_type, req.http_method
         );
-        
-        // Extract and validate tenant_id, namespace, and actor_type from request (from path)
-        // Both tenant_id and namespace default to "default" if not specified in HTTP path
-        // This supports both:
-        // - /api/v1/actors/{tenant_id}/{namespace}/{actor_type} (with tenant_id)
-        // - /api/v1/actors/{namespace}/{actor_type} (without tenant_id, defaults to "default")
-        // Validate tenant_id length before processing (proto validation should catch this, but double-check)
-        if !req.tenant_id.is_empty() && req.tenant_id.len() > 128 {
-            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                "error_type" => "invalid_tenant_id"
-            ).increment(1);
-            return Err(Status::invalid_argument("Tenant ID exceeds maximum length of 128 characters"));
-        }
-        
-        let tenant_id = if req.tenant_id.is_empty() {
-            "default".to_string()
-        } else {
-            req.tenant_id.clone()
-        };
-
-        // Validate namespace length before processing (proto validation should catch this, but double-check)
-        if !req.namespace.is_empty() && req.namespace.len() > 128 {
-            let tenant_id_label = if req.tenant_id.is_empty() { "default".to_string() } else { req.tenant_id.clone() };
-            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                "error_type" => "invalid_namespace",
-                "tenant_id" => tenant_id_label.clone()
-            ).increment(1);
-            return Err(Status::invalid_argument("Namespace exceeds maximum length of 128 characters"));
-        }
-        
-        let namespace = if req.namespace.is_empty() {
-            "default".to_string()
-        } else {
-            req.namespace.clone()
-        };
 
         let actor_type = req.actor_type.clone();
         if actor_type.is_empty() {
-            let tenant_id_label = if req.tenant_id.is_empty() { "default".to_string() } else { req.tenant_id.clone() };
-            let namespace_label = if req.namespace.is_empty() { "default".to_string() } else { req.namespace.clone() };
             metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
                 "error_type" => "missing_actor_type",
-                "tenant_id" => tenant_id_label.clone(),
-                "namespace" => namespace_label.clone()
+                "tenant_id" => tenant_id.clone(),
+                "namespace" => namespace.clone()
             ).increment(1);
             return Err(Status::invalid_argument("Missing actor_type"));
         }
@@ -1340,37 +1339,11 @@ impl ActorServiceTrait for ActorServiceImpl {
         if actor_type.len() > 128 {
             metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
                 "error_type" => "invalid_actor_type",
-                "tenant_id" => tenant_id.clone(),
-                "namespace" => namespace.clone()
+                "tenant_id" => tenant_id,
+                "namespace" => namespace
             ).increment(1);
             return Err(Status::invalid_argument("Actor type exceeds maximum length of 128 characters"));
         }
-
-        // Extract JWT claims from metadata if available
-        let jwt_tenant_id = ActorServiceImpl::extract_tenant_id_from_jwt(&metadata);
-        
-        // Verify tenant_id access if JWT is present
-        if let Some(ref jwt_tenant) = jwt_tenant_id {
-            if jwt_tenant != &tenant_id {
-                metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                    "error_type" => "tenant_mismatch",
-                    "tenant_id" => tenant_id.clone(),
-                    "namespace" => namespace.clone(),
-                    "actor_type" => actor_type.clone()
-                ).increment(1);
-                tracing::warn!(
-                    "🟦 [INVOKE_ACTOR] Tenant mismatch: JWT tenant_id '{}' != requested tenant_id '{}'",
-                    jwt_tenant, tenant_id
-                );
-                return Err(Status::permission_denied(format!(
-                    "JWT tenant_id '{}' does not match requested tenant_id '{}'",
-                    jwt_tenant, tenant_id
-                )));
-            }
-        }
-
-        // Use tenant_id from JWT if available, otherwise use requested tenant_id
-        let effective_tenant_id = jwt_tenant_id.unwrap_or_else(|| tenant_id.clone());
 
         // Get ActorRegistry to lookup actors
         let actor_registry = self.get_actor_registry().await;
@@ -1379,7 +1352,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let lookup_start = std::time::Instant::now();
         
         // Discover actors by type using efficient hashmap lookup (O(1))
-        let actor_ids = actor_registry.discover_actors_by_type(&effective_tenant_id, &namespace, &actor_type).await;
+        let actor_ids = actor_registry.discover_actors_by_type(&ctx, &actor_type).await;
 
         // OBSERVABILITY: Track lookup duration
         let lookup_duration = lookup_start.elapsed();
@@ -1388,23 +1361,23 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         tracing::debug!(
             "🟦 [INVOKE_ACTOR] Lookup complete: found {} actors of type '{}' in tenant '{}', namespace '{}' (took {:?})",
-            actor_ids.len(), actor_type, effective_tenant_id, namespace, lookup_duration
+            actor_ids.len(), actor_type, tenant_id, namespace, lookup_duration
         );
 
         if actor_ids.is_empty() {
             metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
                 "error_type" => "actor_not_found",
-                "tenant_id" => effective_tenant_id.clone(),
+                "tenant_id" => tenant_id.clone(),
                 "namespace" => namespace.clone(),
                 "actor_type" => actor_type.clone()
             ).increment(1);
             tracing::warn!(
                 "🟦 [INVOKE_ACTOR] No actors found: type='{}', tenant='{}', namespace='{}'",
-                actor_type, effective_tenant_id, namespace
+                actor_type, &tenant_id, &namespace
             );
             return Err(Status::not_found(format!(
                 "No actors found for type '{}' in tenant '{}', namespace '{}'",
-                actor_type, effective_tenant_id, namespace
+                actor_type, &tenant_id, &namespace
             )));
         }
 
@@ -1485,7 +1458,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let full_path = if !req.path.is_empty() {
             req.path.clone()
         } else {
-            format!("/api/v1/actors/{}/{}", req.tenant_id, req.actor_type)
+            format!("/api/v1/actors/{}/{}", &namespace, req.actor_type)
         };
         message.uri_path = Some(full_path);
         message.uri_method = Some(http_method.clone());
@@ -1507,7 +1480,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             metrics::counter!("plexspaces_actor_service_invoke_actor_total",
                 "method" => method_label,
                 "pattern" => "ask",
-                "tenant_id" => effective_tenant_id.clone(),
+                "tenant_id" => tenant_id.clone(),
                 "namespace" => namespace.clone(),
                 "actor_type" => actor_type.clone()
             ).increment(1);
@@ -1521,7 +1494,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                         "method" => method_label,
                         "pattern" => "ask",
                         "status" => "success",
-                        "tenant_id" => effective_tenant_id.clone(),
+                        "tenant_id" => tenant_id.clone(),
                         "namespace" => namespace.clone(),
                         "actor_type" => actor_type.clone()
                     ).record(invoke_duration.as_secs_f64());
@@ -1546,14 +1519,14 @@ impl ActorServiceTrait for ActorServiceImpl {
                         "method" => method_label,
                         "pattern" => "ask",
                         "status" => "error",
-                        "tenant_id" => effective_tenant_id.clone(),
+                        "tenant_id" => tenant_id.clone(),
                         "namespace" => namespace.clone(),
                         "actor_type" => actor_type.clone()
                     ).record(invoke_duration.as_secs_f64());
                     metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
                         "error_type" => "ask_failed",
                         "method" => method_label,
-                        "tenant_id" => effective_tenant_id.clone(),
+                        "tenant_id" => tenant_id.clone(),
                         "namespace" => namespace.clone(),
                         "actor_type" => actor_type.clone()
                     ).increment(1);
@@ -1572,7 +1545,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             metrics::counter!("plexspaces_actor_service_invoke_actor_total",
                 "method" => method_label,
                 "pattern" => "tell",
-                "tenant_id" => effective_tenant_id.clone(),
+                "tenant_id" => tenant_id.clone(),
                 "namespace" => namespace.clone(),
                 "actor_type" => actor_type.clone()
             ).increment(1);
@@ -1585,7 +1558,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                         "method" => method_label,
                         "pattern" => "tell",
                         "status" => "success",
-                        "tenant_id" => effective_tenant_id.clone(),
+                        "tenant_id" => tenant_id.clone(),
                         "namespace" => namespace.clone(),
                         "actor_type" => actor_type.clone()
                     ).record(invoke_duration.as_secs_f64());
@@ -1610,14 +1583,14 @@ impl ActorServiceTrait for ActorServiceImpl {
                         "method" => method_label,
                         "pattern" => "tell",
                         "status" => "error",
-                        "tenant_id" => effective_tenant_id.clone(),
+                        "tenant_id" => tenant_id.clone(),
                         "namespace" => namespace.clone(),
                         "actor_type" => actor_type.clone()
                     ).record(invoke_duration.as_secs_f64());
                     metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
                         "error_type" => "tell_failed",
                         "method" => method_label,
-                        "tenant_id" => effective_tenant_id.clone(),
+                        "tenant_id" => tenant_id.clone(),
                         "namespace" => namespace.clone(),
                         "actor_type" => actor_type.clone()
                     ).increment(1);
@@ -1647,32 +1620,13 @@ impl ActorServiceTrait for ActorServiceImpl {
 }
 
 impl ActorServiceImpl {
-    /// Extract tenant_id from JWT claims in request metadata
+    /// Extract tenant_id from JWT claims in request metadata (legacy method, kept for compatibility)
     fn extract_tenant_id_from_jwt(metadata: &tonic::metadata::MetadataMap) -> Option<String> {
-        // Try to get authorization header
-        if let Some(auth_header) = metadata.get("authorization") {
-            if let Ok(auth_str) = auth_header.to_str() {
-                // Extract token from "Bearer <token>"
-                if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                    // Decode JWT (simplified - in production, use proper JWT library)
-                    // For now, we'll parse the JWT claims
-                    // Note: This is a simplified implementation - in production, use proper JWT validation
-                    if let Some(claims) = Self::decode_jwt_token(token) {
-                        return Some(claims.tenant_id);
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Decode JWT token and extract claims (simplified implementation)
-    /// In production, use proper JWT validation library
-    fn decode_jwt_token(_token: &str) -> Option<plexspaces_proto::grpc::v1::JwtClaims> {
-        // TODO: Implement proper JWT decoding using jsonwebtoken crate
-        // For now, return None to indicate no JWT found
-        // This will be implemented when JWT validation is properly integrated
-        None
+        // Try to get from x-tenant-id header (set by JWT middleware)
+        metadata.get("x-tenant-id")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
     }
 }
 
@@ -1868,22 +1822,23 @@ mod tests {
             namespace: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            use plexspaces_core::RequestContext;
             let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+            let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
             self.inner
-                .lookup(tenant_id, namespace, obj_type, object_id)
+                .lookup(&ctx, obj_type, object_id)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
 
         async fn lookup_full(
             &self,
-            tenant_id: &str,
-            namespace: &str,
+            ctx: &plexspaces_core::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             self.inner
-                .lookup(tenant_id, namespace, object_type, object_id)
+                .lookup_full(ctx, object_type, object_id)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -1911,13 +1866,11 @@ mod tests {
 
     /// Helper to create ActorServiceImpl with proper ServiceLocator setup for tests
     async fn create_test_actor_service(actor_registry: Arc<ActorRegistry>, node_id: String) -> ActorServiceImpl {
-        use plexspaces_core::ReplyWaiterRegistry;
-        let service_locator = Arc::new(ServiceLocator::new());
-        let reply_tracker = Arc::new(ReplyTracker::new());
-        let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
+        use plexspaces_node::create_default_service_locator;
+        // Create default service locator which already has most services
+        let service_locator = create_default_service_locator(Some(node_id.clone()), None, None).await;
+        // Register actor_registry if not already registered
         service_locator.register_service(actor_registry.clone()).await;
-        service_locator.register_service(reply_tracker).await;
-        service_locator.register_service(reply_waiter_registry).await;
         ActorServiceImpl::new(service_locator, node_id)
     }
 
@@ -1928,12 +1881,14 @@ mod tests {
         mailbox: Arc<Mailbox>,
         service_locator: Arc<ServiceLocator>,
     ) {
-        let sender: Arc<dyn MessageSender> = Arc::new(RegularActorWrapper::new(
+        let sender: Arc<dyn MessageSender> = Arc::new(plexspaces_actor::ActorRef::local(
             actor_id.clone(),
             mailbox,
             service_locator,
         ));
-        actor_registry.register_actor(actor_id, sender, None, None, None).await;
+        // Use internal context for actor registration (system-level operation)
+        let internal_ctx = plexspaces_core::RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_id, sender, None).await;
     }
 
     /// Helper to create a test ActorRegistry with a node registration
@@ -1948,8 +1903,8 @@ mod tests {
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node_address.to_string(),
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
+            tenant_id: "internal".to_string(),
+            namespace: "system".to_string(),
             ..Default::default()
         };
         
@@ -2730,8 +2685,8 @@ mod tests {
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
+            tenant_id: "internal".to_string(),
+            namespace: "system".to_string(),
             ..Default::default()
         };
         object_registry_impl1.register(node2_registration).await.unwrap();
@@ -2743,8 +2698,8 @@ mod tests {
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node3_address.clone(),
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
+            tenant_id: "internal".to_string(),
+            namespace: "system".to_string(),
             ..Default::default()
         };
         object_registry_impl1.register(node3_registration).await.unwrap();

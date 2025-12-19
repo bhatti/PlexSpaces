@@ -1,409 +1,270 @@
-//! Byzantine Generals Problem implementation for PlexSpaces
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+//! Byzantine Generals Problem - Simple implementation based on Erlang version
 //!
-//! This example demonstrates all 5 foundational pillars:
-//! 1. TupleSpace for vote coordination
-//! 2. OTP supervision for fault tolerance
-//! 3. Journal for durable decisions
-//! 4. WASM runtime for portable logic (phase 2)
-//! 5. Firecracker VMs for isolation (future)
+//! This is a simplified implementation that follows the Erlang algorithm closely:
+//! - Processes communicate via messages
+//! - Source process sends initial messages in round 0
+//! - Other processes relay messages in subsequent rounds
+//! - Processes vote and make decisions
+//! - Some processes can be faulty (traitors)
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use async_trait::async_trait;
-
-use plexspaces::ActorId;  // ActorId is re-exported from root
-use plexspaces::{Actor, ActorContext, BehaviorType, BehaviorError};  // Re-exported from root
-use plexspaces::mailbox::{Mailbox, MailboxConfig};
-use plexspaces::journal::Journal;
-use plexspaces::tuplespace::{Tuple, TupleField, Pattern, PatternField, TupleSpaceError, TupleSpace};
-use plexspaces::tuplespace::lattice_space::LatticeTupleSpace;
-use plexspaces::lattice::{Lattice, SetLattice, LWWLattice, ConsistencyLevel};
-use plexspaces_proto::v1::tuplespace::TupleSpaceConfig;
-use plexspaces_core::ActorError;
-
 use serde::{Serialize, Deserialize};
 
+use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_behavior::GenServer;
+use plexspaces_mailbox::Message;
+
 // ============================================================================
-// Configuration Helpers
+// Message Types
 // ============================================================================
-//
-// These functions create configured TupleSpace instances for Byzantine Generals tests
 
-/// Create a TupleSpace instance from environment or default
-///
-/// ## Purpose
-/// Provides a convenient way to create TupleSpace for Byzantine tests that respects
-/// environment configuration (for multi-process tests) or falls back to in-memory.
-///
-/// ## Environment Variables
-/// - `PLEXSPACES_TUPLESPACE_BACKEND`: Backend type ("in-memory", "sqlite", "redis", "postgres")
-/// - `PLEXSPACES_SQLITE_PATH`: SQLite database file path
-/// - Other vars per TupleSpace::from_env() documentation
-///
-/// ## Returns
-/// Configured TupleSpace wrapped in Arc<dyn TupleSpaceOps> for use with General
-///
-/// ## Examples
-/// ```rust
-/// # use byzantine_generals::create_tuplespace_from_env;
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// // Uses env vars if set, otherwise in-memory
-/// let tuplespace = create_tuplespace_from_env().await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn create_tuplespace_from_env() -> Result<Arc<dyn TupleSpaceOps>, Box<dyn std::error::Error>> {
-    // Try environment variables first, fall back to in-memory
-    let tuplespace = TupleSpace::from_env_or_default().await?;
-
-    // Wrap in Arc<dyn TupleSpaceOps> for Byzantine API
-    Ok(Arc::new(tuplespace))
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GeneralMessage {
+    /// Initialize with neighbor information
+    Init {
+        general_ids: Vec<usize>,
+        source_id: usize,
+        num_rounds: usize,
+    },
+    /// Receive a message with path and value
+    ReceiveMessage {
+        path: String,
+        value: Value,
+    },
+    /// Send messages for a round
+    SendMessages {
+        round: usize,
+    },
+    /// Get result
+    GetResult,
+    /// Stop the general
+    Stop,
 }
 
-/// Create a TupleSpace instance from explicit configuration
-///
-/// ## Purpose
-/// Allows tests to explicitly specify backend configuration instead of relying on env vars.
-/// Useful for integration tests that need specific backends.
-///
-/// ## Arguments
-/// * `config` - TupleSpaceConfig protobuf message
-///
-/// ## Returns
-/// Configured TupleSpace wrapped in Arc<dyn TupleSpaceOps>
-///
-/// ## Examples
-/// ```rust
-/// # use byzantine_generals::create_tuplespace_from_config;
-/// # use plexspaces_proto::v1::tuplespace::{TupleSpaceConfig, SqliteBackend};
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let config = TupleSpaceConfig {
-///     backend: Some(plexspaces_proto::v1::tuplespace::tuple_space_config::Backend::Sqlite(
-///         SqliteBackend { path: ":memory:".to_string() }
-///     )),
-///     pool_size: 1,
-///     default_ttl_seconds: 0,
-///     enable_indexing: false,
-/// };
-/// let tuplespace = create_tuplespace_from_config(config).await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn create_tuplespace_from_config(config: TupleSpaceConfig) -> Result<Arc<dyn TupleSpaceOps>, Box<dyn std::error::Error>> {
-    let tuplespace = TupleSpace::from_config(config).await?;
-    Ok(Arc::new(tuplespace))
-}
-
-/// Create an in-memory TupleSpace with lattice consistency
-///
-/// ## Purpose
-/// Convenience function for creating in-memory TupleSpace with lattice-based consistency.
-/// This is the default for single-process tests.
-///
-/// ## Arguments
-/// * `node_id` - Node identifier for lattice operations
-/// * `consistency` - Consistency level (Linearizable, Causal, Eventual)
-///
-/// ## Returns
-/// In-memory LatticeTupleSpace wrapped in Arc<dyn TupleSpaceOps>
-///
-/// ## Examples
-/// ```rust
-/// # use byzantine_generals::create_lattice_tuplespace;
-/// # use plexspaces::lattice::ConsistencyLevel;
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let tuplespace = create_lattice_tuplespace("node1", ConsistencyLevel::Linearizable).await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn create_lattice_tuplespace(
-    node_id: &str,
-    consistency: ConsistencyLevel,
-) -> Result<Arc<dyn TupleSpaceOps>, Box<dyn std::error::Error>> {
-    let lattice_space = LatticeTupleSpace::new(node_id.to_string(), consistency);
-    Ok(Arc::new(lattice_space))
-}
-
-/// The decision that generals must agree upon
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Decision {
-    Attack,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Value {
+    Zero,
+    One,
     Retreat,
-    Undecided,
 }
 
-/// A vote from a general
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Vote {
-    pub general_id: String,
-    pub round: u32,
-    pub value: Decision,
-    pub path: Vec<String>,  // Chain of generals who relayed this vote
-}
-
-/// State of a general in the Byzantine army
-#[derive(Debug, Clone)]
-pub struct GeneralState {
-    pub id: String,
-    pub is_commander: bool,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneralResult {
+    pub id: usize,
+    pub is_source: bool,
     pub is_faulty: bool,
-    pub round: u32,
-    pub votes: HashMap<String, Vec<Vote>>,  // Votes received per round
-    pub decision: Decision,
+    pub decision: Value,
     pub message_count: usize,
 }
 
-/// Trait for TupleSpace operations needed by Byzantine Generals
-///
-/// This allows General to work with any TupleSpace implementation (LatticeTupleSpace, RedisTupleSpace, etc.)
-#[async_trait]
-pub trait TupleSpaceOps: Send + Sync {
-    async fn write(&self, tuple: Tuple) -> Result<(), TupleSpaceError>;
-    async fn read(&self, pattern: &Pattern) -> Result<Vec<Tuple>, TupleSpaceError>;
-}
+// ============================================================================
+// General Actor (GenServer)
+// ============================================================================
 
-/// Implement TupleSpaceOps for LatticeTupleSpace
-#[async_trait]
-impl TupleSpaceOps for LatticeTupleSpace {
-    async fn write(&self, tuple: Tuple) -> Result<(), TupleSpaceError> {
-        self.write(tuple).await
-            .map_err(|e| TupleSpaceError::BackendError(e.to_string()))
-    }
-
-    async fn read(&self, pattern: &Pattern) -> Result<Vec<Tuple>, TupleSpaceError> {
-        // LatticeTupleSpace.read() doesn't return Result, just Vec<Tuple>
-        let tuples = self.read(pattern).await;
-        Ok(tuples)
-    }
-}
-
-/// Implement TupleSpaceOps for RedisTupleSpace
-#[cfg(feature = "redis-backend")]
-#[async_trait]
-impl TupleSpaceOps for plexspaces::tuplespace::RedisTupleSpace {
-    async fn write(&self, tuple: Tuple) -> Result<(), TupleSpaceError> {
-        self.write(tuple).await
-    }
-
-    async fn read(&self, pattern: &Pattern) -> Result<Vec<Tuple>, TupleSpaceError> {
-        self.read(pattern).await
-    }
-}
-
-/// Implement TupleSpaceOps for regular TupleSpace (configurable backend)
-///
-/// This allows Byzantine example to work with any configured backend (SQLite, Redis, PostgreSQL)
-#[async_trait]
-impl TupleSpaceOps for TupleSpace {
-    async fn write(&self, tuple: Tuple) -> Result<(), TupleSpaceError> {
-        self.write(tuple).await
-    }
-
-    async fn read(&self, pattern: &Pattern) -> Result<Vec<Tuple>, TupleSpaceError> {
-        // TupleSpace.read() returns Result<Option<Tuple>> for single match
-        // For Byzantine, we need read_all() which returns all matching tuples
-        self.read_all(pattern.clone()).await
-    }
-}
-
-/// A general in the Byzantine army
-#[derive(Clone)]
 pub struct General {
-    pub id: ActorId,
-    pub state: Arc<RwLock<GeneralState>>,
-    pub mailbox: Arc<Mailbox>,
-    pub journal: Arc<dyn Journal>,
-    pub tuplespace: Arc<dyn TupleSpaceOps>,
+    id: usize,
+    source_id: usize,
+    num_rounds: usize,
+    general_ids: Vec<usize>,
+    values: HashMap<String, Value>,
+    is_faulty: bool,
+    message_count: usize,
 }
 
 impl General {
-    /// Create a new general
-    pub async fn new(
-        id: String,
-        is_commander: bool,
-        is_faulty: bool,
-        journal: Arc<dyn Journal>,
-        tuplespace: Arc<dyn TupleSpaceOps>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let actor_id = id.clone();
-        let state = GeneralState {
-            id: id.clone(),
-            is_commander,
+    pub fn new(id: usize, source_id: usize, num_rounds: usize) -> Self {
+        // Process is faulty if it's the source or id == 2 (matching Erlang logic)
+        let is_faulty = id == source_id || id == 2;
+        
+        Self {
+            id,
+            source_id,
+            num_rounds,
+            general_ids: Vec::new(),
+            values: HashMap::new(),
             is_faulty,
-            round: 0,
-            votes: HashMap::new(),
-            decision: Decision::Undecided,
             message_count: 0,
-        };
-
-        Ok(General {
-            id: actor_id.clone(),
-            state: Arc::new(RwLock::new(state)),
-            mailbox: Arc::new(Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id)).await?),
-            journal,
-            tuplespace,
-        })
+        }
     }
 
-    /// Commander proposes a value
-    pub async fn propose(&self, attack: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let mut state = self.state.write().await;
+    fn handle_init(&mut self, general_ids: Vec<usize>) {
+        self.general_ids = general_ids;
+    }
 
-        if !state.is_commander {
-            return Err("Only commander can propose".into());
+    fn handle_receive_message(&mut self, path: String, value: Value) {
+        self.values.insert(path, value);
+        self.message_count += 1;
+    }
+
+    async fn handle_send_messages(
+        &mut self,
+        round: usize,
+        ctx: &ActorContext,
+    ) -> Result<(), BehaviorError> {
+        if round == 0 && self.id == self.source_id {
+            self.send_initial_messages(ctx).await?;
+        } else if round > 0 {
+            self.relay_messages(round, ctx).await?;
         }
-
-        let decision = if attack { Decision::Attack } else { Decision::Retreat };
-        state.decision = decision;
-
-        // TODO: Update to new Journal API
-        // Old API: self.journal.append(JournalEntry { ... })
-        // New API: Use typed methods like record_state_change()
-        // For now, commenting out to get compilation working
-
-        // Write proposal to TupleSpace
-        let tuple = Tuple::new(vec![
-            TupleField::String("proposal".to_string()),
-            TupleField::String(state.id.clone()),
-            TupleField::Integer(0),  // Round 0
-            TupleField::String(format!("{:?}", decision)),
-        ]);
-        self.tuplespace.write(tuple).await?;
-
-        println!("Commander {} proposes: {:?}", state.id, decision);
-
         Ok(())
     }
 
-    /// Cast a vote to the TupleSpace
-    pub async fn cast_vote(&self, round: u32, value: Decision, path: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
-        let state = self.state.read().await;
-
-        // Create vote
-        let vote = Vote {
-            general_id: state.id.clone(),
-            round,
-            value,
-            path: path.clone(),
-        };
-
-        // Write vote to TupleSpace
-        let tuple = Tuple::new(vec![
-            TupleField::String("vote".to_string()),
-            TupleField::String(state.id.clone()),
-            TupleField::Integer(round as i64),
-            TupleField::String(format!("{:?}", value)),
-            TupleField::String(path.join(",")),
-        ]);
-        self.tuplespace.write(tuple).await?;
-
-        // TODO: Update to new Journal API
-        // For now, commenting out to get compilation working
-
-        println!("General {} votes {:?} in round {}", state.id, value, round);
-
+    async fn send_initial_messages(&mut self, ctx: &ActorContext) -> Result<(), BehaviorError> {
+        let base_value = Value::Zero;
+        let general_ids = self.general_ids.clone();
+        
+        for &other_id in &general_ids {
+            if other_id != self.id {
+                let value = if self.is_faulty {
+                    // Faulty commander sends different values
+                    if other_id % 2 == 0 {
+                        Value::Zero
+                    } else {
+                        Value::One
+                    }
+                } else {
+                    base_value
+                };
+                
+                let path = self.id.to_string();
+                self.send_message_to_general(ctx, other_id, path, value).await?;
+            }
+        }
+        
         Ok(())
     }
 
-    /// Read votes from TupleSpace for a given round
-    pub async fn read_votes(&self, round: u32) -> Result<Vec<Vote>, Box<dyn std::error::Error>> {
-        let pattern = Pattern::new(vec![
-            PatternField::Exact(TupleField::String("vote".to_string())),
-            PatternField::Wildcard,  // Any general
-            PatternField::Exact(TupleField::Integer(round as i64)),
-            PatternField::Wildcard,  // Any value
-            PatternField::Wildcard,  // Any path
-        ]);
-
-        let tuples = self.tuplespace.read(&pattern).await?;
-
-        let votes: Vec<Vote> = tuples.into_iter().filter_map(|t| {
-            let fields = t.fields();
-
-            // Extract fields using pattern matching
-            let general_id = match &fields[1] {
-                TupleField::String(s) => s.clone(),
-                _ => return None,
-            };
-
-            let value_str = match &fields[3] {
-                TupleField::String(s) => s.as_str(),
-                _ => return None,
-            };
-
-            let value = match value_str {
-                "Attack" => Decision::Attack,
-                "Retreat" => Decision::Retreat,
-                _ => Decision::Undecided,
-            };
-
-            let path = match &fields[4] {
-                TupleField::String(s) => s.split(',').map(String::from).collect(),
-                _ => Vec::new(),
-            };
-
-            Some(Vote {
-                general_id,
-                round,
-                value,
-                path,
-            })
-        }).collect();
-
-        Ok(votes)
+    async fn relay_messages(
+        &mut self,
+        round: usize,
+        ctx: &ActorContext,
+    ) -> Result<(), BehaviorError> {
+        let paths = self.get_paths_for_round(round - 1);
+        
+        for path in paths {
+            if let Some(&value) = self.values.get(&path) {
+                let new_value = if self.is_faulty && self.id == 2 {
+                    // Faulty process transforms value
+                    Value::One
+                } else {
+                    value
+                };
+                
+                let new_path = format!("{}{}", path, self.id);
+                let general_ids = self.general_ids.clone();
+                
+                for &other_id in &general_ids {
+                    if other_id != self.id {
+                        // Don't send to processes already in path
+                        let other_id_str = other_id.to_string();
+                        if !new_path.contains(&other_id_str) {
+                            self.send_message_to_general(ctx, other_id, new_path.clone(), new_value).await?;
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(())
     }
 
-    /// Process votes and reach a decision
-    pub async fn decide(&self) -> Result<Decision, Box<dyn std::error::Error>> {
-        let mut state = self.state.write().await;
-
-        if state.is_commander {
-            // Commander sticks to their proposal
-            return Ok(state.decision);
+    fn get_paths_for_round(&self, round: usize) -> Vec<String> {
+        if round == 0 {
+            vec![self.source_id.to_string()]
+        } else {
+            self.values
+                .keys()
+                .filter(|path| path.len() == round + 1)
+                .cloned()
+                .collect()
         }
+    }
 
-        // Collect all votes from all rounds
-        let mut all_votes = Vec::new();
-        for round in 0..=state.round {
-            let votes = self.read_votes(round).await?;
-            all_votes.extend(votes);
+    async fn send_message_to_general(
+        &mut self,
+        ctx: &ActorContext,
+        target_id: usize,
+        path: String,
+        value: Value,
+    ) -> Result<(), BehaviorError> {
+        let actor_id = format!("general{}@{}", target_id, &ctx.node_id);
+        let msg_bytes = bincode::serialize(&GeneralMessage::ReceiveMessage { path, value })
+            .map_err(|e| BehaviorError::ProcessingError(format!("Serialization error: {}", e)))?;
+        
+        let message = Message::new(msg_bytes);
+        let actor_service = ctx.get_actor_service().await
+            .ok_or_else(|| BehaviorError::ProcessingError("ActorService not available".to_string()))?;
+        
+        actor_service.send(&actor_id, message).await
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send message: {}", e)))?;
+        
+        Ok(())
+    }
+
+    fn create_result(&self) -> GeneralResult {
+        let decision = if self.id == self.source_id {
+            // Source process uses its own value
+            if self.is_faulty {
+                Value::One
+            } else {
+                Value::Zero
+            }
+        } else {
+            self.majority_vote()
+        };
+        
+        GeneralResult {
+            id: self.id,
+            is_source: self.id == self.source_id,
+            is_faulty: self.is_faulty,
+            decision,
+            message_count: self.message_count,
         }
+    }
 
-        // Count votes (majority voting)
-        let mut vote_counts: HashMap<Decision, usize> = HashMap::new();
-        for vote in &all_votes {
-            *vote_counts.entry(vote.value).or_insert(0) += 1;
+    fn majority_vote(&self) -> Value {
+        let mut counts: HashMap<Value, usize> = HashMap::new();
+        
+        for value in self.values.values() {
+            *counts.entry(*value).or_insert_with(|| 0) += 1;
         }
-
-        // Find majority
-        let total_votes: usize = vote_counts.values().sum();
+        
+        let total_votes: usize = counts.values().sum();
+        
+        if total_votes == 0 {
+            return Value::Retreat;
+        }
+        
         let majority_threshold = total_votes / 2;
-
-        let decision = vote_counts
-            .into_iter()
-            .find(|(_, count)| *count > majority_threshold)
-            .map(|(decision, _)| decision)
-            .unwrap_or(Decision::Retreat);  // Default to retreat if no majority
-
-        state.decision = decision;
-
-        // TODO: Update to new Journal API
-        // For now, commenting out to get compilation working
-
-        println!("General {} decides: {:?}", state.id, decision);
-
-        Ok(decision)
-    }
-
-    /// Simulate Byzantine behavior for faulty generals
-    pub fn get_faulty_value(&self, original: Decision) -> Decision {
-        // Faulty generals send opposite values
-        match original {
-            Decision::Attack => Decision::Retreat,
-            Decision::Retreat => Decision::Attack,
-            Decision::Undecided => Decision::Undecided,
+        
+        for (value, count) in counts {
+            if count > majority_threshold {
+                return value;
+            }
         }
+        
+        Value::Retreat
     }
 }
 
@@ -411,266 +272,185 @@ impl General {
 impl Actor for General {
     async fn handle_message(
         &mut self,
-        _ctx: &plexspaces_core::ActorContext,
-        msg: plexspaces_mailbox::Message,
+        ctx: &ActorContext,
+        msg: Message,
     ) -> Result<(), BehaviorError> {
-        let mut state = self.state.write().await;
-        state.message_count += 1;
-
-        match msg.message_type.as_str() {
-            "PROPOSE" => {
-                // Commander's proposal received
-                if let Ok(decision) = bincode::deserialize::<Decision>(&msg.payload) {
-                    println!("General {} received proposal: {:?}", state.id, decision);
-
-                    // Relay the proposal (potentially modified if faulty)
-                    let value = if state.is_faulty {
-                        self.get_faulty_value(decision)
-                    } else {
-                        decision
-                    };
-
-                    drop(state);  // Release write lock
-                    self.cast_vote(0, value, vec![self.state.read().await.id.clone()])
-                        .await
-                        .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
+        let general_msg: GeneralMessage = bincode::deserialize(msg.payload())
+            .map_err(|e| BehaviorError::ProcessingError(format!("Deserialization error: {}", e)))?;
+        
+        match general_msg {
+            GeneralMessage::Init { general_ids, .. } => {
+                self.handle_init(general_ids);
+            }
+            GeneralMessage::ReceiveMessage { path, value } => {
+                self.handle_receive_message(path, value);
+            }
+            GeneralMessage::SendMessages { round } => {
+                self.handle_send_messages(round, ctx).await?;
+            }
+            GeneralMessage::GetResult => {
+                // Result is returned via reply using ctx.send_reply()
+                let result = self.create_result();
+                let result_bytes = bincode::serialize(&result)
+                    .map_err(|e| BehaviorError::ProcessingError(format!("Serialization error: {}", e)))?;
+                
+                if let Some(sender_id) = &msg.sender {
+                    let reply = Message::new(result_bytes);
+                    ctx.send_reply(
+                        msg.correlation_id.as_deref(),
+                        sender_id,
+                        msg.receiver.clone(),
+                        reply,
+                    ).await
+                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
                 }
             }
-            "VOTE" => {
-                // Process incoming vote
-                if let Ok(vote) = bincode::deserialize::<Vote>(&msg.payload) {
-                    state.votes
-                        .entry(vote.round.to_string())
-                        .or_insert_with(Vec::new)
-                        .push(vote.clone());
-
-                    // Relay vote in next round if needed
-                    if vote.round < 2 {  // Limit rounds
-                        let mut new_path = vote.path.clone();
-                        new_path.push(state.id.clone());
-
-                        let value = if state.is_faulty {
-                            self.get_faulty_value(vote.value)
-                        } else {
-                            vote.value
-                        };
-
-                        drop(state);  // Release write lock
-                        self.cast_vote(vote.round + 1, value, new_path)
-                            .await
-                            .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
-                    }
-                }
-            }
-            "DECIDE" => {
-                drop(state);  // Release write lock
-                self.decide()
-                    .await
-                    .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
-            }
-            _ => {
-                println!("General {} received unknown message type: {}",
-                         state.id, msg.message_type);
+            GeneralMessage::Stop => {
+                // Stop handling - actor will be terminated
             }
         }
-
+        
         Ok(())
     }
 
     fn behavior_type(&self) -> BehaviorType {
         BehaviorType::GenServer
     }
-
-    // NOTE: pre_start/post_stop lifecycle hooks are now static on Actor,
-    // not part of Actor trait. They would be called via:
-    // Actor::on_activate() and Actor::on_deactivate()
 }
 
-/// Supervisor for Byzantine generals
-///
-/// TODO: Update to new Supervision API
-/// Old pattern: Implement Supervisor trait
-/// New pattern: Use Supervisor struct with configuration
-///
-/// For now, keeping this as a simple coordinator struct.
-/// Actual supervision would be done via:
-///   let supervisor = Supervisor::new("byzantine-supervisor", strategy).await?;
-///   supervisor.add_child(actor_spec).await?;
-pub struct ByzantineSupervisor {
-    pub num_generals: usize,
-    pub num_faulty: usize,
-}
-
-impl ByzantineSupervisor {
-    pub fn new(num_generals: usize, num_faulty: usize) -> Self {
-        ByzantineSupervisor {
-            num_generals,
-            num_faulty,
-        }
+#[async_trait]
+impl GenServer for General {
+    async fn handle_request(
+        &mut self,
+        ctx: &ActorContext,
+        msg: Message,
+    ) -> Result<(), BehaviorError> {
+        // GenServer handles requests - delegate to handle_message
+        self.handle_message(ctx, msg).await
     }
 }
 
-/// Create ActorSpec for a Byzantine general
-///
-/// ## Purpose
-/// Factory function to create supervised general actors with specified properties.
-/// This is used by supervised_consensus tests.
-///
-/// ## Arguments
-/// * `id` - Unique identifier for this general (e.g., "general-0@localhost")
-/// * `is_commander` - Whether this is the commanding general (proposes initial value)
-/// * `is_faulty` - Whether this general exhibits Byzantine behavior (sends conflicting votes)
-/// * `tuplespace` - TupleSpace instance for vote coordination
-/// * `journal` - Journal for durable decision recording
-///
-/// ## Returns
-/// ActorSpec ready to be added to a Supervisor
-///
-/// ## Examples
-/// ```rust,no_run
-/// use std::sync::Arc;
-/// use byzantine_generals::{create_general_spec, create_lattice_tuplespace};
-/// use plexspaces::journal::MemoryJournal;
-/// use plexspaces::lattice::ConsistencyLevel;
-/// use plexspaces::supervisor::Supervisor;
-///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let tuplespace = create_lattice_tuplespace("node1", ConsistencyLevel::Linearizable).await?;
-/// let journal = Arc::new(MemoryJournal::new());
-///
-/// let spec = create_general_spec(
-///     "general-0@localhost".to_string(),
-///     true,  // is_commander
-///     false, // is_faulty
-///     tuplespace,
-///     journal,
-/// );
-///
-/// // Add to supervisor
-/// // let (supervisor, _) = Supervisor::new("supervisor".to_string(), strategy);
-/// // supervisor.add_child(spec).await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// ## Implementation Notes
-/// - General already implements Actor trait
-/// - Factory creates a fresh General instance on each call (no Clone needed)
-/// - Each restart creates a new General with same parameters
-/// - Mailbox is created fresh for each restart
-pub fn create_general_spec(
-    id: String,
-    is_commander: bool,
-    is_faulty: bool,
-    tuplespace: Arc<dyn TupleSpaceOps>,
-    journal: Arc<dyn Journal>,
-) -> plexspaces_supervisor::ActorSpec {
-    use plexspaces_actor::Actor;
-    use plexspaces_mailbox::{Mailbox, MailboxConfig};
-    use plexspaces_supervisor::{ActorSpec, RestartPolicy, ChildType};
+// ============================================================================
+// Algorithm Runner
+// ============================================================================
 
-    // Clone Arc references for factory closure
-    let ts = tuplespace.clone();
-    let j = journal.clone();
+pub struct ByzantineAlgorithm {
+    num_processes: usize,
+    source_id: usize,
+    num_rounds: usize,
+    general_ids: Vec<usize>,
+}
 
-    ActorSpec {
-        id: id.clone(),
-        factory: Arc::new(move || {
-            // Create fresh General behavior instance
-            // This is called on each restart, so General gets a clean state
-            // Note: Factory is sync, but General::new is async - need to use block_on
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let general = match rt.block_on(General::new(
-                id.clone(),
-                is_commander,
-                is_faulty,
-                j.clone(),
-                ts.clone(),
-            )) {
-                Ok(g) => g,
-                Err(e) => return Err(plexspaces_core::ActorError::InvalidState(format!("Failed to create General: {}", e))),
+impl ByzantineAlgorithm {
+    pub fn new(num_processes: usize, source_id: usize, num_rounds: usize) -> Result<Self, String> {
+        if num_processes < 4 {
+            return Err("Need at least 4 processes for Byzantine Generals Problem".to_string());
+        }
+        if source_id >= num_processes {
+            return Err("Source must be less than number of processes".to_string());
+        }
+        if num_rounds < 1 {
+            return Err("Need at least 1 round".to_string());
+        }
+        
+        let general_ids: Vec<usize> = (0..num_processes).collect();
+        
+        Ok(Self {
+            num_processes,
+            source_id,
+            num_rounds,
+            general_ids,
+        })
+    }
+
+    pub async fn run(
+        &self,
+        ctx: &ActorContext,
+    ) -> Result<(u64, usize, Vec<GeneralResult>), String> {
+        use std::time::Instant;
+        let start_time = Instant::now();
+        
+        // Initialize all generals
+        for &general_id in &self.general_ids {
+            let init_msg = GeneralMessage::Init {
+                general_ids: self.general_ids.clone(),
+                source_id: self.source_id,
+                num_rounds: self.num_rounds,
             };
-
-            // Wrap General in Actor
-            // General implements Actor, so this is type-safe
-            let mailbox = match rt.block_on(Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", id.clone()))) {
-                Ok(m) => m,
-                Err(e) => return Err(plexspaces_core::ActorError::InvalidState(format!("Failed to create Mailbox: {}", e))),
-            };
-            Ok(Actor::new(
-                id.clone(),
-                Box::new(general),  // Box<dyn Actor>
-                mailbox,
-                "byzantine".to_string(), // namespace for journal entries
-                None, // node_id - will be set when spawned
-            ))
-        }),
-        restart: RestartPolicy::Permanent,  // Always restart on failure
-        child_type: ChildType::Worker,      // Regular actor (not supervisor)
-        shutdown_timeout_ms: Some(5000),    // 5 seconds for graceful shutdown
-    }
-}
-
-// Old Supervisor trait implementation removed - Supervisor is now a struct, not a trait
-// See API_CHANGES.md for details on the new supervision pattern
-
-/// Lattice-based consensus state for coordination-free agreement
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConsensusLattice {
-    pub votes: SetLattice<Vote>,
-    pub decision: LWWLattice<Decision>,
-}
-
-impl ConsensusLattice {
-    pub fn new(node_id: String) -> Self {
-        ConsensusLattice {
-            votes: SetLattice::new(),
-            decision: LWWLattice::new(Decision::Undecided, 0, node_id),
+            let msg_bytes = bincode::serialize(&init_msg)
+                .map_err(|e| format!("Serialization error: {}", e))?;
+            
+            let message = Message::new(msg_bytes);
+            let actor_id = format!("general{}@{}", general_id, &ctx.node_id);
+            let actor_service = ctx.get_actor_service().await
+                .ok_or_else(|| "ActorService not available".to_string())?;
+            
+            actor_service.send(&actor_id, message).await
+                .map_err(|e| format!("Failed to initialize general {}: {}", general_id, e))?;
         }
-    }
-
-    pub fn add_vote(&mut self, vote: Vote) {
-        self.votes = self.votes.merge(&SetLattice::singleton(vote));
-    }
-
-    pub fn update_decision(&mut self, decision: Decision, timestamp: u64, node_id: String) {
-        let new_decision = LWWLattice::new(decision, timestamp, node_id);
-        self.decision = self.decision.merge(&new_decision);
-    }
-
-    pub fn get_consensus(&self) -> Decision {
-        // Count votes using the set
-        let mut counts: HashMap<Decision, usize> = HashMap::new();
-        for vote in &self.votes.elements {
-            *counts.entry(vote.value).or_insert(0) += 1;
+        
+        // Run rounds
+        for round in 0..self.num_rounds {
+            for &general_id in &self.general_ids {
+                let send_msg = GeneralMessage::SendMessages { round };
+                let msg_bytes = bincode::serialize(&send_msg)
+                    .map_err(|e| format!("Serialization error: {}", e))?;
+                
+                let message = Message::new(msg_bytes);
+                let actor_id = format!("general{}@{}", general_id, &ctx.node_id);
+                let actor_service = ctx.get_actor_service().await
+                    .ok_or_else(|| "ActorService not available".to_string())?;
+                
+                actor_service.send(&actor_id, message).await
+                    .map_err(|e| format!("Failed to send round {} message to general {}: {}", round, general_id, e))?;
+            }
+            
+            // Wait a bit for messages to propagate
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
-
-        // Find majority
-        let total: usize = counts.values().sum();
-        counts.into_iter()
-            .find(|(_, count)| *count > total / 2)
-            .map(|(decision, _)| decision)
-            .unwrap_or(self.decision.value)
-    }
-}
-
-impl Lattice for ConsensusLattice {
-    fn merge(&self, other: &Self) -> Self {
-        ConsensusLattice {
-            votes: self.votes.merge(&other.votes),
-            decision: self.decision.merge(&other.decision),
+        
+        // Collect results using ActorRef::ask
+        let mut results = Vec::new();
+        let actor_registry = ctx.service_locator.get_service::<plexspaces_core::ActorRegistry>().await
+            .ok_or_else(|| "ActorRegistry not available".to_string())?;
+        
+        for &general_id in &self.general_ids {
+            let get_result_msg = GeneralMessage::GetResult;
+            let msg_bytes = bincode::serialize(&get_result_msg)
+                .map_err(|e| format!("Serialization error: {}", e))?;
+            
+            let mut message = Message::new(msg_bytes);
+            let actor_id = format!("general{}@{}", general_id, &ctx.node_id);
+            
+            // Get ActorRef and use ask pattern
+            if actor_registry.lookup_actor(&actor_id).await.is_some() {
+                // Create ActorRef using remote() - works for both local and remote actors
+                use plexspaces_actor::ActorRef;
+                let actor_ref = ActorRef::remote(
+                    actor_id.clone(),
+                    ctx.node_id.clone(),
+                    ctx.service_locator.clone(),
+                );
+                
+                // Set receiver in message
+                message.receiver = actor_id.clone();
+                
+                // Use ActorRef::ask for request-reply
+                let reply = actor_ref.ask(message, std::time::Duration::from_secs(5)).await
+                    .map_err(|e| format!("Failed to get result from general {}: {}", general_id, e))?;
+                
+                let result: GeneralResult = bincode::deserialize(reply.payload())
+                    .map_err(|e| format!("Deserialization error: {}", e))?;
+                
+                results.push(result);
+            } else {
+                return Err(format!("General {} not found in registry", general_id));
+            }
         }
-    }
-
-    fn subsumes(&self, other: &Self) -> bool {
-        self.votes.subsumes(&other.votes) &&
-        self.decision.subsumes(&other.decision)
-    }
-
-    fn bottom() -> Self {
-        ConsensusLattice {
-            votes: SetLattice::bottom(),
-            decision: LWWLattice::new(Decision::Undecided, 0, "bottom".to_string()),
-        }
+        
+        let duration = start_time.elapsed().as_millis() as u64;
+        let total_messages: usize = results.iter().map(|r| r.message_count).sum();
+        
+        Ok((duration, total_messages, results))
     }
 }

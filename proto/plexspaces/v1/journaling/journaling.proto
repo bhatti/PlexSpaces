@@ -620,7 +620,7 @@ service JournalService {
   // Append single journal entry
   rpc Append(AppendRequest) returns (AppendResponse) {
     option (google.api.http) = {
-      post: "/v1/journal/append"
+      post: "/api/v1/journal/append"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -633,7 +633,7 @@ service JournalService {
   // Append batch of entries (atomic)
   rpc AppendBatch(AppendBatchRequest) returns (AppendBatchResponse) {
     option (google.api.http) = {
-      post: "/v1/journal/append-batch"
+      post: "/api/v1/journal/append-batch"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -646,7 +646,7 @@ service JournalService {
   // Replay entries from sequence (streaming for large journals)
   rpc ReplayFrom(ReplayFromRequest) returns (stream JournalEntry) {
     option (google.api.http) = {
-      get: "/v1/journal/{actor_id}/replay"
+      get: "/api/v1/journal/{actor_id}/replay"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Replay Journal"
@@ -658,7 +658,7 @@ service JournalService {
   // Get latest checkpoint
   rpc GetLatestCheckpoint(GetLatestCheckpointRequest) returns (Checkpoint) {
     option (google.api.http) = {
-      get: "/v1/journal/{actor_id}/checkpoint"
+      get: "/api/v1/journal/{actor_id}/checkpoint"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Latest Checkpoint"
@@ -670,7 +670,7 @@ service JournalService {
   // Save checkpoint
   rpc SaveCheckpoint(SaveCheckpointRequest) returns (SaveCheckpointResponse) {
     option (google.api.http) = {
-      post: "/v1/journal/checkpoint"
+      post: "/api/v1/journal/checkpoint"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -683,7 +683,7 @@ service JournalService {
   // Truncate journal to sequence (cleanup after checkpoint)
   rpc TruncateTo(TruncateToRequest) returns (TruncateToResponse) {
     option (google.api.http) = {
-      delete: "/v1/journal/{actor_id}/truncate"
+      delete: "/api/v1/journal/{actor_id}/truncate"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Truncate Journal"
@@ -695,7 +695,7 @@ service JournalService {
   // Get journal statistics
   rpc GetStats(GetStatsRequest) returns (JournalStats) {
     option (google.api.http) = {
-      get: "/v1/journal/stats"
+      get: "/api/v1/journal/stats"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Statistics"
@@ -709,7 +709,7 @@ service JournalService {
   /// Append a single event to the event log
   rpc AppendEvent(AppendEventRequest) returns (AppendEventResponse) {
     option (google.api.http) = {
-      post: "/v1/journal/events/append"
+      post: "/api/v1/journal/events/append"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -722,7 +722,7 @@ service JournalService {
   /// Replay events from a specific sequence (paginated)
   rpc ReplayEventsFrom(ReplayEventsFromRequest) returns (ReplayEventsFromResponse) {
     option (google.api.http) = {
-      get: "/v1/journal/{actor_id}/events/replay"
+      get: "/api/v1/journal/{actor_id}/events/replay"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Replay Events"
@@ -734,7 +734,7 @@ service JournalService {
   /// Get actor history (paginated)
   rpc GetActorHistory(GetActorHistoryRequest) returns (ActorHistory) {
     option (google.api.http) = {
-      get: "/v1/journal/{actor_id}/history"
+      get: "/api/v1/journal/{actor_id}/history"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Actor History"

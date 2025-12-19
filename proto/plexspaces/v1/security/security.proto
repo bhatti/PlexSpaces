@@ -385,7 +385,7 @@ service SecurityService {
   // Service-to-service authentication (mTLS)
   rpc AuthenticateService(AuthenticateServiceRequest) returns (AuthenticateServiceResponse) {
     option (google.api.http) = {
-      post: "/v1/auth/service"
+      post: "/api/v1/auth/service"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -398,7 +398,7 @@ service SecurityService {
   // API authentication (JWT)
   rpc AuthenticateApi(AuthenticateApiRequest) returns (AuthenticateApiResponse) {
     option (google.api.http) = {
-      post: "/v1/auth/api"
+      post: "/api/v1/auth/api"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -411,7 +411,7 @@ service SecurityService {
   // Create API key
   rpc CreateApiKey(CreateApiKeyRequest) returns (CreateApiKeyResponse) {
     option (google.api.http) = {
-      post: "/v1/auth/api-keys"
+      post: "/api/v1/auth/api-keys"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -424,7 +424,7 @@ service SecurityService {
   // Revoke API key
   rpc RevokeApiKey(RevokeApiKeyRequest) returns (RevokeApiKeyResponse) {
     option (google.api.http) = {
-      delete: "/v1/auth/api-keys/{key_id}"
+      delete: "/api/v1/auth/api-keys/{key_id}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Revoke API Key"
@@ -436,7 +436,7 @@ service SecurityService {
   // List API keys
   rpc ListApiKeys(ListApiKeysRequest) returns (ListApiKeysResponse) {
     option (google.api.http) = {
-      get: "/v1/auth/api-keys"
+      get: "/api/v1/auth/api-keys"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List API Keys"
@@ -448,7 +448,7 @@ service SecurityService {
   // Get audit logs
   rpc GetAuditLogs(GetAuditLogsRequest) returns (GetAuditLogsResponse) {
     option (google.api.http) = {
-      get: "/v1/security/audit-logs"
+      get: "/api/v1/security/audit-logs"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Audit Logs"

@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
         .build();
 
     // Create TupleSpace for coordination
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
 
     // Create metrics tracker
     let mut metrics_tracker = CoordinationComputeTracker::new("matrix-multiply".to_string());
@@ -86,9 +86,10 @@ async fn main() -> Result<()> {
         let behavior = Box::new(worker_behavior);
         
         // Build and spawn actor using ActorBuilder::spawn() which uses ActorFactory internally
+        let ctx = plexspaces_core::RequestContext::internal();
         let actor_ref = ActorBuilder::new(behavior)
             .with_name(format!("worker-{}", worker_id))
-            .spawn(node.service_locator().clone())
+            .spawn(&ctx, node.service_locator().clone())
             .await?;
         worker_refs.push(actor_ref);
         info!("  Created worker actor: worker-{}", worker_id);
@@ -124,7 +125,8 @@ async fn main() -> Result<()> {
     // Spawn using ActorBuilder::spawn() which uses ActorFactory internally
     let master_ref = ActorBuilder::new(behavior)
         .with_name("master".to_string())
-        .spawn(node.service_locator().clone())
+        let ctx = plexspaces_core::RequestContext::internal();
+            .spawn(&ctx, node.service_locator().clone())
         .await?;
     info!("  Created master actor\n");
 

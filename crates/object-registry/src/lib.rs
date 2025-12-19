@@ -134,6 +134,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+use plexspaces_core::RequestContext;
 use plexspaces_keyvalue::{KVError, KeyValueStore};
 use plexspaces_proto::object_registry::v1::{
     HealthStatus, ObjectRegistration, ObjectType,
@@ -291,12 +292,17 @@ impl ObjectRegistry {
             ));
         }
 
-        // Set defaults for tenant and namespace if not provided
+        // Validate tenant_id is not empty (required)
         if registration.tenant_id.is_empty() {
-            registration.tenant_id = "default".to_string();
+            return Err(ObjectRegistryError::InvalidInput(
+                "tenant_id is required and cannot be empty".to_string(),
+            ));
         }
+        // Validate namespace is not empty (required, no defaults)
         if registration.namespace.is_empty() {
-            registration.namespace = "default".to_string();
+            return Err(ObjectRegistryError::InvalidInput(
+                "namespace is required and cannot be empty".to_string(),
+            ));
         }
 
         // Set timestamps
@@ -317,8 +323,11 @@ impl ObjectRegistry {
             &registration.object_id,
         );
 
+        // Create RequestContext for tenant isolation
+        let ctx = RequestContext::new_without_auth(registration.tenant_id.clone(), registration.namespace.clone());
+
         // Check if already registered (optional - remove if overwrite is desired)
-        if self.kv_store.get(&key).await?.is_some() {
+        if self.kv_store.get(&ctx, &key).await?.is_some() {
             return Err(ObjectRegistryError::ObjectAlreadyRegistered(
                 registration.object_id.clone(),
             ));
@@ -327,7 +336,7 @@ impl ObjectRegistry {
         // Serialize and store
         let value = registration.encode_to_vec();
 
-        self.kv_store.put(&key, value).await?;
+        self.kv_store.put(&ctx, &key, value).await?;
 
         Ok(())
     }
@@ -366,12 +375,15 @@ impl ObjectRegistry {
 
         let key = Self::make_key(tenant, ns, object_type, object_id);
 
+        // Create RequestContext for tenant isolation
+        let ctx = RequestContext::new_without_auth(tenant.to_string(), ns.to_string());
+
         // Check if exists
-        if self.kv_store.get(&key).await?.is_none() {
+        if self.kv_store.get(&ctx, &key).await?.is_none() {
             return Err(ObjectRegistryError::ObjectNotFound(object_id.to_string()));
         }
 
-        self.kv_store.delete(&key).await?;
+        self.kv_store.delete(&ctx, &key).await?;
 
         Ok(())
     }
@@ -392,37 +404,45 @@ impl ObjectRegistry {
     /// - [`ObjectRegistryError::StorageError`]: KeyValueStore failure
     pub async fn lookup(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, ObjectRegistryError> {
-        let tenant = if tenant_id.is_empty() {
-            "default"
-        } else {
-            tenant_id
-        };
-        let ns = if namespace.is_empty() {
-            "default"
-        } else {
-            namespace
-        };
+        let key = Self::make_key(ctx.tenant_id(), ctx.namespace(), object_type, object_id);
 
-        let key = Self::make_key(tenant, ns, object_type, object_id);
-
-        match self.kv_store.get(&key).await? {
+        match self.kv_store.get(ctx, &key).await? {
             Some(value) => {
                 let registration = ObjectRegistration::decode(&value[..])
                     .map_err(|e| ObjectRegistryError::SerializationError(e.to_string()))?;
+                // If not admin, verify tenant matches
+                if !ctx.is_admin() && registration.tenant_id != ctx.tenant_id() {
+                    return Ok(None); // Tenant mismatch - return None
+                }
                 Ok(Some(registration))
             }
             None => Ok(None),
         }
     }
 
+    /// Lookup object by ID (full signature matching ObjectRegistry trait)
+    ///
+    /// This wraps `lookup()` to match the ObjectRegistry trait signature.
+    /// Use this when implementing the ObjectRegistry trait.
+    pub async fn lookup_full(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+        object_id: &str,
+    ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        self.lookup(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
     /// Discover objects with filtering
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// * `object_type` - Filter by type (None = all types)
     /// * `object_category` - Filter by category (None = all categories)
     /// * `capabilities` - Filter by capabilities (None = all)
@@ -438,8 +458,12 @@ impl ObjectRegistry {
     ///
     /// ## Performance
     /// O(n) scan with filtering - use prefixes for type filtering
+    ///
+    /// ## Note
+    /// If ctx.is_admin() is true, tenant filtering is bypassed for admin operations.
     pub async fn discover(
         &self,
+        ctx: &RequestContext,
         object_type: Option<ObjectType>,
         object_category: Option<String>,
         capabilities: Option<Vec<String>>,
@@ -448,6 +472,8 @@ impl ObjectRegistry {
         limit: usize,
     ) -> Result<Vec<ObjectRegistration>, ObjectRegistryError> {
         // Build prefix for type filtering
+        // Key format: {tenant_id}:{namespace}:{object_type}:{object_id}
+        // So prefix should be: {tenant_id}:{namespace}:{type}:
         let prefix = match object_type {
             Some(obj_type) => {
                 let type_str = match obj_type {
@@ -458,19 +484,16 @@ impl ObjectRegistry {
                     _ => "",
                 };
                 if type_str.is_empty() {
-                    "".to_string()
+                    format!("{}:{}:", ctx.tenant_id(), ctx.namespace())
                 } else {
-                    // Prefix: default:default:{type}:
-                    // Note: This assumes default tenant/namespace for scanning
-                    // For production, would need to scan across all tenants/namespaces
-                    format!("default:default:{}:", type_str)
+                    format!("{}:{}:{}:", ctx.tenant_id(), ctx.namespace(), type_str)
                 }
             }
-            None => "".to_string(),
+            None => format!("{}:{}:", ctx.tenant_id(), ctx.namespace()),
         };
 
-        // List KeyValueStore with prefix
-        let keys = self.kv_store.list(&prefix).await?;
+        // List KeyValueStore with prefix (scoped to tenant/namespace via context)
+        let keys = self.kv_store.list(&ctx, &prefix).await?;
 
         let mut results = Vec::new();
 
@@ -479,47 +502,52 @@ impl ObjectRegistry {
                 break;
             }
 
-            if let Some(value) = self.kv_store.get(&key).await? {
-                if let Ok(registration) = ObjectRegistration::decode(&value[..]) {
-                    // Apply filters
-                    if let Some(ref cat) = object_category {
-                        if registration.object_category != *cat {
-                            continue;
+            if let Some(value) = self.kv_store.get(&ctx, &key).await? {
+                    if let Ok(registration) = ObjectRegistration::decode(&value[..]) {
+                        // If not admin, verify tenant matches
+                        if !ctx.is_admin() && registration.tenant_id != ctx.tenant_id() {
+                            continue; // Tenant mismatch - skip
                         }
-                    }
 
-                    if let Some(ref caps) = capabilities {
-                        if !caps
-                            .iter()
-                            .all(|c| registration.capabilities.contains(c))
-                        {
-                            continue;
+                        // Apply filters
+                        if let Some(ref cat) = object_category {
+                            if registration.object_category != *cat {
+                                continue;
+                            }
                         }
-                    }
 
-                    if let Some(ref lbls) = labels {
-                        if !lbls.iter().all(|l| registration.labels.contains(l)) {
-                            continue;
+                        if let Some(ref caps) = capabilities {
+                            if !caps
+                                .iter()
+                                .all(|c| registration.capabilities.contains(c))
+                            {
+                                continue;
+                            }
                         }
-                    }
 
-                    if let Some(ref status) = health_status {
-                        // HealthStatus enum can be cast to i32 directly
-                        let status_value = match status {
-                            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown => 0,
-                            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy => 1,
-                            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusDegraded => 2,
-                            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy => 3,
-                            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusStarting => 4,
-                            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusStopping => 5,
-                        };
-                        if registration.health_status != status_value {
-                            continue;
+                        if let Some(ref lbls) = labels {
+                            if !lbls.iter().all(|l| registration.labels.contains(l)) {
+                                continue;
+                            }
                         }
-                    }
 
-                    results.push(registration);
-                }
+                        if let Some(ref status) = health_status {
+                            // HealthStatus enum can be cast to i32 directly
+                            let status_value = match status {
+                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown => 0,
+                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy => 1,
+                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusDegraded => 2,
+                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy => 3,
+                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusStarting => 4,
+                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusStopping => 5,
+                            };
+                            if registration.health_status != status_value {
+                                continue;
+                            }
+                        }
+
+                        results.push(registration);
+                    }
             }
         }
 
@@ -529,8 +557,7 @@ impl ObjectRegistry {
     /// Update heartbeat for object
     ///
     /// ## Arguments
-    /// * `tenant_id` - Tenant identifier
-    /// * `namespace` - Namespace
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// * `object_type` - Type of object
     /// * `object_id` - Object identifier
     ///
@@ -542,28 +569,18 @@ impl ObjectRegistry {
     /// - [`ObjectRegistryError::StorageError`]: KeyValueStore failure
     pub async fn heartbeat(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), ObjectRegistryError> {
-        let tenant = if tenant_id.is_empty() {
-            "default"
-        } else {
-            tenant_id
-        };
-        let ns = if namespace.is_empty() {
-            "default"
-        } else {
-            namespace
-        };
+        let key = Self::make_key(ctx.tenant_id(), ctx.namespace(), object_type, object_id);
 
-        let key = Self::make_key(tenant, ns, object_type, object_id);
+        // Use the provided RequestContext (no need to recreate)
 
         // Get existing registration
         let value = self
             .kv_store
-            .get(&key)
+            .get(&ctx, &key)
             .await?
             .ok_or_else(|| ObjectRegistryError::ObjectNotFound(object_id.to_string()))?;
 
@@ -584,7 +601,8 @@ impl ObjectRegistry {
         // Re-serialize and store
         let updated_value = registration.encode_to_vec();
 
-        self.kv_store.put(&key, updated_value).await?;
+        // Use the provided RequestContext (no need to recreate)
+        self.kv_store.put(ctx, &key, updated_value).await?;
 
         Ok(())
     }
@@ -615,8 +633,9 @@ mod tests {
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
         registry.register(registration.clone()).await.unwrap();
 
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let found = registry
-            .lookup("test-tenant", "test-namespace", ObjectType::ObjectTypeActor, "test-actor@node1")
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
             .unwrap();
 
@@ -656,8 +675,9 @@ mod tests {
             .await
             .unwrap();
 
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let found = registry
-            .lookup("test-tenant", "test-namespace", ObjectType::ObjectTypeActor, "test-actor@node1")
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
             .unwrap();
 
@@ -676,13 +696,15 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         // Update heartbeat
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         registry
-            .heartbeat("test-tenant", "test-namespace", ObjectType::ObjectTypeActor, "test-actor@node1")
+            .heartbeat(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
             .unwrap();
 
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let found = registry
-            .lookup("test-tenant", "test-namespace", ObjectType::ObjectTypeActor, "test-actor@node1")
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
             .unwrap()
             .unwrap();
@@ -711,8 +733,9 @@ mod tests {
         reg3.namespace = "default".to_string();
         registry.register(reg3).await.unwrap();
 
+        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
         let actors = registry
-            .discover(Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
 

@@ -56,6 +56,7 @@ pub trait ActorFactory: Send + Sync {
     /// in ActorRegistry automatically.
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// * `actor_id` - Actor ID (format: "actor_name@node_id")
     /// * `actor_type` - Type of actor to spawn (used by BehaviorFactory if available)
     /// * `initial_state` - Initial state bytes (passed to BehaviorFactory if available)
@@ -71,6 +72,7 @@ pub trait ActorFactory: Send + Sync {
     /// Returns MessageSender to allow different implementations to return different types.
     async fn spawn_actor(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         actor_id: &ActorId,
         actor_type: &str,
         initial_state: Vec<u8>,
@@ -84,7 +86,9 @@ pub trait ActorFactory: Send + Sync {
     /// Spawns an actor that has already been built (e.g., by ActorBuilder).
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// * `actor` - The pre-built actor to spawn
+    /// * `actor_type` - Optional actor type
     ///
     /// ## Returns
     /// MessageSender for the spawned actor
@@ -94,10 +98,9 @@ pub trait ActorFactory: Send + Sync {
     /// constructed. The actor should already have its ID, context, etc. set.
     async fn spawn_built_actor(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         actor: Arc<crate::Actor>,
         actor_type: Option<String>,
-        tenant_id: Option<String>,
-        namespace: Option<String>,
     ) -> Result<Arc<dyn plexspaces_core::MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
     
     /// Stop an actor

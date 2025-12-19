@@ -426,7 +426,7 @@ service NodeService {
   // Register a new node
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {
     option (google.api.http) = {
-      post: "/v1/nodes"
+      post: "/api/v1/nodes"
       body: "*"
     };
   }
@@ -434,28 +434,28 @@ service NodeService {
   // Unregister a node
   rpc UnregisterNode(UnregisterNodeRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      delete: "/v1/nodes/{node_id}"
+      delete: "/api/v1/nodes/{node_id}"
     };
   }
 
   // Get node information
   rpc GetNode(GetNodeRequest) returns (Node) {
     option (google.api.http) = {
-      get: "/v1/nodes/{node_id}"
+      get: "/api/v1/nodes/{node_id}"
     };
   }
 
   // List all nodes
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse) {
     option (google.api.http) = {
-      get: "/v1/nodes"
+      get: "/api/v1/nodes"
     };
   }
 
   // Assign an actor to a node
   rpc AssignActor(AssignActorRequest) returns (AssignActorResponse) {
     option (google.api.http) = {
-      post: "/v1/nodes/{node_id}/actors"
+      post: "/api/v1/nodes/{node_id}/actors"
       body: "*"
     };
   }
@@ -463,49 +463,49 @@ service NodeService {
   // Remove an actor from a node
   rpc RemoveActor(RemoveActorRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      delete: "/v1/nodes/{node_id}/actors/{actor_id.value}"
+      delete: "/api/v1/nodes/{node_id}/actors/{actor_id.value}"
     };
   }
 
   // ORBIT-INSPIRED: Actor lock operations
   rpc AcquireActorLock(AcquireActorLockRequest) returns (AcquireActorLockResponse) {
     option (google.api.http) = {
-      post: "/v1/locks/actors"
+      post: "/api/v1/locks/actors"
       body: "*"
     };
   }
 
   rpc ReleaseActorLock(ReleaseActorLockRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      delete: "/v1/locks/actors/{actor_id.value}"
+      delete: "/api/v1/locks/actors/{actor_id.value}"
     };
   }
 
   // WASMCLOUD-INSPIRED: Lattice mesh operations
   rpc JoinLattice(JoinLatticeRequest) returns (JoinLatticeResponse) {
     option (google.api.http) = {
-      post: "/v1/lattice/join"
+      post: "/api/v1/lattice/join"
       body: "*"
     };
   }
 
   rpc LeaveLattice(LeaveLatticeRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      post: "/v1/lattice/leave"
+      post: "/api/v1/lattice/leave"
       body: "*"
     };
   }
 
   rpc SendHeartbeat(Heartbeat) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      post: "/v1/lattice/heartbeat"
+      post: "/api/v1/lattice/heartbeat"
       body: "*"
     };
   }
 
   rpc DiscoverNodes(DiscoverNodesRequest) returns (DiscoverNodesResponse) {
     option (google.api.http) = {
-      get: "/v1/nodes/discover"
+      get: "/api/v1/nodes/discover"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Discover Nodes"
@@ -517,7 +517,7 @@ service NodeService {
   // Get node metrics
   rpc GetNodeMetrics(GetNodeRequest) returns (NodeMetrics) {
     option (google.api.http) = {
-      get: "/v1/nodes/{node_id}/metrics"
+      get: "/api/v1/nodes/{node_id}/metrics"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Node Metrics"

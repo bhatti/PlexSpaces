@@ -48,7 +48,8 @@
 //!     .build();
 //! ```
 
-use crate::{Node, NodeConfig, NodeId};
+use crate::{Node, NodeId, ReleaseSpec};
+use plexspaces_proto::node::v1::NodeRuntimeConfig;
 
 /// Builder for creating nodes with a fluent API
 ///
@@ -62,7 +63,8 @@ use crate::{Node, NodeConfig, NodeId};
 /// - Single entry point for all node types
 pub struct NodeBuilder {
     node_id: NodeId,
-    config: NodeConfig,
+    config: NodeRuntimeConfig,
+    release_spec: Option<ReleaseSpec>,
 }
 
 impl NodeBuilder {
@@ -76,22 +78,12 @@ impl NodeBuilder {
     /// let builder = NodeBuilder::new("my-node");
     /// ```
     pub fn new(node_id: impl Into<NodeId>) -> Self {
-        let mut config = NodeConfig::default();
-        // Set sensible defaults if not already set
-        if config.listen_addr.is_empty() {
-            config.listen_addr = "0.0.0.0:9000".to_string();
-        }
-        if config.max_connections == 0 {
-            config.max_connections = 100;
-        }
-        if config.heartbeat_interval_ms == 0 {
-            config.heartbeat_interval_ms = 5000;
-        }
-        // Default clustering to enabled
-        config.clustering_enabled = true;
+        // Use default_node_config() helper which creates NodeRuntimeConfig with correct fields
+        let mut config = crate::default_node_config();
         Self {
             node_id: node_id.into(),
             config,
+            release_spec: None,
         }
     }
 
@@ -261,6 +253,27 @@ impl NodeBuilder {
         self
     }
 
+    /// Set the release configuration for this node
+    ///
+    /// ## Arguments
+    /// * `release_spec` - ReleaseSpec containing node and application configuration
+    ///
+    /// ## Purpose
+    /// Allows setting release config at node creation time, which will be used
+    /// to initialize NodeConfig in ServiceLocator during node.start().
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let release_spec = load_release_spec_from_file("release.yaml").await?;
+    /// let node = NodeBuilder::new("my-node")
+    ///     .with_release_spec(release_spec)
+    ///     .build();
+    /// ```
+    pub fn with_release_spec(mut self, release_spec: ReleaseSpec) -> Self {
+        self.release_spec = Some(release_spec);
+        self
+    }
+
     /// Build the node with the configured options
     ///
     /// ## Returns
@@ -272,6 +285,11 @@ impl NodeBuilder {
     /// - Heartbeat interval: 5000ms if not provided
     /// - Clustering: enabled if not provided
     ///
+    /// ## Release Config
+    /// If release_spec is provided, it will be set on the node and used during start().
+    /// Otherwise, start() will attempt to load from PLEXSPACES_RELEASE_CONFIG_PATH
+    /// or release.yaml/release.toml files.
+    ///
     /// ## Example
     /// ```rust,ignore
     /// let node = NodeBuilder::new("my-node")
@@ -279,7 +297,23 @@ impl NodeBuilder {
     ///     .build();
     /// ```
     pub fn build(self) -> Node {
-        Node::new(self.node_id, self.config)
+        let mut node = Node::new(self.node_id, self.config);
+        // Store release_spec in node - it will be set during start() if not already set
+        // Note: We can't call async set_release_spec here since build() is sync
+        // The release_spec will be loaded in start() if not already set
+        if let Some(release_spec) = self.release_spec {
+            // Use tokio::runtime::Handle to set release spec synchronously
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.block_on(async {
+                    node.set_release_spec(release_spec).await;
+                });
+            } else {
+                // No runtime available - store in a way that can be retrieved later
+                // For now, we'll rely on start() to load it from file/env
+                // This is a limitation of having a sync build() method
+            }
+        }
+        node
     }
 }
 

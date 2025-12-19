@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut mailbox_config = mailbox_config_default();
     mailbox_config.capacity = 100;
-    let mailbox = Mailbox::new(mailbox_config);
+    let mailbox = Mailbox::new(mailbox_config, actor_id.clone()).await?;
 
     let behavior = Box::new(CreditCheckWorker::new(actor_id.clone()));
     let mut actor = Actor::new(
@@ -81,6 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         behavior,
         mailbox,
         "finance-test".to_string(),
+        "default".to_string(),
+        None,
     );
 
     // Attach DurabilityFacet
@@ -142,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("\n[Step 7] Creating new actor instance to test replay");
     let mut mailbox_config2 = mailbox_config_default();
     mailbox_config2.capacity = 100;
-    let mailbox2 = Mailbox::new(mailbox_config2);
+    let mailbox2 = Mailbox::new(mailbox_config2, actor_id.clone()).await?;
 
     let behavior2 = Box::new(CreditCheckWorker::new(actor_id.clone()));
     let mut actor2 = Actor::new(
@@ -150,6 +152,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         behavior2,
         mailbox2,
         "finance-test".to_string(),
+        "default".to_string(),
+        None,
     );
 
     // Attach DurabilityFacet (will trigger replay on start)

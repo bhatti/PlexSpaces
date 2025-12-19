@@ -34,7 +34,7 @@ use std::sync::Arc;
 use plexspaces_core::actor_context::{
     ActorService, ChannelService, FacetService, ObjectRegistry, ObjectRegistration, ProcessGroupService, TupleSpaceProvider,
 };
-use plexspaces_core::Service;
+use plexspaces_core::{RequestContext, Service};
 use plexspaces_facet::Facet;
 use plexspaces_core::ActorRef;
 use plexspaces_mailbox::Message;
@@ -148,23 +148,22 @@ impl ObjectRegistry for ObjectRegistryWrapper {
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(&ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .lookup(tenant_id, namespace, object_type, object_id)
+            .lookup_full(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn register(
@@ -493,8 +492,12 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         // This is a convenience - in production, groups should be created explicitly
         let _ = self.registry.create_group(group_name, tenant_id, namespace).await;
         
+        // Convert actor_id string to ActorId
+        use plexspaces_core::ActorId;
+        let actor_id = ActorId::from(actor_id.to_string());
+        
         self.registry
-            .join_group(group_name, tenant_id, &actor_id.to_string(), vec![])
+            .join_group(group_name, tenant_id, namespace, &actor_id, vec![])
             .await
             .map_err(|e| format!("Failed to join group {}: {}", group_name, e).into())
     }
@@ -503,11 +506,16 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         &self,
         group_name: &str,
         tenant_id: &str,
-        _namespace: &str,
+        namespace: &str,
         actor_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+        use plexspaces_core::ActorId;
+        let actor_id = ActorId::from(actor_id.to_string());
+        
         self.registry
-            .leave_group(group_name, tenant_id, &actor_id.to_string())
+            .leave_group(&ctx, group_name, &actor_id)
             .await
             .map_err(|e| format!("Failed to leave group {}: {}", group_name, e).into())
     }
@@ -516,28 +524,39 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         &self,
         group_name: &str,
         tenant_id: &str,
-        _namespace: &str,
+        namespace: &str,
         message: Message,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         // Convert Message to Vec<u8> for ProcessGroupRegistry
         let payload = message.payload().to_vec();
         
-        self.registry
-            .publish_to_group(group_name, tenant_id, None, payload)
+        let actor_ids = self.registry
+            .publish_to_group(&ctx, group_name, None, payload)
             .await
-            .map_err(|e| format!("Failed to publish to group {}: {}", group_name, e).into())
+            .map_err(|e| format!("Failed to publish to group {}: {}", group_name, e))?;
+        
+        // Convert ActorId to String
+        Ok(actor_ids.iter().map(|id| id.to_string()).collect())
     }
 
     async fn get_members(
         &self,
         group_name: &str,
         tenant_id: &str,
-        _namespace: &str,
+        namespace: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        self.registry
-            .get_members(group_name, tenant_id)
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+        
+        let actor_ids = self.registry
+            .get_members(&ctx, group_name)
             .await
-            .map_err(|e| format!("Failed to get members of group {}: {}", group_name, e).into())
+            .map_err(|e| format!("Failed to get members of group {}: {}", group_name, e))?;
+        
+        // Convert ActorId to String
+        Ok(actor_ids.iter().map(|id| id.to_string()).collect())
     }
 }
 

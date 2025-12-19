@@ -13,6 +13,7 @@ description = "Firecracker microVM integration"
 plexspaces-proto = { workspace = true }
 plexspaces-wasm-runtime = { path = "../wasm-runtime" }
 plexspaces-object-registry = { path = "../object-registry" }
+plexspaces-core = { path = "../core" }
 
 # Core dependencies
 tokio = { workspace = true }

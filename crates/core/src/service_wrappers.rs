@@ -32,6 +32,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::actor_context::TupleSpaceProvider;
+use crate::RequestContext;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 
 /// Wrapper that adapts TupleSpace to TupleSpaceProvider trait
@@ -49,6 +50,18 @@ impl TupleSpaceProviderWrapper {
     /// Create a new wrapper from TupleSpace
     pub fn new(inner: Arc<plexspaces_tuplespace::TupleSpace>) -> Self {
         Self { inner }
+    }
+    
+    /// Create a new TupleSpace from RequestContext
+    ///
+    /// ## Purpose
+    /// Helper to create TupleSpace with tenant/namespace from RequestContext.
+    /// This avoids circular dependency (tuplespace can't depend on core).
+    pub fn from_context(ctx: &RequestContext) -> Arc<plexspaces_tuplespace::TupleSpace> {
+        Arc::new(plexspaces_tuplespace::TupleSpace::with_tenant_namespace(
+            ctx.tenant_id(),
+            ctx.namespace(),
+        ))
     }
 }
 

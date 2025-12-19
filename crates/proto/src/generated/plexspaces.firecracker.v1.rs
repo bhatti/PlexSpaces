@@ -454,6 +454,8 @@ pub struct DeployApplicationRequest {
     #[prost(bytes="vec", tag="3")]
     pub application_bundle: ::prost::alloc::vec::Vec<u8>,
     /// Application configuration (optional, can be in bundle)
+    ///
+    /// Max 1MB
     #[prost(string, tag="4")]
     pub application_config_json: ::prost::alloc::string::String,
 }

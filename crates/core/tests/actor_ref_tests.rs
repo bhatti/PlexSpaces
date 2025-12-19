@@ -27,37 +27,6 @@ fn test_actor_ref_new_invalid_id() {
 }
 
 #[test]
-fn test_actor_ref_parse_actor_id_success() {
-    let (name, node) = ActorRef::parse_actor_id("actor@node1").unwrap();
-    assert_eq!(name, "actor");
-    assert_eq!(node, "node1");
-}
-
-#[test]
-fn test_actor_ref_parse_actor_id_failure() {
-    let result = ActorRef::parse_actor_id("invalid");
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_actor_ref_parse_actor_id_edge_cases() {
-    // Multiple @ symbols (should split on first)
-    let (name, node) = ActorRef::parse_actor_id("actor@node@extra").unwrap();
-    assert_eq!(name, "actor");
-    assert_eq!(node, "node@extra");
-    
-    // Empty actor name
-    let (name, node) = ActorRef::parse_actor_id("@node").unwrap();
-    assert_eq!(name, "");
-    assert_eq!(node, "node");
-    
-    // Empty node name
-    let (name, node) = ActorRef::parse_actor_id("actor@").unwrap();
-    assert_eq!(name, "actor");
-    assert_eq!(node, "");
-}
-
-#[test]
 fn test_is_remote_actor() {
     assert!(ActorRef::is_remote_actor("actor@node2", "node1"));
     assert!(!ActorRef::is_remote_actor("actor@node1", "node1"));

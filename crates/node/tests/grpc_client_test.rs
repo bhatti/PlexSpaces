@@ -72,9 +72,9 @@ async fn start_test_server(node: Arc<Node>) -> String {
 
 /// Helper to create a test node with a registered actor
 async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
-    let node = Arc::new(Node::new(NodeId::new("test-node-1"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node-1").build());
 
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
     
     let actor_id = "test-actor-1@test-node-1".to_string();
@@ -83,7 +83,7 @@ async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
     let actor_ref = ActorRef::local(actor_id.clone(), mailbox.clone(), service_locator.clone());
     
     // Register actor with MessageSender (mailbox is internal)
-    let wrapper = Arc::new(RegularActorWrapper::new(
+    let wrapper = Arc::new(ActorRef::local(
         actor_id.clone(),
         mailbox,
         service_locator,
@@ -158,7 +158,7 @@ async fn test_send_message_via_client() {
 #[tokio::test]
 async fn test_send_message_to_nonexistent_actor() {
     // Setup: Start server WITHOUT registered actor
-    let node = Arc::new(Node::new(NodeId::new("test-node-2"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node-2").build());
     let server_addr = start_test_server(node).await;
 
     // Create client

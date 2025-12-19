@@ -33,7 +33,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tuplespace_provider_wrapper() {
-        let tuplespace = Arc::new(TupleSpace::new());
+        let tuplespace = Arc::new(TupleSpace::default());
         let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
         // Test write

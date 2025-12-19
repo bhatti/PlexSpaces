@@ -76,17 +76,39 @@ let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().
 
 let map_actor = create_operator_actor(map_operator);
 let map_id = map_actor.id().clone();
-let _msg_sender = actor_factory.spawn_built_actor(Arc::new(map_actor), None, None, None).await?;
+let ctx = plexspaces_core::RequestContext::internal();
+let _msg_sender = actor_factory.spawn_actor(
+    &ctx,
+    &map_id,
+    "GenServer", // actor_type
+    vec![], // initial_state
+    None, // config
+    std::collections::HashMap::new(), // labels
+).await?;
 let map_actor = plexspaces_core::ActorRef::new(map_id)?;
 
 let filter_actor = create_operator_actor(filter_operator);
 let filter_id = filter_actor.id().clone();
-let _msg_sender = actor_factory.spawn_built_actor(Arc::new(filter_actor), None, None, None).await?;
+let _msg_sender = actor_factory.spawn_actor(
+    &ctx,
+    &filter_id,
+    "GenServer", // actor_type
+    vec![], // initial_state
+    None, // config
+    std::collections::HashMap::new(), // labels
+).await?;
 let filter_actor = plexspaces_core::ActorRef::new(filter_id)?;
 
 let reduce_actor = create_operator_actor(reduce_operator);
 let reduce_id = reduce_actor.id().clone();
-let _msg_sender = actor_factory.spawn_built_actor(Arc::new(reduce_actor), None, None, None).await?;
+let _msg_sender = actor_factory.spawn_actor(
+    &ctx,
+    &reduce_id,
+    "GenServer", // actor_type
+    vec![], // initial_state
+    None, // config
+    std::collections::HashMap::new(), // labels
+).await?;
 let reduce_actor = plexspaces_core::ActorRef::new(reduce_id)?;
 
 // Process events in pipeline

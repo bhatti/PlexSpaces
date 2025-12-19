@@ -4,7 +4,7 @@
 // Tests for ActorContext ChannelService receive_from_queue with None timeout
 
 use plexspaces_core::actor_context::{ActorContext, ChannelService};
-use plexspaces_core::ActorId;
+use plexspaces_core::{ActorId, ServiceLocator};
 use plexspaces_mailbox::Message;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -64,17 +64,20 @@ async fn test_channel_service_receive_from_queue_no_timeout() {
     // Test receive_from_queue with None timeout (covers line 111-112)
     let channel_service = Arc::new(MockChannelService { return_none: false });
     
-    // Create minimal context and replace channel_service
-        let mut context = ActorContext::minimal(
-            "test@node1".to_string(),
-            "node1".to_string(),
-            "default".to_string(), // namespace
-            "test-tenant".to_string(), // tenant_id (required)
-        );
-    // Replace channel_service with our mock
-    context.channel_service = channel_service.clone();
+    // Create context with service locator and register channel service
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    service_locator.register_service(channel_service.clone()).await;
+    let context = ActorContext::new(
+        "node1".to_string(),
+        "test-tenant".to_string(),
+        "default".to_string(),
+        service_locator,
+        None,
+    );
     
-    let result = context.channel_service.receive_from_queue("test-queue", None).await;
+    let channel_svc = context.get_channel_service().await.unwrap();
+    let result = channel_svc.receive_from_queue("test-queue", None).await;
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -84,17 +87,20 @@ async fn test_channel_service_receive_from_queue_no_timeout_returns_none() {
     // Test receive_from_queue with None timeout returning None
     let channel_service = Arc::new(MockChannelService { return_none: true });
     
-    // Create minimal context and replace channel_service
-        let mut context = ActorContext::minimal(
-            "test@node1".to_string(),
-            "node1".to_string(),
-            "default".to_string(), // namespace
-            "test-tenant".to_string(), // tenant_id (required)
-        );
-    // Replace channel_service with our mock
-    context.channel_service = channel_service.clone();
+    // Create context with service locator and register channel service
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    service_locator.register_service(channel_service.clone()).await;
+    let context = ActorContext::new(
+        "node1".to_string(),
+        "test-tenant".to_string(),
+        "default".to_string(),
+        service_locator,
+        None,
+    );
     
-    let result = context.channel_service.receive_from_queue("test-queue", None).await;
+    let channel_svc = context.get_channel_service().await.unwrap();
+    let result = channel_svc.receive_from_queue("test-queue", None).await;
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
 }

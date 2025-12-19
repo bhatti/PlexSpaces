@@ -58,7 +58,8 @@ async fn start_test_server(node: Arc<Node>) -> String {
 #[tokio::test]
 async fn test_monitor_local_actor() {
     // Setup: Create node with local actor
-    let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("node1").build());
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -104,9 +105,9 @@ async fn test_monitor_local_actor() {
 #[tokio::test]
 async fn test_monitor_remote_actor() {
     // Setup: Create two nodes
-    let node1 = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+    let node1 = Arc::new(NodeBuilder::new("node1").build());
 
-    let node2 = Arc::new(Node::new(NodeId::new("node2"), NodeConfig::default()));
+    let node2 = Arc::new(NodeBuilder::new("node2").build());
 
     // Start gRPC server for node2
     let node2_address = start_test_server(node2.clone()).await;
@@ -162,7 +163,8 @@ async fn test_monitor_remote_actor() {
 #[tokio::test]
 async fn test_local_actor_termination_notification() {
     // Setup: Create node with local actor
-    let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("node1").build());
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -214,13 +216,14 @@ async fn test_remote_actor_termination_notification() {
     // Note: This test is currently ignored due to an issue with supervisor_callback
     // address in remote monitoring. The monitor() function uses config.listen_addr
     // which may not match the actual bound gRPC server address.
-    let mut node1_config = NodeConfig::default();
-    node1_config.listen_addr = "127.0.0.1:0".to_string(); // Will be bound to random port
-    let node1 = Arc::new(Node::new(NodeId::new("node1"), node1_config));
+    use plexspaces_node::NodeBuilder;
+    let node1 = Arc::new(NodeBuilder::new("node1")
+        .with_listen_address("127.0.0.1:0")
+        .build());
 
-    let mut node2_config = NodeConfig::default();
-    node2_config.listen_addr = "127.0.0.1:0".to_string(); // Will be bound to random port
-    let node2 = Arc::new(Node::new(NodeId::new("node2"), node2_config));
+    let node2 = Arc::new(NodeBuilder::new("node2")
+        .with_listen_address("127.0.0.1:0")
+        .build());
 
     // Start gRPC servers for both nodes
     let node1_address = start_test_server(node1.clone()).await;
@@ -283,7 +286,8 @@ async fn test_remote_actor_termination_notification() {
 #[tokio::test]
 async fn test_monitor_nonexistent_actor() {
     // Setup: Create node
-    let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("node1").build());
 
     let (tx, _rx) = mpsc::channel(1);
 
@@ -304,7 +308,8 @@ async fn test_monitor_nonexistent_actor() {
 #[tokio::test]
 async fn test_multiple_monitors_same_actor() {
     // Setup: Create node with actor
-    let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("node1").build());
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -363,7 +368,8 @@ async fn test_multiple_monitors_same_actor() {
 #[tokio::test]
 async fn test_monitor_ref_uniqueness() {
     // Setup: Create node with actor
-    let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("node1").build());
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -408,7 +414,8 @@ async fn test_monitor_ref_uniqueness() {
 #[tokio::test]
 async fn test_actor_crash_reason_propagation() {
     // Setup: Create node with actor
-    let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("node1").build());
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();

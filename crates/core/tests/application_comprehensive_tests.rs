@@ -77,6 +77,7 @@ async fn test_application_start_failure() {
 
     let mut app = TestApplication {
         name: "test-app".to_string(),
+        stop_fails: false,
         version: "0.1.0".to_string(),
         start_fails: true,
         health_status: HealthStatus::HealthStatusHealthy,
@@ -96,6 +97,7 @@ async fn test_application_start_failure() {
 async fn test_application_stop_failure() {
     let mut app = TestApplication {
         name: "test-app".to_string(),
+        stop_fails: false,
         version: "0.1.0".to_string(),
         start_fails: false,
         health_status: HealthStatus::HealthStatusHealthy,
@@ -117,6 +119,7 @@ async fn test_application_health_status_variants() {
         name: "app".to_string(),
         version: "1.0".to_string(),
         start_fails: false,
+        stop_fails: false,
         health_status: HealthStatus::HealthStatusHealthy,
     };
     assert_eq!(healthy_app.health_check().await, HealthStatus::HealthStatusHealthy);
@@ -125,6 +128,7 @@ async fn test_application_health_status_variants() {
         name: "app".to_string(),
         version: "1.0".to_string(),
         start_fails: false,
+        stop_fails: false,
         health_status: HealthStatus::HealthStatusDegraded,
     };
     assert_eq!(degraded_app.health_check().await, HealthStatus::HealthStatusDegraded);
@@ -133,6 +137,7 @@ async fn test_application_health_status_variants() {
         name: "app".to_string(),
         version: "1.0".to_string(),
         start_fails: false,
+        stop_fails: false,
         health_status: HealthStatus::HealthStatusUnhealthy,
     };
     assert_eq!(unhealthy_app.health_check().await, HealthStatus::HealthStatusUnhealthy);

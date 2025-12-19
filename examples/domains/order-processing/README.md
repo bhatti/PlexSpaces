@@ -257,7 +257,15 @@ use std::sync::Arc;
 let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
     .ok_or_else(|| "ActorFactory not found")?;
 let actor_id = actor.id().clone();
-let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+let ctx = plexspaces_core::RequestContext::internal();
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "Workflow", // actor_type
+    vec![], // initial_state
+    None, // config
+    std::collections::HashMap::new(), // labels
+).await?;
 let actor_ref = plexspaces_core::ActorRef::new(actor_id)?;
 ```
 
@@ -322,7 +330,15 @@ use std::sync::Arc;
 let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
     .ok_or_else(|| "ActorFactory not found")?;
 let actor_id = actor.id().clone();
-let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await?;
+let ctx = plexspaces_core::RequestContext::internal();
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "Workflow", // actor_type
+    vec![], // initial_state
+    None, // config
+    std::collections::HashMap::new(), // labels
+).await?;
 let actor_ref = plexspaces_core::ActorRef::new(actor_id)?;
 ```
 

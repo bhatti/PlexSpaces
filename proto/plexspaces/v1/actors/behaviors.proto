@@ -43,26 +43,6 @@ import "plexspaces/v1/common.proto";
 // GenServer Behavior (Request/Reply Pattern)
 // ============================================================================
 
-// GenServer behavior service
-//
-// ## Pattern
-// Inspired by Erlang gen_server but simplified to 2 handlers:
-// - Request: Synchronous, expects reply (like gen_server:call)
-// - Event: Asynchronous, fire-and-forget (like gen_server:cast + handle_info)
-//
-// ## Why 2 handlers instead of 3?
-// Erlang has handle_call, handle_cast, handle_info. We simplify:
-// - handle_cast and handle_info are both fire-and-forget
-// - In Rust, we have enums and match - don't need separate handlers
-// - Simpler mental model: "Does it need a reply or not?"
-service GenServerService {
-  // Handle synchronous request (expects reply)
-  rpc HandleRequest(HandleRequestRequest) returns (HandleRequestResponse);
-
-  // Handle asynchronous event (fire-and-forget)
-  rpc HandleEvent(HandleEventRequest) returns (plexspaces.common.v1.Empty);
-}
-
 message HandleRequestRequest {
   string actor_id = 1;
   google.protobuf.Any message = 2;
@@ -88,12 +68,6 @@ message HandleEventRequest {
 // ============================================================================
 // GenEvent Behavior (Event Bus Pattern)
 // ============================================================================
-
-service GenEventService {
-  rpc NotifyHandlers(NotifyHandlersRequest) returns (plexspaces.common.v1.Empty);
-  rpc AddHandler(AddHandlerRequest) returns (plexspaces.common.v1.Empty);
-  rpc RemoveHandler(RemoveHandlerRequest) returns (plexspaces.common.v1.Empty);
-}
 
 message NotifyHandlersRequest {
   string actor_id = 1;

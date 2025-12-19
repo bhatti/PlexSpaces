@@ -88,7 +88,8 @@ async fn create_actor_service(registry: Arc<ObjectRegistryImpl>, node_id: String
         }) as Arc<dyn CoreObjectRegistry>,
         node_id.clone(),
     ));
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some(node_id.clone()), None, None).await;
     let reply_tracker = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator.register_service(actor_registry.clone()).await;
@@ -215,16 +216,17 @@ async fn test_tell_with_grpc_remote() {
         }) as Arc<dyn plexspaces_core::ObjectRegistry>,
         "node2".to_string(),
     ));
-    let service_locator2 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator2.register_service(actor_registry2.clone()).await;
     service_locator2.register_service(reply_tracker2).await;
     service_locator2.register_service(reply_waiter_registry2).await;
     let service2 = ActorServiceImpl::new(service_locator2.clone(), "node2".to_string());
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let sender: Arc<dyn MessageSender> = Arc::new(RegularActorWrapper::new(
+    let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         "target-actor@node2".to_string(),
         Arc::clone(&mailbox2),
         service_locator2,
@@ -262,7 +264,8 @@ async fn test_tell_with_grpc_remote() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node1".to_string(),
     ));
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some(node_id.clone()), None, None).await;
     service_locator.register_service(actor_registry1).await;
 
     // ACT: Send message from node1 to actor on node2 using unified ActorRef
@@ -317,16 +320,17 @@ async fn test_ask_with_grpc_remote() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node2".to_string(),
     ));
-    let service_locator2 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator2.register_service(actor_registry2.clone()).await;
     service_locator2.register_service(reply_tracker2).await;
     service_locator2.register_service(reply_waiter_registry2).await;
     let service2 = Arc::new(ActorServiceImpl::new(service_locator2.clone(), "node2".to_string()));
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let sender: Arc<dyn MessageSender> = Arc::new(RegularActorWrapper::new(
+    let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         "responder@node2".to_string(),
         Arc::clone(&mailbox2),
         service_locator2,
@@ -360,16 +364,17 @@ async fn test_ask_with_grpc_remote() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node2".to_string(),
     ));
-    let service_locator2_for_server = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2_for_server = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let reply_tracker2_for_server = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry2_for_server = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator2_for_server.register_service(actor_registry2_for_server.clone()).await;
     service_locator2_for_server.register_service(reply_tracker2_for_server).await;
     service_locator2_for_server.register_service(reply_waiter_registry2_for_server).await;
     let service2_for_server = ActorServiceImpl::new(service_locator2_for_server.clone(), "node2".to_string());
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let sender: Arc<dyn MessageSender> = Arc::new(RegularActorWrapper::new(
+    let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         "responder@node2".to_string(),
         Arc::clone(&mailbox2),
         service_locator2_for_server,
@@ -405,7 +410,8 @@ async fn test_ask_with_grpc_remote() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node1".to_string(),
     ));
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some(node_id.clone()), None, None).await;
     service_locator.register_service(actor_registry1).await;
 
     // ACT: Send ask() from node1 to actor on node2 using unified ActorRef
@@ -457,16 +463,17 @@ async fn test_ask_with_grpc_timeout() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node2".to_string(),
     ));
-    let service_locator2 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator2.register_service(actor_registry2.clone()).await;
     service_locator2.register_service(reply_tracker2).await;
     service_locator2.register_service(reply_waiter_registry2).await;
     let service2 = ActorServiceImpl::new(service_locator2.clone(), "node2".to_string());
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let sender: Arc<dyn MessageSender> = Arc::new(RegularActorWrapper::new(
+    let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         "silent@node2".to_string(),
         Arc::clone(&mailbox2),
         service_locator2,
@@ -504,7 +511,8 @@ async fn test_ask_with_grpc_timeout() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node1".to_string(),
     ));
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some(node_id.clone()), None, None).await;
     service_locator.register_service(actor_registry1).await;
 
     // ACT: Send ask() with short timeout using unified ActorRef

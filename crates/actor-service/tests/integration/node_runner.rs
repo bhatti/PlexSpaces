@@ -38,22 +38,23 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         namespace: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_core::RequestContext;
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(&ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .lookup(tenant_id, namespace, object_type, object_id)
+            .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -127,7 +128,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
 
     // Create ActorService (using backward-compatible constructor)
-    let service_locator = Arc::new(plexspaces_core::ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let reply_tracker = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator.register_service(actor_registry.clone()).await;

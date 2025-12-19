@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_new() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
     
     // Wrapper should be created successfully - test by using it
@@ -24,7 +24,7 @@ async fn test_tuplespace_provider_wrapper_new() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_write() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     let tuple = Tuple::new(vec![
@@ -46,7 +46,7 @@ async fn test_tuplespace_provider_wrapper_write() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_read() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     // Write a tuple first
@@ -72,7 +72,7 @@ async fn test_tuplespace_provider_wrapper_read() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_read_empty() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     let pattern = Pattern::new(vec![
@@ -88,7 +88,7 @@ async fn test_tuplespace_provider_wrapper_read_empty() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_take() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     // Write a tuple first
@@ -117,7 +117,7 @@ async fn test_tuplespace_provider_wrapper_take() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_take_empty() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     let pattern = Pattern::new(vec![
@@ -133,7 +133,7 @@ async fn test_tuplespace_provider_wrapper_take_empty() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_count() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     // Write multiple tuples
@@ -157,7 +157,7 @@ async fn test_tuplespace_provider_wrapper_count() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_count_zero() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     let pattern = Pattern::new(vec![
@@ -172,7 +172,7 @@ async fn test_tuplespace_provider_wrapper_count_zero() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_multiple_operations() {
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     // Write

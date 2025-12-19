@@ -3,7 +3,7 @@
 //
 // Tests for ActorContext methods to improve coverage
 
-use plexspaces_core::{ActorContext, ServiceLocator};
+use plexspaces_core::{ActorContext, ServiceLocator, ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider, ProcessGroupService, FacetService};
 use plexspaces_mailbox::Message;
 use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField, TupleSpaceError};
 use std::sync::Arc;
@@ -36,6 +36,15 @@ impl ActorService for MockActorService {
     async fn send(&self, _actor_id: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         Ok("msg-id".to_string())
     }
+    async fn send_reply(
+        &self,
+        _correlation_id: Option<&str>,
+        _sender_id: &plexspaces_core::ActorId,
+        _target_actor_id: plexspaces_core::ActorId,
+        _reply_message: Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
 }
 
 struct MockObjectRegistry;
@@ -44,7 +53,7 @@ impl ObjectRegistry for MockObjectRegistry {
     async fn lookup(&self, _tenant_id: &str, _object_id: &str, _namespace: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(None)
     }
-    async fn lookup_full(&self, _tenant_id: &str, _namespace: &str, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn lookup_full(&self, _ctx: &plexspaces_core::RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(None)
     }
     async fn register(&self, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -86,8 +95,6 @@ impl ProcessGroupService for MockProcessGroupService {
     }
 }
 
-#[async_trait::async_trait]
-
 struct MockFacetService;
 #[async_trait::async_trait]
 impl FacetService for MockFacetService {
@@ -101,7 +108,8 @@ impl FacetService for MockFacetService {
 }
 
 fn create_test_context() -> ActorContext {
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     ActorContext::new(
         "test-node".to_string(),
         "test-ns".to_string(),
@@ -116,7 +124,7 @@ fn create_test_context() -> ActorContext {
 // This test is no longer applicable
 
 #[tokio::test]
-async fn test_actor_context_minimal_with_config() {
+async fn test_actor_context_new_with_config() {
     use plexspaces_proto::v1::actor::ActorConfig;
     
     let mut config = ActorConfig::default();
@@ -124,10 +132,13 @@ async fn test_actor_context_minimal_with_config() {
     config.enable_persistence = true;
     let config = Some(config);
     
-    let ctx = ActorContext::minimal_with_config(
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-ns".to_string(),
         "tenant-123".to_string(),
+        service_locator,
         config.clone(),
     );
     
@@ -164,7 +175,7 @@ async fn test_actor_context_service_access() {
     // Services are accessed via service_locator, not directly
     // Test that service_locator is accessible
     assert_eq!(ctx.node_id, "test-node");
-    assert_eq!(ctx.tenant_id(), "tenant-123");
+    assert_eq!(ctx.tenant_id, "tenant-123");
 }
 
 #[tokio::test]
@@ -174,12 +185,12 @@ async fn test_actor_context_convenience_methods() {
     // Services are accessed via service_locator
     // This test verifies the context is created correctly
     assert_eq!(ctx.node_id, "test-node");
-    assert_eq!(ctx.tenant_id(), "tenant-123");
+    assert_eq!(ctx.tenant_id, "tenant-123");
     
     // Test tuplespace convenience methods (via service_locator)
     // Services are accessed via service_locator, not directly
     // This test verifies the context is created correctly
     assert_eq!(ctx.node_id, "test-node");
-    assert_eq!(ctx.tenant_id(), "tenant-123");
+    assert_eq!(ctx.tenant_id, "tenant-123");
 }
 

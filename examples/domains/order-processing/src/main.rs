@@ -75,9 +75,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create order processor actor using ActorBuilder
     info!("🎭 Creating order processor actor...");
     let behavior = Box::new(OrderProcessorBehavior::new());
+    let ctx = plexspaces_core::RequestContext::internal();
     let actor_ref = ActorBuilder::new(behavior)
         .with_name("order-processor")
-        .spawn(node.service_locator().clone())
+        .spawn(&ctx, node.service_locator().clone())
         .await?;
     
     let actor_id = actor_ref.id();

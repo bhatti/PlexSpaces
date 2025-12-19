@@ -823,7 +823,7 @@ service TuplePlexSpaceService {
   // Write tuples
   rpc Write(WriteRequest) returns (WriteResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/tuples"
+      post: "/api/v1/tuplespace/tuples"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -836,7 +836,7 @@ service TuplePlexSpaceService {
   // Read tuples (blocking and non-blocking)
   rpc Read(ReadRequest) returns (ReadResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/read"
+      post: "/api/v1/tuplespace/read"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -849,7 +849,7 @@ service TuplePlexSpaceService {
   // Take tuples (read and remove)
   rpc Take(ReadRequest) returns (ReadResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/take"
+      post: "/api/v1/tuplespace/take"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -862,7 +862,7 @@ service TuplePlexSpaceService {
   // Count matching tuples
   rpc Count(CountRequest) returns (CountResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/count"
+      post: "/api/v1/tuplespace/count"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -875,7 +875,7 @@ service TuplePlexSpaceService {
   // Check if tuples exist
   rpc Exists(ExistsRequest) returns (ExistsResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/exists"
+      post: "/api/v1/tuplespace/exists"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -891,7 +891,7 @@ service TuplePlexSpaceService {
   // Subscribe to tuple events
   rpc Subscribe(SubscribeRequest) returns (SubscribeResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/subscriptions"
+      post: "/api/v1/tuplespace/subscriptions"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -904,7 +904,7 @@ service TuplePlexSpaceService {
   // Unsubscribe from tuple events
   rpc Unsubscribe(UnsubscribeRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      delete: "/v1/tuplespace/subscriptions/{subscription_id}"
+      delete: "/api/v1/tuplespace/subscriptions/{subscription_id}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Unsubscribe from Events"
@@ -916,7 +916,7 @@ service TuplePlexSpaceService {
   // Begin transaction
   rpc BeginTransaction(BeginTransactionRequest) returns (BeginTransactionResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/transactions"
+      post: "/api/v1/tuplespace/transactions"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -929,7 +929,7 @@ service TuplePlexSpaceService {
   // Commit transaction
   rpc CommitTransaction(CommitTransactionRequest) returns (CommitTransactionResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/transactions/{transaction_id}/commit"
+      post: "/api/v1/tuplespace/transactions/{transaction_id}/commit"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -942,7 +942,7 @@ service TuplePlexSpaceService {
   // Abort transaction
   rpc AbortTransaction(AbortTransactionRequest) returns (AbortTransactionResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/transactions/{transaction_id}/abort"
+      post: "/api/v1/tuplespace/transactions/{transaction_id}/abort"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -955,7 +955,7 @@ service TuplePlexSpaceService {
   // Clear tuplespace
   rpc Clear(plexspaces.common.v1.Empty) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      delete: "/v1/tuplespace/tuples"
+      delete: "/api/v1/tuplespace/tuples"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Clear TuplePlexSpace"
@@ -967,7 +967,7 @@ service TuplePlexSpaceService {
   // Renew tuple lease
   rpc RenewLease(RenewLeaseRequest) returns (RenewLeaseResponse) {
     option (google.api.http) = {
-      post: "/v1/tuplespace/tuples/{tuple_id}/renew-lease"
+      post: "/api/v1/tuplespace/tuples/{tuple_id}/renew-lease"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1014,7 +1014,7 @@ service TuplePlexSpaceService {
   // ```
   rpc GetStats(plexspaces.common.v1.Empty) returns (GetStatsResponse) {
     option (google.api.http) = {
-      get: "/v1/tuplespace/stats"
+      get: "/api/v1/tuplespace/stats"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Storage Statistics"

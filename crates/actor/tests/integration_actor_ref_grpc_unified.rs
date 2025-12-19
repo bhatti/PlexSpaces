@@ -32,8 +32,9 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(&ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -45,8 +46,9 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(tenant_id, namespace, object_type, object_id)
+            .lookup_full(&ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -86,7 +88,8 @@ impl ActorService for TestActorServiceWrapper {
 
 /// Helper to create ActorServiceImpl with proper ServiceLocator setup
 async fn create_actor_service(actor_registry: Arc<ActorRegistry>, node_id: String) -> ActorServiceImpl {
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let reply_tracker = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator.register_service(actor_registry.clone()).await;
@@ -102,14 +105,15 @@ async fn register_test_actor(
     mailbox: Arc<Mailbox>,
     service_locator: Arc<ServiceLocator>,
 ) {
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
-    let sender: Arc<dyn MessageSender> = Arc::new(RegularActorWrapper::new(
+    let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         actor_id.clone(),
         mailbox,
         service_locator,
     ));
-    actor_registry.register_actor(actor_id, sender, None, None, None).await;
+    let ctx = plexspaces_core::RequestContext::internal();
+    actor_registry.register_actor(&ctx, actor_id, sender, None).await;
 }
 
 /// Helper to create a test ActorService wrapper
@@ -136,7 +140,8 @@ async fn start_test_server(service: ActorServiceImpl, port: u16) -> tokio::task:
 async fn test_unified_tell_local() {
     // ARRANGE: Create local actor
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "local-actor@node1".to_string()).await.unwrap());
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let actor_ref = ActorRef::local("local-actor@node1".to_string(), Arc::clone(&mailbox), service_locator);
 
     // ACT: Send message
@@ -153,7 +158,8 @@ async fn test_unified_tell_local() {
 async fn test_unified_ask_local() {
     // ARRANGE: Create local actor that replies
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "responder@node1".to_string()).await.unwrap());
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let actor_ref = ActorRef::local("responder@node1".to_string(), Arc::clone(&mailbox), service_locator.clone());
     
     // Spawn task to handle messages and reply
@@ -219,7 +225,8 @@ async fn test_unified_tell_remote_grpc() {
 
     // Create actor on node2
     let mailbox2 = Arc::new(Mailbox::new(MailboxConfig::default(), "actor2@node1".to_string()).await.unwrap());
-    let service_locator2 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let actor_ref2 = ActorRef::local("target-actor@node2".to_string(), Arc::clone(&mailbox2), service_locator2);
     // Create ActorRegistry for service2
     let actor_registry2 = Arc::new(ActorRegistry::new(
@@ -228,7 +235,8 @@ async fn test_unified_tell_remote_grpc() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node2".to_string(),
     ));
-    let service_locator2 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator2.register_service(actor_registry2.clone()).await;
@@ -271,10 +279,12 @@ async fn test_unified_tell_remote_grpc() {
         "node1".to_string(),
     ));
     // Create ServiceLocator and register ActorRegistry
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     service_locator.register_service(actor_registry1.clone()).await;
     
-    let service_locator1 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator1 = create_default_service_locator(Some("node1".to_string()), None, None).await;
     let reply_tracker1 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry1 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator1.register_service(actor_registry1.clone()).await;
@@ -334,7 +344,8 @@ async fn test_unified_ask_remote_grpc() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node2".to_string(),
     ));
-    let service_locator2 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator2.register_service(actor_registry2.clone()).await;
@@ -368,7 +379,8 @@ async fn test_unified_ask_remote_grpc() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node2".to_string(),
     ));
-    let service_locator2_for_server = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2_for_server = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let reply_tracker2_for_server = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry2_for_server = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator2_for_server.register_service(actor_registry2_for_server.clone()).await;
@@ -409,10 +421,12 @@ async fn test_unified_ask_remote_grpc() {
         "node1".to_string(),
     ));
     // Create ServiceLocator and register ActorRegistry
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     service_locator.register_service(actor_registry1.clone()).await;
     
-    let service_locator1 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator1 = create_default_service_locator(Some("node1".to_string()), None, None).await;
     let reply_tracker1 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry1 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator1.register_service(actor_registry1.clone()).await;
@@ -470,7 +484,8 @@ async fn test_unified_ask_remote_grpc_timeout() {
         }) as Arc<dyn CoreObjectRegistry>,
         "node2".to_string(),
     ));
-    let service_locator2 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
     let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator2.register_service(actor_registry2.clone()).await;
@@ -513,10 +528,12 @@ async fn test_unified_ask_remote_grpc_timeout() {
         "node1".to_string(),
     ));
     // Create ServiceLocator and register ActorRegistry
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     service_locator.register_service(actor_registry1.clone()).await;
     
-    let service_locator1 = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator1 = create_default_service_locator(Some("node1".to_string()), None, None).await;
     let reply_tracker1 = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry1 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator1.register_service(actor_registry1.clone()).await;

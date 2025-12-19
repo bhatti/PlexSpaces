@@ -110,12 +110,25 @@ pub async fn deploy(
 
     // Load release config if provided
     let release_config = if let Some(release_path) = release_config_file {
-        let release_str = fs::read_to_string(release_path)
-            .with_context(|| format!("Failed to read release config file: {}", release_path))?;
+        use plexspaces_node::config_loader::ConfigLoader;
         
-        // TODO: Parse TOML to ReleaseSpec
-        // For now, return error
-        anyhow::bail!("Release config parsing not yet implemented");
+        // Determine file type from extension
+        let path = std::path::Path::new(release_path);
+        let is_yaml = path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext == "yaml" || ext == "yml")
+            .unwrap_or(false);
+        
+        if is_yaml {
+            // Load YAML release config
+            let loader = ConfigLoader::new(true); // Enable security validation
+            let spec = loader.load_release_spec_with_env_precedence(release_path)
+                .with_context(|| format!("Failed to load release config from {}", release_path))?;
+            Some(spec)
+        } else {
+            // Try TOML (for future support)
+            anyhow::bail!("TOML release config parsing not yet implemented, use YAML format");
+        }
     } else {
         None
     };

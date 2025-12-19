@@ -52,7 +52,7 @@ async fn test_node_operations_wrapper() {
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper() {
-    let tuplespace = Arc::new(plexspaces_tuplespace::TupleSpace::new());
+    let tuplespace = Arc::new(plexspaces_tuplespace::TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     // Test write

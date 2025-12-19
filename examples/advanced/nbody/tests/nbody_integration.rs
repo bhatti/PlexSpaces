@@ -82,6 +82,20 @@ async fn test_spawn_body_actors() {
     // Test that body actors can be spawned
     let node = Arc::new(NodeBuilder::new("test-node").build());
     
+    // Wait for services to be registered
+    let service_locator = node.service_locator();
+    for _ in 0..10 {
+        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+    
+    // Register ActorFactory for tests
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
+    service_locator.register_service(actor_factory_impl.clone()).await;
+    
     let body = Body::new(
         "body-1".to_string(),
         5.972e24, // Earth mass
@@ -90,9 +104,10 @@ async fn test_spawn_body_actors() {
     );
 
     use plexspaces_actor::ActorBuilder;
+    let ctx = plexspaces_core::RequestContext::internal();
     let body_ref = ActorBuilder::new(Box::new(BodyActor::new(body)))
         .with_id(format!("body-1@{}", node.id().as_str()))
-        .spawn(node.service_locator().clone())
+        .spawn(&ctx, service_locator.clone())
         .await
         .expect("Failed to spawn body actor");
 
@@ -104,6 +119,20 @@ async fn test_body_actor_responds_to_get_state() {
     // Test that actor responds to get_state message
     let node = Arc::new(NodeBuilder::new("test-node").build());
     
+    // Wait for services to be registered
+    let service_locator = node.service_locator();
+    for _ in 0..10 {
+        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+    
+    // Register ActorFactory for tests
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
+    service_locator.register_service(actor_factory_impl.clone()).await;
+    
     let body = Body::new(
         "body-1".to_string(),
         5.972e24,
@@ -112,9 +141,10 @@ async fn test_body_actor_responds_to_get_state() {
     );
 
     use plexspaces_actor::ActorBuilder;
+    let ctx = plexspaces_core::RequestContext::internal();
     let body_ref = ActorBuilder::new(Box::new(BodyActor::new(body)))
         .with_id(format!("body-1@{}", node.id().as_str()))
-        .spawn(node.service_locator().clone())
+        .spawn(&ctx, service_locator.clone())
         .await
         .expect("Failed to spawn body actor");
 
@@ -124,7 +154,7 @@ async fn test_body_actor_responds_to_get_state() {
     // Send get_state message (non-blocking, just verify it doesn't panic)
     let msg = Message::new(b"get_state".to_vec());
     // Use ActorService to send message
-    let actor_service = node.service_locator().get_actor_service().await;
+    let actor_service = service_locator.get_actor_service().await;
     if let Some(service) = actor_service {
         let _ = service.send(body_ref.id(), msg).await;
     }
@@ -140,6 +170,20 @@ async fn test_multiple_body_actors() {
     // Test spawning multiple body actors
     let node = Arc::new(NodeBuilder::new("test-node").build());
     
+    // Wait for services to be registered
+    let service_locator = node.service_locator();
+    for _ in 0..10 {
+        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+    
+    // Register ActorFactory for tests
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
+    service_locator.register_service(actor_factory_impl.clone()).await;
+    
     let bodies = vec![
         Body::new("body-1".to_string(), 1.0e24, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
         Body::new("body-2".to_string(), 1.0e24, [1.0e11, 0.0, 0.0], [0.0, 0.0, 0.0]),
@@ -149,9 +193,10 @@ async fn test_multiple_body_actors() {
     let mut body_refs = Vec::new();
     for body in bodies {
         use plexspaces_actor::ActorBuilder;
+        let ctx = plexspaces_core::RequestContext::internal();
         let body_ref = ActorBuilder::new(Box::new(BodyActor::new(body)))
             .with_id(format!("body-{}@{}", body_refs.len() + 1, node.id().as_str()))
-            .spawn(node.service_locator().clone())
+            .spawn(&ctx, service_locator.clone())
             .await
             .expect("Failed to spawn body actor");
         body_refs.push(body_ref);
@@ -163,7 +208,7 @@ async fn test_multiple_body_actors() {
     sleep(Duration::from_millis(200)).await;
 
     // Send messages to all actors (with delays to avoid mailbox overflow)
-    let actor_service = node.service_locator().get_actor_service().await;
+    let actor_service = service_locator.get_actor_service().await;
     if let Some(service) = actor_service {
         for body_ref in &body_refs {
             let msg = Message::new(b"get_state".to_vec());

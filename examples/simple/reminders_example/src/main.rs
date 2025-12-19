@@ -215,13 +215,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ ReminderFacet attached");
     println!();
 
-    // Spawn using ActorFactory (spawn_built_actor is called internally)
+    // Spawn using ActorFactory
+    // Note: For actors with VirtualActorFacet, we must use spawn_built_actor because
+    // virtual actor logic checks for the facet during spawn. For other cases, use spawn_actor.
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let actor_id = actor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    // Since we have VirtualActorFacet attached, we need to use spawn_built_actor
+    // Virtual actor logic checks for the facet during spawn, so it must be attached before
+    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let actor_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;

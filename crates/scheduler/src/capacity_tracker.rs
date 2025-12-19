@@ -28,6 +28,7 @@
 //! - Provides methods to get node capacities, filter by labels, etc.
 
 use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_core::RequestContext;
 use plexspaces_proto::{
     common::v1::ResourceSpec,
     node::v1::NodeCapacity,
@@ -72,11 +73,12 @@ impl CapacityTracker {
     /// `Ok(Some(NodeCapacity))` if node found, `Ok(None)` if not found
     pub async fn get_node_capacity(
         &self,
+        ctx: &RequestContext,
         node_id: &str,
     ) -> CapacityTrackerResult<Option<NodeCapacity>> {
         let registration = self
             .registry
-            .lookup("default", "default", ObjectType::ObjectTypeService, node_id)
+            .lookup(ctx, ObjectType::ObjectTypeService, node_id)
             .await
             .map_err(|e| CapacityTrackerError::RegistryError(e.to_string()))?;
 
@@ -97,13 +99,17 @@ impl CapacityTracker {
     /// Map of node_id -> NodeCapacity
     pub async fn list_node_capacities(
         &self,
+        ctx: &RequestContext,
         node_labels: Option<&HashMap<String, String>>,
         min_available_resources: Option<&ResourceSpec>,
     ) -> CapacityTrackerResult<HashMap<String, NodeCapacity>> {
         // Discover all nodes (registered as services)
+        // For capacity tracking, use internal context to see all nodes
+        let internal_ctx = RequestContext::internal();
         let nodes = self
             .registry
             .discover(
+                &internal_ctx,
                 Some(ObjectType::ObjectTypeService),
                 None, // object_category
                 None, // capabilities
@@ -273,8 +279,8 @@ mod tests {
             object_name: node_id.to_string(),
             object_type: ObjectType::ObjectTypeService as i32,
             version: "1.0.0".to_string(),
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
+            tenant_id: "internal".to_string(),
+            namespace: "system".to_string(),
             node_id: node_id.to_string(),
             grpc_address: format!("http://{}:9001", node_id),
             object_category: "node".to_string(),
@@ -351,6 +357,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_node_capacity() {
+        use plexspaces_core::RequestContext;
         let kv = Arc::new(InMemoryKVStore::new());
         let registry = Arc::new(ObjectRegistry::new(kv));
 
@@ -366,7 +373,8 @@ mod tests {
         registry.register(registration).await.unwrap();
 
         let tracker = CapacityTracker::new(registry);
-        let capacity = tracker.get_node_capacity("node-1").await.unwrap();
+        let ctx = RequestContext::internal();
+        let capacity = tracker.get_node_capacity(&ctx, "node-1").await.unwrap();
 
         assert!(capacity.is_some());
         assert!(capacity.unwrap().total.is_some());
@@ -377,13 +385,15 @@ mod tests {
         let kv = Arc::new(InMemoryKVStore::new());
         let registry = Arc::new(ObjectRegistry::new(kv));
         let tracker = CapacityTracker::new(registry);
+        let ctx = RequestContext::internal();
 
-        let capacity = tracker.get_node_capacity("nonexistent").await.unwrap();
+        let capacity = tracker.get_node_capacity(&ctx, "nonexistent").await.unwrap();
         assert!(capacity.is_none());
     }
 
     #[tokio::test]
     async fn test_list_node_capacities() {
+        use plexspaces_core::RequestContext;
         let kv = Arc::new(InMemoryKVStore::new());
         let registry = Arc::new(ObjectRegistry::new(kv));
 
@@ -411,7 +421,8 @@ mod tests {
         registry.register(registration2).await.unwrap();
 
         let tracker = CapacityTracker::new(registry);
-        let capacities = tracker.list_node_capacities(None, None).await.unwrap();
+        let ctx = RequestContext::internal();
+        let capacities = tracker.list_node_capacities(&ctx, None, None).await.unwrap();
 
         assert_eq!(capacities.len(), 2);
         assert!(capacities.contains_key("node-1"));
@@ -445,8 +456,9 @@ mod tests {
         // Filter by zone=us-west
         let mut filter_labels = HashMap::new();
         filter_labels.insert("zone".to_string(), "us-west".to_string());
+        let ctx = RequestContext::internal();
         let capacities = tracker
-            .list_node_capacities(Some(&filter_labels), None)
+            .list_node_capacities(&ctx, Some(&filter_labels), None)
             .await
             .unwrap();
 
@@ -491,7 +503,7 @@ mod tests {
         };
 
         let capacities = tracker
-            .list_node_capacities(None, Some(&min_resources))
+            .list_node_capacities(&RequestContext::internal(), None, Some(&min_resources))
             .await
             .unwrap();
 

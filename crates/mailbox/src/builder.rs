@@ -152,7 +152,7 @@ impl MailboxBuilder {
         
         let sqlite_config = SqliteConfig {
             database_path,
-            table_name: "mailbox_messages".to_string(),
+            table_name: "channel_messages".to_string(),
             wal_mode: true,
             cleanup_acked: true,
             cleanup_age_seconds: 3600,
@@ -344,24 +344,8 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "sqlite-backend")]
     async fn test_mailbox_builder_sqlite() {
-        use std::path::PathBuf;
-        
-        // Create persistent test directory (not auto-deleted)
-        let temp_base = std::env::temp_dir();
-        let test_dir = temp_base.join(format!("plexspaces_mailbox_builder_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        std::fs::create_dir_all(&test_dir).unwrap();
-        let db_path = test_dir.join("test_mailbox.db");
-        
-        // Keep test_dir alive
-        let _keep_alive = &test_dir;
-        
-        // Get absolute path as string
-        let db_path_str = db_path.to_str().unwrap().to_string();
-        
-        // Touch the database file to ensure it exists (sqlx should create it, but this helps)
-        if !db_path.exists() {
-            std::fs::File::create(&db_path).unwrap();
-        }
+        // Use in-memory database to prevent concurrency issues
+        let db_path_str = ":memory:".to_string();
         
         let mailbox = MailboxBuilder::new()
             .with_sqlite(db_path_str)

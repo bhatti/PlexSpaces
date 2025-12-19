@@ -851,7 +851,7 @@ service SystemService {
   // Get system information
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse) {
     option (google.api.http) = {
-      get: "/v1/system/info"
+      get: "/api/v1/system/info"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get System Info"
@@ -863,7 +863,7 @@ service SystemService {
   // Health check (custom detailed health, use grpc.health.v1.Health for K8s probes)
   rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {
     option (google.api.http) = {
-      get: "/v1/system/health"
+      get: "/api/v1/system/health"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Health Check"
@@ -881,10 +881,10 @@ service SystemService {
   // ## Design Notes
   // - Includes both critical and non-critical dependency checks
   // - Supports partial failure scenarios (non-critical dependencies can fail)
-  // - HTTP endpoint: GET /v1/system/health/detailed
+  // - HTTP endpoint: GET /api/v1/system/health/detailed
   rpc GetDetailedHealth(GetDetailedHealthRequest) returns (GetDetailedHealthResponse) {
     option (google.api.http) = {
-      get: "/v1/system/health/detailed"
+      get: "/api/v1/system/health/detailed"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Detailed Health"
@@ -967,7 +967,7 @@ service SystemService {
   // grpc.health.v1.Health service instead.
   rpc GetNodeReadiness(GetNodeReadinessRequest) returns (GetNodeReadinessResponse) {
     option (google.api.http) = {
-      get: "/v1/system/readiness"
+      get: "/api/v1/system/readiness"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Node Readiness"
@@ -988,7 +988,7 @@ service SystemService {
   // - External orchestration
   rpc MarkStartupComplete(MarkStartupCompleteRequest) returns (MarkStartupCompleteResponse) {
     option (google.api.http) = {
-      post: "/v1/system/health/startup-complete"
+      post: "/api/v1/system/health/startup-complete"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1012,7 +1012,7 @@ service SystemService {
   // - Drain verification
   rpc BeginShutdown(BeginShutdownRequest) returns (BeginShutdownResponse) {
     option (google.api.http) = {
-      post: "/v1/system/health/shutdown"
+      post: "/api/v1/system/health/shutdown"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1025,7 +1025,7 @@ service SystemService {
   // Get metrics
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {
     option (google.api.http) = {
-      get: "/v1/system/metrics"
+      get: "/api/v1/system/metrics"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Metrics"
@@ -1037,7 +1037,7 @@ service SystemService {
   // Get configuration
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse) {
     option (google.api.http) = {
-      get: "/v1/system/config"
+      get: "/api/v1/system/config"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Config"
@@ -1049,7 +1049,7 @@ service SystemService {
   // Set configuration
   rpc SetConfig(SetConfigRequest) returns (SetConfigResponse) {
     option (google.api.http) = {
-      put: "/v1/system/config"
+      put: "/api/v1/system/config"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1062,7 +1062,7 @@ service SystemService {
   // Get logs
   rpc GetLogs(GetLogsRequest) returns (GetLogsResponse) {
     option (google.api.http) = {
-      get: "/v1/system/logs"
+      get: "/api/v1/system/logs"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Logs"
@@ -1074,7 +1074,7 @@ service SystemService {
   // Create backup
   rpc CreateBackup(CreateBackupRequest) returns (CreateBackupResponse) {
     option (google.api.http) = {
-      post: "/v1/system/backups"
+      post: "/api/v1/system/backups"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1087,7 +1087,7 @@ service SystemService {
   // List backups
   rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse) {
     option (google.api.http) = {
-      get: "/v1/system/backups"
+      get: "/api/v1/system/backups"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Backups"
@@ -1099,7 +1099,7 @@ service SystemService {
   // Restore backup
   rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse) {
     option (google.api.http) = {
-      post: "/v1/system/backups/{backup_id}/restore"
+      post: "/api/v1/system/backups/{backup_id}/restore"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1112,7 +1112,7 @@ service SystemService {
   // Shutdown system
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse) {
     option (google.api.http) = {
-      post: "/v1/system/shutdown"
+      post: "/api/v1/system/shutdown"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1133,7 +1133,7 @@ service SystemService {
   // - Metrics collection (shutdown duration per phase)
   rpc GetShutdownStatus(GetShutdownStatusRequest) returns (GetShutdownStatusResponse) {
     option (google.api.http) = {
-      get: "/v1/system/shutdown/status"
+      get: "/api/v1/system/shutdown/status"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Shutdown Status"

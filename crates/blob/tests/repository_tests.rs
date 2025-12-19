@@ -29,31 +29,10 @@ mod sql_tests {
     use tempfile::NamedTempFile;
 
     async fn create_test_repository() -> Arc<SqlBlobRepository> {
-        use sqlx::{sqlite::SqlitePoolOptions, AnyPool};
-        use tempfile::NamedTempFile;
+        use sqlx::AnyPool;
         
-        // Workaround for sqlx 0.7 AnyPool driver registration issue in tests
-        // AnyPool requires the sqlite driver to be registered at runtime, which
-        // doesn't happen in test environment. We use a file-based database as a workaround.
-        let temp_file = NamedTempFile::new().unwrap();
-        let db_path = temp_file.path().to_str().unwrap();
-        
-        // Try AnyPool first (works in production)
-        let any_pool = match AnyPool::connect(&format!("sqlite:{}", db_path)).await {
-            Ok(pool) => pool,
-            Err(_) => {
-                // Fallback: Use SqlitePool and convert (if possible)
-                // Note: This is a workaround - ideally AnyPool would work in tests
-                let sqlite_pool = SqlitePoolOptions::new()
-                    .max_connections(1)
-                    .connect(&format!("sqlite:{}", db_path))
-                    .await
-                    .unwrap();
-                // Unfortunately, we can't convert SqlitePool to AnyPool directly
-                // So we'll just panic with a helpful message
-                panic!("AnyPool driver not available in test environment. This is a known sqlx 0.7 limitation. Consider using integration tests or a different test setup.");
-            }
-        };
+        // Use in-memory database to prevent concurrency issues
+        let any_pool = AnyPool::connect("sqlite::memory:").await.unwrap();
         
         SqlBlobRepository::migrate(&any_pool).await.unwrap();
         Arc::new(SqlBlobRepository::new(any_pool))
@@ -81,8 +60,7 @@ mod sql_tests {
     }
 
     fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
-        RequestContext::new(tenant_id.to_string())
-            .with_namespace(namespace.to_string())
+        RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string())
     }
 
     #[tokio::test]
@@ -204,5 +182,148 @@ mod sql_tests {
         let result = repo.save(&ctx, &metadata).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("namespace"));
+    }
+
+    #[tokio::test]
+    async fn test_namespace_isolation() {
+        let repo = create_test_repository().await;
+        let ctx1 = create_test_context("tenant-1", "ns-1");
+        let ctx2 = create_test_context("tenant-1", "ns-2");
+        
+        let metadata = create_test_metadata("blob-1", "tenant-1", "ns-1");
+        repo.save(&ctx1, &metadata).await.unwrap();
+
+        // Should be able to get from ns-1
+        assert!(repo.get(&ctx1, "blob-1").await.unwrap().is_some());
+
+        // Should NOT be able to get from ns-2 (namespace isolation)
+        assert!(repo.get(&ctx2, "blob-1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tenant_and_namespace_isolation_list() {
+        let repo = create_test_repository().await;
+        let ctx1 = create_test_context("tenant-1", "ns-1");
+        let ctx2 = create_test_context("tenant-2", "ns-1");
+        let ctx3 = create_test_context("tenant-1", "ns-2");
+        
+        // Create blobs in different tenants/namespaces
+        let metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
+        repo.save(&ctx1, &metadata1).await.unwrap();
+        
+        let metadata2 = create_test_metadata("blob-2", "tenant-2", "ns-1");
+        repo.save(&ctx2, &metadata2).await.unwrap();
+        
+        let metadata3 = create_test_metadata("blob-3", "tenant-1", "ns-2");
+        repo.save(&ctx3, &metadata3).await.unwrap();
+
+        // Each context should only see its own blobs
+        let (results1, total1) = repo.list(&ctx1, &ListFilters::default(), 10, 0).await.unwrap();
+        assert_eq!(total1, 1);
+        assert_eq!(results1[0].blob_id, "blob-1");
+
+        let (results2, total2) = repo.list(&ctx2, &ListFilters::default(), 10, 0).await.unwrap();
+        assert_eq!(total2, 1);
+        assert_eq!(results2[0].blob_id, "blob-2");
+
+        let (results3, total3) = repo.list(&ctx3, &ListFilters::default(), 10, 0).await.unwrap();
+        assert_eq!(total3, 1);
+        assert_eq!(results3[0].blob_id, "blob-3");
+    }
+
+    #[tokio::test]
+    async fn test_empty_namespace_list_returns_all_namespaces() {
+        let repo = create_test_repository().await;
+        let ctx_ns1 = create_test_context("tenant-1", "ns-1");
+        let ctx_ns2 = create_test_context("tenant-1", "ns-2");
+        let ctx_empty = create_test_context("tenant-1", "");
+
+        // Create blobs in different namespaces
+        let metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
+        repo.save(&ctx_ns1, &metadata1).await.unwrap();
+
+        let metadata2 = create_test_metadata("blob-2", "tenant-1", "ns-2");
+        repo.save(&ctx_ns2, &metadata2).await.unwrap();
+
+        // List with empty namespace should return blobs from all namespaces
+        let (results, total) = repo.list(&ctx_empty, &ListFilters::default(), 10, 0).await.unwrap();
+        assert_eq!(total, 2);
+        assert!(results.iter().any(|b| b.blob_id == "blob-1"));
+        assert!(results.iter().any(|b| b.blob_id == "blob-2"));
+
+        // List with specific namespace should only return that namespace's blobs
+        let (results_ns1, total_ns1) = repo.list(&ctx_ns1, &ListFilters::default(), 10, 0).await.unwrap();
+        assert_eq!(total_ns1, 1);
+        assert_eq!(results_ns1[0].blob_id, "blob-1");
+
+        let (results_ns2, total_ns2) = repo.list(&ctx_ns2, &ListFilters::default(), 10, 0).await.unwrap();
+        assert_eq!(total_ns2, 1);
+        assert_eq!(results_ns2[0].blob_id, "blob-2");
+    }
+
+    #[tokio::test]
+    async fn test_empty_namespace_get_by_sha256_returns_any_namespace() {
+        let repo = create_test_repository().await;
+        let ctx_ns1 = create_test_context("tenant-1", "ns-1");
+        let ctx_ns2 = create_test_context("tenant-1", "ns-2");
+        let ctx_empty = create_test_context("tenant-1", "");
+
+        let sha256 = "c".repeat(64);
+        
+        // Create blob in ns-1 with specific sha256
+        let mut metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
+        metadata1.sha256 = sha256.clone();
+        repo.save(&ctx_ns1, &metadata1).await.unwrap();
+
+        // Create blob in ns-2 with different sha256
+        let mut metadata2 = create_test_metadata("blob-2", "tenant-1", "ns-2");
+        metadata2.sha256 = "d".repeat(64);
+        repo.save(&ctx_ns2, &metadata2).await.unwrap();
+
+        // get_by_sha256 with empty namespace should find blob from any namespace
+        let retrieved = repo.get_by_sha256(&ctx_empty, &sha256).await.unwrap().unwrap();
+        assert_eq!(retrieved.blob_id, "blob-1");
+        assert_eq!(retrieved.namespace, "ns-1");
+
+        // get_by_sha256 with specific namespace should only find in that namespace
+        let retrieved_ns1 = repo.get_by_sha256(&ctx_ns1, &sha256).await.unwrap().unwrap();
+        assert_eq!(retrieved_ns1.blob_id, "blob-1");
+
+        // get_by_sha256 with different namespace should not find it
+        let retrieved_ns2 = repo.get_by_sha256(&ctx_ns2, &sha256).await.unwrap();
+        assert!(retrieved_ns2.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_empty_namespace_find_expired_returns_all_namespaces() {
+        let repo = create_test_repository().await;
+        let ctx_ns1 = create_test_context("tenant-1", "ns-1");
+        let ctx_ns2 = create_test_context("tenant-1", "ns-2");
+        let ctx_empty = create_test_context("tenant-1", "");
+
+        // Create expired blob in ns-1
+        let mut metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
+        metadata1.expires_at = Some(datetime_to_timestamp(Utc::now() - chrono::Duration::hours(1)));
+        repo.save(&ctx_ns1, &metadata1).await.unwrap();
+
+        // Create expired blob in ns-2
+        let mut metadata2 = create_test_metadata("blob-2", "tenant-1", "ns-2");
+        metadata2.expires_at = Some(datetime_to_timestamp(Utc::now() - chrono::Duration::hours(1)));
+        repo.save(&ctx_ns2, &metadata2).await.unwrap();
+
+        // find_expired with empty namespace should return expired blobs from all namespaces
+        let expired = repo.find_expired(&ctx_empty, 10).await.unwrap();
+        assert_eq!(expired.len(), 2);
+        assert!(expired.iter().any(|b| b.blob_id == "blob-1"));
+        assert!(expired.iter().any(|b| b.blob_id == "blob-2"));
+
+        // find_expired with specific namespace should only return that namespace's expired blobs
+        let expired_ns1 = repo.find_expired(&ctx_ns1, 10).await.unwrap();
+        assert_eq!(expired_ns1.len(), 1);
+        assert_eq!(expired_ns1[0].blob_id, "blob-1");
+
+        let expired_ns2 = repo.find_expired(&ctx_ns2, 10).await.unwrap();
+        assert_eq!(expired_ns2.len(), 1);
+        assert_eq!(expired_ns2[0].blob_id, "blob-2");
     }
 }

@@ -87,64 +87,80 @@ async fn main() -> Result<()> {
     sleep(Duration::from_millis(500)).await;
     info!("Node started");
 
-    // Spawn actors using ActorBuilder
+    // Spawn actors using ActorFactory::spawn_actor
     info!("Spawning actors...");
     
-    let data_loader_behavior = Box::new(data_loader::DataLoaderActor::new());
-    let data_loader = ActorBuilder::new(data_loader_behavior)
-        .with_id(ActorId::from("data-loader@local"))
-        .build();
-    // Use ActorFactory to spawn actor
+    // Use ActorFactory to spawn actor with spawn_actor
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node_arc.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found"))?;
-    let actor_id = data_loader.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(data_loader), None, None, None).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    let actor_id = ActorId::from("data-loader@local");
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "DataLoader", // actor_type from DataLoaderActor behavior_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let _data_loader_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     info!("  ✓ Data loader actor spawned");
 
-    let preprocessor_behavior = Box::new(preprocessor::PreprocessorActor::new());
-    let preprocessor = ActorBuilder::new(preprocessor_behavior)
-        .with_id(ActorId::from("preprocessor@local"))
-        .build();
-    let actor_id = preprocessor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(preprocessor), None, None, None).await
+    let actor_id = ActorId::from("preprocessor@local");
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "Preprocessor", // actor_type from PreprocessorActor behavior_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let _preprocessor_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     info!("  ✓ Preprocessor actor spawned");
 
-    let trainer_behavior = Box::new(trainer::TrainerActor::new());
-    let trainer = ActorBuilder::new(trainer_behavior)
-        .with_id(ActorId::from("trainer@local"))
-        .build();
-    let actor_id = trainer.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(trainer), None, None, None).await
+    let actor_id = ActorId::from("trainer@local");
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "Trainer", // actor_type from TrainerActor behavior_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let _trainer_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     info!("  ✓ Trainer actor spawned");
 
-    let validator_behavior = Box::new(validator::ValidatorActor::new());
-    let validator = ActorBuilder::new(validator_behavior)
-        .with_id(ActorId::from("validator@local"))
-        .build();
-    let actor_id = validator.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(validator), None, None, None).await
+    let actor_id = ActorId::from("validator@local");
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "Validator", // actor_type from ValidatorActor behavior_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let _validator_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     info!("  ✓ Validator actor spawned");
 
-    let server_behavior = Box::new(server::ServerActor::new());
-    let server = ActorBuilder::new(server_behavior)
-        .with_id(ActorId::from("server@local"))
-        .build();
-    let actor_id = server.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(server), None, None, None).await
+    let actor_id = ActorId::from("server@local");
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "Server", // actor_type from ServerActor behavior_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let _server_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;

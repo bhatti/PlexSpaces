@@ -45,22 +45,23 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         namespace: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_core::RequestContext;
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(&ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .lookup(tenant_id, namespace, object_type, object_id)
+            .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -95,7 +96,8 @@ impl ActorTrait for TestBehavior {
 }
 
 async fn create_test_service_locator() -> Arc<ServiceLocator> {
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     
     // Create ObjectRegistry for ActorRegistry
     let kv = Arc::new(InMemoryKVStore::new());
@@ -127,16 +129,17 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
     // Get ActorRegistry to verify registration
     let registry: Arc<ActorRegistry> = service_locator.get_service().await.unwrap();
     
-    // Create actor
-    let behavior = Box::new(TestBehavior);
-    let actor = ActorBuilder::new(behavior)
-        .with_id("test-actor@test-node".to_string())
-        .build()
-        .await;
-    
-    // Spawn actor
-    let actor_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(actor);
-    let message_sender = factory.spawn_built_actor(actor_any).await.unwrap();
+    // Spawn actor using spawn_actor
+    let actor_id: ActorId = "test-actor@test-node".to_string();
+    let ctx = plexspaces_core::RequestContext::internal();
+    let message_sender = factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer", // actor_type from TestBehavior
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await.unwrap();
     
     // Verify actor is registered (via MessageSender, not mailbox)
     let actor_id: ActorId = "test-actor@test-node".to_string();
@@ -185,17 +188,18 @@ async fn test_multiple_actors_spawned_via_factory() {
     let factory = ActorFactoryImpl::new(service_locator.clone());
     let registry: Arc<ActorRegistry> = service_locator.get_service().await.unwrap();
     
-    // Spawn multiple actors
+    // Spawn multiple actors using spawn_actor
+    let ctx = plexspaces_core::RequestContext::internal();
     for i in 0..5 {
         let actor_id: ActorId = format!("actor-{}@test-node", i);
-        let behavior = Box::new(TestBehavior);
-        let actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await;
-        
-        let actor_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(actor);
-        factory.spawn_built_actor(actor_any).await.unwrap();
+        factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer", // actor_type from TestBehavior
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+        ).await.unwrap();
         
         // Verify each is registered
         assert!(registry.is_actor_activated(&actor_id).await, "Actor {} should be activated", i);

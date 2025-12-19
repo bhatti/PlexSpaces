@@ -56,6 +56,7 @@ mod tests {
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
+            state_schema_version: 1,
             backend_config: None,
         };
         
@@ -150,12 +151,32 @@ mod tests {
     async fn test_mailbox_recovery_with_durability_facet() {
         use plexspaces_proto::channel::v1::{ChannelConfig, SqliteConfig};
         use std::path::PathBuf;
+        use ulid::Ulid;
         
         // Use file-based SQLite for recovery test (to test actual persistence)
-        // Create a persistent test directory that won't be auto-deleted
+        // Create a unique test directory using ULID
         let temp_base = std::env::temp_dir();
-        let test_dir = temp_base.join(format!("plexspaces_recovery_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let test_id = Ulid::new().to_string();
+        let test_dir = temp_base.join(format!("plexspaces_recovery_test_{}", test_id));
         std::fs::create_dir_all(&test_dir).unwrap();
+        
+        // Guard to ensure cleanup happens even if test fails
+        struct TestDirGuard {
+            path: PathBuf,
+        }
+        
+        impl Drop for TestDirGuard {
+            fn drop(&mut self) {
+                // Clean up test directory and all its contents
+                if self.path.exists() {
+                    let _ = std::fs::remove_dir_all(&self.path);
+                }
+            }
+        }
+        
+        let _guard = TestDirGuard {
+            path: test_dir.clone(),
+        };
         
         let mailbox_db = test_dir.join("mailbox_recovery.db");
         let journal_db = test_dir.join("journal_recovery.db");
@@ -176,9 +197,6 @@ mod tests {
             std::fs::File::create(&journal_db).unwrap();
         }
         
-        // Keep test_dir reference to prevent cleanup (files should persist for recovery test)
-        let _keep_alive = &test_dir;
-        
         // Phase 1: Create mailbox and facet, send messages, simulate crash
         {
             let mut config = plexspaces_mailbox::mailbox_config_default();
@@ -186,7 +204,7 @@ mod tests {
             
             let sqlite_config = SqliteConfig {
                 database_path: mailbox_db_str.clone(),
-                table_name: "recovery_messages".to_string(),
+                table_name: "channel_messages".to_string(), // Use default table name from migration
                 wal_mode: true,
                 cleanup_acked: false,
                 cleanup_age_seconds: 0,
@@ -213,6 +231,7 @@ mod tests {
                 replay_on_activation: true,
                 cache_side_effects: true,
                 compression: CompressionType::CompressionTypeNone as i32,
+                state_schema_version: 1,
                 backend_config: None,
             };
             let mut facet = DurabilityFacet::new(storage, durability_config);
@@ -238,7 +257,7 @@ mod tests {
             
             let sqlite_config = SqliteConfig {
                 database_path: mailbox_db_str.clone(),
-                table_name: "recovery_messages".to_string(),
+                table_name: "channel_messages".to_string(), // Use default table name from migration
                 wal_mode: true,
                 cleanup_acked: false,
                 cleanup_age_seconds: 0,
@@ -267,6 +286,7 @@ mod tests {
                 replay_on_activation: true,
                 cache_side_effects: true,
                 compression: CompressionType::CompressionTypeNone as i32,
+                state_schema_version: 1,
                 backend_config: None,
             };
             let mut facet = DurabilityFacet::new(storage, durability_config);
@@ -285,14 +305,13 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             
             // Should be able to receive messages
-            let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+            let _received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
             // Note: Recovery of messages depends on SQLite channel implementation
             // For now, just verify mailbox works after recovery
             assert!(true);
         }
         
-        // Note: Files are left in test_dir for inspection/debugging
-        // In production, these would be cleaned up by the application lifecycle
-        // For tests, we leave them to verify persistence worked
+        // TestDirGuard will automatically clean up test_dir when it goes out of scope
+        // This happens regardless of test success or failure
     }
 }

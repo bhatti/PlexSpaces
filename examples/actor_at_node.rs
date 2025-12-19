@@ -84,19 +84,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Spawn counter actor on node1
     use plexspaces_actor::ActorBuilder;
     println!("\nSpawning counter@node1...");
+    let ctx = plexspaces_core::RequestContext::internal();
     let counter1_ref = ActorBuilder::new(Box::new(Counter { count: 0 }))
         .with_id("counter@node1".to_string())
-        .spawn(node1.service_locator().clone())
+        .spawn(&ctx, node1.service_locator().clone())
         .await?;
 
     println!("✅ counter@node1 spawned: {}", counter1_ref.id());
 
     // Create a minimal ActorContext for sending messages
     // In a real actor, you would get this from handle_message() parameter
-    let ctx = ActorContext::minimal(
-        "example-sender".to_string(),
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    let ctx = ActorContext::new(
         "node1".to_string(),
         "default".to_string(),
+        "default".to_string(),
+        service_locator,
+        None,
     );
 
     // Send messages using actor@node syntax

@@ -273,8 +273,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::debug!("DurabilityFacet attached successfully");
         
         // Spawn the actor using ActorFactory
-        let actor_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(actor);
-        let _message_sender = actor_factory.spawn_built_actor(actor_any).await
+        // Note: Since actor has DurabilityFacet attached, we use spawn_built_actor
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
             .map_err(|e| format!("Failed to spawn actor: {}", e))?;
         
         tracing::debug!("Actor spawned successfully");
@@ -457,9 +458,17 @@ mod tests {
             .build()
             .await;
         
-        // Spawn actor using ActorFactory
-        let actor_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(actor);
-        let _message_sender = actor_factory.spawn_built_actor(actor_any).await.unwrap();
+        // Spawn actor using ActorFactory with spawn_actor
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = "test-counter@test-node".to_string();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer", // actor_type
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+        ).await.unwrap();
         
         // Create ActorRef (use remote() even for local actors - it works for both)
         let counter = ActorRef::remote(

@@ -404,8 +404,19 @@ impl AuthInterceptor {
         // Check RBAC permissions
         self.check_rbac(&claims, &context.method)?;
 
-        // Extract tenant_id and user_id from claims and add to headers for downstream use
+        // SECURITY: Remove any user-provided headers to prevent header injection attacks
+        // These headers must ONLY come from JWT, not from client
+        // When auth is enabled, we explicitly remove these headers and only set them from JWT
         let mut modified_headers = std::collections::HashMap::new();
+        
+        // Remove any existing headers (to prevent injection)
+        // Setting them to empty string signals removal to the interceptor chain
+        modified_headers.insert("x-tenant-id".to_string(), String::new());
+        modified_headers.insert("x-user-id".to_string(), String::new());
+        modified_headers.insert("x-user-roles".to_string(), String::new());
+        
+        // Now set them ONLY from JWT claims (not from incoming headers)
+        // This ensures security: users cannot spoof tenant_id/user_id via headers
         if !claims.tenant_id.is_empty() {
             modified_headers.insert("x-tenant-id".to_string(), claims.tenant_id.clone());
         }

@@ -307,7 +307,7 @@ async fn test_distributed_simulation() {
     let num_cols = 750;
 
     // Simulate distributed TupleSpace (shared in-memory)
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
 
     let matrix = create_test_matrix(num_rows, num_cols);
     let vector = create_test_vector(num_cols);

@@ -328,7 +328,7 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
     use plexspaces_node::grpc_service::ActorServiceImpl;
     use plexspaces_proto::v1::actor::actor_service_server::ActorService;
     
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let health_reporter = create_health_reporter();
     health_reporter.mark_startup_complete(None).await;
     
@@ -360,7 +360,7 @@ async fn test_grpc_service_accepts_requests_when_serving() {
     use plexspaces_node::grpc_service::ActorServiceImpl;
     use plexspaces_proto::v1::actor::actor_service_server::ActorService;
     
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let health_reporter = create_health_reporter();
     health_reporter.mark_startup_complete(None).await;
     

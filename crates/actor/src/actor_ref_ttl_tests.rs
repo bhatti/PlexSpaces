@@ -36,7 +36,8 @@ mod tests {
     #[tokio::test]
     async fn test_actor_ref_ttl_preserved() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         let _actor_ref = ActorRef::local("test@node1".to_string(), mailbox, service_locator);
         
         let ttl = Duration::from_secs(30);
@@ -54,7 +55,8 @@ mod tests {
     #[tokio::test]
     async fn test_actor_ref_no_ttl() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         let _actor_ref = ActorRef::local("test@node1".to_string(), mailbox, service_locator);
         
         let message = Message::new(b"test".to_vec());
@@ -67,7 +69,8 @@ mod tests {
     #[tokio::test]
     async fn test_actor_ref_expired_message() {
         let mailbox = create_test_mailbox().await;
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         let actor_ref = ActorRef::local("test@node1".to_string(), Arc::clone(&mailbox), service_locator);
         
         let ttl = Duration::from_millis(10);

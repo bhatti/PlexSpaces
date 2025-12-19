@@ -260,11 +260,25 @@ fn row_to_scheduling_request(row: sqlx::sqlite::SqliteRow) -> Result<SchedulingR
         nanos: 0,
     });
 
+    // namespace and tenant_id are required - return error if missing from DB
+    let namespace = namespace.ok_or_else(|| {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "namespace is required in SchedulingRequest but was NULL in database"
+        )) as Box<dyn Error + Send + Sync>
+    })?;
+    let tenant_id = tenant_id.ok_or_else(|| {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "tenant_id is required in SchedulingRequest but was NULL in database"
+        )) as Box<dyn Error + Send + Sync>
+    })?;
+    
     Ok(SchedulingRequest {
         request_id,
         requirements: Some(requirements),
-        namespace: namespace.unwrap_or_default(),
-        tenant_id: tenant_id.unwrap_or_default(),
+        namespace,
+        tenant_id,
         status,
         selected_node_id: selected_node_id.unwrap_or_default(),
         actor_id: actor_id.unwrap_or_default(),

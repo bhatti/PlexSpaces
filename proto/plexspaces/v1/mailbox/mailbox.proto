@@ -405,28 +405,6 @@ message MessageEnvelope {
   map<string, string> metadata = 10;
 }
 
-
-// Mailbox service
-service MailboxService {
-  // Create a mailbox
-  rpc CreateMailbox(CreateMailboxRequest) returns (CreateMailboxResponse);
-
-  // Delete a mailbox
-  rpc DeleteMailbox(DeleteMailboxRequest) returns (plexspaces.common.v1.Empty);
-
-  // Get mailbox statistics
-  rpc GetMailboxStats(GetMailboxStatsRequest) returns (GetMailboxStatsResponse);
-
-  // Update mailbox configuration
-  rpc UpdateMailboxConfig(UpdateMailboxConfigRequest) returns (plexspaces.common.v1.Empty);
-
-  // Purge mailbox (clear all messages)
-  rpc PurgeMailbox(PurgeMailboxRequest) returns (PurgeMailboxResponse);
-
-  // List mailboxes
-  rpc ListMailboxes(ListMailboxesRequest) returns (ListMailboxesResponse);
-}
-
 message CreateMailboxRequest {
   string actor_id = 1;
   MailboxConfig config = 2;

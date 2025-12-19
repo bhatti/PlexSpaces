@@ -49,6 +49,7 @@ rand = "0.8"
 [dev-dependencies]
 tokio-test = "0.4"
 plexspaces-grpc-middleware = { path = "../grpc-middleware" }
+plexspaces-node = { path = "../node" }
 jsonwebtoken = "9.0"
 reqwest = { version = "0.11", features = ["json"] }
 tempfile = "3.8"

@@ -137,7 +137,7 @@ service SchedulingService {
   // Schedule actor on best matching node (synchronous, returns immediately)
   rpc ScheduleActor(ScheduleActorRequest) returns (ScheduleActorResponse) {
     option (google.api.http) = {
-      post: "/v1/scheduling/actors"
+      post: "/api/v1/scheduling/actors"
       body: "*"
     };
   }
@@ -145,21 +145,21 @@ service SchedulingService {
   // Get scheduling request status (for polling)
   rpc GetSchedulingStatus(GetSchedulingStatusRequest) returns (GetSchedulingStatusResponse) {
     option (google.api.http) = {
-      get: "/v1/scheduling/requests/{request_id}"
+      get: "/api/v1/scheduling/requests/{request_id}"
     };
   }
   
   // Get node capacity (for monitoring)
   rpc GetNodeCapacity(GetNodeCapacityRequest) returns (GetNodeCapacityResponse) {
     option (google.api.http) = {
-      get: "/v1/scheduling/nodes/{node_id}/capacity"
+      get: "/api/v1/scheduling/nodes/{node_id}/capacity"
     };
   }
   
   // List all node capacities
   rpc ListNodeCapacities(ListNodeCapacitiesRequest) returns (ListNodeCapacitiesResponse) {
     option (google.api.http) = {
-      get: "/v1/scheduling/nodes/capacities"
+      get: "/api/v1/scheduling/nodes/capacities"
     };
   }
 }

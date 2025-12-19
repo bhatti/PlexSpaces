@@ -72,6 +72,7 @@ fn create_actor_spec(
                 id_clone.clone(),
                 Box::new(MockBehavior::new()),
                 mailbox,
+                "test-tenant".to_string(),
                 "test".to_string(),
                 None,
             ))

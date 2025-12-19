@@ -125,6 +125,10 @@ pub async fn register_dependencies(
     let mut registered_count = 0;
     let default_namespace = config.default_namespace.as_str();
     let default_tenant = config.default_tenant.as_str();
+    
+    // Create RequestContext for dependency lookup (using config defaults)
+    use plexspaces_core::RequestContext;
+    let ctx = RequestContext::new_without_auth(default_tenant.to_string(), default_namespace.to_string());
 
     for dep_spec in &config.dependencies {
         // Parse dependency spec: "name:type:critical"
@@ -149,9 +153,9 @@ pub async fn register_dependencies(
             }
         };
 
-        // Lookup dependency in object-registry
+        // Lookup dependency in object-registry using RequestContext
         let registration = match registry
-            .lookup_full(default_tenant, default_namespace, object_type, dep_name)
+            .lookup_full(&ctx, object_type, dep_name)
             .await
         {
             Ok(Some(reg)) => reg,

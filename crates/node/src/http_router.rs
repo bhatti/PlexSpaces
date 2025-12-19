@@ -202,17 +202,7 @@ where
                         .collect();
                     
                     if path_parts.len() >= 2 {
-                        let (tenant_id, namespace, actor_type) = if path_parts.len() == 3 {
-                            // /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
-                            (path_parts[0].to_string(), path_parts[1].to_string(), path_parts[2].to_string())
-                        } else if path_parts.len() == 2 {
-                            // /api/v1/actors/{namespace}/{actor_type} - default tenant_id to "default"
-                            ("default".to_string(), path_parts[0].to_string(), path_parts[1].to_string())
-                        } else {
-                            ("default".to_string(), "default".to_string(), path_parts[0].to_string())
-                        };
-                        
-                        // Extract query parameters for GET requests
+                        // Extract query params first (needed for fallback)
                         let query_params: std::collections::HashMap<String, String> = req.uri()
                             .query()
                             .map(|q| {
@@ -222,10 +212,52 @@ where
                             })
                             .unwrap_or_default();
                         
-                        // Create InvokeActorRequest
+                        let (tenant_id, namespace, actor_type) = if path_parts.len() == 3 {
+                            // /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
+                            (path_parts[0].to_string(), path_parts[1].to_string(), path_parts[2].to_string())
+                        } else if path_parts.len() == 2 {
+                            // /api/v1/actors/{namespace}/{actor_type} - tenant_id required in header or query param
+                            // Try to get tenant_id from headers (set by JWT middleware) or query params
+                            let tenant_id = req.headers()
+                                .get("x-tenant-id")
+                                .and_then(|v| v.to_str().ok())
+                                .or_else(|| query_params.get("tenant_id").map(|s| s.as_str()))
+                                .ok_or_else(|| {
+                                    // Return error response if tenant_id not found
+                                    let error_body = format!("tenant_id is required. Either include it in the path as /api/v1/actors/{{tenant_id}}/{{namespace}}/{{actor_type}}, provide x-tenant-id header, or add tenant_id query parameter.");
+                                    return Ok(Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(hyper::body::Incoming::from(error_body))
+                                        .unwrap());
+                                })?;
+                            (tenant_id.to_string(), path_parts[0].to_string(), path_parts[1].to_string())
+                        } else {
+                            // Single part - require tenant_id and namespace in headers/query
+                            let tenant_id = req.headers()
+                                .get("x-tenant-id")
+                                .and_then(|v| v.to_str().ok())
+                                .or_else(|| query_params.get("tenant_id").map(|s| s.as_str()))
+                                .ok_or_else(|| {
+                                    let error_body = "tenant_id is required. Provide x-tenant-id header or tenant_id query parameter.";
+                                    return Ok(Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(hyper::body::Incoming::from(error_body))
+                                        .unwrap());
+                                })?;
+                            let namespace = req.headers()
+                                .get("x-namespace")
+                                .and_then(|v| v.to_str().ok())
+                                .or_else(|| query_params.get("namespace").map(|s| s.as_str()))
+                                .unwrap_or(""); // namespace can be empty
+                            (tenant_id.to_string(), namespace.to_string(), path_parts[0].to_string())
+                        };
+                        
+                        // Extract query parameters for GET requests (already extracted above, reuse)
+                        let query_params: std::collections::HashMap<String, String> = query_params;
+                        
+                        // Create InvokeActorRequest (tenant_id comes from auth, not request)
                         use plexspaces_proto::actor::v1::InvokeActorRequest;
                         let mut invoke_req = InvokeActorRequest {
-                            tenant_id,
                             namespace,
                             actor_type,
                             http_method: method.as_str().to_string(),
@@ -546,9 +578,7 @@ fn create_axum_router(
         let tenant_id = tenant_id.ok_or_else(|| {
             (StatusCode::BAD_REQUEST, "tenant_id is required".to_string())
         })?;
-        let namespace = namespace.ok_or_else(|| {
-            (StatusCode::BAD_REQUEST, "namespace is required".to_string())
-        })?;
+        let namespace = namespace.unwrap_or_else(|| "".to_string()); // namespace can be empty
         let file_data = file_data.ok_or_else(|| {
             (StatusCode::BAD_REQUEST, "file data is required".to_string())
         })?;

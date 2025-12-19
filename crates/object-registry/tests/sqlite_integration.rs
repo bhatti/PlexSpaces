@@ -56,7 +56,7 @@ mod tests {
 
         // Node 1 can discover all actors (cross-node discovery)
         let actors = registry1
-            .discover(Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover("default", "default", Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(actors.len(), 2);
@@ -124,7 +124,7 @@ mod tests {
         // Verify all were registered
         let registry = ObjectRegistry::new(kv.clone());
         let actors = registry
-            .discover(Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover("default", "default", Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(actors.len(), 3);
@@ -202,7 +202,7 @@ mod tests {
 
         // Discover all actors (should find both)
         let all_actors = registry
-            .discover(Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover("default", "default", Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(all_actors.len(), 2);
@@ -237,7 +237,7 @@ mod tests {
 
         // Discover in default namespace (should not find either)
         let default_actors = registry
-            .discover(Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover("default", "default", Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(default_actors.len(), 0);

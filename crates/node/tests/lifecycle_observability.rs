@@ -57,7 +57,8 @@ async fn test_lifecycle_event_full_spawn_sequence() {
     use plexspaces_proto::actor_lifecycle_event::EventType;
 
     // Create node
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("test-node").build());
 
     // Create observability subscriber channel (simulates Prometheus exporter)
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -151,7 +152,8 @@ async fn test_lifecycle_event_full_spawn_sequence() {
 #[tokio::test]
 async fn test_lifecycle_event_subscription_receives_termination() {
     // Create node
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("test-node").build());
 
     // Create observability subscriber channel (simulates Prometheus exporter)
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -235,7 +237,8 @@ async fn test_lifecycle_event_subscription_receives_termination() {
 #[tokio::test]
 async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
     // Create node
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("test-node").build());
 
     // Create three observability subscribers (simulates Prometheus + StatsD + OpenTelemetry)
     let (prometheus_tx, mut prometheus_rx) = mpsc::unbounded_channel();
@@ -342,7 +345,8 @@ async fn test_lifecycle_event_timestamps() {
     let start_time = Utc::now();
 
     // Create node and subscriber
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("test-node").build());
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     node.subscribe_lifecycle_events(event_tx).await;
@@ -402,7 +406,8 @@ async fn test_lifecycle_event_timestamps() {
 #[tokio::test]
 async fn test_lifecycle_event_unsubscribe() {
     // Create node
-    let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+    use plexspaces_node::NodeBuilder;
+    let node = Arc::new(NodeBuilder::new("test-node").build());
 
     // Subscribe
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -480,9 +485,9 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
     use tonic::transport::Server;
 
     // Create two nodes
-    let node1 = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+    let node1 = Arc::new(NodeBuilder::new("node1").build());
 
-    let node2 = Arc::new(Node::new(NodeId::new("node2"), NodeConfig::default()));
+    let node2 = Arc::new(NodeBuilder::new("node2").build());
 
     // Start gRPC server for node2 (actor host)
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();

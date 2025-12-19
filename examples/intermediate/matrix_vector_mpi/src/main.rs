@@ -70,7 +70,7 @@ async fn main() -> Result<()> {
         .build();
 
     // Create TupleSpace for coordination (dataflow pattern)
-    let space = Arc::new(TupleSpace::new());
+    let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
 
     // Create metrics tracker
     let mut metrics_tracker = CoordinationComputeTracker::new("matrix-vector-mpi".to_string());
@@ -82,9 +82,10 @@ async fn main() -> Result<()> {
         let worker_actor = WorkerActor::new(space.clone(), worker_id, num_cols);
         let behavior = Box::new(worker_actor);
         
+        let ctx = plexspaces_core::RequestContext::internal();
         let actor_ref = ActorBuilder::new(behavior)
             .with_name(format!("worker-{}", worker_id))
-            .spawn(node.service_locator().clone())
+            .spawn(&ctx, node.service_locator().clone())
             .await?;
         worker_refs.push(actor_ref);
         info!("  Created worker actor: worker-{}", worker_id);

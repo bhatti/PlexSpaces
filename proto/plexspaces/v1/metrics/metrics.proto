@@ -130,7 +130,7 @@ service MetricsService {
   // Get current metric values (structured)
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {
     option (google.api.http) = {
-      get: "/v1/metrics"
+      get: "/api/v1/metrics"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Metrics"
@@ -142,7 +142,7 @@ service MetricsService {
   // List all registered metric definitions
   rpc ListMetricDefinitions(ListMetricDefinitionsRequest) returns (ListMetricDefinitionsResponse) {
     option (google.api.http) = {
-      get: "/v1/metrics/definitions"
+      get: "/api/v1/metrics/definitions"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Metric Definitions"
@@ -154,7 +154,7 @@ service MetricsService {
   // Record metric (for testing/manual recording)
   rpc RecordMetric(RecordMetricRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      post: "/v1/metrics/record"
+      post: "/api/v1/metrics/record"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {

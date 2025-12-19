@@ -24,11 +24,14 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_actor_context_minimal() {
-    let ctx = ActorContext::minimal(
-        "test-actor".to_string(),
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    let ctx = ActorContext::new(
         "node1".to_string(),
-        "default".to_string(), // namespace
-        "test-tenant".to_string(), // tenant_id (required)
+        "default".to_string(),
+        "test-tenant".to_string(),
+        service_locator,
+        None,
     );
 
     // actor_id is no longer stored in ActorContext - removed as part of envelope refactoring
@@ -38,21 +41,12 @@ async fn test_actor_context_minimal() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - should be in crates/node/tests/actor_context_integration.rs
-async fn test_actor_context_new() {
-    // This test should be an integration test in the node crate, not a unit test here.
-    // Service wrappers are implemented and Node::create_actor_context() is available.
-    // See crates/node/tests/actor_context_integration.rs for integration tests.
-    // This test is kept here as a placeholder but should be removed or moved to node crate.
-}
-
-#[tokio::test]
 async fn test_tuplespace_provider_wrapper() {
     use plexspaces_core::service_wrappers::TupleSpaceProviderWrapper;
     use plexspaces_core::TupleSpaceProvider;
     use plexspaces_tuplespace::TupleSpace;
 
-    let tuplespace = Arc::new(TupleSpace::new());
+    let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
 
     // Test write
@@ -84,16 +78,19 @@ async fn test_stub_actor_service() {
     // StubActorService is private, test via minimal context
     use plexspaces_mailbox::Message;
 
-    let ctx = ActorContext::minimal(
-        "test-actor".to_string(),
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    let ctx = ActorContext::new(
         "node1".to_string(),
-        "default".to_string(), // namespace
-        "test-tenant".to_string(), // tenant_id (required)
+        "default".to_string(),
+        "test-tenant".to_string(),
+        service_locator,
+        None,
     );
     
     // Services are accessed via service_locator, not directly
     assert_eq!(ctx.node_id, "node1");
-    assert_eq!(ctx.tenant_id(), "default");
+    assert_eq!(ctx.tenant_id, "test-tenant");
 }
 
 #[tokio::test]
@@ -101,29 +98,35 @@ async fn test_stub_object_registry() {
     // StubObjectRegistry is private, test via minimal context
     use plexspaces_proto::object_registry::v1::ObjectType;
 
-    let ctx = ActorContext::minimal(
-        "test-actor".to_string(),
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    let ctx = ActorContext::new(
         "node1".to_string(),
-        "default".to_string(), // namespace
-        "test-tenant".to_string(), // tenant_id (required)
+        "default".to_string(),
+        "test-tenant".to_string(),
+        service_locator,
+        None,
     );
     
     // Services are accessed via service_locator, not directly
     assert_eq!(ctx.node_id, "node1");
-    assert_eq!(ctx.tenant_id(), "default");
+    assert_eq!(ctx.tenant_id, "test-tenant");
 }
 
 #[tokio::test]
 async fn test_stub_node_operations() {
     // StubNodeOperations is private, test via minimal context
-    let ctx = ActorContext::minimal(
-        "test-actor".to_string(),
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    let ctx = ActorContext::new(
         "node1".to_string(),
-        "default".to_string(), // namespace
-        "test-tenant".to_string(), // tenant_id (required)
+        "default".to_string(),
+        "test-tenant".to_string(),
+        service_locator,
+        None,
     );
     // Node operations are accessed via service_locator, not directly
     assert_eq!(ctx.node_id, "node1");
-    assert_eq!(ctx.tenant_id(), "default");
+    assert_eq!(ctx.tenant_id, "test-tenant");
 }
 

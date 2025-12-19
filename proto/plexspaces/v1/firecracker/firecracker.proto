@@ -50,8 +50,11 @@ syntax = "proto3";
 
 package plexspaces.firecracker.v1;
 
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
+import "buf/validate/validate.proto";
 import "plexspaces/v1/common.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
@@ -78,25 +81,58 @@ option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspace
 // - VMs stopped via StopVm()
 service FirecrackerVmService {
   // Create new microVM with specified configuration
-  rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
+  rpc CreateVm(CreateVmRequest) returns (CreateVmResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/firecracker/vms"
+      body: "*"
+    };
+  }
 
   // Boot existing VM (start kernel execution)
-  rpc BootVm(BootVmRequest) returns (BootVmResponse);
+  rpc BootVm(BootVmRequest) returns (BootVmResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/firecracker/vms/{vm_id}:boot"
+      body: "*"
+    };
+  }
 
   // Pause VM execution (can be resumed)
-  rpc PauseVm(PauseVmRequest) returns (PauseVmResponse);
+  rpc PauseVm(PauseVmRequest) returns (PauseVmResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/firecracker/vms/{vm_id}:pause"
+      body: "*"
+    };
+  }
 
   // Resume paused VM
-  rpc ResumeVm(ResumeVmRequest) returns (ResumeVmResponse);
+  rpc ResumeVm(ResumeVmRequest) returns (ResumeVmResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/firecracker/vms/{vm_id}:resume"
+      body: "*"
+    };
+  }
 
   // Stop VM and release resources
-  rpc StopVm(StopVmRequest) returns (StopVmResponse);
+  rpc StopVm(StopVmRequest) returns (StopVmResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/firecracker/vms/{vm_id}:stop"
+      body: "*"
+    };
+  }
 
   // Get VM state and metadata
-  rpc GetVmState(GetVmStateRequest) returns (GetVmStateResponse);
+  rpc GetVmState(GetVmStateRequest) returns (GetVmStateResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/firecracker/vms/{vm_id}"
+    };
+  }
 
   // List all VMs on this node
-  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/firecracker/vms"
+    };
+  }
 
   // Deploy application to VM (entire application, not individual actors)
   //
@@ -108,13 +144,22 @@ service FirecrackerVmService {
   // - Application includes: framework runtime, WASM modules, configuration
   // - VM contains entire application, not individual actors
   // - Actor deployment is handled by application layer, not VM layer
-  rpc DeployApplication(DeployApplicationRequest) returns (DeployApplicationResponse);
+  rpc DeployApplication(DeployApplicationRequest) returns (DeployApplicationResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/firecracker/vms/{vm_id}/applications"
+      body: "*"
+    };
+  }
 
   // Undeploy application from VM
   //
   // ## Purpose
   // Removes application from VM, stopping all actors and cleaning up resources.
-  rpc UndeployApplication(UndeployApplicationRequest) returns (UndeployApplicationResponse);
+  rpc UndeployApplication(UndeployApplicationRequest) returns (UndeployApplicationResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/firecracker/vms/{vm_id}/applications/{application_id}"
+    };
+  }
 }
 
 // ============================================================================
@@ -139,13 +184,20 @@ service FirecrackerVmService {
 // - mem_size_mib limited to 128-32768 (practical limits)
 message VmConfig {
   // VM identifier (ULID format)
-  string vm_id = 1;
+  string vm_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Number of vCPUs (1-32)
-  uint32 vcpu_count = 2;
+  uint32 vcpu_count = 2 [
+    (buf.validate.field).uint32 = {gte: 1, lte: 32}
+  ];
 
   // Memory size in MiB (128-32768)
-  uint32 mem_size_mib = 3;
+  uint32 mem_size_mib = 3 [
+    (buf.validate.field).uint32 = {gte: 128, lte: 32768}
+  ];
 
   // Kernel configuration
   BootSource boot_source = 4;
@@ -417,7 +469,7 @@ message ResourceUsage {
 
 // CreateVm request
 message CreateVmRequest {
-  VmConfig config = 1;
+  VmConfig config = 1 [(google.api.field_behavior) = REQUIRED];
 }
 
 // CreateVm response
@@ -430,7 +482,10 @@ message CreateVmResponse {
 
 // BootVm request
 message BootVmRequest {
-  string vm_id = 1;
+  string vm_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 }
 
 // BootVm response
@@ -442,7 +497,10 @@ message BootVmResponse {
 
 // PauseVm request
 message PauseVmRequest {
-  string vm_id = 1;
+  string vm_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 }
 
 // PauseVm response
@@ -454,7 +512,10 @@ message PauseVmResponse {
 
 // ResumeVm request
 message ResumeVmRequest {
-  string vm_id = 1;
+  string vm_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 }
 
 // ResumeVm response
@@ -466,7 +527,10 @@ message ResumeVmResponse {
 
 // StopVm request
 message StopVmRequest {
-  string vm_id = 1;
+  string vm_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
   bool force = 2;  // Force kill if graceful shutdown fails
 }
 
@@ -478,7 +542,10 @@ message StopVmResponse {
 
 // GetVmState request
 message GetVmStateRequest {
-  string vm_id = 1;
+  string vm_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 }
 
 // GetVmState response
@@ -515,10 +582,16 @@ message ListVmsResponse {
 // Application includes framework runtime, WASM modules, and configuration.
 message DeployApplicationRequest {
   // VM identifier
-  string vm_id = 1;
+  string vm_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Application identifier
-  string application_id = 2;
+  string application_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Application bundle (framework + actors + config)
   //
@@ -527,10 +600,10 @@ message DeployApplicationRequest {
   // - WASM modules (actor implementations)
   // - Application configuration
   // - Dependencies
-  bytes application_bundle = 3;
+  bytes application_bundle = 3 [(google.api.field_behavior) = REQUIRED];
 
   // Application configuration (optional, can be in bundle)
-  string application_config_json = 4;
+  string application_config_json = 4 [(buf.validate.field).string.max_len = 1048576];  // Max 1MB
 }
 
 // DeployApplication response
@@ -543,8 +616,14 @@ message DeployApplicationResponse {
 
 // UndeployApplication request
 message UndeployApplicationRequest {
-  string vm_id = 1;
-  string application_id = 2;
+  string vm_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+  string application_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
   bool force = 3;  // Force undeploy even if actors are running
 }
 

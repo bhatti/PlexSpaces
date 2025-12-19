@@ -125,7 +125,7 @@ mod integration_tests {
         let behavior = Box::new(MockBehavior::new());
         let mailbox = Mailbox::new(mailbox_config_default(), id.clone()).await.unwrap();
 
-        let mut actor = ActorStruct::new(id.clone(), behavior, mailbox, "test-namespace".to_string(), None);
+        let mut actor = ActorStruct::new(id.clone(), behavior, mailbox, "test-tenant".to_string(), "test-namespace".to_string(), None);
 
         // Test initial state
         assert_eq!(actor.state().await, ActorState::Creating);
@@ -156,6 +156,7 @@ mod integration_tests {
             id.clone(),
             initial_behavior,
             mailbox,
+            "test-tenant".to_string(),
             "test-namespace".to_string(),
             None, // node_id
         );

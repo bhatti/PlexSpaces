@@ -263,7 +263,7 @@ async fn test_mpi_with_metrics() {
     let num_cols = 250;
 
     // Create in-memory TupleSpace for quick test
-    let space = Arc::new(plexspaces_tuplespace::TupleSpace::new());
+    let space = Arc::new(plexspaces_tuplespace::TupleSpace::with_tenant_namespace("internal", "system"));
 
     let matrix = create_test_matrix(num_rows, num_cols);
     let vector = create_test_vector(num_cols);
@@ -312,7 +312,7 @@ async fn test_distributed_barrier_sync() {
     println!("\n=== Distributed Barrier Synchronization Test ===\n");
 
     let num_workers: usize = 3;
-    let space = Arc::new(plexspaces_tuplespace::TupleSpace::new());
+    let space = Arc::new(plexspaces_tuplespace::TupleSpace::with_tenant_namespace("internal", "system"));
 
     println!("Testing barrier with {} workers\n", num_workers);
 

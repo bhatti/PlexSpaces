@@ -493,6 +493,9 @@ pub struct CreateActorRequest {
     pub config: ::core::option::Option<ActorConfig>,
     #[prost(map="string, string", tag="5")]
     pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Optional namespace. If not provided or empty, uses namespace from RequestContext
+    #[prost(string, tag="6")]
+    pub namespace: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1330,46 +1333,42 @@ pub struct GetOrActivateActorResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct InvokeActorRequest {
-    /// Tenant ID (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type})
-    /// Default: "default" if not provided in path or if no authentication provided
-    /// When using path without tenant_id, this field will be empty and should default to "default"
+    /// Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
+    /// Can be empty - defaults to empty string if not provided
+    /// Tenant ID comes from gRPC auth (JWT middleware) or default config, not from request
     #[prost(string, tag="1")]
-    pub tenant_id: ::prost::alloc::string::String,
-    /// Namespace (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type})
-    /// Default: "default" if not specified
-    #[prost(string, tag="2")]
     pub namespace: ::prost::alloc::string::String,
-    /// Actor type (extracted from path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type})
+    /// Actor type (extracted from path: /api/v1/actors/{namespace}/{actor_type})
     /// Used to lookup actors via ActorRegistry discover_actors_by_type
-    #[prost(string, tag="3")]
+    #[prost(string, tag="2")]
     pub actor_type: ::prost::alloc::string::String,
     /// HTTP method (GET, POST, PUT, or DELETE)
     /// GET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)
-    #[prost(string, tag="4")]
+    #[prost(string, tag="3")]
     pub http_method: ::prost::alloc::string::String,
     /// Request payload
     /// For GET/DELETE: JSON string of query parameters
     /// For POST/PUT: Request body bytes
-    #[prost(bytes="vec", tag="5")]
+    #[prost(bytes="vec", tag="4")]
     pub payload: ::prost::alloc::vec::Vec<u8>,
     /// HTTP headers (for POST/PUT requests)
     /// Converted from HTTP request headers
-    #[prost(map="string, string", tag="6")]
+    #[prost(map="string, string", tag="5")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Query parameters (for GET/DELETE requests)
     /// Converted to JSON and stored in payload
-    #[prost(map="string, string", tag="7")]
+    #[prost(map="string, string", tag="6")]
     pub query_params: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Full HTTP path for the request (optional)
-    /// Example: "/api/v1/actors/default/default/counter/custom/path"
+    /// Example: "/api/v1/actors/default/counter/custom/path"
     /// Allows actors to perform custom routing based on the complete URL
-    #[prost(string, tag="9")]
+    #[prost(string, tag="7")]
     pub path: ::prost::alloc::string::String,
     /// Subpath after the actor_type segment (optional)
-    /// Example: for "/api/v1/actors/default/default/counter/metrics/latest"
+    /// Example: for "/api/v1/actors/default/counter/metrics/latest"
     ///           subpath = "metrics/latest"
     /// This will be used in future for advanced per-actor routing capabilities.
-    #[prost(string, tag="10")]
+    #[prost(string, tag="8")]
     pub subpath: ::prost::alloc::string::String,
 }
 /// Response from invoking an actor

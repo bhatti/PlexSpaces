@@ -46,10 +46,10 @@ fn create_proto_message(id: &str, sender: &str, receiver: &str, payload: Vec<u8>
 
 /// Helper to create a test node with a mock actor
 async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
-    let node = Arc::new(Node::new(NodeId::new("test-node-1"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node-1").build());
 
     // Create a mock actor with mailbox (use actor@node format)
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
     
     let actor_id = "test-actor-1@test-node-1".to_string();
@@ -58,7 +58,7 @@ async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
     let actor_ref = ActorRef::local(actor_id.clone(), mailbox.clone(), service_locator.clone());
     
     // Register actor with MessageSender (mailbox is internal)
-    let wrapper = Arc::new(RegularActorWrapper::new(
+    let wrapper = Arc::new(ActorRef::local(
         actor_id.clone(),
         mailbox,
         service_locator,
@@ -74,7 +74,7 @@ async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
 #[tokio::test]
 async fn test_send_message_missing_message() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-1"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node-1").build());
     let service = ActorServiceImpl::new(node.clone());
 
     // Request with no message
@@ -97,7 +97,7 @@ async fn test_send_message_missing_message() {
 #[tokio::test]
 async fn test_send_message_missing_receiver() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-2"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node-2").build());
     let service = ActorServiceImpl::new(node.clone());
 
     // Message with empty receiver
@@ -122,7 +122,7 @@ async fn test_send_message_missing_receiver() {
 #[tokio::test]
 async fn test_send_message_to_nonexistent_actor() {
     // Setup: Create node WITHOUT registered actor
-    let node = Arc::new(Node::new(NodeId::new("test-node-3"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node-3").build());
     let service = ActorServiceImpl::new(node.clone());
 
     // Create message to non-existent actor
@@ -189,7 +189,7 @@ async fn test_send_message_to_existing_actor() {
 #[tokio::test]
 async fn test_unimplemented_methods_return_unimplemented_status() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-4"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node-4").build());
     let service = ActorServiceImpl::new(node.clone());
 
     // Test create_actor

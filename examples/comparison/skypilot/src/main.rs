@@ -245,7 +245,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let actor_id = actor.id().clone();
-    let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer", // actor_type from SkyPilotSchedulerActor
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let actor_ref = plexspaces_core::ActorRef::new(actor_id)
         .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
@@ -369,10 +377,12 @@ mod tests {
             .await;
         
         // Spawn using ActorFactory
+        // Note: Since actor has DurabilityFacet attached, we use spawn_built_actor
         let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
             .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
         let actor_id = actor.id().clone();
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
             .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         let actor_ref = plexspaces_core::ActorRef::new(actor_id)
             .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();

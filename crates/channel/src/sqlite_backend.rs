@@ -201,51 +201,20 @@ impl SqliteChannel {
                 })?;
         }
 
+        // Run migrations (SQLite-specific)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(&pool)
+            .await
+            .map_err(|e| {
+                ChannelError::BackendError(format!("Failed to run channel migrations: {}", e))
+            })?;
+
         // Get table name
         let table_name = if sqlite_config.table_name.is_empty() {
             "channel_messages".to_string()
         } else {
             sqlite_config.table_name.clone()
         };
-
-        // Create schema
-        let create_table_sql = format!(
-            r#"
-            CREATE TABLE IF NOT EXISTS {} (
-                id TEXT PRIMARY KEY,
-                channel_name TEXT NOT NULL,
-                payload BLOB NOT NULL,
-                timestamp INTEGER NOT NULL,
-                acked INTEGER DEFAULT 0,
-                created_at INTEGER NOT NULL
-            )
-            "#,
-            table_name
-        );
-
-        sqlx::query(&create_table_sql)
-            .execute(&pool)
-            .await
-            .map_err(|e| {
-                ChannelError::BackendError(format!("Failed to create table: {}", e))
-            })?;
-
-        // Create index for unacked messages
-        let create_index_sql = format!(
-            r#"
-            CREATE INDEX IF NOT EXISTS idx_{}_unacked 
-            ON {}(channel_name, acked) 
-            WHERE acked = 0
-            "#,
-            table_name, table_name
-        );
-
-        sqlx::query(&create_index_sql)
-            .execute(&pool)
-            .await
-            .map_err(|e| {
-                ChannelError::BackendError(format!("Failed to create index: {}", e))
-            })?;
 
         let channel = Self {
             config,

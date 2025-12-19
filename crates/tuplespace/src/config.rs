@@ -146,12 +146,13 @@ impl TupleSpace {
     pub async fn from_config(config: TupleSpaceConfig) -> Result<Self, TupleSpaceError> {
         match config.backend {
             None => {
-                // No backend specified, use in-memory default
-                Ok(Self::new())
+                // No backend specified, use in-memory default with internal tenant/namespace
+                // Note: Can't use RequestContext here due to circular dependency (core -> tuplespace)
+                Ok(Self::with_tenant_namespace("internal", "system"))
             }
             Some(Backend::InMemory(_)) => {
-                // In-memory backend
-                Ok(Self::new())
+                // In-memory backend with internal tenant/namespace
+                Ok(Self::with_tenant_namespace("internal", "system"))
             }
             Some(Backend::Sqlite(_sqlite_config)) => {
                 // SQLite backend
@@ -164,7 +165,7 @@ impl TupleSpace {
                         cache_size_kb: 2000, // 2MB cache
                     };
                     let storage = SqlStorage::new_sqlite(storage_config).await?;
-                    Ok(Self::with_storage(Box::new(storage)))
+                    Ok(Self::with_storage_and_tenant(Box::new(storage), "internal", "system"))
                 }
                 #[cfg(not(feature = "sql-backend"))]
                 {
@@ -187,7 +188,7 @@ impl TupleSpace {
                         pool_size: 5,         // Default pool size
                     };
                     let storage = RedisStorage::new(storage_config).await?;
-                    Ok(Self::with_storage(Box::new(storage)))
+                    Ok(Self::with_storage_and_tenant(Box::new(storage), "internal", "system"))
                 }
                 #[cfg(not(feature = "redis-backend"))]
                 {
@@ -217,7 +218,7 @@ impl TupleSpace {
                         },
                     };
                     let storage = SqlStorage::new_postgres(storage_config).await?;
-                    Ok(Self::with_storage(Box::new(storage)))
+                    Ok(Self::with_storage_and_tenant(Box::new(storage), "internal", "system"))
                 }
                 #[cfg(not(feature = "sql-backend"))]
                 {
@@ -470,8 +471,9 @@ impl TupleSpace {
         if std::env::var("PLEXSPACES_TUPLESPACE_BACKEND").is_ok() {
             Self::from_env().await
         } else {
-            // Fall back to in-memory default
-            Ok(Self::new())
+            // Fall back to in-memory default with internal tenant/namespace
+            // Note: Can't use RequestContext here due to circular dependency (core -> tuplespace)
+            Ok(Self::with_tenant_namespace("internal", "system"))
         }
     }
 }
@@ -649,10 +651,15 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "sql-backend")]
     async fn test_from_env_sqlite() {
+        // Use a mutex to ensure test isolation (prevents race conditions with env vars)
+        use std::sync::Mutex;
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap();
+        
         // Clean up first to avoid interference
         std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
         std::env::remove_var("PLEXSPACES_SQLITE_PATH");
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         std::env::set_var("PLEXSPACES_TUPLESPACE_BACKEND", "sqlite");
         std::env::set_var("PLEXSPACES_SQLITE_PATH", ":memory:");

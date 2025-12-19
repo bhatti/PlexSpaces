@@ -43,60 +43,27 @@ impl SqlBlobRepository {
     }
 
     /// Run migrations to create blob_metadata table
+    /// Detects database type and uses appropriate migration path
     pub async fn migrate(pool: &Pool<sqlx::Any>) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS blob_metadata (
-                blob_id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                namespace TEXT NOT NULL,
-                name TEXT NOT NULL,
-                sha256 TEXT NOT NULL,
-                content_type TEXT,
-                content_length BIGINT NOT NULL,
-                etag TEXT,
-                blob_group TEXT,
-                kind TEXT,
-                metadata_json TEXT,
-                tags_json TEXT,
-                expires_at TIMESTAMP,
-                created_at TIMESTAMP NOT NULL,
-                updated_at TIMESTAMP NOT NULL
-            )
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        // Create indexes
-        sqlx::query(
-            r#"
-            CREATE INDEX IF NOT EXISTS idx_blob_metadata_tenant_namespace
-            ON blob_metadata(tenant_id, namespace)
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE INDEX IF NOT EXISTS idx_blob_metadata_sha256
-            ON blob_metadata(tenant_id, namespace, sha256)
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE INDEX IF NOT EXISTS idx_blob_metadata_expires_at
-            ON blob_metadata(expires_at)
-            WHERE expires_at IS NOT NULL
-            "#,
-        )
-        .execute(pool)
-        .await?;
-
+        // Try to detect database type by attempting SQLite-specific query
+        // If it succeeds, it's SQLite; otherwise, assume PostgreSQL
+        let is_sqlite = sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
+            .fetch_optional(pool)
+            .await
+            .is_ok();
+        
+        if is_sqlite {
+            // SQLite detected
+            sqlx::migrate!("./migrations/sqlite")
+                .run(pool)
+                .await?;
+        } else {
+            // PostgreSQL (or other database)
+            sqlx::migrate!("./migrations/postgres")
+                .run(pool)
+                .await?;
+        }
+        
         Ok(())
     }
 }
@@ -131,22 +98,41 @@ impl BlobRepository for SqlBlobRepository {
         ctx: &RequestContext,
         sha256: &str,
     ) -> BlobResult<Option<BlobMetadata>> {
-        let row = sqlx::query(
-            r#"
-            SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
-                   content_length, etag, blob_group, kind, metadata_json, tags_json,
-                   expires_at, created_at, updated_at
-            FROM blob_metadata
-            WHERE tenant_id = $1 AND namespace = $2 AND sha256 = $3
-            ORDER BY created_at DESC
-            LIMIT 1
-            "#,
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(sha256)
-        .fetch_optional(&*self.pool)
-        .await?;
+        // Filter by namespace only if it's non-empty
+        let row = if ctx.namespace().is_empty() {
+            sqlx::query(
+                r#"
+                SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
+                       content_length, etag, blob_group, kind, metadata_json, tags_json,
+                       expires_at, created_at, updated_at
+                FROM blob_metadata
+                WHERE tenant_id = $1 AND sha256 = $2
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+            )
+            .bind(ctx.tenant_id())
+            .bind(sha256)
+            .fetch_optional(&*self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
+                       content_length, etag, blob_group, kind, metadata_json, tags_json,
+                       expires_at, created_at, updated_at
+                FROM blob_metadata
+                WHERE tenant_id = $1 AND namespace = $2 AND sha256 = $3
+                ORDER BY created_at DESC
+                LIMIT 1
+                "#,
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(sha256)
+            .fetch_optional(&*self.pool)
+            .await?
+        };
 
         if let Some(row) = row {
             Ok(Some(row_to_metadata(&row)?))
@@ -288,9 +274,15 @@ impl BlobRepository for SqlBlobRepository {
         page_size: i64,
         offset: i64,
     ) -> BlobResult<(Vec<BlobMetadata>, i64)> {
-        // Build WHERE clause - always filter by tenant_id and namespace from context
-        let mut where_clauses: Vec<String> = vec!["tenant_id = $1".to_string(), "namespace = $2".to_string()];
-        let mut bind_index = 3;
+        // Build WHERE clause - filter by tenant_id always, namespace only if non-empty
+        let mut where_clauses: Vec<String> = vec!["tenant_id = $1".to_string()];
+        let mut bind_index = 2;
+        
+        // Add namespace filter only if non-empty
+        if !ctx.namespace().is_empty() {
+            where_clauses.push(format!("namespace = ${}", bind_index));
+            bind_index += 1;
+        }
 
         if let Some(ref name_prefix) = filters.name_prefix {
             where_clauses.push(format!("name LIKE ${}", bind_index));
@@ -350,8 +342,12 @@ impl BlobRepository for SqlBlobRepository {
         );
 
         let mut list_query = sqlx::query(&list_query)
-            .bind(ctx.tenant_id())
-            .bind(ctx.namespace());
+            .bind(ctx.tenant_id());
+        
+        // Bind namespace only if non-empty
+        if !ctx.namespace().is_empty() {
+            list_query = list_query.bind(ctx.namespace());
+        }
 
         if let Some(ref name_prefix) = filters.name_prefix {
             list_query = list_query.bind(format!("{}%", name_prefix));
@@ -385,24 +381,43 @@ impl BlobRepository for SqlBlobRepository {
     ) -> BlobResult<Vec<BlobMetadata>> {
         let now_str = Utc::now().to_rfc3339();
 
-        // Always filter by tenant_id and namespace from context
-        let rows = sqlx::query(
-            r#"
-            SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
-                   content_length, etag, blob_group, kind, metadata_json, tags_json,
-                   expires_at, created_at, updated_at
-            FROM blob_metadata
-            WHERE tenant_id = $1 AND namespace = $2 AND expires_at IS NOT NULL AND expires_at < $3
-            ORDER BY expires_at ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(&now_str)
-        .bind(limit)
-        .fetch_all(&*self.pool)
-        .await?;
+        // Filter by namespace only if it's non-empty
+        let rows = if ctx.namespace().is_empty() {
+            sqlx::query(
+                r#"
+                SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
+                       content_length, etag, blob_group, kind, metadata_json, tags_json,
+                       expires_at, created_at, updated_at
+                FROM blob_metadata
+                WHERE tenant_id = $1 AND expires_at IS NOT NULL AND expires_at < $2
+                ORDER BY expires_at ASC
+                LIMIT $3
+                "#,
+            )
+            .bind(ctx.tenant_id())
+            .bind(&now_str)
+            .bind(limit)
+            .fetch_all(&*self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
+                       content_length, etag, blob_group, kind, metadata_json, tags_json,
+                       expires_at, created_at, updated_at
+                FROM blob_metadata
+                WHERE tenant_id = $1 AND namespace = $2 AND expires_at IS NOT NULL AND expires_at < $3
+                ORDER BY expires_at ASC
+                LIMIT $4
+                "#,
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(&now_str)
+            .bind(limit)
+            .fetch_all(&*self.pool)
+            .await?
+        };
 
         let mut results = Vec::new();
         for row in rows {

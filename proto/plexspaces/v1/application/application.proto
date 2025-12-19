@@ -524,7 +524,7 @@ service ApplicationService {
   // 5. Register application with ApplicationManager
   rpc DeployApplication(DeployApplicationRequest) returns (DeployApplicationResponse) {
     option (google.api.http) = {
-      post: "/v1/applications"
+      post: "/api/v1/applications"
       body: "*"
     };
   }
@@ -544,7 +544,7 @@ service ApplicationService {
   // If exceeded, may force kill the application.
   rpc UndeployApplication(UndeployApplicationRequest) returns (UndeployApplicationResponse) {
     option (google.api.http) = {
-      delete: "/v1/applications/{application_id}"
+      delete: "/api/v1/applications/{application_id}"
     };
   }
 
@@ -554,7 +554,7 @@ service ApplicationService {
   // Get list of all applications deployed on this node.
   rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse) {
     option (google.api.http) = {
-      get: "/v1/applications"
+      get: "/api/v1/applications"
     };
   }
 
@@ -564,14 +564,14 @@ service ApplicationService {
   // Get detailed status of a specific application.
   rpc GetApplicationStatus(GetApplicationStatusRequest) returns (GetApplicationStatusResponse) {
     option (google.api.http) = {
-      get: "/v1/applications/{application_id}/status"
+      get: "/api/v1/applications/{application_id}/status"
     };
   }
 
   // Start an application (legacy, use DeployApplication for new deployments)
   rpc StartApplication(StartApplicationRequest) returns (StartApplicationResponse) {
     option (google.api.http) = {
-      post: "/v1/applications/{name}:start"
+      post: "/api/v1/applications/{name}:start"
       body: "*"
     };
   }
@@ -579,7 +579,7 @@ service ApplicationService {
   // Stop an application (legacy, use UndeployApplication for new deployments)
   rpc StopApplication(StopApplicationRequest) returns (StopApplicationResponse) {
     option (google.api.http) = {
-      post: "/v1/applications/{name}:stop"
+      post: "/api/v1/applications/{name}:stop"
       body: "*"
     };
   }

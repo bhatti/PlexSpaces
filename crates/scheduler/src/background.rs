@@ -323,10 +323,12 @@ impl BackgroundScheduler {
 
         info!("Processing scheduling request: {}", request.request_id);
 
-        // Get node capacities
+        // Get node capacities (use internal context for system operations)
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::internal();
         let node_capacities = self
             .capacity_tracker
-            .list_node_capacities(None, None)
+            .list_node_capacities(&ctx, None, None)
             .await
             .map_err(|e| BackgroundSchedulerError::NodeSelectionError(e.to_string()))?;
 

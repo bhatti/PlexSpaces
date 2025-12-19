@@ -90,7 +90,7 @@ impl GenServer for CounterActor {
 #[tokio::test]
 async fn test_tell_with_virtual_actor_eager() {
     // Test: tell() with VirtualActorFacet (eager activation)
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-eager@test-node".to_string();
     
     // Get or activate actor with VirtualActorFacet (eager)
@@ -152,7 +152,7 @@ async fn test_tell_with_virtual_actor_eager() {
 #[tokio::test]
 async fn test_ask_with_virtual_actor_eager() {
     // Test: ask() with VirtualActorFacet (eager activation)
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-eager-ask@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -204,7 +204,7 @@ async fn test_ask_with_virtual_actor_eager() {
 #[tokio::test]
 async fn test_tell_with_virtual_actor_lazy() {
     // Test: tell() with VirtualActorFacet (lazy activation) - should activate on first message
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-lazy-tell@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -263,7 +263,7 @@ async fn test_tell_with_virtual_actor_lazy() {
 #[tokio::test]
 async fn test_ask_with_virtual_actor_lazy() {
     // Test: ask() with VirtualActorFacet (lazy activation) - should activate on first message
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-lazy-ask@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -313,7 +313,7 @@ async fn test_ask_with_virtual_actor_lazy() {
 #[tokio::test]
 async fn test_multiple_ask_with_virtual_actor_lazy() {
     // Test: Multiple ask() calls with VirtualActorFacet (lazy activation)
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-lazy-multi@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -382,7 +382,7 @@ async fn test_multiple_ask_with_virtual_actor_lazy() {
 async fn test_ask_with_virtual_actor_lazy_reproduce_issue() {
     // Test to reproduce the orleans lazy activation timeout issue
     // This should activate on first message and respond within 1 second
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let actor_id: ActorId = "counter-lazy-reproduce@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 

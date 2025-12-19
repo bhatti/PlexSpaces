@@ -216,64 +216,23 @@ impl SqlStorage {
         Ok(storage)
     }
 
-    /// Initialize database schema
+    /// Initialize database schema using migrations
     async fn initialize_schema(&self) -> Result<(), TupleSpaceError> {
-        let create_table_sql = format!(
-            r#"
-            CREATE TABLE IF NOT EXISTS {} (
-                id TEXT PRIMARY KEY,
-                tuple_data TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                expires_at TEXT,
-                renewable INTEGER NOT NULL
-            )
-            "#,
-            self.table_name
-        );
-
         match &self.pool {
             SqlPool::Postgres(pool) => {
-                sqlx::query(&create_table_sql)
-                    .execute(pool)
+                sqlx::migrate!("./migrations/postgres")
+                    .run(pool)
                     .await
                     .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("Schema creation failed: {}", e))
+                        TupleSpaceError::BackendError(format!("PostgreSQL migration failed: {}", e))
                     })?;
             }
             SqlPool::Sqlite(pool) => {
-                sqlx::query(&create_table_sql)
-                    .execute(pool)
+                sqlx::migrate!("./migrations/sqlite")
+                    .run(pool)
                     .await
                     .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("Schema creation failed: {}", e))
-                    })?;
-            }
-        }
-
-        // Create index for expires_at (partial index for non-null values)
-        let create_index_sql = format!(
-            r#"
-            CREATE INDEX IF NOT EXISTS idx_{}_expires_at
-            ON {} (expires_at)
-            "#,
-            self.table_name, self.table_name
-        );
-
-        match &self.pool {
-            SqlPool::Postgres(pool) => {
-                sqlx::query(&create_index_sql)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("Index creation failed: {}", e))
-                    })?;
-            }
-            SqlPool::Sqlite(pool) => {
-                sqlx::query(&create_index_sql)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("Index creation failed: {}", e))
+                        TupleSpaceError::BackendError(format!("SQLite migration failed: {}", e))
                     })?;
             }
         }

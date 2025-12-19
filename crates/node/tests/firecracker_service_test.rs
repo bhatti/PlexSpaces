@@ -17,7 +17,7 @@ mod firecracker_service_tests {
 
     /// Helper to create a test node
     async fn create_test_node() -> Arc<Node> {
-        Arc::new(Node::new(NodeId::new("test-node"), default_node_config()))
+        Arc::new(NodeBuilder::new("test-node").build())
     }
 
     /// Helper to create Firecracker service

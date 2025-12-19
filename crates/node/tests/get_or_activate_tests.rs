@@ -18,7 +18,7 @@ use test_helpers::{lookup_actor_ref, activate_virtual_actor, get_or_activate_act
 #[tokio::test]
 async fn test_get_or_activate_actor_new_actor() {
     // Test: Creating a new actor when it doesn't exist
-    let node = Node::new(NodeId::new("test-node"), default_node_config());
+    let node = NodeBuilder::new("test-node").build();
     let node_id = node.id().clone();
     
     let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();
@@ -48,7 +48,7 @@ async fn test_get_or_activate_actor_new_actor() {
     // Verify actor was created
     assert_eq!(actor_ref.id(), &actor_id);
     
-    // Verify actor exists
+    // Verify actor exists in registry
     let location = find_actor_helper(&node, &actor_id).await.unwrap();
     match location {
         plexspaces_node::ActorLocation::Local(_) => {
@@ -56,12 +56,22 @@ async fn test_get_or_activate_actor_new_actor() {
         }
         _ => panic!("Expected local actor"),
     }
+    
+    // Additional verification: Check ActorRegistry registration
+    use plexspaces_core::ActorRegistry;
+    let actor_registry = node.actor_registry();
+    let routing = actor_registry.lookup_routing(&actor_id.to_string())
+        .await
+        .ok()
+        .flatten();
+    assert!(routing.is_some(), "Actor should be registered in ActorRegistry");
+    assert!(routing.as_ref().unwrap().is_local, "Actor should be local");
 }
 
 #[tokio::test]
 async fn test_get_or_activate_actor_existing_actor() {
     // Test: Returning existing actor when it already exists
-    let node = Node::new(NodeId::new("test-node"), default_node_config());
+    let node = NodeBuilder::new("test-node").build();
     let node_id = node.id().clone();
     
     let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();
@@ -102,7 +112,7 @@ async fn test_get_or_activate_actor_existing_actor() {
 #[tokio::test]
 async fn test_get_or_activate_actor_concurrent_activation() {
     // Test: Concurrent get_or_activate calls should handle race conditions
-    let node = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+    let node = Arc::new(NodeBuilder::new("test-node").build());
     let node_id = node.id().clone();
     
     let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();

@@ -25,7 +25,7 @@
 //! - Application lifecycle (start/stop/health)
 //! - Error handling (invalid modules, missing runtime, etc.)
 
-use plexspaces_node::{application_service::ApplicationServiceImpl, Node, NodeConfig, NodeId};
+use plexspaces_node::{application_service::ApplicationServiceImpl, Node, NodeId};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
     ChildSpec, ChildType, DeployApplicationRequest, GetApplicationStatusRequest,
@@ -50,12 +50,10 @@ const SIMPLE_WASM: &[u8] = &[
 ];
 
 async fn create_test_node() -> Arc<Node> {
-    let node_id = NodeId::new("test-node");
-    let config = NodeConfig {
-        listen_addr: "127.0.0.1:0".to_string(), // Use port 0 for random port
-        ..Default::default()
-    };
-    Arc::new(Node::new(node_id, config))
+    use plexspaces_node::NodeBuilder;
+    Arc::new(NodeBuilder::new("test-node")
+        .with_listen_address("127.0.0.1:0")
+        .build())
 }
 
 async fn create_test_node_with_service() -> (Arc<Node>, String) {

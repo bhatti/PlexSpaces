@@ -69,15 +69,16 @@ mod handlers {
                 .and_then(|v| v.to_str().ok())
                 .ok_or_else(|| BlobError::InvalidInput("Missing x-tenant-id header. JWT authentication required.".to_string()))?;
             
+            // namespace is REQUIRED - must be provided in header or use default from config
             let namespace = headers.get("x-namespace")
                 .and_then(|v| v.to_str().ok())
-                .unwrap_or("default");
+                .filter(|s| !s.is_empty())
+                .unwrap_or(""); // Default namespace (can be empty)
             
             let user_id = headers.get("x-user-id")
                 .and_then(|v| v.to_str().ok());
             
-            let mut ctx = RequestContext::new(tenant_id.to_string())
-                .with_namespace(namespace.to_string());
+            let mut ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
             
             if let Some(uid) = user_id {
                 ctx = ctx.with_user_id(uid.to_string());
@@ -88,8 +89,7 @@ mod handlers {
 
         /// Extract RequestContext from multipart form (fallback for uploads)
         fn extract_context_from_form(tenant_id: &str, namespace: &str) -> RequestContext {
-            RequestContext::new(tenant_id.to_string())
-                .with_namespace(namespace.to_string())
+            RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string())
         }
 
         /// Handle HTTP request

@@ -147,13 +147,12 @@ async fn create_test_registry_with_actors(
 
         async fn lookup_full(
             &self,
-            tenant_id: &str,
-            namespace: &str,
+            ctx: &plexspaces_core::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             self.inner
-                .lookup(tenant_id, namespace, object_type, object_id)
+                .lookup_full(ctx, object_type, object_id)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -174,7 +173,8 @@ async fn create_test_registry_with_actors(
     });
     
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     service_locator.register_service(actor_registry.clone()).await;
     
     // Create ActorFactory and required services
@@ -186,17 +186,20 @@ async fn create_test_registry_with_actors(
     let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
     service_locator.register_service(actor_factory.clone()).await;
     
-    // Register actors with type information
+    // Register actors with type information using spawn_actor
+    let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.clone(), "default".to_string());
     for i in 0..num_actors {
         let actor_id = format!("{}-{}@{}", actor_type, i, node_id);
-        let behavior: Box<dyn ActorTrait> = Box::new(CounterActor::new());
-        let actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await;
         
-        // tenant_id is optional now (removed from ActorContext)
-        let message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await
+        // Use spawn_actor instead of building and spawning separately
+        let message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            actor_type, // Use the provided actor_type
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+        ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e))
             .unwrap();
         

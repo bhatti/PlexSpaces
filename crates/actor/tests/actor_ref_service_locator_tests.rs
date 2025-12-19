@@ -24,21 +24,21 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         object_type: Option<ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(ObjectType::ObjectTypeUnspecified);
+        let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(&ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .lookup(tenant_id, namespace, object_type, object_id)
+            .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -57,7 +57,8 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 #[tokio::test]
 async fn test_actor_ref_remote_uses_service_locator() {
     // Test: Remote ActorRef should use ServiceLocator for gRPC client caching
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
         Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
     ));
@@ -85,7 +86,8 @@ async fn test_actor_ref_remote_uses_service_locator() {
 #[tokio::test]
 async fn test_actor_ref_remote_tell_uses_service_locator() {
     // Test: Remote ActorRef.tell() should use ServiceLocator to get gRPC client
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
         Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
     ));
@@ -134,7 +136,8 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
 #[tokio::test]
 async fn test_actor_ref_remote_ask_uses_service_locator() {
     // Test: Remote ActorRef.ask() should use ServiceLocator to get gRPC client
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
         Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
     ));
@@ -182,7 +185,8 @@ async fn test_actor_ref_local_unchanged() {
     // Test: Local ActorRef should work the same (no ServiceLocator needed)
     use plexspaces_mailbox::mailbox_config_default;
     let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let actor_ref = ActorRef::local("test-actor", mailbox.clone(), service_locator);
     
     assert!(actor_ref.is_local());

@@ -187,13 +187,13 @@ impl WorkflowStorage {
     async fn run_migrations(&self) -> Result<(), WorkflowError> {
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-        sqlx::migrate!("./migrations")
+                sqlx::migrate!("./migrations/sqlite")
                     .run(pool)
-            .await
+                    .await
                     .map_err(|e| WorkflowError::Storage(format!("SQLite migration failed: {}", e)))?;
             }
             SqlPool::Postgres(pool) => {
-                sqlx::migrate!("./migrations")
+                sqlx::migrate!("./migrations/postgres")
                     .run(pool)
                     .await
                     .map_err(|e| WorkflowError::Storage(format!("PostgreSQL migration failed: {}", e)))?;

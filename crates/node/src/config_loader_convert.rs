@@ -24,6 +24,8 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             id: yaml.node.id,
             listen_address: yaml.node.listen_address,
             cluster_seed_nodes: yaml.node.cluster_seed_nodes,
+            default_tenant_id: "internal".to_string(), // Default for local development
+            default_namespace: "system".to_string(), // Default for local development
         }),
         runtime: Some({
             let mut runtime_config = RuntimeConfig {

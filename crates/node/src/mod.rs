@@ -28,7 +28,7 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
 use plexspaces_core::application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_core::{ActorId, ActorRef as CoreActorRef, ActorRegistry, ReplyTracker, ServiceLocator, VirtualActorManager, FacetManager};
+use plexspaces_core::{ActorId, ActorRef as CoreActorRef, ActorRegistry, ReplyTracker, ServiceLocator, VirtualActorManager, FacetManager, RequestContext};
 use plexspaces_actor::ActorRef;
 use plexspaces_journaling::{ActivationProvider, VirtualActorFacet};
 use plexspaces_mailbox::Message;
@@ -138,6 +138,9 @@ pub struct Node {
     /// Health reporter for health checks and graceful shutdown (Phase 5)
     /// Set in Node::start(), None before start
     health_reporter: Arc<RwLock<Option<Arc<crate::health_service::PlexSpacesHealthReporter>>>>,
+    /// ReleaseSpec configuration (optional, loaded from release config files)
+    /// If provided, NodeConfig will be extracted from release_spec.node in start()
+    release_spec: Arc<RwLock<Option<plexspaces_proto::node::v1::ReleaseSpec>>>,
 }
 
 /// Node configuration
@@ -229,7 +232,8 @@ impl Node {
             id.as_str().to_string(),
         ));
 
-        // Create ServiceLocator and register services
+        // Create ServiceLocator - Node will register services in start() method
+        // For tests/examples, use ServiceLocator::create_default() instead
         let service_locator = Arc::new(ServiceLocator::new());
         let reply_tracker = Arc::new(ReplyTracker::new());
         
@@ -268,6 +272,7 @@ impl Node {
         
         // Store node_arc for later registration in start()
         // We'll register Node in ServiceLocator in start() method
+        // Note: proto NodeConfig (from ReleaseSpec.node) will be registered in start() when available
 
         Node {
             id,
@@ -275,7 +280,7 @@ impl Node {
             service_locator,
             connections: Arc::new(RwLock::new(HashMap::new())),
             grpc_clients: Arc::new(RwLock::new(HashMap::new())), // Client pool
-            tuplespace: Arc::new(TupleSpace::new()),
+            tuplespace: Arc::new(TupleSpace::default()),
             config,
             metrics: Arc::new(RwLock::new(default_node_metrics())),
             application_manager: Arc::new(RwLock::new(ApplicationManager::new())), // Erlang/OTP application lifecycle
@@ -288,6 +293,70 @@ impl Node {
             blob_service: Arc::new(RwLock::new(None)), // Blob service (created in start())
             connection_health: Arc::new(RwLock::new(HashMap::new())), // Connection health tracking
             health_reporter: Arc::new(RwLock::new(None)), // Health reporter (created in start())
+            release_spec: Arc::new(RwLock::new(None)), // ReleaseSpec (optional, loaded from config)
+        }
+    }
+    
+    /// Set ReleaseSpec for this node
+    ///
+    /// ## Purpose
+    /// Allows setting ReleaseSpec configuration that will be used in start() to extract NodeConfig.
+    /// This is typically called after loading release config from files.
+    ///
+    /// ## Arguments
+    /// * `release_spec` - ReleaseSpec to set
+    ///
+    /// ## Note
+    /// If ReleaseSpec is set, start() will use release_spec.node for NodeConfig instead of creating defaults.
+    pub async fn set_release_spec(&self, release_spec: plexspaces_proto::node::v1::ReleaseSpec) {
+        let mut spec = self.release_spec.write().await;
+        *spec = Some(release_spec);
+    }
+    
+    /// Get ReleaseSpec if set
+    pub async fn get_release_spec(&self) -> Option<plexspaces_proto::node::v1::ReleaseSpec> {
+        let spec = self.release_spec.read().await;
+        spec.clone()
+    }
+    
+    /// Load release config from file or environment variable
+    ///
+    /// ## Purpose
+    /// Loads ReleaseSpec from:
+    /// 1. `PLEXSPACES_RELEASE_CONFIG_PATH` environment variable (if set)
+    /// 2. `release.yaml` in current directory
+    /// 3. `release.toml` in current directory
+    ///
+    /// ## Returns
+    /// Ok(ReleaseSpec) if found and loaded, Err if not found or invalid
+    ///
+    /// ## Note
+    /// This is called automatically in `start()` if release_spec is not already set.
+    /// For embedded applications, call `set_release_spec()` before `start()`.
+    async fn load_release_config(&self) -> Result<plexspaces_proto::node::v1::ReleaseSpec, NodeError> {
+        use crate::config_loader::ConfigLoader;
+        use std::env;
+        
+        // Check environment variable first
+        let config_path = if let Ok(path) = env::var("PLEXSPACES_RELEASE_CONFIG_PATH") {
+            Some(path)
+        } else {
+            // Try common file names
+            if std::path::Path::new("release.yaml").exists() {
+                Some("release.yaml".to_string())
+            } else if std::path::Path::new("release.toml").exists() {
+                Some("release.toml".to_string())
+            } else {
+                None
+            }
+        };
+        
+        if let Some(path) = config_path {
+            let loader = ConfigLoader::new(); // Enable security validation by default
+            loader.load_release_spec_with_env_precedence(&path).await
+                .map_err(|e| NodeError::ConfigError(format!("Failed to load release config from {}: {}", path, e)))
+        } else {
+            Err(NodeError::ConfigError("No release config file found and PLEXSPACES_RELEASE_CONFIG_PATH not set".to_string()))
         }
     }
 
@@ -304,6 +373,22 @@ impl Node {
     /// Get ServiceLocator
     pub fn service_locator(&self) -> Arc<ServiceLocator> {
         self.service_locator.clone()
+    }
+    
+    /// Register proto NodeConfig in ServiceLocator
+    ///
+    /// ## Purpose
+    /// Registers the proto NodeConfig (from ReleaseSpec.node) in ServiceLocator
+    /// so that services can access default_tenant_id and default_namespace.
+    ///
+    /// ## Arguments
+    /// * `node_config` - Proto NodeConfig from ReleaseSpec.node
+    ///
+    /// ## Note
+    /// This should be called after Node creation if ReleaseSpec is available.
+    /// If not called, defaults will fall back to "internal" and "system".
+    pub async fn register_node_config(&self, node_config: plexspaces_proto::node::v1::NodeConfig) {
+        self.service_locator.register_node_config(node_config).await;
     }
 
 
@@ -396,7 +481,7 @@ impl Node {
     }
     
     /// Get ObjectRegistry (internal use only - use service_locator.get_service() instead)
-    pub(crate) fn object_registry(&self) -> Arc<plexspaces_object_registry::ObjectRegistry> {
+    pub fn object_registry(&self) -> Arc<plexspaces_object_registry::ObjectRegistry> {
         self.object_registry.clone()
     }
     
@@ -817,10 +902,11 @@ impl Node {
         // Send heartbeat to ObjectRegistry
         // Note: Using OBJECT_TYPE_SERVICE for nodes (nodes are services in the registry)
         // TODO: Consider adding OBJECT_TYPE_NODE to ObjectType enum if needed
+        // Use internal context for system operations
+        let internal_ctx = RequestContext::internal();
         self.object_registry
             .heartbeat(
-                "default", // tenant_id
-                "default", // namespace
+                &internal_ctx,
                 ObjectType::ObjectTypeService,
                 self.id.as_str(),
             )
@@ -924,6 +1010,12 @@ impl Node {
     /// - Announces node availability in TupleSpace
     /// - Registers SIGTERM/SIGINT handlers for graceful shutdown
     ///
+    /// ## Release Config Loading
+    /// If release config is not already set (via `set_release_spec()`), this method will:
+    /// 1. Check `PLEXSPACES_RELEASE_CONFIG_PATH` environment variable
+    /// 2. Check `release.yaml` or `release.toml` in current directory
+    /// 3. If found, load and set ReleaseSpec on the node
+    ///
     /// ## Graceful Shutdown
     /// When SIGTERM or SIGINT is received:
     /// 1. Stops accepting new requests
@@ -944,6 +1036,54 @@ impl Node {
             .write()
             .await
             .set_node_context(self.clone());
+        
+        // Load release config if not already set
+        // Check if release_spec is already set
+        {
+            let release_spec = self.release_spec.read().await;
+            if release_spec.is_none() {
+                drop(release_spec);
+                // Try to load from file or env variable
+                if let Ok(release_spec) = self.load_release_config().await {
+                    self.set_release_spec(release_spec).await;
+                    tracing::info!("Loaded release config from file or environment variable");
+                } else {
+                    tracing::debug!("No release config found, using defaults");
+                }
+            }
+        }
+        
+        // Register proto NodeConfig in ServiceLocator if not already registered
+        // Priority: release_spec.node > defaults from NodeRuntimeConfig
+        // This allows services to access default_tenant_id and default_namespace
+        let proto_node_config = {
+            let release_spec = self.release_spec.read().await;
+            if let Some(ref spec) = *release_spec {
+                // Use NodeConfig from ReleaseSpec if available
+                if let Some(ref node_config) = spec.node {
+                    node_config.clone()
+                } else {
+                    // ReleaseSpec exists but node is None - create default
+                    plexspaces_proto::node::v1::NodeConfig {
+                        id: self.id.as_str().to_string(),
+                        listen_address: self.config.listen_addr.clone(),
+                        cluster_seed_nodes: vec![],
+                        default_tenant_id: "internal".to_string(),
+                        default_namespace: "system".to_string(),
+                    }
+                }
+            } else {
+                // No ReleaseSpec - create default from Node config
+                plexspaces_proto::node::v1::NodeConfig {
+                    id: self.id.as_str().to_string(),
+                    listen_address: self.config.listen_addr.clone(),
+                    cluster_seed_nodes: vec![],
+                    default_tenant_id: "internal".to_string(),
+                    default_namespace: "system".to_string(),
+                }
+            }
+        };
+        self.service_locator.register_node_config(proto_node_config).await;
 
         // Register node in ObjectRegistry before starting heartbeat
         // This ensures heartbeats will succeed
@@ -957,10 +1097,11 @@ impl Node {
         let node_for_registration = self.clone();
         tokio::spawn(async move {
             // Register the node in ObjectRegistry
+            // Use internal context for system operations
             use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
             let registration = ObjectRegistration {
-                tenant_id: "default".to_string(),
-                namespace: "default".to_string(),
+                tenant_id: "internal".to_string(),
+                namespace: "system".to_string(),
                 object_type: ObjectType::ObjectTypeService as i32,
                 object_id: node_id_str.clone(),
                 grpc_address: format!("http://{}", listen_addr),
@@ -1423,7 +1564,6 @@ impl Node {
                     // Create InvokeActorRequest
                     use plexspaces_proto::actor::v1::InvokeActorRequest;
                     let mut invoke_req = InvokeActorRequest {
-                        tenant_id,
                         namespace,
                         actor_type,
                         http_method: method.as_str().to_string(),
@@ -1848,13 +1988,15 @@ impl Node {
         if is_local1 && is_local2 {
             // Both actors are local
             // Verify both actors exist in ActorRegistry
-            let routing1 = self.actor_registry.lookup_routing(actor_id).await
+            // Use internal context for routing lookup (system-level operation)
+            let internal_ctx = RequestContext::internal();
+            let routing1 = self.actor_registry.lookup_routing(&internal_ctx, actor_id).await
                 .map_err(|_| NodeError::ActorNotFound(actor_id.clone()))?;
             if routing1.is_none() || !routing1.unwrap().is_local {
                 return Err(NodeError::ActorNotFound(actor_id.clone()));
             }
             
-            let routing2 = self.actor_registry.lookup_routing(linked_actor_id).await
+            let routing2 = self.actor_registry.lookup_routing(&internal_ctx, linked_actor_id).await
                 .map_err(|_| NodeError::ActorNotFound(linked_actor_id.clone()))?;
             if routing2.is_none() || !routing2.unwrap().is_local {
                 return Err(NodeError::ActorNotFound(linked_actor_id.clone()));
@@ -3114,7 +3256,9 @@ mod tests {
             )))
         } else {
             // Check routing
-            let routing = actor_registry.lookup_routing(&actor_id).await
+            // Use internal context for routing lookup (system-level operation)
+            let internal_ctx = RequestContext::internal();
+            let routing = actor_registry.lookup_routing(&internal_ctx, &actor_id).await
                 .map_err(|e| NodeError::ActorRefCreationFailed(actor_id.clone(), e.to_string()))?;
             
             if let Some(routing_info) = routing {
@@ -3150,8 +3294,11 @@ mod tests {
     
     use super::*;
     use plexspaces_mailbox::Mailbox;
-    use plexspaces_actor::RegularActorWrapper;
+    
     use plexspaces_core::MessageSender;
+    
+    // Import NodeBuilder for tests
+    use crate::NodeBuilder;
     
     // Helper to get ActorRegistry from service_locator
     // Waits for registration if not yet available (Node::new() registers asynchronously)
@@ -3175,18 +3322,20 @@ mod tests {
     
     // Helper to register actor with MessageSender (replaces register_local)
     async fn register_actor_for_test(node: &Node, actor_id: &str, mailbox: Arc<Mailbox>) {
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_id.to_string(),
             mailbox,
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(node).await;
-        actor_registry.register_actor(actor_id.to_string(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_id.to_string(), wrapper, None).await;
     }
 
     #[tokio::test]
     async fn test_node_creation() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         assert_eq!(node.id().as_str(), "test-node");
         assert_eq!(node.connected_nodes().await.len(), 0);
@@ -3197,28 +3346,31 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         use std::sync::Arc;
 
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox.clone(), node.service_locator());
 
         // Register with ActorRegistry first
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
 
         // Register actor config (if needed)
         actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
 
         // Should find local actor via ActorRegistry
-        match actor_registry.lookup_routing(&"test-actor@test-node".to_string()).await {
+        let internal_ctx = RequestContext::internal();
+        match actor_registry.lookup_routing(&internal_ctx, &"test-actor@test-node".to_string()).await {
             Ok(Some(routing_info)) => {
                 assert!(routing_info.is_local);
                 assert_eq!(routing_info.node_id, "test-node");
@@ -3230,7 +3382,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tuplespace_integration() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Write configuration to TupleSpace (Orbit-inspired)
         node.tuplespace()
@@ -3258,27 +3410,30 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         use std::sync::Arc;
 
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox.clone(), node.service_locator());
 
         // Register with ActorRegistry first
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
 
         // Register actor config
         let actor_registry = get_actor_registry(&node).await;
         actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
-        assert!(actor_registry.lookup_routing(&"test-actor@test-node".to_string()).await.is_ok());
+        let internal_ctx = RequestContext::internal();
+        assert!(actor_registry.lookup_routing(&internal_ctx, &"test-actor@test-node".to_string()).await.is_ok());
 
         // Unregister
         actor_registry.unregister_with_cleanup(&"test-actor@test-node".to_string())
@@ -3295,7 +3450,7 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         use std::sync::Arc;
 
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox.clone(), node.service_locator());
@@ -3318,7 +3473,7 @@ mod tests {
     async fn test_route_message_local() {
         use plexspaces_mailbox::mailbox_config_default;
 
-        let node_arc = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+        let node_arc = Arc::new(NodeBuilder::new("test-node").build());
         
         // Register NodeMetricsUpdater early for tests (normally done in create_actor_context_arc)
         let metrics_updater = Arc::new(crate::service_wrappers::NodeMetricsUpdaterWrapper::new(node_arc.clone()));
@@ -3357,7 +3512,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_message_actor_not_found() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
         
         // Wait for services to be registered
         for _ in 0..10 {
@@ -3448,7 +3603,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_node_announcement() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Manually announce node in TupleSpace (without starting full server)
         node.tuplespace()
@@ -3473,7 +3628,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cluster_manager_join() {
-        let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("node1").build());
 
         let cluster_config = ClusterConfig {
             name: "test-cluster".to_string(),
@@ -3503,7 +3658,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cluster_manager_leave() {
-        let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("node1").build());
 
         let cluster_config = ClusterConfig {
             name: "test-cluster".to_string(),
@@ -3540,7 +3695,7 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
         use std::sync::Arc;
 
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Create actor
         let behavior = Box::new(MockBehavior::new());
@@ -3551,6 +3706,7 @@ mod tests {
             "test-actor@test-node".to_string(),
             behavior,
             mailbox,
+            "test-tenant".to_string(),
             "test-namespace".to_string(),
             None,
         );
@@ -3569,7 +3725,16 @@ mod tests {
         service_locator.register_service(actor_factory_impl.clone()).await;
         let actor_factory: Arc<ActorFactoryImpl> = actor_factory_impl;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await.unwrap();
+        let internal_ctx = RequestContext::internal();
+        let actor_id = "test-actor@test-node".to_string();
+        let _message_sender = actor_factory.spawn_actor(
+            &internal_ctx,
+            &actor_id,
+            "test", // actor_type
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+        ).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox_for_ref, service_locator);
@@ -3579,7 +3744,8 @@ mod tests {
 
         // Verify actor registered in ActorRegistry
         let actor_registry = get_actor_registry(&node).await;
-        match actor_registry.lookup_routing(&"test-actor@test-node".to_string()).await {
+        let internal_ctx = RequestContext::internal();
+        match actor_registry.lookup_routing(&internal_ctx, &"test-actor@test-node".to_string()).await {
             Ok(Some(routing_info)) => {
                 assert!(routing_info.is_local);
                 assert_eq!(routing_info.node_id, "test-node");
@@ -3598,7 +3764,7 @@ mod tests {
         use std::sync::Arc;
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Create monitor channel
         let (tx, mut rx) = mpsc::channel(1);
@@ -3610,6 +3776,7 @@ mod tests {
             "test-actor@test-node".to_string(),
             behavior,
             mailbox,
+            "test-tenant".to_string(),
             "test-namespace".to_string(),
             None,
         );
@@ -3628,7 +3795,8 @@ mod tests {
         service_locator.register_service(actor_factory_impl.clone()).await;
         let actor_factory: Arc<ActorFactoryImpl> = actor_factory_impl;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await.unwrap();
+        let internal_ctx = RequestContext::internal();
+        let _message_sender = actor_factory.spawn_built_actor(&internal_ctx, Arc::new(actor), None).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox_for_ref, service_locator);
@@ -3691,7 +3859,7 @@ mod tests {
         // Actual panics would be caught by JoinHandle and classified as "panic"
         // in spawn_actor's watcher task.
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Create monitor channel
         let (tx, _rx) = mpsc::channel(1);
@@ -3703,6 +3871,7 @@ mod tests {
             "test-actor@test-node".to_string(),
             behavior,
             mailbox,
+            "test-tenant".to_string(),
             "test-namespace".to_string(),
             None,
         );
@@ -3721,7 +3890,8 @@ mod tests {
         service_locator.register_service(actor_factory_impl.clone()).await;
         let actor_factory: Arc<ActorFactoryImpl> = actor_factory_impl;
         
-        let _message_sender = actor_factory.spawn_built_actor(Arc::new(actor), None, None, None).await.unwrap();
+        let internal_ctx = RequestContext::internal();
+        let _message_sender = actor_factory.spawn_built_actor(&internal_ctx, Arc::new(actor), None).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox_for_ref, service_locator);
@@ -3763,9 +3933,9 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
 
         // Create two nodes
-        let node1 = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+        let node1 = Arc::new(NodeBuilder::new("node1").build());
 
-        let node2 = Arc::new(Node::new(NodeId::new("node2"), NodeConfig::default()));
+        let node2 = Arc::new(NodeBuilder::new("node2").build());
 
         // Register node2 as remote node in node1's registry
         // Using a fake address since we're testing routing logic, not actual gRPC
@@ -3838,8 +4008,8 @@ mod tests {
         // Register remote node in ObjectRegistry (ActorRegistry looks up nodes here)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
         let registration = ObjectRegistration {
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
+            tenant_id: "internal".to_string(),
+            namespace: "system".to_string(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_id: "_node@node2".to_string(), // ActorRegistry looks for this format
             grpc_address: "http://localhost:9999".to_string(),
@@ -3850,7 +4020,8 @@ mod tests {
 
         // Try to find actor with @node2 suffix
         let actor_registry = get_actor_registry(&node).await;
-        let result = actor_registry.lookup_routing(&"test-actor@node2".to_string()).await;
+        let internal_ctx = RequestContext::internal();
+        let result = actor_registry.lookup_routing(&internal_ctx, &"test-actor@node2".to_string()).await;
 
         // Should find it as remote (because node2 is registered in ObjectRegistry)
         assert!(result.is_ok());
@@ -3870,7 +4041,7 @@ mod tests {
         // Try to find actor that doesn't exist anywhere
         let actor_registry = get_actor_registry(&node).await;
         let result = actor_registry
-            .lookup_routing(&"nonexistent@unknown-node".to_string())
+            .lookup_routing(&RequestContext::internal(), &"nonexistent@unknown-node".to_string())
             .await;
 
         // lookup_routing returns Ok(None) when node is not found in ObjectRegistry
@@ -3883,9 +4054,9 @@ mod tests {
     async fn test_find_actor_via_tuplespace() {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
 
-        let node1 = Node::new(NodeId::new("node1"), NodeConfig::default());
+        let node1 = NodeBuilder::new("node1").build();
 
-        let node2 = Node::new(NodeId::new("node2"), NodeConfig::default());
+        let node2 = NodeBuilder::new("node2").build();
 
         // Register actor on node2 (this writes to node2's TupleSpace)
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
@@ -3899,8 +4070,8 @@ mod tests {
         // Register node2 in ObjectRegistry on node1 (so node1 can find it via lookup_routing)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
         let registration = ObjectRegistration {
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
+            tenant_id: "internal".to_string(),
+            namespace: "system".to_string(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_id: "_node@node2".to_string(),
             grpc_address: "http://localhost:9999".to_string(),
@@ -3911,7 +4082,8 @@ mod tests {
 
         // Now node1 should find the actor via ObjectRegistry (lookup_routing uses ObjectRegistry, not TupleSpace)
         let actor_registry1 = get_actor_registry(&node1).await;
-        let result = actor_registry1.lookup_routing(&"test-actor@node2".to_string()).await;
+        let internal_ctx = RequestContext::internal();
+        let result = actor_registry1.lookup_routing(&internal_ctx, &"test-actor@node2".to_string()).await;
 
         assert!(result.is_ok());
         match result.unwrap() {
@@ -3946,7 +4118,7 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Register a local actor
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
@@ -3994,7 +4166,7 @@ mod tests {
     async fn test_monitor_local_actor_not_found() {
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Create monitoring channel
         let (tx, _rx) = mpsc::channel(1);
@@ -4017,7 +4189,7 @@ mod tests {
     async fn test_monitor_remote_actor_node_not_connected() {
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("node1"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("node1").build());
 
         // Create monitoring channel
         let (tx, _rx) = mpsc::channel(1);
@@ -4041,7 +4213,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_notify_actor_down_no_monitors() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Notify for actor with no monitors (should not panic)
         let result = node
@@ -4057,7 +4229,7 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Register a local actor
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
@@ -4122,7 +4294,7 @@ mod tests {
     async fn test_lifecycle_event_subscription() {
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Create subscription channel
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -4158,7 +4330,7 @@ mod tests {
     async fn test_lifecycle_event_unsubscribe() {
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Create subscription channel
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -4195,22 +4367,24 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Register actor and monitor it
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox.clone(), node.service_locator());
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
@@ -4257,22 +4431,24 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
         use tokio::sync::mpsc;
 
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Register actor and monitor it
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox.clone(), node.service_locator());
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
@@ -4315,7 +4491,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_lifecycle_event_other() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Create Starting event (non-terminal event)
         let event = plexspaces_proto::ActorLifecycleEvent {
@@ -4340,7 +4516,7 @@ mod tests {
     async fn test_stats_tracking() {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
 
-        let node_arc = Arc::new(Node::new(NodeId::new("test-node"), default_node_config()));
+        let node_arc = Arc::new(NodeBuilder::new("test-node").build());
         
         // Register NodeMetricsUpdater early for tests (normally done in create_actor_context_arc)
         let metrics_updater = Arc::new(crate::service_wrappers::NodeMetricsUpdaterWrapper::new(node_arc.clone()));
@@ -4452,20 +4628,22 @@ mod tests {
     async fn test_register_actor_with_config() {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         use std::sync::Arc;
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox.clone(), node.service_locator());
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
 
         let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
 
@@ -4489,20 +4667,22 @@ mod tests {
     async fn test_register_actor_without_config() {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         use std::sync::Arc;
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox.clone(), node.service_locator());
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
 
         // Register actor without config
         let actor_registry = get_actor_registry(&node).await;
@@ -4517,20 +4697,22 @@ mod tests {
     async fn test_unregister_actor_removes_config() {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         use std::sync::Arc;
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("test-actor@test-node", mailbox.clone(), node.service_locator());
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
 
         let config = create_actor_config_with_resources(1.0, 1024 * 1024 * 256, 0, 0);
 
@@ -4560,21 +4742,22 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         use std::sync::Arc;
 
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Register first actor with resources
         let mailbox1 = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-1-{}", ulid::Ulid::new())).await.unwrap());
         let actor1_ref = ActorRef::local("actor-1@test-node", mailbox1.clone(), node.service_locator());
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper1 = Arc::new(RegularActorWrapper::new(
+        let wrapper1 = Arc::new(ActorRef::local(
             actor1_ref.id().clone(),
             mailbox1.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor1_ref.id().clone(), wrapper1, None, None, None).await;
+        let internal_ctx = plexspaces_core::RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor1_ref.id().clone(), wrapper1, None).await;
         let config1 = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
         let actor_registry = get_actor_registry(&node).await;
         actor_registry.register_actor_with_config(actor1_ref.id().clone(), Some(config1))
@@ -4586,13 +4769,14 @@ mod tests {
         let actor2_ref = ActorRef::local("actor-2@test-node", mailbox2.clone(), node.service_locator());
         let config2 = create_actor_config_with_resources(1.5, 1024 * 1024 * 256, 512 * 1024 * 1024, 1);
         // Register actor2 with MessageSender first
-        let wrapper2 = Arc::new(RegularActorWrapper::new(
+        let wrapper2 = Arc::new(ActorRef::local(
             actor2_ref.id().clone(),
             mailbox2.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor2_ref.id().clone(), wrapper2, None, None, None).await;
+        let internal_ctx = plexspaces_core::RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor2_ref.id().clone(), wrapper2, None).await;
         let actor_registry = get_actor_registry(&node).await;
         actor_registry.register_actor_with_config(actor2_ref.id().clone(), Some(config2))
             .await
@@ -4629,7 +4813,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_node_capacity_without_actors() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Calculate capacity with no actors
         let capacity = node.calculate_node_capacity().await;
@@ -4650,21 +4834,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_node_capacity_with_actor_without_resources() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Register actor without resource requirements
         let mailbox = Arc::new(Mailbox::new(plexspaces_mailbox::mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("actor-1@test-node", mailbox.clone(), node.service_locator());
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
         let mut config = plexspaces_proto::v1::actor::ActorConfig::default();
         config.resource_requirements = None; // No resource requirements
         config.config_schema_version = 1;
@@ -4686,7 +4872,7 @@ mod tests {
     async fn test_calculate_node_capacity_after_unregister() {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         use std::sync::Arc;
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Register actor with resources
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
@@ -4715,7 +4901,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_node_capacity_with_partial_resource_spec() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Create config with only CPU specified (no memory/disk)
         use plexspaces_proto::{
@@ -4747,15 +4933,17 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
         let actor_ref = ActorRef::local("actor-1@test-node", mailbox.clone(), node.service_locator());
         // Register actor with MessageSender (mailbox is internal)
-        use plexspaces_actor::RegularActorWrapper;
+        
         use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(RegularActorWrapper::new(
+        let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             mailbox.clone(),
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor(actor_ref.id().clone(), wrapper, None, None, None).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
         let actor_registry = get_actor_registry(&node).await;
         actor_registry.register_actor_with_config(actor_ref.id().clone(), Some(config))
             .await
@@ -4870,7 +5058,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_application() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         let app = Box::new(MockTestApplication::new("test-app"));
         node.register_application(app).await.unwrap();
@@ -4887,7 +5075,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_duplicate_application() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         let app1 = Box::new(MockTestApplication::new("test-app"));
         node.register_application(app1).await.unwrap();
@@ -4905,7 +5093,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_application() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let app = Box::new(MockTestApplication::new("test-app"));
         let start_called = app.start_called.clone();
@@ -4928,7 +5116,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_application_failure() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let app = Box::new(MockTestApplication::new_failing_start("test-app"));
         node.register_application(app).await.unwrap();
@@ -4950,7 +5138,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_application() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let app = Box::new(MockTestApplication::new("test-app"));
         let stop_called = app.stop_called.clone();
@@ -4976,7 +5164,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_application_failure() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let app = Box::new(MockTestApplication::new_failing_stop("test-app"));
         node.register_application(app).await.unwrap();
@@ -5001,7 +5189,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_multiple_applications() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Register and start 3 applications
         let apps = vec![
@@ -5055,13 +5243,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_application_node_trait_implementation() {
-        let node = Node::new(
-            NodeId::new("test-node"),
-            NodeConfig {
-                listen_addr: "0.0.0.0:9999".to_string(),
-                ..Default::default()
-            },
-        );
+        use crate::NodeBuilder;
+        let node = NodeBuilder::new("test-node")
+            .with_listen_address("0.0.0.0:9999")
+            .build();
 
         // Test ApplicationNode trait methods (uses trait methods, not Node methods)
         let node_ref: &dyn ApplicationNode = &node;
@@ -5071,7 +5256,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_nonexistent_application() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let result = node.start_application("nonexistent").await;
 
@@ -5082,7 +5267,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_nonexistent_application() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let result = node
             .stop_application("nonexistent", tokio::time::Duration::from_secs(5))
@@ -5095,7 +5280,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_application_lifecycle_full_cycle() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let app = Box::new(MockTestApplication::new("lifecycle-test"));
         let start_called = app.start_called.clone();
@@ -5139,7 +5324,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_with_partial_failure() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Register 2 apps: one normal, one failing to stop
         let app1 = Box::new(MockTestApplication::new("good-app")) as Box<dyn Application>;
@@ -5179,7 +5364,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_request_flag() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Initially not requested
         assert!(!node.is_shutdown_requested().await);
@@ -5200,7 +5385,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_with_no_applications() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Shutdown with no apps should succeed
         let result = node.shutdown(tokio::time::Duration::from_secs(5)).await;
@@ -5212,7 +5397,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_application_manager_accessor() {
-        let node = Node::new(NodeId::new("test-node"), default_node_config());
+        let node = NodeBuilder::new("test-node").build();
 
         // Get application manager reference
         let manager = node.application_manager();
@@ -5224,7 +5409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_start_attempts() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let app = Box::new(MockTestApplication::new("test-app"));
         node.register_application(app).await.unwrap();
@@ -5248,7 +5433,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_already_stopped_application() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         let app = Box::new(MockTestApplication::new("test-app"));
         node.register_application(app).await.unwrap();
@@ -5276,7 +5461,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_stops_all_applications() {
-        let node = Arc::new(Node::new(NodeId::new("test-node"), NodeConfig::default()));
+        let node = Arc::new(NodeBuilder::new("test-node").build());
 
         // Track which apps were stopped
         let stopped_apps = Arc::new(RwLock::new(Vec::new()));
@@ -5370,7 +5555,9 @@ impl LinkProvider for Node {
 impl ActivationProvider for Node {
     async fn is_actor_active(&self, actor_id: &ActorId) -> bool {
         // Check if actor is registered in ActorRegistry
-        let routing = self.actor_registry.lookup_routing(actor_id).await.ok().flatten();
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::internal();
+        let routing = self.actor_registry.lookup_routing(&ctx, actor_id).await.ok().flatten();
         routing.map(|r| r.is_local).unwrap_or(false)
     }
 

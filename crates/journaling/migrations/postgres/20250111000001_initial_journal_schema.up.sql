@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     -- Metadata (actor type, version, etc.)
     metadata JSONB,
 
+    -- State schema version (for migration)
+    state_schema_version INTEGER NOT NULL DEFAULT 1,
+
     PRIMARY KEY (actor_id, sequence)
 );
 

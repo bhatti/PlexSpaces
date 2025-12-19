@@ -97,7 +97,7 @@ fn create_exact_pattern(values: Vec<tuple_field::Value>) -> ProtoTuple {
 #[tokio::test]
 async fn test_write_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-1"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-1").build());
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
     // Create write request
@@ -129,7 +129,7 @@ async fn test_write_tuple_via_grpc() {
 #[tokio::test]
 async fn test_read_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-2"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-2").build());
 
     // Write tuple directly
     let tuple = InternalTuple::new(vec![
@@ -177,7 +177,7 @@ async fn test_read_tuple_via_grpc() {
 #[tokio::test]
 async fn test_take_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-3"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-3").build());
 
     let tuple = InternalTuple::new(vec![
         InternalTupleField::Integer(20),
@@ -223,7 +223,7 @@ async fn test_take_tuple_via_grpc() {
 #[tokio::test]
 async fn test_count_tuples_via_grpc() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-4"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-4").build());
 
     // Write multiple tuples
     for i in 0..5 {
@@ -260,7 +260,7 @@ async fn test_count_tuples_via_grpc() {
 #[tokio::test]
 async fn test_exists_tuples_via_grpc() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-5"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-5").build());
 
     let tuple = InternalTuple::new(vec![
         InternalTupleField::String("config".to_string()),
@@ -309,7 +309,7 @@ async fn test_exists_tuples_via_grpc() {
 #[tokio::test]
 async fn test_read_with_wildcard_pattern() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-6"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-6").build());
 
     // Write tuples
     node.tuplespace()
@@ -368,7 +368,7 @@ async fn test_read_with_wildcard_pattern() {
 #[tokio::test]
 async fn test_read_no_match() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-7"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-7").build());
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -398,7 +398,7 @@ async fn test_read_no_match() {
 #[tokio::test]
 async fn test_write_multiple_tuples() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-8"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-8").build());
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -429,7 +429,7 @@ async fn test_write_multiple_tuples() {
 #[tokio::test]
 async fn test_write_with_missing_template() {
     // Setup
-    let node = Arc::new(Node::new(NodeId::new("test-node-9"), NodeConfig::default()));
+    let node = Arc::new(NodeBuilder::new("test-node-9").build());
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -457,10 +457,7 @@ async fn test_write_with_missing_template() {
 #[tokio::test]
 async fn test_take_with_missing_template() {
     // Setup
-    let node = Arc::new(Node::new(
-        NodeId::new("test-node-10a"),
-        NodeConfig::default(),
-    ));
+    let node = Arc::new(NodeBuilder::new("test-node-10a").build());
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -488,10 +485,7 @@ async fn test_take_with_missing_template() {
 #[tokio::test]
 async fn test_count_with_missing_template() {
     // Setup
-    let node = Arc::new(Node::new(
-        NodeId::new("test-node-10b"),
-        NodeConfig::default(),
-    ));
+    let node = Arc::new(NodeBuilder::new("test-node-10b").build());
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -515,10 +509,7 @@ async fn test_count_with_missing_template() {
 #[tokio::test]
 async fn test_exists_with_missing_template() {
     // Setup
-    let node = Arc::new(Node::new(
-        NodeId::new("test-node-10c"),
-        NodeConfig::default(),
-    ));
+    let node = Arc::new(NodeBuilder::new("test-node-10c").build());
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -541,10 +532,7 @@ async fn test_exists_with_missing_template() {
 #[tokio::test]
 async fn test_clear_tuplespace() {
     // Setup
-    let node = Arc::new(Node::new(
-        NodeId::new("test-node-10"),
-        NodeConfig::default(),
-    ));
+    let node = Arc::new(NodeBuilder::new("test-node-10").build());
 
     // Write tuples
     for i in 0..3 {

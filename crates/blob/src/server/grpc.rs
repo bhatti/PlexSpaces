@@ -50,32 +50,42 @@ impl BlobServiceImpl {
 
     /// Extract RequestContext from gRPC request metadata
     /// 
+    /// ## Security Note
+    /// When JWT authentication is enabled, the AuthInterceptor removes any user-provided
+    /// x-tenant-id, x-user-id, and x-user-roles headers and sets them ONLY from JWT claims.
+    /// This prevents header injection attacks. These headers must come from JWT, not from client.
+    /// 
     /// Extracts tenant_id from:
-    /// 1. `x-tenant-id` header (set by JWT middleware)
-    /// 2. `tenant_id` in request labels (fallback)
+    /// 1. `x-tenant-id` header (set by JWT middleware, NOT from client)
+    /// 2. `tenant_id` in request labels (fallback, only if auth disabled)
     /// 3. Error if not found (production should always have JWT)
     fn extract_context<T>(request: &Request<T>) -> Result<RequestContext, Status> {
         let metadata = request.metadata();
         
-        // Extract tenant_id from headers (set by JWT middleware)
+        // Extract tenant_id from headers (set by JWT middleware, not from client)
+        // AuthInterceptor ensures these headers come from JWT, not user input
         let tenant_id = metadata.get("x-tenant-id")
             .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())  // Reject empty strings
             .or_else(|| {
-                // Fallback: check request labels (for backward compatibility)
+                // Fallback: check request labels (for backward compatibility when auth disabled)
                 // This is the HTTP API boundary exception
-                None  // For now, require x-tenant-id header
+                None  // For now, require x-tenant-id header from JWT
             })
             .ok_or_else(|| Status::unauthenticated("Missing x-tenant-id header. JWT authentication required."))?;
         
+        // namespace is required - must be provided in header or use default from config
         let namespace = metadata.get("x-namespace")
             .and_then(|v| v.to_str().ok())
-            .unwrap_or("default");
+            .filter(|s| !s.is_empty())
+            .unwrap_or(""); // Default namespace (can be empty)
         
+        // Extract user_id from headers (set by JWT middleware, not from client)
         let user_id = metadata.get("x-user-id")
-            .and_then(|v| v.to_str().ok());
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty());
         
-        let mut ctx = RequestContext::new(tenant_id.to_string())
-            .with_namespace(namespace.to_string());
+        let mut ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         
         if let Some(uid) = user_id {
             ctx = ctx.with_user_id(uid.to_string());

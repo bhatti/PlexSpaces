@@ -30,6 +30,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }
+plexspaces-node = { path = "../node" }
 
 [features]
 tracing = ["plexspaces-core/tracing"]

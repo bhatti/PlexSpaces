@@ -302,10 +302,24 @@ pub struct VirtualActorFacet {
 
 **Example**:
 ```rust
-let actor = ActorBuilder::new("user-123@node1".to_string())
-    .with_behavior(UserSession {})
-    .with_facet(VirtualActorFacet::new(Duration::from_secs(300)))
-    .build()?;
+use plexspaces_journaling::VirtualActorFacet;
+
+let virtual_facet = Box::new(VirtualActorFacet::new(
+    serde_json::json!({
+        "idle_timeout_seconds": 300,
+    }),
+    100, // priority
+));
+
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "UserSession",
+    vec![],
+    None,
+    std::collections::HashMap::new(),
+    vec![virtual_facet], // facets
+).await?;
 ```
 
 #### DurabilityFacet
@@ -338,16 +352,28 @@ pub struct DurabilityFacet {
 
 **Example**:
 ```rust
+use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
+
 let storage = SqliteJournalStorage::new(":memory:").await?;
-let durability = DurabilityFacet::new(
-    Arc::new(storage),
-    DurabilityConfig {
-        checkpoint_interval: 100,
-        replay_on_activation: true,
-        ..Default::default()
-    }
-);
-actor.attach_facet(Box::new(durability), 50, serde_json::json!({})).await?;
+let durability_facet = Box::new(DurabilityFacet::new(
+    storage,
+    serde_json::json!({
+        "checkpoint_interval": 100,
+        "replay_on_activation": true,
+    }),
+    50, // priority
+));
+
+// Spawn actor with durability facet
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "MyActor",
+    vec![],
+    None,
+    std::collections::HashMap::new(),
+    vec![durability_facet], // facets
+).await?;
 ```
 
 #### MobilityFacet
@@ -502,10 +528,22 @@ pub struct TimerFacet {
 
 **Example**:
 ```rust
-let timer_facet = TimerFacet::new();
-actor.attach_facet(Box::new(timer_facet), 300, serde_json::json!({})).await?;
+use plexspaces_journaling::TimerFacet;
 
-// Schedule periodic timer
+let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 75));
+
+// Spawn actor with timer facet
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "MyActor",
+    vec![],
+    None,
+    std::collections::HashMap::new(),
+    vec![timer_facet], // facets
+).await?;
+
+// Schedule periodic timer (in actor code)
 ctx.facet_service()
     .get_facet::<TimerFacet>("timer")?
     .schedule_periodic(
@@ -740,19 +778,37 @@ ctx.facet_service()
 #### Attaching Facets
 
 ```rust
-// At actor creation
-let actor = ActorBuilder::new("actor@node1".to_string())
-    .with_behavior(MyBehavior {})
-    .with_facet(VirtualActorFacet::new())
-    .with_facet(DurabilityFacet::new(storage, config))
-    .build()?;
+use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, SqliteJournalStorage};
 
-// At runtime
-actor.attach_facet(
-    Box::new(MetricsFacet::new()),
-    800, // Priority
-    serde_json::json!({"namespace": "myapp"})
+// At actor creation (recommended)
+let storage = SqliteJournalStorage::new(":memory:").await?;
+let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 100));
+let durability_facet = Box::new(DurabilityFacet::new(
+    storage,
+    serde_json::json!({
+        "checkpoint_interval": 100,
+        "replay_on_activation": true,
+    }),
+    50,
+));
+
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "MyActor",
+    vec![],
+    None,
+    std::collections::HashMap::new(),
+    vec![virtual_facet, durability_facet], // facets
 ).await?;
+
+// At runtime (if needed)
+use plexspaces_facet::capabilities::MetricsFacet;
+let metrics_facet = Box::new(MetricsFacet::new(
+    serde_json::json!({"namespace": "myapp"}),
+    800, // priority
+));
+actor.attach_facet(metrics_facet).await?;
 ```
 
 #### Detaching Facets

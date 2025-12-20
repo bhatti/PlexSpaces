@@ -76,9 +76,9 @@ async fn test_facet_service_get_facet_normal_actor() {
         .await;
     
     // Attach TimerFacet
-    let timer_facet = Box::new(TimerFacet::new());
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(timer_facet, 50, serde_json::json!({}))
+        .attach_facet(timer_facet)
         .await
         .unwrap();
     
@@ -117,16 +117,16 @@ async fn test_facet_service_get_facet_virtual_actor() {
     
     // Attach VirtualActorFacet (makes it a virtual actor)
     use plexspaces_journaling::VirtualActorFacet;
-    let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({})));
+    let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(virtual_facet, 50, serde_json::json!({}))
+        .attach_facet(virtual_facet)
         .await
         .unwrap();
     
     // Attach TimerFacet
-    let timer_facet = Box::new(TimerFacet::new());
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(timer_facet, 50, serde_json::json!({}))
+        .attach_facet(timer_facet)
         .await
         .unwrap();
     
@@ -188,9 +188,9 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
         .await;
     
     // Attach TimerFacet
-    let timer_facet = Box::new(TimerFacet::new());
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(timer_facet, 50, serde_json::json!({}))
+        .attach_facet(timer_facet)
         .await
         .unwrap();
     
@@ -227,9 +227,9 @@ async fn test_facet_service_with_sqlite_backend() {
         .await;
     
     // Attach TimerFacet
-    let timer_facet = Box::new(TimerFacet::new());
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(timer_facet, 50, serde_json::json!({}))
+        .attach_facet(timer_facet)
         .await
         .unwrap();
     

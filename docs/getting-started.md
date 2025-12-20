@@ -89,17 +89,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = PlexSpacesNode::new("node1".to_string()).await?;
     
     // Spawn a counter actor using ActorFactory
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
-    use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     
     let actor_id = "counter@node1".to_string();
-    let behavior = Box::new(Counter { count: 0 });
-    let mut mailbox_config = mailbox_config_default();
-    mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
-    let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await?;
-    let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(), None);
-    
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| "ActorFactory not found")?;
     let ctx = plexspaces_core::RequestContext::internal();
@@ -110,10 +103,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets (empty for simple actor)
     ).await?;
     
-    // Get actor reference
-    let actor_ref = plexspaces_core::ActorRef::new(actor_id.clone())?;
+    // Get actor reference (location-transparent)
+    let actor_ref = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
+        node.service_locator().clone(),
+    );
     
     // Send messages
     let reply1 = actor_ref.ask(
@@ -227,23 +225,54 @@ Facets add dynamic capabilities to actors:
 ### Durable Actor
 
 ```rust
-use plexspaces_facet::DurabilityFacet;
+use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
 
-let actor = ActorBuilder::new("durable-counter@node1".to_string())
-    .with_behavior(Counter { count: 0 })
-    .with_facet(DurabilityFacet::new())  // Automatic persistence
-    .build()?;
+// Create storage and durability facet
+let storage = SqliteJournalStorage::new(":memory:").await?;
+let durability_facet = Box::new(DurabilityFacet::new(
+    storage,
+    serde_json::json!({
+        "checkpoint_interval": 100,
+        "replay_on_activation": true,
+    }),
+    50, // priority
+));
+
+// Spawn actor with facets
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "Counter",
+    vec![],
+    None,
+    std::collections::HashMap::new(),
+    vec![durability_facet], // facets
+).await?;
 ```
 
 ### Virtual Actor
 
 ```rust
-use plexspaces_facet::VirtualActorFacet;
+use plexspaces_journaling::VirtualActorFacet;
 
-let actor = ActorBuilder::new("virtual-counter@node1".to_string())
-    .with_behavior(Counter { count: 0 })
-    .with_facet(VirtualActorFacet::new())  // Auto activation/deactivation
-    .build()?;
+// Create virtual actor facet
+let virtual_facet = Box::new(VirtualActorFacet::new(
+    serde_json::json!({
+        "idle_timeout_seconds": 300,
+    }),
+    100, // priority
+));
+
+// Spawn actor with facets
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "Counter",
+    vec![],
+    None,
+    std::collections::HashMap::new(),
+    vec![virtual_facet], // facets
+).await?;
 ```
 
 ### Workflow

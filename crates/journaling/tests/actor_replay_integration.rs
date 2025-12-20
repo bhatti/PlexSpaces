@@ -101,8 +101,17 @@ mod actor_integration_tests {
         );
 
         // Attach DurabilityFacet (this will set ReplayHandler automatically)
-        let facet = DurabilityFacet::new(storage.clone(), config.clone());
-        actor.attach_facet(Box::new(facet), 0, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let facet = DurabilityFacet::new(storage.clone(), config_value, 50);
+        actor.attach_facet(Box::new(facet)).await.unwrap();
 
         // Start actor
         actor.start().await.unwrap();
@@ -142,8 +151,17 @@ mod actor_integration_tests {
         );
 
         // Attach DurabilityFacet again (ReplayHandler will be set, replay will happen)
-        let facet2 = DurabilityFacet::new(storage.clone(), config);
-        actor2.attach_facet(Box::new(facet2), 0, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let facet2 = DurabilityFacet::new(storage.clone(), config_value, 50);
+        actor2.attach_facet(Box::new(facet2)).await.unwrap();
 
         // Start actor (replay happens in on_attach)
         actor2.start().await.unwrap();
@@ -192,8 +210,17 @@ mod actor_integration_tests {
             None,
         );
 
-        let facet = DurabilityFacet::new(storage.clone(), config.clone());
-        actor.attach_facet(Box::new(facet), 0, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let facet = DurabilityFacet::new(storage.clone(), config_value, 50);
+        actor.attach_facet(Box::new(facet)).await.unwrap();
         actor.start().await.unwrap();
 
         // Process 10 messages
@@ -243,8 +270,17 @@ mod actor_integration_tests {
             None,
         );
 
-        let facet2 = DurabilityFacet::new(storage.clone(), config);
-        actor2.attach_facet(Box::new(facet2), 0, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let facet2 = DurabilityFacet::new(storage.clone(), config_value, 50);
+        actor2.attach_facet(Box::new(facet2)).await.unwrap();
         actor2.start().await.unwrap();
 
         // Verify checkpoint exists (may be higher due to automatic checkpointing)
@@ -293,7 +329,16 @@ mod actor_integration_tests {
             None,
         );
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let mut facet = DurabilityFacet::new(storage.clone(), config_value, 50);
         
         // Set StateLoader for automatic state loading
         let state_loader = CounterStateLoader {
@@ -301,7 +346,7 @@ mod actor_integration_tests {
         };
         facet.set_state_loader(Box::new(state_loader)).await;
 
-        actor.attach_facet(Box::new(facet), 0, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        actor.attach_facet(Box::new(facet)).await.unwrap();
         actor.start().await.unwrap();
 
         // Process messages
@@ -343,13 +388,22 @@ mod actor_integration_tests {
             None,
         );
 
-        let mut facet2 = DurabilityFacet::new(storage.clone(), config);
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let mut facet2 = DurabilityFacet::new(storage.clone(), config_value, 50);
         let state_loader2 = CounterStateLoader {
             counter: Arc::clone(&counter2),
         };
         facet2.set_state_loader(Box::new(state_loader2)).await;
 
-        actor2.attach_facet(Box::new(facet2), 0, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        actor2.attach_facet(Box::new(facet2)).await.unwrap();
         actor2.start().await.unwrap();
 
         // Verify state was automatically restored

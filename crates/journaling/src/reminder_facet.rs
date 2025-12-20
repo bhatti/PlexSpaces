@@ -96,6 +96,12 @@ pub use plexspaces_proto::timer::v1::ReminderFired;
 /// ## Thread Safety
 /// Uses Arc<RwLock<>> for concurrent access to reminder state.
 pub struct ReminderFacet<S: JournalStorage> {
+    /// Facet configuration (immutable)
+    config: Value,
+    
+    /// Facet priority (immutable)
+    priority: i32,
+    
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
     
@@ -121,16 +127,23 @@ pub struct ReminderFacet<S: JournalStorage> {
     activation_provider: Option<Arc<dyn ActivationProvider>>,
 }
 
+/// Default priority for ReminderFacet
+pub const REMINDER_FACET_DEFAULT_PRIORITY: i32 = 50;
+
 impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
     /// Create a new reminder facet
     ///
     /// ## Arguments
     /// * `storage` - Journal storage backend for persistence
+    /// * `config` - Facet configuration (can be empty object `{}` for defaults)
+    /// * `priority` - Facet priority (default: 50)
     ///
     /// ## Returns
     /// New ReminderFacet ready to attach to an actor
-    pub fn new(storage: Arc<S>) -> Self {
+    pub fn new(storage: Arc<S>, config: Value, priority: i32) -> Self {
         ReminderFacet {
+            config,
+            priority,
             actor_id: Arc::new(RwLock::new(None)),
             actor_ref: Arc::new(RwLock::new(None)),
             actor_service: Arc::new(RwLock::new(None)),
@@ -147,6 +160,8 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
     /// ## Arguments
     /// * `storage` - Journal storage backend for persistence
     /// * `activation_provider` - Provider for activating virtual actors
+    /// * `config` - Facet configuration
+    /// * `priority` - Facet priority
     ///
     /// ## Returns
     /// New ReminderFacet ready to attach to an actor
@@ -157,8 +172,12 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
     pub fn with_activation_provider(
         storage: Arc<S>,
         activation_provider: Arc<dyn ActivationProvider>,
+        config: Value,
+        priority: i32,
     ) -> Self {
         ReminderFacet {
+            config,
+            priority,
             actor_id: Arc::new(RwLock::new(None)),
             actor_ref: Arc::new(RwLock::new(None)),
             actor_service: Arc::new(RwLock::new(None)),
@@ -524,6 +543,14 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
         // TODO: Serialize reminder state for persistence (if needed)
         Ok(Value::Null)
     }
+    
+    fn get_config(&self) -> Value {
+        self.config.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 /// Reminder errors
@@ -568,7 +595,7 @@ mod tests {
     
     fn create_test_facet() -> (ReminderFacet<MemoryJournalStorage>, ActorRef) {
         let storage = Arc::new(MemoryJournalStorage::new());
-        let facet = ReminderFacet::new(storage);
+        let facet = ReminderFacet::new(storage, serde_json::json!({}), 75);
         
         let actor_ref = ActorRef::new("test-actor@test-node".to_string()).unwrap();
         

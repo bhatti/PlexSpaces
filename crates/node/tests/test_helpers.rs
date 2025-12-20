@@ -306,6 +306,7 @@ pub async fn spawn_actor_helper(
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets (empty - facets should be attached before spawning)
     ).await
         .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor via ActorFactory: {}", e)))?;
     

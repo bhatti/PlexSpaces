@@ -161,45 +161,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Creating order workflow actor (Cadence-style workflow orchestration)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    let behavior = Box::new(OrderWorkflowActor::new());
-    let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
-        .build()
-        .await;
-    
-    // Attach DurabilityFacet (Cadence workflows are durable)
+    // Create DurabilityFacet (Cadence workflows are durable)
     let storage = MemoryJournalStorage::new();
-    let durability_config = DurabilityConfig::default();
-    let durability_facet = Box::new(DurabilityFacet::new(storage, durability_config));
-    actor
-        .attach_facet(durability_facet, 50, serde_json::json!({}))
-        .await?;
+    let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
     
-    // Spawn using ActorFactory
+    // Spawn using ActorFactory with facets
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
-    let actor_id = actor.id().clone();
-    let _message_sender = let ctx = plexspaces_core::RequestContext::internal();
-            actor_factory.spawn_actor(
-                &ctx,
-                &actor.id().clone(),
-                "GenServer", // actor_type
-                vec![], // initial_state
-                None, // config
-                std::collections::HashMap::new(), // labels
-            ).await
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "Workflow",
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![durability_facet], // facets
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    let actor_ref = plexspaces_core::ActorRef::new(actor_id)
-        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
-
-    let mailbox = node.actor_registry()
-        .lookup_mailbox(actor_ref.id())
-        .await?
-        .ok_or("Actor not found in registry")?;
     
-    let workflow = plexspaces_actor::ActorRef::local(
-        actor_ref.id().clone(),
-        mailbox,
+    // Create ActorRef directly - no need to access mailbox
+    let workflow = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
         node.service_locator().clone(),
     );
 
@@ -248,36 +234,31 @@ mod tests {
             .build();
 
         let actor_id: ActorId = "order-workflow/test-1@test-node".to_string();
-        let behavior = Box::new(OrderWorkflowActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await;
-        
+        // Create DurabilityFacet
         let storage = MemoryJournalStorage::new();
-        let durability_facet = Box::new(DurabilityFacet::new(storage, DurabilityConfig::default()));
-        actor.attach_facet(durability_facet, 50, serde_json::json!({})).await.unwrap();
+        let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
         
-        // Spawn using ActorFactory
-        // Note: Since actor has DurabilityFacet attached, we use spawn_built_actor
+        // Spawn using ActorFactory with facets
         let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
             .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
-        let actor_id = actor.id().clone();
-        let ctx = plexspaces_core::RequestContext::internal();
-        let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("Workflow".to_string())).await
-            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
-        let actor_ref = plexspaces_core::ActorRef::new(actor_id)
-            .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();
-
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(actor_ref.id())
-            .await
-            .unwrap()
-            .unwrap();
         
-        let workflow = plexspaces_actor::ActorRef::local(
-            actor_ref.id().clone(),
-            mailbox,
+        // Spawn using ActorFactory with facets
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "Workflow",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![durability_facet], // facets
+        ).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
+        
+        // Create ActorRef directly - no need to access mailbox
+        let workflow = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
 

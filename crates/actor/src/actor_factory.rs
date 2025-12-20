@@ -78,6 +78,7 @@ pub trait ActorFactory: Send + Sync {
         initial_state: Vec<u8>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: HashMap<String, String>,
+        facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn plexspaces_core::MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
     
     /// Spawn a pre-built actor

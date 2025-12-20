@@ -17,6 +17,19 @@ mod sqlite_tests {
         SqliteJournalStorage::new(":memory:").await.unwrap()
     }
 
+    /// Helper to convert DurabilityConfig to Value
+    fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
+        serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        })
+    }
+
     /// Test: Exact scenario from test_replay_missing_checkpoint
     /// Process 5 messages, detach, reattach with replay, verify entries
     #[tokio::test]
@@ -73,7 +86,7 @@ mod sqlite_tests {
         );
 
         // Create new facet with same config
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
 
         // Attach should trigger replay
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -149,7 +162,7 @@ mod sqlite_tests {
         facet.on_detach(actor_id).await.unwrap();
 
         // Create new facet
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify entries still exist after restart
@@ -214,7 +227,7 @@ mod sqlite_tests {
         assert_eq!(entries2.len(), 6, "Should still have 6 entries after detach");
 
         // Create new facet and reattach
-        let mut facet2 = DurabilityFacet::new(storage.clone(), config);
+        let mut facet2 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet2.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify entries still exist

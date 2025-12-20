@@ -132,11 +132,30 @@ impl GenServerBehavior for Counter {
 ### Example
 
 ```rust
-let actor = ActorBuilder::new("actor@node1".to_string())
-    .with_behavior(MyBehavior {})
-    .with_facet(VirtualActorFacet::new())  // Auto activation/deactivation
-    .with_facet(DurabilityFacet::new(storage, config))  // Automatic persistence
-    .build()?;
+use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, SqliteJournalStorage};
+
+// Create facets
+let storage = SqliteJournalStorage::new(":memory:").await?;
+let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 100));
+let durability_facet = Box::new(DurabilityFacet::new(
+    storage,
+    serde_json::json!({
+        "checkpoint_interval": 100,
+        "replay_on_activation": true,
+    }),
+    50,
+));
+
+// Spawn actor with facets
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "MyActor",
+    vec![],
+    None,
+    std::collections::HashMap::new(),
+    vec![virtual_facet, durability_facet], // facets
+).await?;
 ```
 
 ## TupleSpace
@@ -278,20 +297,28 @@ let reply = actor_ref.ask(
 ### Example
 
 ```rust
-let storage = SqliteJournalStorage::new(":memory:").await?;
-let durability = DurabilityFacet::new(
-    Arc::new(storage),
-    DurabilityConfig {
-        checkpoint_interval: 100,
-        replay_on_activation: true,
-        ..Default::default()
-    }
-);
+use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
 
-let actor = ActorBuilder::new("durable-actor@node1".to_string())
-    .with_behavior(MyBehavior {})
-    .with_facet(durability)
-    .build()?;
+let storage = SqliteJournalStorage::new(":memory:").await?;
+let durability_facet = Box::new(DurabilityFacet::new(
+    storage,
+    serde_json::json!({
+        "checkpoint_interval": 100,
+        "replay_on_activation": true,
+    }),
+    50, // priority
+));
+
+// Spawn actor with durability facet
+let _message_sender = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "MyActor",
+    vec![],
+    None,
+    std::collections::HashMap::new(),
+    vec![durability_facet], // facets
+).await?;
 ```
 
 ## Key Design Principles

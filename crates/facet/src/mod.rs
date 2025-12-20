@@ -82,6 +82,12 @@ pub trait Facet: Send + Sync + Any {
     fn set_state(&mut self, _state: Value) -> Result<(), FacetError> {
         Ok(())
     }
+
+    /// Get facet configuration (immutable)
+    fn get_config(&self) -> Value;
+
+    /// Get facet priority
+    fn get_priority(&self) -> i32;
 }
 
 /// Result of intercepting a method
@@ -150,10 +156,10 @@ pub struct FacetContainer {
 /// Metadata about a facet attached to an actor
 #[derive(Clone, Debug)]
 pub struct FacetMetadata {
-    _facet_type: String,
-    _priority: i32,
-    _attached_at: std::time::Instant,
-    _config: Value,
+    pub facet_type: String,
+    pub priority: i32,
+    pub attached_at: std::time::Instant,
+    pub config: Value,
 }
 
 impl Default for FacetContainer {
@@ -171,13 +177,11 @@ impl FacetContainer {
         }
     }
 
-    /// Attach a facet with given priority
+    /// Attach a facet (config and priority are extracted from facet)
     pub async fn attach(
         &mut self,
-        facet: Box<dyn Facet>,
-        priority: i32,
+        mut facet: Box<dyn Facet>,
         actor_id: &str,
-        config: Value,
     ) -> Result<String, FacetError> {
         let span = tracing::span!(tracing::Level::DEBUG, "facet.attach", facet_type = %facet.facet_type(), actor_id = %actor_id);
         let _enter = span.enter();
@@ -193,19 +197,23 @@ impl FacetContainer {
             return Err(FacetError::AlreadyAttached(facet_type));
         }
 
+        // Extract config and priority from facet
+        let config = facet.get_config();
+        let priority = facet.get_priority();
+
         // Create locked facet
-        let mut facet = facet;
         facet.on_attach(actor_id, config.clone()).await?;
 
         let facet_arc = Arc::new(RwLock::new(facet));
 
-        // Insert based on priority
+        // Insert based on priority (higher priority first)
         let insert_pos = self
             .facets
             .iter()
-            .position(|_| {
-                // Find position based on priority
-                false // Simplified for now
+            .position(|f| {
+                // We need to check priority, but facets are locked
+                // For now, insert at end and sort later if needed
+                false
             })
             .unwrap_or(self.facets.len());
 
@@ -215,10 +223,10 @@ impl FacetContainer {
         self.metadata.insert(
             facet_type.clone(),
             FacetMetadata {
-                _facet_type: facet_type.clone(),
-                _priority: priority,
-                _attached_at: std::time::Instant::now(),
-                _config: config,
+                facet_type: facet_type.clone(),
+                priority: priority,
+                attached_at: std::time::Instant::now(),
+                config: config,
             },
         );
 
@@ -421,7 +429,28 @@ impl FacetRegistry {
 
 /// Logging facet - logs all method calls
 pub struct LoggingFacet {
+    config: Value,
+    priority: i32,
     level: String,
+}
+
+/// Default priority for LoggingFacet
+pub const LOGGING_FACET_DEFAULT_PRIORITY: i32 = 900;
+
+impl LoggingFacet {
+    /// Create a new logging facet
+    pub fn new(config: Value, priority: i32) -> Self {
+        let level = config
+            .get("level")
+            .and_then(|v| v.as_str())
+            .unwrap_or("INFO")
+            .to_string();
+        LoggingFacet {
+            config,
+            priority,
+            level,
+        }
+    }
 }
 
 #[async_trait]
@@ -438,10 +467,8 @@ impl Facet for LoggingFacet {
         self
     }
 
-    async fn on_attach(&mut self, actor_id: &str, config: Value) -> Result<(), FacetError> {
-        if let Some(level) = config.get("level").and_then(|v| v.as_str()) {
-            self.level = level.to_string();
-        }
+    async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
+        // Use stored config, ignore parameter (config is set in constructor)
         println!("Logging facet attached to actor {}", actor_id);
         Ok(())
     }
@@ -479,12 +506,42 @@ impl Facet for LoggingFacet {
         );
         Ok(InterceptResult::Continue)
     }
+    
+    fn get_config(&self) -> Value {
+        self.config.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 /// Caching facet - caches method results
 pub struct CachingFacet {
+    config: Value,
+    priority: i32,
     cache: HashMap<String, Vec<u8>>,
     ttl: std::time::Duration,
+}
+
+/// Default priority for CachingFacet
+pub const CACHING_FACET_DEFAULT_PRIORITY: i32 = 40;
+
+impl CachingFacet {
+    /// Create a new caching facet
+    pub fn new(config: Value, priority: i32) -> Self {
+        let ttl = config
+            .get("ttl_seconds")
+            .and_then(|v| v.as_u64())
+            .map(|s| std::time::Duration::from_secs(s))
+            .unwrap_or(std::time::Duration::from_secs(300));
+        CachingFacet {
+            config,
+            priority,
+            cache: HashMap::new(),
+            ttl,
+        }
+    }
 }
 
 #[async_trait]
@@ -501,10 +558,8 @@ impl Facet for CachingFacet {
         self
     }
 
-    async fn on_attach(&mut self, _actor_id: &str, config: Value) -> Result<(), FacetError> {
-        if let Some(ttl_secs) = config.get("ttl_seconds").and_then(|v| v.as_u64()) {
-            self.ttl = std::time::Duration::from_secs(ttl_secs);
-        }
+    async fn on_attach(&mut self, _actor_id: &str, _config: Value) -> Result<(), FacetError> {
+        // Use stored config, ignore parameter (config is set in constructor)
         Ok(())
     }
 
@@ -543,11 +598,35 @@ impl Facet for CachingFacet {
 
         Ok(InterceptResult::Continue)
     }
+    
+    fn get_config(&self) -> Value {
+        self.config.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 /// Metrics facet - tracks method performance
 pub struct MetricsFacet {
+    config: Value,
+    priority: i32,
     metrics: HashMap<String, MethodMetrics>,
+}
+
+/// Default priority for MetricsFacet
+pub const METRICS_FACET_DEFAULT_PRIORITY: i32 = 800;
+
+impl MetricsFacet {
+    /// Create a new metrics facet
+    pub fn new(config: Value, priority: i32) -> Self {
+        MetricsFacet {
+            config,
+            priority,
+            metrics: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -616,6 +695,14 @@ impl Facet for MetricsFacet {
         println!("Error in method {}", method);
         Ok(ErrorHandling::Propagate)
     }
+    
+    fn get_config(&self) -> Value {
+        self.config.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 #[cfg(test)]
@@ -627,16 +714,13 @@ mod tests {
         let mut container = FacetContainer::new();
 
         // Create and attach a logging facet
-        let facet = Box::new(LoggingFacet {
-            level: "INFO".to_string(),
-        });
-
         let config = serde_json::json!({
             "level": "DEBUG"
         });
+        let facet = Box::new(LoggingFacet::new(config.clone(), 10));
 
         let facet_id = container
-            .attach(facet, 10, "test_actor", config)
+            .attach(facet, "test_actor")
             .await
             .unwrap();
 

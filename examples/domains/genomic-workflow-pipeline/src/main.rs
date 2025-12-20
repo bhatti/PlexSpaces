@@ -129,6 +129,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "processor": "qc",
                     "description": "Filter low-quality sequence reads"
                 }),
+                next: None,
+                on_error: None,
+                retry_policy: None,
             },
             Step {
                 id: "alignment".to_string(),
@@ -139,6 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "processor": "alignment",
                     "description": "Map reads to reference genome (hg38)"
                 }),
+                next: None,
+                on_error: None,
+                retry_policy: None,
             },
             Step {
                 id: "variant-calling".to_string(),
@@ -149,8 +155,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "processor": "variant-calling",
                     "description": "Identify genetic variations"
                 }),
+                next: None,
+                on_error: None,
+                retry_policy: None,
             },
         ],
+        timeout: None,
+        retry_policy: None,
     };
 
     storage.save_definition(&definition).await?;

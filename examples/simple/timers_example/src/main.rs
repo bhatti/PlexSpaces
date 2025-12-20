@@ -213,40 +213,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = NodeBuilder::new("timer-node")
         .build();
 
-    // Create actor with behavior
-    // Configure mailbox with larger capacity to handle timer messages
-    let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.capacity = 1000; // Large enough for timer messages
-    
-    let behavior = Box::new(TimerBehavior::new());
-    let actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("timer-actor@local"))
-        .with_mailbox_config(mailbox_config)
-        .build()
-        .await;
+    // Create TimerFacet with config and priority
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
 
-    // Attach TimerFacet to actor (explicit - A3: explicit facet attachment)
-    let timer_facet = Box::new(TimerFacet::new());
-    let facet_config = serde_json::json!({});
-    actor
-        .attach_facet(timer_facet, 50, facet_config)
-        .await
-        .map_err(|e| format!("Failed to attach TimerFacet: {}", e))?;
-
-    // Spawn using ActorFactory with spawn_actor
-    // Note: TimerFacet can be attached after spawning, but for simplicity we attach before
-    // and use spawn_built_actor. For cases without facets, use spawn_actor directly.
+    // Spawn using ActorFactory with facets
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
-    let actor_id = actor.id().clone();
+    let actor_id = ActorId::from("timer-actor@local");
     let ctx = plexspaces_core::RequestContext::internal();
-    // Since we have TimerFacet attached, use spawn_built_actor
-    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer",
+        vec![], // initial_state
+        None, // config (mailbox config can be set here if needed)
+        std::collections::HashMap::new(), // labels
+        vec![timer_facet], // facets
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    let actor_ref = plexspaces_core::ActorRef::new(actor_id)
-        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
+    
+    // Create ActorRef directly - no need to access mailbox
+    let actor_ref = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
+        node.service_locator().clone(),
+    );
     info!("✅ Actor spawned: {}", actor_ref.id());
     info!("");
 

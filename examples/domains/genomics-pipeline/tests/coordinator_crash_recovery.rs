@@ -179,11 +179,17 @@ impl TestEnvironment {
     async fn read_metrics(&self, sample_id: &str) -> genomics_pipeline::metrics::WorkflowMetrics {
         // TODO: Read actual metrics from journal
         use genomics_pipeline::metrics::WorkflowMetrics;
-        let mut metrics = WorkflowMetrics::new(sample_id.to_string());
-        metrics.compute_duration_ms = 1000;
-        metrics.coordinate_duration_ms = 50;
-        metrics.finalize();
-        metrics
+        WorkflowMetrics {
+            workflow_id: sample_id.to_string(),
+            compute_duration_ms: 1000,
+            coordinate_duration_ms: 50,
+            message_count: 0,
+            barrier_count: 0,
+            total_duration_ms: 1050,
+            granularity_ratio: 20.0,
+            efficiency: 0.95,
+            step_metrics: vec![],
+        }
     }
 
     async fn shutdown(&self) {

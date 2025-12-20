@@ -13,11 +13,12 @@
 use order_processing::OrderProcessorBehavior;
 use order_processing::actors::order_processor::OrderMessage;
 use order_processing::types::OrderItem;
-use plexspaces_actor::ActorBuilder;
-use plexspaces_core::Actor;
+use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use plexspaces_core::{Actor, RequestContext};
 use plexspaces_mailbox::Message;
 use plexspaces_node::{ConfigBootstrap, NodeBuilder};
 use serde::Deserialize;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
 
@@ -30,7 +31,7 @@ struct AppConfig {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter("info")
@@ -76,10 +77,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🎭 Creating order processor actor...");
     let behavior = Box::new(OrderProcessorBehavior::new());
     let ctx = plexspaces_core::RequestContext::internal();
-    let actor_ref = ActorBuilder::new(behavior)
-        .with_name("order-processor")
-        .spawn(&ctx, node.service_locator().clone())
-        .await?;
+    let actor_id = format!("order-processor@{}", node.id().as_str());
+    let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| "ActorFactory not found".to_string())?;
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "Workflow", // actor_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![], // facets
+    ).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let actor_ref = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
+        node.service_locator().clone(),
+    );
     
     let actor_id = actor_ref.id();
     info!("✅ Actor created: {}", actor_id);

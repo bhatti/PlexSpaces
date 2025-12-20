@@ -60,7 +60,16 @@ mod tests {
             backend_config: None,
         };
         
-        DurabilityFacet::new(storage, config)
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        DurabilityFacet::new(storage, config_value, 50)
     }
 
     #[tokio::test]

@@ -16,6 +16,19 @@ mod sqlite_tests {
         SqliteJournalStorage::new(":memory:").await.unwrap()
     }
 
+    /// Helper to convert DurabilityConfig to Value
+    fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
+        serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        })
+    }
+
     /// Test 1: Recovery from checkpoint with no new entries
     ///
     /// Scenario:
@@ -67,7 +80,7 @@ mod sqlite_tests {
 
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify checkpoint was loaded
@@ -153,7 +166,7 @@ mod sqlite_tests {
 
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify checkpoint was loaded (should be at sequence 10, not 20, since we disabled auto-checkpointing)
@@ -219,7 +232,7 @@ mod sqlite_tests {
 
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify full replay happened (all entries should be replayed)
@@ -306,7 +319,7 @@ mod sqlite_tests {
 
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify latest checkpoint was loaded (sequence 20)
@@ -389,7 +402,7 @@ mod sqlite_tests {
         // so it will attempt to use the checkpoint. This test documents the expected behavior
         // for when we add checkpoint validation.
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         
         // Should succeed (current implementation doesn't validate)
         // Future: Should detect corruption and fallback to full replay

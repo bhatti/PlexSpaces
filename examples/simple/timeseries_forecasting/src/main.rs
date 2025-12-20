@@ -104,6 +104,7 @@ async fn main() -> Result<()> {
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets
     ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     let _data_loader_ref = plexspaces_core::ActorRef::new(actor_id)

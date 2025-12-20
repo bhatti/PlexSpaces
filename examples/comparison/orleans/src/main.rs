@@ -286,81 +286,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!();
     
-    // Use get_or_activate_actor - the Orleans pattern!
-    // Factory function creates actor with all facets if it doesn't exist
-    tracing::debug!("Using get_or_activate_actor for Orleans-style virtual actor: {}", actor_id);
-    let core_ref = node.get_or_activate_actor(
-        actor_id.clone(),
-        || async {
-            // Actor factory - only called if actor doesn't exist
-            tracing::debug!("Actor factory called - creating new virtual actor with facets");
-            
-            let behavior = Box::new(BatchPredictorActor::new());
-            let mut actor = ActorBuilder::new(behavior)
-                .with_id(actor_id.clone())
-                .build()
-                .await;
-            
-            // Attach VirtualActorFacet (Orleans-style grain lifecycle)
-            // Use "lazy" activation to match Orleans behavior (activate on first message)
-            tracing::debug!("Attaching VirtualActorFacet with lazy activation (Orleans pattern)");
-            let virtual_facet_config = serde_json::json!({
-                "idle_timeout": "5m",
-                "activation_strategy": "lazy"  // Orleans: actors activate on first message
-            });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
-            actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
-                .await
-                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
-            tracing::debug!("VirtualActorFacet attached successfully");
-            
-            // Attach DurabilityFacet (for state persistence and reminders)
-            tracing::debug!("Attaching DurabilityFacet");
-            let storage = MemoryJournalStorage::new();
-            let durability_config = DurabilityConfig::default();
-            let durability_facet = Box::new(DurabilityFacet::new(storage, durability_config));
-            actor
-                .attach_facet(durability_facet, 50, serde_json::json!({}))
-                .await
-                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach DurabilityFacet: {}", e)))?;
-            tracing::debug!("DurabilityFacet attached successfully");
-            
-            // Attach TimerFacet (in-memory timers, Orleans RegisterTimer)
-            let timer_facet = Box::new(TimerFacet::new());
-            actor
-                .attach_facet(timer_facet, 75, serde_json::json!({}))
-                .await
-                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach TimerFacet: {}", e)))?;
-            
-            // Attach ReminderFacet (durable reminders, Orleans RegisterReminder)
-            let reminder_storage = Arc::new(MemoryJournalStorage::new());
-            let reminder_facet = Box::new(ReminderFacet::new(reminder_storage));
-            actor
-                .attach_facet(reminder_facet, 60, serde_json::json!({}))
-                .await
-                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach ReminderFacet: {}", e)))?;
-            
-            tracing::debug!("All facets attached, converting to Actor");
-            Ok(actor)
-        }
-    ).await?;
-    tracing::debug!("get_or_activate_actor completed: {}", core_ref.id());
+    // Create facets with config and priority (Orleans-style virtual actor)
+    tracing::debug!("Creating Orleans-style virtual actor with facets: {}", actor_id);
+    let virtual_facet_config = serde_json::json!({
+        "idle_timeout": "5m",
+        "activation_strategy": "lazy"  // Orleans: actors activate on first message
+    });
+    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config, 100));
+    let storage = MemoryJournalStorage::new();
+    let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 75));
+    let reminder_storage = Arc::new(MemoryJournalStorage::new());
+    let reminder_facet = Box::new(ReminderFacet::new(reminder_storage, serde_json::json!({}), 60));
+    
+    // Spawn using ActorFactory with facets (Orleans get_or_activate pattern)
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer",
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![virtual_facet, durability_facet, timer_facet, reminder_facet], // facets
+    ).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    
+    tracing::debug!("Actor spawned successfully with all facets");
     
     // Wait for actor to be fully registered
     tokio::time::sleep(Duration::from_millis(200)).await;
-    tracing::debug!("Wait completed, looking up mailbox");
-
-    // Convert to actor::ActorRef for ask method
-    let mailbox = node.actor_registry()
-        .lookup_mailbox(core_ref.id())
-        .await?
-        .ok_or("Actor not found in registry")?;
-    tracing::debug!("Mailbox found for actor: {}", core_ref.id());
     
-    let predictor = plexspaces_actor::ActorRef::local(
-        core_ref.id().clone(),
-        mailbox,
+    // Create ActorRef directly - no need to access mailbox
+    let predictor = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
         node.service_locator().clone(),
     );
 
@@ -599,27 +563,33 @@ mod tests {
         let node = NodeBuilder::new("test-node")
             .build();
 
-        let behavior = Box::new(BatchPredictorActor::new());
-        let actor = ActorBuilder::new(behavior)
-            .with_id("test-predictor@test-node".to_string())
-            .with_virtual_actor()
-            .build()
-            .await;
+        // Create facets
+        let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 100));
+        let storage = MemoryJournalStorage::new();
+        let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
         
-        let core_ref = node
-            .spawn_actor(actor)
-            .await
-            .unwrap();
-
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(core_ref.id())
-            .await
-            .unwrap()
-            .unwrap();
+        // Spawn using ActorFactory with facets
+        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+        use std::sync::Arc;
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = "test-predictor@test-node".to_string();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![virtual_facet, durability_facet], // facets
+        ).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         
-        let predictor = plexspaces_actor::ActorRef::local(
-            core_ref.id().clone(),
-            mailbox,
+        // Create ActorRef directly - no need to access mailbox
+        let predictor = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
 

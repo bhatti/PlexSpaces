@@ -108,6 +108,7 @@ async fn test_simple_consensus() {
             serde_json::to_vec(&initial_state).unwrap(),
             None,
             HashMap::new(),
+            vec![], // facets
         ).await.expect(&format!("Failed to spawn general {}", general_id));
     }
     

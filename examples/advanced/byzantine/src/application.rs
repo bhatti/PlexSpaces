@@ -132,6 +132,7 @@ impl Application for ByzantineApplication {
                 serde_json::to_vec(&initial_state).unwrap(),
                 None,
                 std::collections::HashMap::new(),
+                vec![], // facets
             ).await
                 .map_err(|e| ApplicationError::StartupFailed(format!("Failed to spawn general {}: {}", general_id, e)))?;
         }

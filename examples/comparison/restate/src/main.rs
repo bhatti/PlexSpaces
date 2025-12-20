@@ -161,39 +161,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = NodeBuilder::new("comparison-node-1")
         .build();
 
-    // Create payment actor with DurabilityFacet (Restate-style durable execution)
-    let behavior = Box::new(PaymentActor::new());
-    let mut actor = ActorBuilder::new(behavior)
-        .with_id("payment-service@comparison-node-1".to_string())
-        .build()
-        .await;
-    
-    // Attach DurabilityFacet (Restate-style journaling and deterministic replay)
+    // Create DurabilityFacet (Restate-style journaling and deterministic replay)
     let storage = MemoryJournalStorage::new();
-    let durability_config = DurabilityConfig {
-        checkpoint_interval: 10, // Checkpoint every 10 operations
-        ..Default::default()
-    };
-    let durability_facet = Box::new(DurabilityFacet::new(storage, durability_config));
-    actor
-        .attach_facet(durability_facet, 50, serde_json::json!({}))
-        .await?;
+    let durability_facet = Box::new(DurabilityFacet::new(
+        storage,
+        serde_json::json!({
+            "checkpoint_interval": 10 // Checkpoint every 10 operations
+        }),
+        50,
+    ));
+    
+    // Spawn using ActorFactory with facets
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = "payment-service@comparison-node-1".to_string();
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer",
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![durability_facet], // facets
+    ).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     
     info!("✅ DurabilityFacet attached - journaling and deterministic replay enabled");
     
-    let core_ref = node
-        .spawn_actor(actor)
-        .await?;
-
-    // Convert to actor::ActorRef for ask method
-    let mailbox = node.actor_registry()
-        .lookup_mailbox(core_ref.id())
-        .await?
-        .ok_or("Actor not found in registry")?;
-    
-    let payment_actor = plexspaces_actor::ActorRef::local(
-        core_ref.id().clone(),
-        mailbox,
+    // Create ActorRef directly - no need to access mailbox
+    let payment_actor = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
         node.service_locator().clone(),
     );
 
@@ -291,27 +292,32 @@ mod tests {
         let node = NodeBuilder::new("test-node")
             .build();
 
-        let behavior = Box::new(PaymentActor::new());
-        let actor = ActorBuilder::new(behavior)
-            .with_id("test-payment@test-node".to_string())
-            .with_durability()
-            .build()
-            .await;
+        // Create DurabilityFacet
+        let storage = MemoryJournalStorage::new();
+        let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
         
-        let core_ref = node
-            .spawn_actor(actor)
-            .await
-            .unwrap();
-
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(core_ref.id())
-            .await
-            .unwrap()
-            .unwrap();
+        // Spawn using ActorFactory with facets
+        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+        use std::sync::Arc;
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = "test-payment@test-node".to_string();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![durability_facet], // facets
+        ).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         
-        let payment_actor = plexspaces_actor::ActorRef::local(
-            core_ref.id().clone(),
-            mailbox,
+        // Create ActorRef directly - no need to access mailbox
+        let payment_actor = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
 

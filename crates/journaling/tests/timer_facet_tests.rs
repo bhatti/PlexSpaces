@@ -32,7 +32,7 @@ use tokio::time::sleep;
 
 #[tokio::test]
 async fn test_timer_facet_creation() {
-    let facet = TimerFacet::new();
+    let facet = TimerFacet::new(serde_json::json!({}), 75);
     assert_eq!(facet.facet_type(), "timer");
 }
 

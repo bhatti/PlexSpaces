@@ -38,7 +38,7 @@ impl ActorTrait for QcActorBehavior {
 
     async fn handle_message(
         &mut self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         let qc_message: QcActorMessage = serde_json::from_slice(&msg.payload)
@@ -60,9 +60,10 @@ impl ActorTrait for QcActorBehavior {
                     let response_payload = serde_json::to_vec(&qc_results)
                         .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
                     let response = Message::new(response_payload);
-                    _if let Some(sender_id) = &msg.sender { ctx.send_reply(msg.correlation_id.as_deref(), sender_id, msg.receiver.clone(), response).await } else { Ok(()) }.map_err(|e| {
-                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
-                    })?;
+                    if let Some(sender_id) = &msg.sender { 
+                        ctx.send_reply(msg.correlation_id.as_deref(), sender_id, msg.receiver.clone(), response).await
+                            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                    }
                 }
             }
         }

@@ -206,7 +206,16 @@ async fn test_event_sourcing_with_durability_facet() {
     };
 
     // Both facets share the same storage
-    let durability_facet = DurabilityFacet::new((*storage).clone(), durability_config);
+    let durability_config_value = serde_json::json!({
+        "backend": durability_config.backend,
+        "checkpoint_interval": durability_config.checkpoint_interval,
+        "checkpoint_timeout": durability_config.checkpoint_timeout,
+        "replay_on_activation": durability_config.replay_on_activation,
+        "cache_side_effects": durability_config.cache_side_effects,
+        "compression": durability_config.compression,
+        "state_schema_version": durability_config.state_schema_version,
+    });
+    let durability_facet = DurabilityFacet::new((*storage).clone(), durability_config_value, 50);
     let event_sourcing_facet = EventSourcingFacet::new(storage.clone(), event_sourcing_config);
 
     // Both facets can work together

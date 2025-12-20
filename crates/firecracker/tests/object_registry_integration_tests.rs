@@ -7,6 +7,7 @@ use plexspaces_firecracker::{VmRegistry, VmRegistryEntry, VmState};
 use plexspaces_keyvalue::InMemoryKVStore;
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::object_registry::v1::ObjectType;
+use plexspaces_core::RequestContext;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -24,13 +25,14 @@ async fn test_register_vm_in_object_registry() {
     };
 
     // Register in object registry
-    VmRegistry::register_in_object_registry(&object_registry, &vm_entry, None, None)
+    let ctx = RequestContext::internal();
+    VmRegistry::register_in_object_registry(&ctx, &object_registry, &vm_entry)
         .await
         .unwrap();
 
     // Lookup VM
     let found = object_registry
-        .lookup("default", "default", ObjectType::ObjectTypeVm, "vm-test-001")
+        .lookup(&ctx, ObjectType::ObjectTypeVm, "vm-test-001")
         .await
         .unwrap();
 
@@ -63,16 +65,17 @@ async fn test_discover_vms_from_object_registry() {
         config: None,
     };
 
-    VmRegistry::register_in_object_registry(&object_registry, &vm1, None, None)
+    let ctx = RequestContext::internal();
+    VmRegistry::register_in_object_registry(&ctx, &object_registry, &vm1)
         .await
         .unwrap();
-    VmRegistry::register_in_object_registry(&object_registry, &vm2, None, None)
+    VmRegistry::register_in_object_registry(&ctx, &object_registry, &vm2)
         .await
         .unwrap();
 
     // Discover all VMs
     let vms = object_registry
-        .discover(Some(ObjectType::ObjectTypeVm), None, None, None, None, 100)
+        .discover(&ctx, Some(ObjectType::ObjectTypeVm), None, None, None, None, 100)
         .await
         .unwrap();
 
@@ -95,12 +98,13 @@ async fn test_vm_health_status_mapping() {
         config: None,
     };
 
-    VmRegistry::register_in_object_registry(&object_registry, &vm_running, None, None)
+    let ctx = RequestContext::internal();
+    VmRegistry::register_in_object_registry(&ctx, &object_registry, &vm_running)
         .await
         .unwrap();
 
     let found = object_registry
-        .lookup("default", "default", ObjectType::ObjectTypeVm, "vm-running")
+        .lookup(&ctx, ObjectType::ObjectTypeVm, "vm-running")
         .await
         .unwrap()
         .unwrap();

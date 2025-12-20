@@ -560,6 +560,11 @@ impl Actor {
         self.error_message.read().await.clone()
     }
 
+    /// Get the actor's behavior (for testing/debugging)
+    pub fn behavior(&self) -> &Arc<RwLock<Box<dyn ActorTrait>>> {
+        &self.behavior
+    }
+
     /// Set error message (used when transitioning to FAILED state)
     async fn set_error_message(&self, message: String) {
         *self.error_message.write().await = message;
@@ -769,6 +774,10 @@ impl Actor {
 
     /// Attach a facet to this actor at runtime
     ///
+    /// ## Configuration
+    /// Facet must have config and priority set via constructor before attachment.
+    /// These are extracted from the facet automatically.
+    ///
     /// ## DurabilityFacet Integration
     /// When attaching DurabilityFacet, this method:
     /// - Checks if mailbox is durable and logs metrics
@@ -777,8 +786,6 @@ impl Actor {
     pub async fn attach_facet(
         &self,
         mut facet: Box<dyn Facet>,
-        priority: i32,
-        config: serde_json::Value,
     ) -> Result<String, ActorError> {
         let facet_type = facet.facet_type().to_string();
         
@@ -807,7 +814,7 @@ impl Actor {
         
         let mut facets = self.facets.write().await;
         facets
-            .attach(facet, priority, &self.id, config)
+            .attach(facet, &self.id)
             .await
             .map_err(|e| ActorError::FacetError(e.to_string()))
     }
@@ -1685,12 +1692,29 @@ mod tests {
         use plexspaces_facet::{Facet, FacetError};
 
         // Simple test facet
-        struct TestFacet;
+        struct TestFacet {
+            config: serde_json::Value,
+            priority: i32,
+        }
+
+        impl TestFacet {
+            fn new(config: serde_json::Value, priority: i32) -> Self {
+                Self { config, priority }
+            }
+        }
 
         #[async_trait]
         impl Facet for TestFacet {
             fn facet_type(&self) -> &str {
                 "test-facet"
+            }
+
+            fn get_config(&self) -> serde_json::Value {
+                self.config.clone()
+            }
+
+            fn get_priority(&self) -> i32 {
+                self.priority
             }
 
             fn as_any(&self) -> &dyn std::any::Any {
@@ -1730,8 +1754,8 @@ mod tests {
         );
 
         // Attach facet
-        let facet = Box::new(TestFacet);
-        let result = actor.attach_facet(facet, 0, serde_json::json!({})).await;
+        let facet = Box::new(TestFacet::new(serde_json::json!({}), 50));
+        let result = actor.attach_facet(facet).await;
         assert!(result.is_ok());
     }
 

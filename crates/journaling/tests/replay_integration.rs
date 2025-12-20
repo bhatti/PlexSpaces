@@ -57,6 +57,19 @@ mod sqlite_integration_tests {
         }
     }
 
+    /// Helper to convert DurabilityConfig to Value
+    fn config_to_value(config: &DurabilityConfig) -> Value {
+        serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        })
+    }
+
     /// Test actor: Simple counter
     struct CounterActor {
         count: u64,
@@ -209,7 +222,7 @@ mod sqlite_integration_tests {
             counter: Arc::clone(&counter),
         };
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_replay_handler(Box::new(handler)).await;
 
         // Note: Replay happens in on_attach, but we need ActorContext for replay_journal_with_handler
@@ -286,7 +299,7 @@ mod sqlite_integration_tests {
             counter: Arc::clone(&counter),
         };
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_state_loader(Box::new(state_loader)).await;
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
@@ -327,7 +340,7 @@ mod sqlite_integration_tests {
         // Restart - should fail due to schema version mismatch
         facet.on_detach(actor_id).await.unwrap();
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let result = new_facet.on_attach(actor_id, serde_json::json!({})).await;
 
         // Should fail with schema version error
@@ -397,7 +410,7 @@ mod sqlite_integration_tests {
             counter: Arc::clone(&counter),
         };
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_state_loader(Box::new(state_loader)).await;
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
@@ -436,7 +449,7 @@ mod sqlite_integration_tests {
         // Restart without StateLoader
         facet.on_detach(actor_id).await.unwrap();
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Checkpoint should be available for manual loading
@@ -502,7 +515,7 @@ mod sqlite_integration_tests {
 
         // Restart
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify side effect is still in journal (cached, not re-executed)
@@ -557,7 +570,7 @@ mod sqlite_integration_tests {
 
         // Restart - should replay from beginning
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let result = new_facet.on_attach(actor_id, serde_json::json!({})).await;
         assert!(result.is_ok(), "Should succeed replaying from beginning");
 
@@ -597,7 +610,7 @@ mod sqlite_integration_tests {
 
         // Restart
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Should use latest checkpoint (sequence 60)
@@ -637,7 +650,7 @@ mod sqlite_integration_tests {
 
         // Restart without ReplayHandler
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         // Don't set replay handler
         let result = new_facet.on_attach(actor_id, serde_json::json!({})).await;
         assert!(result.is_ok(), "Should succeed with legacy replay mode");

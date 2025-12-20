@@ -28,12 +28,12 @@ async fn test_chromosome_worker_with_durability_facet() {
 
     // Create durability config with checkpointing every 5 variants
     let config = DurabilityConfig {
-        backend: JournalBackend::Sqlite as i32,
+        backend: JournalBackend::JournalBackendSqlite as i32,
         checkpoint_interval: 5,
         checkpoint_timeout: None,
         replay_on_activation: false,
         cache_side_effects: true,
-        compression: plexspaces_journaling::CompressionType::None as i32,
+        compression: plexspaces_journaling::CompressionType::CompressionTypeNone as i32,
         state_schema_version: 1,
         backend_config: None,
     };
@@ -41,24 +41,26 @@ async fn test_chromosome_worker_with_durability_facet() {
     // Create ChromosomeWorker actor
     let actor_id = "chr1-worker".to_string();
     let chromosome = "chr1".to_string();
-    let mailbox = Mailbox::new(MailboxConfig {
-        storage: StorageStrategy::Memory,
-        ordering: OrderingStrategy::Fifo,
-        durability: DurabilityStrategy::None,
-        max_size: 1000,
-        backpressure: BackpressureStrategy::DropOldest,
-    });
+    let mut mailbox_config = MailboxConfig::default();
+    mailbox_config.storage_strategy = StorageStrategy::Memory as i32;
+    mailbox_config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
+    mailbox_config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
+    mailbox_config.capacity = 1000;
+    mailbox_config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
+    let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await.unwrap();
 
     let mut actor = Actor::new(
         actor_id.clone(),
         Box::new(ChromosomeWorker::new(actor_id.clone(), chromosome.clone())),
         mailbox,
         "genomics".to_string(),
+        "genomics".to_string(),
+        None,
     );
 
     // Attach DurabilityFacet
-    let facet = Box::new(DurabilityFacet::new(storage.clone(), config));
-    actor.attach_facet(facet, 0, serde_json::json!({})).await.unwrap();
+    let facet = Box::new(DurabilityFacet::new(storage.clone(), serde_json::json!({}), 50));
+    actor.attach_facet(facet).await.unwrap();
 
     // Start the actor (spawn message processing loop)
     let _handle = actor.start().await.unwrap();
@@ -110,12 +112,12 @@ async fn test_chromosome_worker_crash_recovery_with_replay() {
     let storage_clone = storage.clone();
 
     let config = DurabilityConfig {
-        backend: JournalBackend::Sqlite as i32,
+        backend: JournalBackend::JournalBackendSqlite as i32,
         checkpoint_interval: 0, // No checkpointing for this test
         checkpoint_timeout: None,
         replay_on_activation: true, // Enable replay on activation
         cache_side_effects: true,
-        compression: plexspaces_journaling::CompressionType::None as i32,
+        compression: plexspaces_journaling::CompressionType::CompressionTypeNone as i32,
         state_schema_version: 1,
         backend_config: None,
     };
@@ -125,24 +127,36 @@ async fn test_chromosome_worker_crash_recovery_with_replay() {
 
     // First actor: Process messages and "crash"
     {
-        let mailbox = Mailbox::new(MailboxConfig {
-            storage: StorageStrategy::Memory,
-            ordering: OrderingStrategy::Fifo,
-            durability: DurabilityStrategy::None,
-            max_size: 1000,
-            backpressure: BackpressureStrategy::DropOldest,
-        });
+        let mut mailbox_config = MailboxConfig::default();
+        mailbox_config.storage_strategy = StorageStrategy::Memory as i32;
+        mailbox_config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
+        mailbox_config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
+        mailbox_config.capacity = 1000;
+        mailbox_config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
+        let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await.unwrap();
 
         let mut actor = Actor::new(
             actor_id.clone(),
             Box::new(ChromosomeWorker::new(actor_id.clone(), chromosome.clone())),
             mailbox,
             "genomics".to_string(),
+            "genomics".to_string(),
+            None,
         );
 
         // Attach DurabilityFacet with replay enabled
-        let facet = Box::new(DurabilityFacet::new(storage.clone(), config.clone()));
-        actor.attach_facet(facet, 0, serde_json::json!({})).await.unwrap();
+        let checkpoint_timeout_seconds = config.checkpoint_timeout.as_ref().map(|d| d.seconds as u64);
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": checkpoint_timeout_seconds,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let facet = Box::new(DurabilityFacet::new(storage.clone(), config_value, 50));
+        actor.attach_facet(facet).await.unwrap();
 
         // Start the actor
         let _handle = actor.start().await.unwrap();
@@ -171,24 +185,36 @@ async fn test_chromosome_worker_crash_recovery_with_replay() {
 
     // Second actor: Recover from journal
     {
-        let mailbox = Mailbox::new(MailboxConfig {
-            storage: StorageStrategy::Memory,
-            ordering: OrderingStrategy::Fifo,
-            durability: DurabilityStrategy::None,
-            max_size: 1000,
-            backpressure: BackpressureStrategy::DropOldest,
-        });
+        let mut mailbox_config = MailboxConfig::default();
+        mailbox_config.storage_strategy = StorageStrategy::Memory as i32;
+        mailbox_config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
+        mailbox_config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
+        mailbox_config.capacity = 1000;
+        mailbox_config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
+        let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await.unwrap();
 
         let mut actor = Actor::new(
             actor_id.clone(),
             Box::new(ChromosomeWorker::new(actor_id.clone(), chromosome.clone())),
             mailbox,
             "genomics".to_string(),
+            "genomics".to_string(),
+            None,
         );
 
         // Attach DurabilityFacet with replay enabled
-        let facet = Box::new(DurabilityFacet::new(storage_clone.clone(), config.clone()));
-        actor.attach_facet(facet, 0, serde_json::json!({})).await.unwrap();
+        let checkpoint_timeout_seconds = config.checkpoint_timeout.as_ref().map(|d| d.seconds as u64);
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": checkpoint_timeout_seconds,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let facet = Box::new(DurabilityFacet::new(storage_clone.clone(), config_value, 50));
+        actor.attach_facet(facet).await.unwrap();
 
         // Start the actor (will trigger replay on activation)
         let _handle = actor.start().await.unwrap();
@@ -232,19 +258,21 @@ async fn test_durability_overhead_measurement() {
 
     // Test WITHOUT durability
     let duration_without_durability = {
-        let mailbox = Mailbox::new(MailboxConfig {
-            storage: StorageStrategy::Memory,
-            ordering: OrderingStrategy::Fifo,
-            durability: DurabilityStrategy::None,
-            max_size: 1000,
-            backpressure: BackpressureStrategy::DropOldest,
-        });
+        let mut mailbox_config = MailboxConfig::default();
+        mailbox_config.storage_strategy = StorageStrategy::Memory as i32;
+        mailbox_config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
+        mailbox_config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
+        mailbox_config.capacity = 1000;
+        mailbox_config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
+        let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await.unwrap();
 
         let actor = Actor::new(
             actor_id.clone(),
             Box::new(ChromosomeWorker::new(actor_id.clone(), chromosome.clone())),
             mailbox,
             "genomics".to_string(),
+            "genomics".to_string(),
+            None,
         );
 
         let start = Instant::now();
@@ -264,34 +292,46 @@ async fn test_durability_overhead_measurement() {
 
     // Test WITH durability
     let duration_with_durability = {
-        let mailbox = Mailbox::new(MailboxConfig {
-            storage: StorageStrategy::Memory,
-            ordering: OrderingStrategy::Fifo,
-            durability: DurabilityStrategy::None,
-            max_size: 1000,
-            backpressure: BackpressureStrategy::DropOldest,
-        });
+        let mut mailbox_config = MailboxConfig::default();
+        mailbox_config.storage_strategy = StorageStrategy::Memory as i32;
+        mailbox_config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
+        mailbox_config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
+        mailbox_config.capacity = 1000;
+        mailbox_config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
+        let mailbox = Mailbox::new(mailbox_config, format!("{}-durable:mailbox", actor_id)).await.unwrap();
 
         let actor = Actor::new(
             format!("{}-durable", actor_id),
             Box::new(ChromosomeWorker::new(actor_id.clone(), chromosome.clone())),
             mailbox,
             "genomics".to_string(),
+            "genomics".to_string(),
+            None,
         );
 
         // Attach DurabilityFacet
         let config = DurabilityConfig {
-            backend: JournalBackend::Sqlite as i32,
+            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0, // No checkpointing
             checkpoint_timeout: None,
             replay_on_activation: false,
             cache_side_effects: true,
-            compression: plexspaces_journaling::CompressionType::None as i32,
+            compression: plexspaces_journaling::CompressionType::CompressionTypeNone as i32,
             state_schema_version: 1,
             backend_config: None,
         };
-        let facet = Box::new(DurabilityFacet::new(storage.clone(), config));
-        actor.attach_facet(facet, 0, serde_json::json!({})).await.unwrap();
+        let checkpoint_timeout_seconds = config.checkpoint_timeout.as_ref().map(|d| d.seconds as u64);
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": checkpoint_timeout_seconds,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let facet = Box::new(DurabilityFacet::new(storage.clone(), config_value, 50));
+        actor.attach_facet(facet).await.unwrap();
 
         let start = Instant::now();
         for i in 0..10 {

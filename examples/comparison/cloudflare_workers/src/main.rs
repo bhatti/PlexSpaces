@@ -240,47 +240,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Actor doesn't exist - create and spawn it
         tracing::debug!("Actor factory called - creating new Durable Object with facets");
         
-        let behavior = Box::new(CounterActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await;
-        
-        // Attach VirtualActorFacet (Cloudflare Durable Objects are virtual actors)
-        // This automatically registers the actor as virtual
-        // Use "eager" activation to ensure actor is ready immediately
-        tracing::debug!("Attaching VirtualActorFacet with eager activation");
+        // Create facets with config and priority
+        tracing::debug!("Creating facets with eager activation");
         let virtual_facet_config = serde_json::json!({
             "idle_timeout": "5m",
             "activation_strategy": "eager"
         });
-        let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
-        actor
-            .attach_facet(virtual_facet, 100, virtual_facet_config)
-            .await
-            .map_err(|e| format!("Failed to attach VirtualActorFacet: {}", e))?;
-        tracing::debug!("VirtualActorFacet attached successfully");
-        
-        // Attach DurabilityFacet (Cloudflare Durable Objects persist state)
-        tracing::debug!("Attaching DurabilityFacet");
+        let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config, 100));
         let storage = MemoryJournalStorage::new();
-        let durability_config = DurabilityConfig::default();
-        let durability_facet = Box::new(DurabilityFacet::new(storage, durability_config));
-        actor
-            .attach_facet(durability_facet, 50, serde_json::json!({}))
-            .await
-            .map_err(|e| format!("Failed to attach DurabilityFacet: {}", e))?;
-        tracing::debug!("DurabilityFacet attached successfully");
+        let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
         
-        // Spawn the actor using ActorFactory
-        // Note: Since actor has DurabilityFacet attached, we use spawn_built_actor
+        // Spawn using ActorFactory with facets
         let ctx = plexspaces_core::RequestContext::internal();
-        let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![virtual_facet, durability_facet], // facets
+        ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e))?;
         
         tracing::debug!("Actor spawned successfully");
         
-        // Create ActorRef (use remote() even for local actors - it works for both)
+        // Create ActorRef directly - no need to access mailbox
         ActorRef::remote(
             actor_id.clone(),
             node.id().as_str().to_string(),
@@ -468,6 +453,7 @@ mod tests {
             vec![], // initial_state
             None, // config
             std::collections::HashMap::new(), // labels
+            vec![], // facets
         ).await.unwrap();
         
         // Create ActorRef (use remote() even for local actors - it works for both)

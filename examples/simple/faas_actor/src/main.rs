@@ -191,6 +191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets
     ).await.map_err(|e| format!("Failed to spawn actor: {}", e))?;
     
     info!("✅ Counter actor spawned: {}", actor_id);

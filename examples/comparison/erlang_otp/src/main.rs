@@ -108,26 +108,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     // Spawn counter actor (equivalent to Erlang gen_server:start_link)
-    let behavior = Box::new(CounterActor::new());
-    let actor = ActorBuilder::new(behavior)
-        .with_id("counter@comparison-node-1".to_string())
-        .build()
-        .await;
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+    let actor_id = "counter@comparison-node-1".to_string();
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer",
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![], // facets
+    ).await
+        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     
-    let core_actor_ref = node
-        .spawn_actor(actor)
-        .await?;
-
-    // Convert core::ActorRef to actor::ActorRef for tell/ask methods
-    // Get mailbox from node's actor registry
-    let mailbox = node.actor_registry()
-        .lookup_mailbox(core_actor_ref.id())
-        .await?
-        .ok_or("Actor not found in registry")?;
-    
-    let counter_actor = plexspaces_actor::ActorRef::local(
-        core_actor_ref.id().clone(),
-        mailbox,
+    // Create ActorRef directly - no need to access mailbox
+    let counter_actor = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
         node.service_locator().clone(),
     );
 
@@ -201,24 +202,28 @@ mod tests {
         let node = NodeBuilder::new("test-node")
             .build();
 
-        let behavior = Box::new(CounterActor::new());
-        let actor = ActorBuilder::new(behavior)
-            .with_id("test-counter@test-node".to_string())
-            .build()
-            .await;
-        let core_ref = node
-            .spawn_actor(actor)
-            .await
-            .unwrap();
+        // Spawn using ActorFactory with facets
+        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+        use std::sync::Arc;
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = "test-counter@test-node".to_string();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![], // facets
+        ).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(core_ref.id())
-            .await
-            .unwrap()
-            .unwrap();
-        let counter = plexspaces_actor::ActorRef::local(
-            core_ref.id().clone(),
-            mailbox,
+        // Create ActorRef directly - no need to access mailbox
+        let counter = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
 
@@ -250,19 +255,28 @@ mod tests {
             .with_id("test-counter-2@test-node-2".to_string())
             .build()
             .await;
-        let core_ref = node
-            .spawn_actor(actor)
-            .await
-            .unwrap();
+        // Spawn using ActorFactory with facets
+        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+        use std::sync::Arc;
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = "test-counter-2@test-node-2".to_string();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![], // facets
+        ).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(core_ref.id())
-            .await
-            .unwrap()
-            .unwrap();
-        let counter = plexspaces_actor::ActorRef::local(
-            core_ref.id().clone(),
-            mailbox,
+        // Create ActorRef directly - no need to access mailbox
+        let counter = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
 

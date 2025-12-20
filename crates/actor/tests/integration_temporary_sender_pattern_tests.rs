@@ -453,6 +453,7 @@ async fn test_local_actor_calling_ask_of_local_actor() {
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets
     ).await.unwrap();
     
     let _message_sender2 = actor_factory.spawn_actor(
@@ -462,6 +463,7 @@ async fn test_local_actor_calling_ask_of_local_actor() {
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets
     ).await.unwrap();
     
     // Get ActorRef for counter2

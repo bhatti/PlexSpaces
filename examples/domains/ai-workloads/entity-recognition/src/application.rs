@@ -120,6 +120,7 @@ impl Application for EntityRecognitionApplication {
                 vec![], // initial_state
                 None, // config
                 std::collections::HashMap::new(), // labels
+                vec![], // facets
             ).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             
@@ -146,6 +147,7 @@ impl Application for EntityRecognitionApplication {
                 vec![], // initial_state
                 None, // config
                 std::collections::HashMap::new(), // labels
+                vec![], // facets
             ).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             
@@ -172,6 +174,7 @@ impl Application for EntityRecognitionApplication {
                 vec![], // initial_state
                 None, // config
                 std::collections::HashMap::new(), // labels
+                vec![], // facets
             ).await
                 .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
             

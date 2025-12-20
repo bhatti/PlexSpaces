@@ -139,12 +139,20 @@ impl plexspaces_core::Actor for GeneralBehavior {
 /// Helper to register a remote node in ObjectRegistry (needed for gRPC client lookup)
 async fn register_node_in_object_registry(node: &Arc<Node>, remote_node_id: &str, address: &str) {
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+    // Extract host:port from http://host:port format
+    let grpc_address = if address.starts_with("http://") {
+        address.strip_prefix("http://").unwrap().to_string()
+    } else if address.starts_with("https://") {
+        address.strip_prefix("https://").unwrap().to_string()
+    } else {
+        address.to_string()
+    };
     let registration = ObjectRegistration {
         tenant_id: "internal".to_string(),
         namespace: "system".to_string(),
         object_type: ObjectType::ObjectTypeService as i32,
         object_id: format!("_node@{}", remote_node_id),
-        grpc_address: address.to_string(),
+        grpc_address,
         object_category: "Node".to_string(),
         ..Default::default()
     };
@@ -189,6 +197,13 @@ async fn register_actor_factory(node: &Arc<Node>) {
     ));
     let actor_service_wrapper = Arc::new(ActorServiceWrapper::new(actor_service_impl));
     service_locator.register_actor_service(actor_service_wrapper).await;
+
+    // Register NodeMetricsUpdater for Node stats tracking
+    use plexspaces_node::service_wrappers::NodeMetricsUpdaterWrapper;
+    let metrics_updater = Arc::new(NodeMetricsUpdaterWrapper::new(node.clone()));
+    service_locator.register_service(metrics_updater.clone()).await;
+    let metrics_updater_trait: Arc<dyn plexspaces_core::NodeMetricsUpdater + Send + Sync> = metrics_updater.clone() as Arc<dyn plexspaces_core::NodeMetricsUpdater + Send + Sync>;
+    service_locator.register_node_metrics_updater(metrics_updater_trait).await;
 }
 
 /// Helper to start a gRPC server for testing
@@ -224,6 +239,9 @@ async fn test_byzantine_generals_two_nodes() {
     // Start gRPC servers
     let node1_address = start_test_server(node1.clone()).await;
     let node2_address = start_test_server(node2.clone()).await;
+
+    // Wait a bit longer for servers to be fully ready
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
     // Register nodes with each other
     node1.register_remote_node(NodeId::new("node2"), node2_address.clone()).await.unwrap();
@@ -273,6 +291,7 @@ async fn test_byzantine_generals_two_nodes() {
         serialize_general_state("general1".to_string(), true, false),
         None,
         HashMap::new(),
+        vec![], // facets
     ).await.expect("Failed to spawn general1");
 
     // Create and spawn general2 (loyal) using spawn_actor
@@ -283,6 +302,7 @@ async fn test_byzantine_generals_two_nodes() {
         serialize_general_state("general2".to_string(), false, false),
         None,
         HashMap::new(),
+        vec![], // facets
     ).await.expect("Failed to spawn general2");
 
     // Create and spawn general3 (loyal) using spawn_actor
@@ -293,6 +313,7 @@ async fn test_byzantine_generals_two_nodes() {
         serialize_general_state("general3".to_string(), false, false),
         None,
         HashMap::new(),
+        vec![], // facets
     ).await.expect("Failed to spawn general3");
 
     // Create and spawn general4 (traitor) using spawn_actor
@@ -303,22 +324,27 @@ async fn test_byzantine_generals_two_nodes() {
         serialize_general_state("general4".to_string(), false, true),
         None,
         HashMap::new(),
+        vec![], // facets
     ).await.expect("Failed to spawn general4");
     
     // Commander (general1) proposes "attack"
-    let proposal_msg = Message::new("attack".as_bytes().to_vec());
-
-    // Send proposal to other generals (cross-node messaging)
-    // For local actors, use MessageSender::tell() directly
+    let mut proposal_msg = Message::new("attack".as_bytes().to_vec());
+    proposal_msg.receiver = "general2@node1".to_string();
     msg_sender2.tell(proposal_msg.clone()).await.expect("Failed to send to general2");
     
     // For remote actors, use node1's ActorService to route (tracks stats on node1)
     use plexspaces_core::ActorService;
     let actor_service1: Arc<dyn ActorService> = service_locator1.get_actor_service().await
         .expect("ActorService not found on node1");
-    actor_service1.send(&"general3@node2".to_string(), proposal_msg.clone()).await
+    
+    let mut proposal_msg3 = Message::new("attack".as_bytes().to_vec());
+    proposal_msg3.receiver = "general3@node2".to_string();
+    actor_service1.send(&"general3@node2".to_string(), proposal_msg3).await
         .expect("Failed to send to general3");
-    actor_service1.send(&"general4@node2".to_string(), proposal_msg.clone()).await
+    
+    let mut proposal_msg4 = Message::new("attack".as_bytes().to_vec());
+    proposal_msg4.receiver = "general4@node2".to_string();
+    actor_service1.send(&"general4@node2".to_string(), proposal_msg4).await
         .expect("Failed to send to general4");
 
     // Wait for messages to propagate
@@ -341,7 +367,14 @@ async fn test_byzantine_connection_pooling() {
     let node2 = Arc::new(NodeBuilder::new("node2").build());
 
     let node2_address = start_test_server(node2.clone()).await;
-    node1.register_remote_node(NodeId::new("node2"), node2_address).await.unwrap();
+    
+    // Wait a bit for server to be fully ready
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    
+    node1.register_remote_node(NodeId::new("node2"), node2_address.clone()).await.unwrap();
+    
+    // Register node2 in ObjectRegistry (needed for gRPC client lookup)
+    register_node_in_object_registry(&node1, "node2", &node2_address).await;
 
     // Register ActorFactory for node2 (needed for tests)
     register_actor_factory(&node2).await;
@@ -370,6 +403,7 @@ async fn test_byzantine_connection_pooling() {
         serialize_general_state("general".to_string(), false, false),
         None,
         HashMap::new(),
+        vec![], // facets
     ).await.expect("Failed to spawn general");
 
     // Register ActorFactory for node1 (needed for tests)
@@ -383,7 +417,8 @@ async fn test_byzantine_connection_pooling() {
     let actor_service1: Arc<dyn ActorService> = service_locator1.get_actor_service().await
         .expect("ActorService not found on node1");
     for i in 0..10 {
-        let msg = Message::new(format!("vote-{}", i).as_bytes().to_vec());
+        let mut msg = Message::new(format!("vote-{}", i).as_bytes().to_vec());
+        msg.receiver = "general@node2".to_string();
         actor_service1.send(&"general@node2".to_string(), msg).await
             .expect(&format!("Failed to send message {}", i));
     }
@@ -469,6 +504,7 @@ async fn test_cross_node_actor_discovery() {
         serialize_general_state("general".to_string(), false, false),
         None,
         HashMap::new(),
+        vec![], // facets
     ).await.expect("Failed to spawn general");
 
     // Node1 should discover actor on node2 via ActorRegistry lookup_routing

@@ -55,7 +55,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actor_id = "counter-actor-1";
 
     println!("1. Creating durable actor with journaling enabled");
-    let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+    let config_value = serde_json::json!({
+        "backend": config.backend,
+        "checkpoint_interval": config.checkpoint_interval,
+        "checkpoint_timeout": config.checkpoint_timeout,
+        "replay_on_activation": config.replay_on_activation,
+        "cache_side_effects": config.cache_side_effects,
+        "compression": config.compression,
+        "state_schema_version": config.state_schema_version,
+    });
+    let mut facet = DurabilityFacet::new(storage.clone(), config_value, 50);
     facet.on_attach(actor_id, serde_json::json!({})).await?;
     println!("   ✓ Actor attached, journaling active\n");
 
@@ -131,7 +140,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   ✓ Actor detached\n");
 
     // Create new facet (simulating restart)
-    let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+    let config_value = serde_json::json!({
+        "backend": config.backend,
+        "checkpoint_interval": config.checkpoint_interval,
+        "checkpoint_timeout": config.checkpoint_timeout,
+        "replay_on_activation": config.replay_on_activation,
+        "cache_side_effects": config.cache_side_effects,
+        "compression": config.compression,
+        "state_schema_version": config.state_schema_version,
+    });
+    let mut new_facet = DurabilityFacet::new(storage.clone(), config_value, 50);
     new_facet.on_attach(actor_id, serde_json::json!({})).await?;
     println!("   ✓ Actor restarted, replay completed");
     

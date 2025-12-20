@@ -73,6 +73,12 @@ use plexspaces_proto::timer::v1::TimerFired;
 /// ## Thread Safety
 /// Uses Arc<RwLock<>> for concurrent access to timer state.
 pub struct TimerFacet {
+    /// Facet configuration (immutable)
+    config: Value,
+    
+    /// Facet priority (immutable)
+    priority: i32,
+    
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
     
@@ -93,6 +99,9 @@ pub struct TimerFacet {
     node_id: Arc<RwLock<Option<String>>>,
 }
 
+/// Default priority for TimerFacet
+pub const TIMER_FACET_DEFAULT_PRIORITY: i32 = 50;
+
 /// Timer handle for managing timer lifecycle
 struct TimerHandle {
     /// Timer registration
@@ -105,10 +114,16 @@ struct TimerHandle {
 impl TimerFacet {
     /// Create a new timer facet
     ///
+    /// ## Arguments
+    /// * `config` - Facet configuration (can be empty object `{}` for defaults)
+    /// * `priority` - Facet priority (default: 50)
+    ///
     /// ## Returns
     /// New TimerFacet ready to attach to an actor
-    pub fn new() -> Self {
+    pub fn new(config: Value, priority: i32) -> Self {
         TimerFacet {
+            config,
+            priority,
             actor_id: Arc::new(RwLock::new(None)),
             actor_ref: Arc::new(RwLock::new(None)),
             actor_service: Arc::new(RwLock::new(None)),
@@ -124,12 +139,21 @@ impl TimerFacet {
     /// ## Arguments
     /// * `lock_manager` - LockManager for distributed locking (Redis or SQL backend)
     /// * `node_id` - Node ID for lock holder identification
+    /// * `config` - Facet configuration
+    /// * `priority` - Facet priority
     ///
     /// ## Returns
     /// New TimerFacet with distributed locking support
     #[cfg(feature = "locks")]
-    pub fn with_lock_manager(lock_manager: Arc<dyn LockManager>, node_id: String) -> Self {
+    pub fn with_lock_manager(
+        lock_manager: Arc<dyn LockManager>, 
+        node_id: String,
+        config: Value,
+        priority: i32,
+    ) -> Self {
         TimerFacet {
+            config,
+            priority,
             actor_id: Arc::new(RwLock::new(None)),
             actor_ref: Arc::new(RwLock::new(None)),
             actor_service: Arc::new(RwLock::new(None)),
@@ -517,7 +541,8 @@ impl Facet for TimerFacet {
         self
     }
     
-    async fn on_attach(&mut self, actor_id: &str, config: Value) -> Result<(), FacetError> {
+    async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
+        // Use stored config, ignore parameter (config is set in constructor)
         let mut id = self.actor_id.write().await;
         *id = Some(actor_id.to_string());
         
@@ -551,6 +576,14 @@ impl Facet for TimerFacet {
         let timers = self.timers.read();
         // TODO: Serialize timer state for persistence (if needed)
         Ok(Value::Null)
+    }
+    
+    fn get_config(&self) -> Value {
+        self.config.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
     }
 }
 
@@ -600,7 +633,7 @@ mod tests {
         // Note: This is a simplified test setup - in real usage, messages go to actor's mailbox
         let (tx, rx) = mpsc::channel(100);
         
-        let facet = TimerFacet::new();
+        let facet = TimerFacet::new(serde_json::json!({}), 75);
         (facet, actor_ref, rx)
     }
     

@@ -27,7 +27,8 @@
 use matrix_multiply::*;
 
 use plexspaces_node::{NodeBuilder, ConfigBootstrap, CoordinationComputeTracker};
-use plexspaces_actor::ActorBuilder;
+use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use plexspaces_core::RequestContext;
 use plexspaces_tuplespace::TupleSpace;
 use plexspaces_mailbox::Message;
 use std::sync::Arc;
@@ -87,10 +88,24 @@ async fn main() -> Result<()> {
         
         // Build and spawn actor using ActorBuilder::spawn() which uses ActorFactory internally
         let ctx = plexspaces_core::RequestContext::internal();
-        let actor_ref = ActorBuilder::new(behavior)
-            .with_name(format!("worker-{}", worker_id))
-            .spawn(&ctx, node.service_locator().clone())
-            .await?;
+        let actor_id = format!("worker-{}@{}", worker_id, node.id().as_str());
+        let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer", // actor_type
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![], // facets
+        ).await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn actor: {}", e))?;
+        let actor_ref = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
+            node.service_locator().clone(),
+        );
         worker_refs.push(actor_ref);
         info!("  Created worker actor: worker-{}", worker_id);
     }
@@ -118,16 +133,26 @@ async fn main() -> Result<()> {
     let master_behavior = MasterBehavior::new(space.clone());
     let behavior = Box::new(master_behavior);
     
-    let actor = ActorBuilder::new(behavior)
-        .with_name("master")
-        .build();
-    
-    // Spawn using ActorBuilder::spawn() which uses ActorFactory internally
-    let master_ref = ActorBuilder::new(behavior)
-        .with_name("master".to_string())
-        let ctx = plexspaces_core::RequestContext::internal();
-            .spawn(&ctx, node.service_locator().clone())
-        .await?;
+    // Spawn master using ActorFactory
+    let master_id = format!("master@{}", node.id().as_str());
+    let ctx = RequestContext::internal();
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &master_id,
+        "GenServer", // actor_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![], // facets
+    ).await
+        .map_err(|e| anyhow::anyhow!("Failed to spawn master: {}", e))?;
+    let master_ref = ActorRef::remote(
+        master_id.clone(),
+        node.id().as_str().to_string(),
+        node.service_locator().clone(),
+    );
     info!("  Created master actor\n");
 
     // Wait for master to initialize

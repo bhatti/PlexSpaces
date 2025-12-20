@@ -128,13 +128,14 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
-        let _message_sender = actor_factory.spawn_actor(
+          let _message_sender = actor_factory.spawn_actor(
             &ctx,
             &actor_id,
             &req.actor_type,
             req.initial_state.clone(),
             req.config.clone(),
             labels,
+            vec![], // facets
         ).await
             .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
         
@@ -243,6 +244,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
             req.initial_state.clone(),
             req.config.clone(),
             req.labels.clone(),
+            vec![], // facets (empty - facets should be attached via config or separate API)
         ).await
             .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
 

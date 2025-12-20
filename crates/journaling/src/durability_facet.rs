@@ -64,7 +64,12 @@
 //! let storage = SqliteJournalStorage::new(":memory:").await?;
 //!
 //! // Create durability facet
-//! let mut facet = DurabilityFacet::new(storage, config);
+//! let config_value = serde_json::json!({
+//!     "backend": config.backend,
+//!     "checkpoint_interval": config.checkpoint_interval,
+//!     "replay_on_activation": config.replay_on_activation,
+//! });
+//! let mut facet = DurabilityFacet::new(storage, config_value, 50);
 //!
 //! // Attach to actor (triggers replay if enabled)
 //! facet.on_attach("actor-123", serde_json::json!({})).await?;
@@ -111,10 +116,16 @@ use tracing;
 /// - Uses CheckpointManager for periodic snapshots
 /// - Intercepts before/after method calls via Facet trait
 pub struct DurabilityFacet<S: JournalStorage> {
+    /// Facet configuration as Value (immutable, for Facet trait)
+    config_value: Value,
+    
+    /// Facet priority (immutable)
+    priority: i32,
+    
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
 
-    /// Durability configuration
+    /// Durability configuration (parsed from config_value)
     config: DurabilityConfig,
 
     /// Journal storage backend
@@ -145,12 +156,16 @@ pub struct DurabilityFacet<S: JournalStorage> {
     state_loader: Arc<RwLock<Option<Box<dyn StateLoader>>>>,
 }
 
+/// Default priority for DurabilityFacet
+pub const DURABILITY_FACET_DEFAULT_PRIORITY: i32 = 50;
+
 impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
     /// Create a new durability facet
     ///
     /// ## Arguments
     /// * `storage` - Journal storage backend
-    /// * `config` - Durability configuration from proto
+    /// * `config` - Facet configuration as Value (can be empty `{}` for defaults)
+    /// * `priority` - Facet priority (default: 50)
     ///
     /// ## Returns
     /// New DurabilityFacet ready to attach to an actor
@@ -160,28 +175,24 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
     /// # use plexspaces_journaling::*;
     /// # async fn example() -> JournalResult<()> {
     /// let storage = MemoryJournalStorage::new();
-    /// let config = DurabilityConfig {
-    ///     backend: JournalBackend::JournalBackendMemory as i32,
-    ///     checkpoint_interval: 100,
-    ///     checkpoint_timeout: None,
-    ///     replay_on_activation: true,
-    ///     cache_side_effects: true,
-    ///     compression: CompressionType::CompressionTypeNone as i32,
-    ///     state_schema_version: 1,
-    ///     backend_config: None,
-    /// };
+    /// let config = serde_json::json!({
+    ///     "checkpoint_interval": 100,
+    ///     "replay_on_activation": true,
+    /// });
     ///
-    /// let facet = DurabilityFacet::new(storage, config);
+    /// let facet = DurabilityFacet::new(storage, config, 50);
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(storage: S, config: DurabilityConfig) -> Self {
+    pub fn new(storage: S, config: Value, priority: i32) -> Self {
+        // Parse Value to DurabilityConfig
+        let durability_config = Self::parse_config(config.clone());
         // Create checkpoint config from durability config
         let checkpoint_config = CheckpointConfig {
-            enabled: config.checkpoint_interval > 0,
-            entry_interval: config.checkpoint_interval,
-            time_interval: config.checkpoint_timeout.clone(),
-            compression: config.compression,
+            enabled: durability_config.checkpoint_interval > 0,
+            entry_interval: durability_config.checkpoint_interval,
+            time_interval: durability_config.checkpoint_timeout.clone(),
+            compression: durability_config.compression,
             retention_count: 2,  // Keep last 2 checkpoints
             auto_truncate: false, // Don't auto-truncate - let users control this via config
             async_checkpointing: false,
@@ -194,9 +205,9 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
         // Note: CheckpointManager needs S, not Arc<S>
         // We'll wrap storage in Arc for sharing, but CheckpointManager takes ownership
         let checkpoint_storage = Arc::clone(&storage_arc);
-        // Get schema version from config (default to 1 if not set)
-        let schema_version = if config.state_schema_version > 0 {
-            config.state_schema_version
+        // Get schema version from durability_config (default to 1 if not set)
+        let schema_version = if durability_config.state_schema_version > 0 {
+            durability_config.state_schema_version
         } else {
             1 // Default to schema version 1
         };
@@ -208,8 +219,10 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
         ));
 
         Self {
+            config_value: config,
+            priority,
             actor_id: Arc::new(RwLock::new(None)),
-            config,
+            config: durability_config,
             storage: storage_arc,
             checkpoint_manager,
             execution_context: Arc::new(RwLock::new(None)),
@@ -219,6 +232,54 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
             resolved_promises: Arc::new(RwLock::new(HashMap::new())),
             replay_handler: Arc::new(RwLock::new(None)),
             state_loader: Arc::new(RwLock::new(None)),
+        }
+    }
+    
+    /// Parse Value to DurabilityConfig
+    fn parse_config(config: Value) -> DurabilityConfig {
+        // Extract values from JSON config or use defaults
+        DurabilityConfig {
+            backend: config
+                .get("backend")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(JournalBackend::JournalBackendMemory as i32),
+            checkpoint_interval: config
+                .get("checkpoint_interval")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as u64)
+                .unwrap_or(100),
+            checkpoint_timeout: config
+                .get("checkpoint_timeout")
+                .and_then(|v| {
+                    // Try to parse as Duration proto or as string
+                    if let Some(duration_str) = v.as_str() {
+                        // Parse duration string (e.g., "5m", "10s") - simplified for now
+                        // In real implementation, would parse to prost_types::Duration
+                        None // Skip for now - requires duration parsing
+                    } else {
+                        None
+                    }
+                }),
+            replay_on_activation: config
+                .get("replay_on_activation")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            cache_side_effects: config
+                .get("cache_side_effects")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            compression: config
+                .get("compression")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(CompressionType::CompressionTypeNone as i32),
+            state_schema_version: config
+                .get("state_schema_version")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as u32)
+                .unwrap_or(1),
+            backend_config: None, // BackendConfig doesn't implement Deserialize, skip for now
         }
     }
 
@@ -1118,6 +1179,14 @@ impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
         // Future: Could record error in journal for debugging
         Ok(ErrorHandling::Propagate)
     }
+    
+    fn get_config(&self) -> Value {
+        self.config_value.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 // =============================================================================
@@ -1144,12 +1213,30 @@ mod tests {
         }
     }
 
+    /// Helper to convert DurabilityConfig to Value
+    fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
+        let mut json = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        // Handle checkpoint_timeout separately (Option<Duration> doesn't serialize directly)
+        if let Some(ref timeout) = config.checkpoint_timeout {
+            json["checkpoint_timeout_seconds"] = serde_json::json!(timeout.seconds);
+            json["checkpoint_timeout_nanos"] = serde_json::json!(timeout.nanos);
+        }
+        json
+    }
+
     #[tokio::test]
     async fn test_facet_creation() {
         let storage = MemoryJournalStorage::new();
         let config = create_test_config();
 
-        let facet = DurabilityFacet::new(storage, config);
+        let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         assert_eq!(facet.facet_type(), "durability");
     }
@@ -1160,7 +1247,7 @@ mod tests {
         let mut config = create_test_config();
         config.replay_on_activation = false; // Disable replay
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         // Should succeed without errors
         let result = facet.on_attach("actor-1", serde_json::json!({})).await;
@@ -1180,7 +1267,7 @@ mod tests {
         let storage = MemoryJournalStorage::new();
         let config = create_test_config(); // replay_on_activation = true
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         // Should succeed even with no checkpoint/journal
         let result = facet.on_attach("actor-1", serde_json::json!({})).await;
@@ -1192,7 +1279,7 @@ mod tests {
         let storage = MemoryJournalStorage::new();
         let config = create_test_config();
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         facet
             .on_attach("actor-1", serde_json::json!({}))
@@ -1215,7 +1302,7 @@ mod tests {
         let mut config = create_test_config();
         config.replay_on_activation = false;
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -1248,7 +1335,7 @@ mod tests {
         let mut config = create_test_config();
         config.replay_on_activation = false;
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -1286,7 +1373,7 @@ mod tests {
         let mut config = create_test_config();
         config.replay_on_activation = false;
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -1316,7 +1403,7 @@ mod tests {
         config.replay_on_activation = false;
         config.checkpoint_interval = 0; // Disable checkpointing for this test
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -1341,7 +1428,7 @@ mod tests {
         config.replay_on_activation = false; // First attach without replay
 
         // Create and attach facet
-        let mut facet1 = DurabilityFacet::new(storage_clone.clone(), config.clone());
+        let mut facet1 = DurabilityFacet::new(storage_clone.clone(), config_to_value(&config), 50);
         facet1
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -1363,7 +1450,7 @@ mod tests {
 
         // Create new facet with replay enabled
         config.replay_on_activation = true;
-        let mut facet2 = DurabilityFacet::new(storage_clone, config);
+        let mut facet2 = DurabilityFacet::new(storage_clone, config_to_value(&config), 50);
 
         // On attach, should replay journal
         let result = facet2.on_attach("actor-1", serde_json::json!({})).await;
@@ -1383,7 +1470,7 @@ mod tests {
         let storage = MemoryJournalStorage::new();
         let config = create_test_config();
 
-        let facet = DurabilityFacet::new(storage, config);
+        let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         // on_error should propagate by default
         let result = facet.on_error("test_method", "test error").await;
@@ -1396,7 +1483,7 @@ mod tests {
         let storage = MemoryJournalStorage::new();
         let config = create_test_config();
 
-        let facet = DurabilityFacet::new(storage, config);
+        let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         // Calling before_method without attach should fail
         let result = facet.before_method("test", &[]).await;
@@ -1410,7 +1497,7 @@ mod tests {
         let mut config = create_test_config();
         config.replay_on_activation = false;
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -1447,7 +1534,7 @@ mod tests {
     async fn test_facet_get_state() {
         let storage = MemoryJournalStorage::new();
         let config = create_test_config();
-        let facet = DurabilityFacet::new(storage, config);
+        let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         // get_state should return Null (default implementation)
         let state = facet.get_state().unwrap();
@@ -1458,7 +1545,7 @@ mod tests {
     async fn test_facet_set_state() {
         let storage = MemoryJournalStorage::new();
         let config = create_test_config();
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         // set_state should succeed (default implementation is no-op)
         let state = serde_json::json!({"key": "value"});
@@ -1475,7 +1562,7 @@ mod tests {
         config.checkpoint_interval = 5;
 
         // First facet: create journal entries and checkpoint
-        let mut facet1 = DurabilityFacet::new(storage_clone.clone(), config.clone());
+        let mut facet1 = DurabilityFacet::new(storage_clone.clone(), config_to_value(&config), 50);
         facet1
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -1509,7 +1596,7 @@ mod tests {
 
         // Second facet: replay from checkpoint
         config.replay_on_activation = true;
-        let mut facet2 = DurabilityFacet::new(storage_clone, config);
+        let mut facet2 = DurabilityFacet::new(storage_clone, config_to_value(&config), 50);
 
         // Should replay from checkpoint sequence + 1
         let result = facet2.on_attach("actor-1", serde_json::json!({})).await;
@@ -1532,7 +1619,7 @@ mod tests {
         config.replay_on_activation = false;
         config.checkpoint_interval = 0; // Disable checkpointing for this test to verify all entries persist
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -1599,7 +1686,7 @@ mod tests {
         let mut config = create_test_config();
         config.replay_on_activation = false;
 
-        let mut facet = DurabilityFacet::new(storage, config);
+        let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await

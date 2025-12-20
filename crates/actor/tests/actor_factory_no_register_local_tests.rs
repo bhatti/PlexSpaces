@@ -139,6 +139,7 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets
     ).await.unwrap();
     
     // Verify actor is registered (via MessageSender, not mailbox)
@@ -171,6 +172,7 @@ async fn test_spawn_actor_registers_message_sender_only() {
         vec![],
         None,
         std::collections::HashMap::new(),
+        vec![], // facets
     ).await.unwrap();
     
     // Verify actor is registered

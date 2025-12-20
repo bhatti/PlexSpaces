@@ -675,20 +675,18 @@ impl ActorBuilder {
         let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
             .ok_or_else(|| "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string())?;
         
-        // Use ActorFactory to spawn the actor with spawn_actor
-        // Note: spawn_actor will rebuild the actor internally, but this ensures consistency
-        // For efficiency, we could keep using spawn_built_actor, but user wants all code to use spawn_actor
-        let _message_sender = actor_factory.spawn_actor(
+        // Use spawn_built_actor since the actor is already built
+        // This avoids recreating the actor that was just built
+        let _message_sender = actor_factory.spawn_built_actor(
             ctx,
-            &actor_id,
-            &actor_type,
-            vec![], // initial_state
-            actor.context().config.clone(), // config from built actor
-            std::collections::HashMap::new(), // labels
+            Arc::new(actor),
+            Some(actor_type),
         ).await
             .map_err(|e| format!("Failed to spawn actor via ActorFactory: {}", e))?;
         
         // Create ActorRef from the actor ID
+        // Note: spawn_built_actor returns MessageSender, but we need ActorRef for compatibility
+        // We can create ActorRef from the actor_id since the actor is registered
         plexspaces_core::ActorRef::new(actor_id.clone())
             .map_err(|e| format!("Failed to create ActorRef for {}: {}", actor_id, e).into())
     }

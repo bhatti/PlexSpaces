@@ -78,6 +78,12 @@ use tokio::sync::RwLock;
 /// ## Thread Safety
 /// Uses Arc<RwLock<>> for concurrent access to lifecycle state.
 pub struct VirtualActorFacet {
+    /// Facet configuration (immutable)
+    config: Value,
+    
+    /// Facet priority (immutable)
+    priority: i32,
+    
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
 
@@ -100,6 +106,9 @@ pub struct VirtualActorFacet {
     is_activating: Arc<RwLock<bool>>,
 }
 
+/// Default priority for VirtualActorFacet
+pub const VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY: i32 = 100;
+
 /// Activation strategy for virtual actors
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivationStrategy {
@@ -116,10 +125,12 @@ impl VirtualActorFacet {
     ///
     /// ## Arguments
     /// * `config` - Facet configuration (idle_timeout, activation_strategy)
+    /// * `priority` - Facet priority (default: 100)
     ///
     /// ## Returns
     /// New VirtualActorFacet ready to attach to an actor
-    pub fn new(config: Value) -> Self {
+    pub fn new(config: Value, priority: i32) -> Self {
+        // Validate and parse config
         let idle_timeout = config
             .get("idle_timeout")
             .and_then(|v| v.as_str())
@@ -137,6 +148,8 @@ impl VirtualActorFacet {
             .unwrap_or(ActivationStrategy::Lazy);
 
         VirtualActorFacet {
+            config,
+            priority,
             actor_id: Arc::new(RwLock::new(None)),
             idle_timeout: Arc::new(RwLock::new(idle_timeout)),
             activation_strategy: Arc::new(RwLock::new(activation_strategy)),
@@ -249,25 +262,9 @@ impl Facet for VirtualActorFacet {
         self
     }
 
-    async fn on_attach(&mut self, actor_id: &str, config: Value) -> Result<(), FacetError> {
+    async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
+        // Use stored config, ignore parameter (config is set in constructor)
         *self.actor_id.write().await = Some(actor_id.to_string());
-
-        // Update config if provided
-        if let Some(timeout_str) = config.get("idle_timeout").and_then(|v| v.as_str()) {
-            if let Some(timeout) = parse_duration(timeout_str) {
-                *self.idle_timeout.write().await = timeout;
-            }
-        }
-
-        if let Some(strategy_str) = config.get("activation_strategy").and_then(|v| v.as_str()) {
-            let strategy = match strategy_str {
-                "eager" => ActivationStrategy::Eager,
-                "prewarm" => ActivationStrategy::Prewarm,
-                _ => ActivationStrategy::Lazy,
-            };
-            *self.activation_strategy.write().await = strategy;
-        }
-
         Ok(())
     }
 
@@ -304,6 +301,14 @@ impl Facet for VirtualActorFacet {
     async fn on_error(&self, _method: &str, _error: &str) -> Result<ErrorHandling, FacetError> {
         // Don't interfere with error handling
         Ok(ErrorHandling::Propagate)
+    }
+    
+    fn get_config(&self) -> Value {
+        self.config.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
     }
 
     fn get_state(&self) -> Result<Value, FacetError> {
@@ -360,7 +365,7 @@ mod tests {
             "activation_strategy": "lazy"
         });
 
-        let facet = VirtualActorFacet::new(config);
+        let facet = VirtualActorFacet::new(config, 100);
         assert_eq!(facet.facet_type(), "virtual_actor");
 
         let state = facet.get_lifecycle_state().await;
@@ -376,8 +381,8 @@ mod tests {
             "activation_strategy": "eager"
         });
 
-        let mut facet = VirtualActorFacet::new(serde_json::json!({}));
-        facet.on_attach("actor-123", config).await.unwrap();
+        let mut facet = VirtualActorFacet::new(config.clone(), 100);
+        facet.on_attach("actor-123", serde_json::json!({})).await.unwrap();
 
         let state = facet.get_lifecycle_state().await;
         assert_eq!(state.idle_timeout, Duration::from_secs(600));
@@ -385,7 +390,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_should_activate() {
-        let facet = VirtualActorFacet::new(serde_json::json!({}));
+        let facet = VirtualActorFacet::new(serde_json::json!({}), 100);
         assert!(facet.should_activate().await);
 
         // After activation, should not activate again
@@ -395,7 +400,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_activation() {
-        let facet = VirtualActorFacet::new(serde_json::json!({}));
+        let facet = VirtualActorFacet::new(serde_json::json!({}), 100);
 
         // First activation should succeed
         assert!(facet.start_activation().await);
@@ -414,7 +419,7 @@ mod tests {
             "idle_timeout": "1s"
         });
 
-        let facet = VirtualActorFacet::new(config);
+        let facet = VirtualActorFacet::new(config, 100);
         facet.mark_activated().await;
 
         // Should not deactivate immediately
@@ -433,7 +438,7 @@ mod tests {
             "idle_timeout": "1s"
         });
 
-        let facet = VirtualActorFacet::new(config);
+        let facet = VirtualActorFacet::new(config, 100);
         facet.mark_activated().await;
 
         // Wait almost to timeout
@@ -454,7 +459,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_activation_count() {
-        let facet = VirtualActorFacet::new(serde_json::json!({}));
+        let facet = VirtualActorFacet::new(serde_json::json!({}), 100);
 
         let state = facet.get_lifecycle_state().await;
         assert_eq!(state.activation_count, 0);

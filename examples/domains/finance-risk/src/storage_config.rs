@@ -186,7 +186,20 @@ impl StorageConfig {
             config.replay_on_activation
         );
 
-        Ok(DurabilityFacet::new(storage, config))
+        let mut config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        // Handle checkpoint_timeout separately (Option<Duration> doesn't serialize directly)
+        if let Some(ref timeout) = config.checkpoint_timeout {
+            config_value["checkpoint_timeout_seconds"] = serde_json::json!(timeout.seconds);
+            config_value["checkpoint_timeout_nanos"] = serde_json::json!(timeout.nanos);
+        }
+        Ok(DurabilityFacet::new(storage, config_value, 50))
     }
 }
 

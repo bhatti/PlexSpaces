@@ -90,7 +90,16 @@
 
         // Phase 2: Restart and recovery
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_value, 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify checkpoint was loaded (check via storage instead)
@@ -178,7 +187,16 @@
 
         // Phase 2: Restart and verify side effect was cached
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_value, 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify side effect entry is still in journal
@@ -239,7 +257,16 @@
 
         // Phase 2: Restart and verify checkpoint was loaded
         facet.on_detach(actor_id).await.unwrap();
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let config_value = serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        });
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_value, 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Verify checkpoint was loaded

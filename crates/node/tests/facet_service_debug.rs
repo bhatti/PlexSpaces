@@ -85,9 +85,9 @@ async fn test_02_attach_facet_no_spawn() {
         .await;
     
     // Attach facet
-    let timer_facet = Box::new(TimerFacet::new());
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(timer_facet, 50, serde_json::json!({}))
+        .attach_facet(timer_facet)
         .await
         .unwrap();
     
@@ -111,9 +111,9 @@ async fn test_03_spawn_actor_with_facet() {
         .await;
     
     // Attach facet
-    let timer_facet = Box::new(TimerFacet::new());
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(timer_facet, 50, serde_json::json!({}))
+        .attach_facet(timer_facet)
         .await
         .unwrap();
     
@@ -154,9 +154,9 @@ async fn test_04_facet_storage_after_spawn() {
         .await;
     
     // Attach facet
-    let timer_facet = Box::new(TimerFacet::new());
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(timer_facet, 50, serde_json::json!({}))
+        .attach_facet(timer_facet)
         .await
         .unwrap();
     

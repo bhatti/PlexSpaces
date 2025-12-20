@@ -47,7 +47,7 @@ mod distributed_lock_tests {
 
     /// Helper to create TimerFacet without locks
     fn create_timer_facet_without_locks() -> TimerFacet {
-        TimerFacet::new()
+        TimerFacet::new(serde_json::json!({}), 75)
     }
 
     #[tokio::test]

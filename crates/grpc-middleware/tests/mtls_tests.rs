@@ -31,7 +31,11 @@ mod tests {
         // Test that we can create mTLS config
         let mtls_config = MtlsConfig {
             enable_mtls: true,
-            ca_certificate: "-----BEGIN CERTIFICATE-----\n...".to_string(),
+            ca_certificate_path: "/tmp/ca.crt".to_string(),
+            server_certificate_path: "/tmp/server.crt".to_string(),
+            server_key_path: "/tmp/server.key".to_string(),
+            auto_generate: false,
+            cert_dir: "/tmp/certs".to_string(),
             trusted_services: vec!["actor-service".to_string(), "scheduler-service".to_string()],
             certificate_rotation_interval: Some(prost_types::Duration {
                 seconds: 86400 * 30, // 30 days
@@ -40,7 +44,7 @@ mod tests {
         };
 
         assert!(mtls_config.enable_mtls);
-        assert!(!mtls_config.ca_certificate.is_empty());
+        assert!(!mtls_config.ca_certificate_path.is_empty());
         assert_eq!(mtls_config.trusted_services.len(), 2);
     }
 

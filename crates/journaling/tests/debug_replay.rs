@@ -17,6 +17,19 @@ mod sqlite_tests {
         SqliteJournalStorage::new(":memory:").await.unwrap()
     }
 
+    /// Helper to convert DurabilityConfig to Value
+    fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
+        serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        })
+    }
+
     /// Test: Minimal reproduction - attach with replay_on_activation=true, write one entry
     #[tokio::test]
     async fn test_minimal_replay_activation() {
@@ -32,7 +45,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-minimal";
 
         println!("=== Step 1: Attach facet ===");
@@ -151,7 +164,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-sequence";
 
         println!("=== Before attach ===");
@@ -233,7 +246,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id2 = "debug-facet";
 
         facet.on_attach(actor_id2, serde_json::json!({})).await.unwrap();
@@ -261,7 +274,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-actor-id";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -297,7 +310,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-query";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -336,7 +349,7 @@ mod sqlite_tests {
         };
 
         println!("=== Creating facet ===");
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-step";
 
         println!("=== Step 1: on_attach ===");

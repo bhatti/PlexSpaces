@@ -178,59 +178,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         capacity: 1000,
         ..Default::default()
     };
-    let actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("reminder-actor@local"))
-        .with_mailbox_config(mailbox_config)
-        .build()
-        .await;
-
-    // Attach VirtualActorFacet for auto-activation
-    info!("🔌 Attaching VirtualActorFacet for auto-activation...");
+    // Create facets with config and priority
+    info!("🔌 Creating facets...");
     let virtual_facet_config = serde_json::json!({
         "idle_timeout": "10s",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
-    actor
-        .attach_facet(virtual_facet, 100, virtual_facet_config)
-        .await
-        .map_err(|e| format!("Failed to attach VirtualActorFacet: {}", e))?;
-    info!("✅ VirtualActorFacet attached");
-    println!();
-
-    // Attach ReminderFacet with activation provider
-    info!("🔌 Attaching ReminderFacet with storage...");
+    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config, 100));
+    info!("✅ VirtualActorFacet created");
+    
     let activation_provider = Arc::new(SimpleActivationProvider {
         node: node.clone(),
     });
     let reminder_facet = Box::new(ReminderFacet::with_activation_provider(
         storage.clone(),
         activation_provider,
+        serde_json::json!({}),
+        50,
     ));
-    let reminder_facet_config = serde_json::json!({});
-    actor
-        .attach_facet(reminder_facet, 50, reminder_facet_config)
-        .await
-        .map_err(|e| format!("Failed to attach ReminderFacet: {}", e))?;
-    info!("✅ ReminderFacet attached");
+    info!("✅ ReminderFacet created");
     println!();
 
-    // Spawn using ActorFactory
-    // Note: For actors with VirtualActorFacet, we must use spawn_built_actor because
-    // virtual actor logic checks for the facet during spawn. For other cases, use spawn_actor.
+    // Spawn using ActorFactory with facets
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
-    let actor_id = actor.id().clone();
+    let actor_id = ActorId::from("reminder-actor@local");
     let ctx = plexspaces_core::RequestContext::internal();
-    // Since we have VirtualActorFacet attached, we need to use spawn_built_actor
-    // Virtual actor logic checks for the facet during spawn, so it must be attached before
-    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer",
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![virtual_facet, reminder_facet], // facets
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    let actor_ref = plexspaces_core::ActorRef::new(actor_id)
-        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
-    let actor_id = actor_ref.id().clone();
+    
+    // Create ActorRef directly - no need to access mailbox
+    let actor_ref = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
+        node.service_locator().clone(),
+    );
     info!("✅ Actor spawned: {}", actor_id);
     println!();
     

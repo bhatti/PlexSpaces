@@ -268,6 +268,7 @@ impl ActorFactory for ActorFactoryImpl {
         initial_state: Vec<u8>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: HashMap<String, String>,
+        facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
         use crate::ActorBuilder;
         use plexspaces_core::{Actor as ActorTrait, BehaviorType, behavior_factory::BehaviorFactory};
@@ -352,6 +353,12 @@ impl ActorFactory for ActorFactoryImpl {
         // Build actor
         let actor = builder.build().await
             .map_err(|e| format!("Failed to build actor: {}", e))?;
+        
+        // Attach facets before spawning
+        for mut facet in facets {
+            actor.attach_facet(facet).await
+                .map_err(|e| format!("Failed to attach facet: {}", e))?;
+        }
         
         // Spawn the built actor with type information
         self.spawn_built_actor(ctx, Arc::new(actor), Some(actor_type.to_string())).await
@@ -472,7 +479,7 @@ impl ActorFactory for ActorFactoryImpl {
                     _ => "lazy"
                 }
             });
-            let virtual_facet_for_reg = VirtualActorFacet::new(facet_config);
+            let virtual_facet_for_reg = VirtualActorFacet::new(facet_config, 100); // VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY
             
             // Register as virtual actor (only if not already registered)
             if !manager.is_virtual(&actor_id).await {

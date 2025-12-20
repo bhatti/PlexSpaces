@@ -96,10 +96,16 @@ use tokio::sync::RwLock;
 /// - Supports pagination for efficient retrieval
 /// - Shares snapshots with DurabilityFacet (efficiency)
 pub struct EventSourcingFacet<S: JournalStorage> {
+    /// Facet configuration as Value (immutable, for Facet trait)
+    config_value: Value,
+    
+    /// Facet priority (immutable)
+    priority: i32,
+    
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
 
-    /// Event sourcing configuration
+    /// Event sourcing configuration (parsed from config_value)
     config: EventSourcingConfig,
 
     /// Journal storage backend (shared with DurabilityFacet)
@@ -109,42 +115,74 @@ pub struct EventSourcingFacet<S: JournalStorage> {
     event_sequence: Arc<RwLock<u64>>,
 }
 
+/// Default priority for EventSourcingFacet
+pub const EVENT_SOURCING_FACET_DEFAULT_PRIORITY: i32 = 40;
+
 impl<S: JournalStorage + Clone + 'static> EventSourcingFacet<S> {
     /// Create a new event sourcing facet
     ///
     /// ## Arguments
     /// * `storage` - Journal storage backend (shared with DurabilityFacet)
-    /// * `config` - Event sourcing configuration from proto
+    /// * `config` - Facet configuration as Value
+    /// * `priority` - Facet priority
     ///
     /// ## Returns
     /// New EventSourcingFacet ready to attach to an actor
-    ///
-    /// ## Example
-    /// ```rust,no_run
-    /// # use plexspaces_journaling::*;
-    /// # async fn example() -> JournalResult<()> {
-    /// let storage = MemoryJournalStorage::new();
-    /// let config = EventSourcingConfig {
-    ///     event_log_enabled: true,
-    ///     auto_replay: true,
-    ///     snapshot_interval: 100,
-    ///     time_travel_enabled: true,
-    ///     metadata: Default::default(),
-    ///     default_page_size: 100,
-    ///     max_page_size: 1000,
-    /// };
-    ///
-    /// let facet = EventSourcingFacet::new(Arc::new(storage), config);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn new(storage: Arc<S>, config: EventSourcingConfig) -> Self {
-        Self {
+    pub fn new(storage: Arc<S>, config: Value, priority: i32) -> Self {
+        // Parse Value to EventSourcingConfig manually (EventSourcingConfig doesn't implement Deserialize)
+        let event_sourcing_config = EventSourcingConfig {
+            event_log_enabled: config
+                .get("event_log_enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            auto_replay: config
+                .get("auto_replay")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            snapshot_interval: config
+                .get("snapshot_interval")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as u64)
+                .unwrap_or(100),
+            time_travel_enabled: config
+                .get("time_travel_enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            metadata: HashMap::new(), // Metadata parsing skipped for simplicity
+            default_page_size: config
+                .get("default_page_size")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(100),
+            max_page_size: config
+                .get("max_page_size")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(1000),
+        };
+        
+        EventSourcingFacet {
+            config_value: config,
+            priority,
             actor_id: Arc::new(RwLock::new(None)),
-            config,
+            config: event_sourcing_config,
             storage,
             event_sequence: Arc::new(RwLock::new(0)),
         }
+    }
+    
+    /// Legacy constructor for backward compatibility
+    pub fn with_config(storage: Arc<S>, config: EventSourcingConfig) -> Self {
+        // Convert EventSourcingConfig to Value manually
+        let config_value = serde_json::json!({
+            "event_log_enabled": config.event_log_enabled,
+            "auto_replay": config.auto_replay,
+            "snapshot_interval": config.snapshot_interval,
+            "time_travel_enabled": config.time_travel_enabled,
+            "default_page_size": config.default_page_size,
+            "max_page_size": config.max_page_size,
+        });
+        Self::new(storage, config_value, EVENT_SOURCING_FACET_DEFAULT_PRIORITY)
     }
 
     /// Log an event to the event log
@@ -329,6 +367,14 @@ impl<S: JournalStorage + Clone + 'static> Facet for EventSourcingFacet<S> {
         // Event sourcing doesn't handle errors
         Ok(ErrorHandling::Propagate)
     }
+    
+    fn get_config(&self) -> Value {
+        self.config_value.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 #[cfg(test)]
@@ -349,12 +395,24 @@ mod tests {
         }
     }
 
+    /// Helper to convert EventSourcingConfig to Value
+    fn config_to_value(config: &EventSourcingConfig) -> serde_json::Value {
+        serde_json::json!({
+            "event_log_enabled": config.event_log_enabled,
+            "auto_replay": config.auto_replay,
+            "snapshot_interval": config.snapshot_interval,
+            "time_travel_enabled": config.time_travel_enabled,
+            "default_page_size": config.default_page_size,
+            "max_page_size": config.max_page_size,
+        })
+    }
+
     #[tokio::test]
     async fn test_facet_creation() {
         let storage = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
-        let facet = EventSourcingFacet::new(storage, config);
+        let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         assert_eq!(facet.facet_type(), "event_sourcing");
     }
@@ -365,7 +423,7 @@ mod tests {
         let mut config = create_test_config();
         config.auto_replay = false; // Disable replay
 
-        let mut facet = EventSourcingFacet::new(storage, config);
+        let mut facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         // Should succeed without errors
         let result = facet.on_attach("actor-1", serde_json::json!({})).await;
@@ -381,7 +439,7 @@ mod tests {
         let storage = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
-        let mut facet = EventSourcingFacet::new(storage, config);
+        let mut facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         // Should succeed even with empty event log
         let result = facet.on_attach("actor-1", serde_json::json!({})).await;
@@ -393,7 +451,7 @@ mod tests {
         let storage = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
-        let mut facet = EventSourcingFacet::new(storage.clone(), config);
+        let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
 
         // Log an event
@@ -417,7 +475,7 @@ mod tests {
         let mut config = create_test_config();
         config.event_log_enabled = false; // Disable event logging
 
-        let mut facet = EventSourcingFacet::new(storage.clone(), config);
+        let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
 
         // Log an event (should return 0, no event logged)
@@ -464,7 +522,7 @@ mod tests {
         storage.append_event(&event1).await.unwrap();
         storage.append_event(&event2).await.unwrap();
 
-        let facet = EventSourcingFacet::new(storage, config);
+        let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         // Replay events
         let events = facet.replay_events("actor-1", 0).await.unwrap();
@@ -483,7 +541,7 @@ mod tests {
         let mut config = create_test_config();
         config.auto_replay = false; // Disable auto-replay
 
-        let facet = EventSourcingFacet::new(storage, config);
+        let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         // Replay events (should return empty vec)
         let events = facet.replay_events("actor-1", 0).await.unwrap();
@@ -495,7 +553,7 @@ mod tests {
         let storage = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
-        let mut facet = EventSourcingFacet::new(storage.clone(), config);
+        let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
 
         // Call after_method (should log event)
@@ -519,7 +577,7 @@ mod tests {
         let mut config = create_test_config();
         config.event_log_enabled = false; // Disable event logging
 
-        let mut facet = EventSourcingFacet::new(storage.clone(), config);
+        let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
 
         // Call after_method (should not log event)
@@ -540,7 +598,7 @@ mod tests {
         let storage = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
-        let facet = EventSourcingFacet::new(storage, config);
+        let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         // Calling after_method without attach should fail
         let result = facet.after_method("test", &[], &[]).await;
@@ -552,7 +610,7 @@ mod tests {
         let storage = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
-        let mut facet = EventSourcingFacet::new(storage, config);
+        let mut facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
         facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
 
         // Detach
@@ -573,7 +631,7 @@ mod tests {
         let storage = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
-        let mut facet = EventSourcingFacet::new(storage.clone(), config);
+        let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
 
         // Log multiple events
@@ -619,7 +677,7 @@ mod tests {
             storage.append_event(&event).await.unwrap();
         }
 
-        let facet = EventSourcingFacet::new(storage, config);
+        let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         // Replay from sequence 3
         let events = facet.replay_events("actor-1", 3).await.unwrap();
@@ -730,7 +788,7 @@ mod tests {
         let storage = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
-        let facet = EventSourcingFacet::new(storage, config);
+        let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         // on_error should propagate by default
         let result = facet.on_error("test_method", "test error").await;

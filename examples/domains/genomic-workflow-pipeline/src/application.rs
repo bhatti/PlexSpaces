@@ -68,6 +68,10 @@ impl Application for GenomicsPipelineApplication {
         // Note: In production, this would check actor health via ObjectRegistry
         HealthStatus::HealthStatusHealthy
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl Default for GenomicsPipelineApplication {

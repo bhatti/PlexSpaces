@@ -127,14 +127,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create ActorRegistry (composes ObjectRegistry)
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
 
-    // Create ActorService (using backward-compatible constructor)
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    // Create ServiceLocator and register services manually
+    let service_locator = Arc::new(plexspaces_core::ServiceLocator::new());
     let reply_tracker = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator.register_service(actor_registry.clone()).await;
     service_locator.register_service(reply_tracker).await;
     service_locator.register_service(reply_waiter_registry).await;
+    
+    // Register VirtualActorManager
+    use plexspaces_core::VirtualActorManager;
+    let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
+    service_locator.register_service(virtual_actor_manager).await;
+    
+    // Register FacetManager (from ActorRegistry)
+    let facet_manager = actor_registry.facet_manager().clone();
+    service_locator.register_service(facet_manager).await;
+    
+    // Register ActorFactoryImpl
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
+    service_locator.register_service(actor_factory).await;
     let service = ActorServiceImpl::new(service_locator, node_id.to_string());
 
     // Start gRPC server

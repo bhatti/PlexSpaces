@@ -107,52 +107,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Creating counter actor (Rivet-style virtual actor)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    let behavior = Box::new(CounterActor::new());
-    let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
-        .build()
-        .await;
-    
-    // Attach VirtualActorFacet (Rivet actors are virtual)
+    // Create facets with config and priority
     let virtual_facet_config = serde_json::json!({
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
-    actor
-        .attach_facet(virtual_facet, 100, virtual_facet_config)
-        .await?;
+    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config, 100));
     
     // Attach DurabilityFacet (Rivet actors persist state)
     let storage = MemoryJournalStorage::new();
-    let durability_config = DurabilityConfig::default();
-    let durability_facet = Box::new(DurabilityFacet::new(storage, durability_config));
-    actor
-        .attach_facet(durability_facet, 50, serde_json::json!({}))
-        .await?;
+    let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
     
-    // Spawn using ActorFactory
+    // Spawn using ActorFactory with facets
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
-    let actor_id = actor.id().clone();
     let ctx = plexspaces_core::RequestContext::internal();
-    // Note: Since actor has VirtualActorFacet attached, we use spawn_built_actor
-    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer",
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![virtual_facet, durability_facet], // facets
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    let core_ref = plexspaces_core::ActorRef::new(actor_id)
-        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
-
-    // Convert to actor::ActorRef for ask method
-    let mailbox = node.actor_registry()
-        .lookup_mailbox(core_ref.id())
-        .await?
-        .ok_or("Actor not found in registry")?;
     
-    let counter = plexspaces_actor::ActorRef::local(
-        core_ref.id().clone(),
-        mailbox,
+    // Create ActorRef directly - no need to access mailbox
+    let counter = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
         node.service_locator().clone(),
     );
 
@@ -232,39 +218,31 @@ mod tests {
             .build();
 
         let actor_id: ActorId = "counter/test-1@test-node".to_string();
-        let behavior = Box::new(CounterActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await;
         
-        let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({})));
-        actor.attach_facet(virtual_facet, 100, serde_json::json!({})).await.unwrap();
-        
+        // Create facets with config and priority
+        let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 100));
         let storage = MemoryJournalStorage::new();
-        let durability_facet = Box::new(DurabilityFacet::new(storage, DurabilityConfig::default()));
-        actor.attach_facet(durability_facet, 50, serde_json::json!({})).await.unwrap();
+        let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
         
-        // Spawn using ActorFactory
-        // Note: Since actor has VirtualActorFacet attached, we use spawn_built_actor
+        // Spawn using ActorFactory with facets
         let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
             .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
-        let actor_id = actor.id().clone();
         let ctx = plexspaces_core::RequestContext::internal();
-        let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![virtual_facet, durability_facet], // facets
+        ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
-        let core_ref = plexspaces_core::ActorRef::new(actor_id)
-            .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();
-
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(core_ref.id())
-            .await
-            .unwrap()
-            .unwrap();
         
-        let counter = plexspaces_actor::ActorRef::local(
-            core_ref.id().clone(),
-            mailbox,
+        // Create ActorRef directly - no need to access mailbox
+        let counter = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
 

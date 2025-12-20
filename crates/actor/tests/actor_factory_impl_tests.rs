@@ -145,12 +145,12 @@ async fn test_activate_virtual_actor_success() {
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
-    actor.attach_facet(virtual_facet, 100, facet_config.clone()).await.unwrap();
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone(), 100));
+    actor.attach_facet(virtual_facet).await.unwrap();
     
     // Register as virtual actor first (needed for activate_virtual_actor to recognize it)
     let facet_box = Arc::new(tokio::sync::RwLock::new(
-        Box::new(VirtualActorFacet::new(facet_config)) as Box<dyn std::any::Any + Send + Sync>
+        Box::new(VirtualActorFacet::new(facet_config, 100)) as Box<dyn std::any::Any + Send + Sync>
     ));
     manager.register("test-actor@test-node".to_string(), facet_box).await.unwrap();
     
@@ -267,6 +267,7 @@ async fn test_spawn_actor_success() {
         vec![],
         None,
         HashMap::new(),
+        vec![], // facets
     ).await;
     
     assert!(result.is_ok(), "Spawn should succeed");
@@ -293,6 +294,7 @@ async fn test_spawn_actor_with_config() {
         vec![],
         config,
         HashMap::new(),
+        vec![], // facets
     ).await;
     
     assert!(result.is_ok(), "Spawn with config should succeed");
@@ -336,6 +338,7 @@ async fn test_spawn_actor_normalize_id() {
         vec![],
         None,
         HashMap::new(),
+        vec![], // facets
     ).await;
     
     assert!(result.is_ok(), "Spawn should normalize actor ID");
@@ -381,8 +384,8 @@ async fn test_spawn_built_actor_virtual_eager() {
         "idle_timeout": "5m",
         "activation_strategy": "eager"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
-    actor.attach_facet(virtual_facet, 100, facet_config).await.unwrap();
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config, 100));
+    actor.attach_facet(virtual_facet).await.unwrap();
     
     let ctx = RequestContext::internal();
     let result = factory.spawn_built_actor(&ctx, Arc::new(actor), Some("test".to_string())).await;
@@ -410,8 +413,8 @@ async fn test_spawn_built_actor_virtual_lazy() {
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
-    actor.attach_facet(virtual_facet, 100, facet_config).await.unwrap();
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config, 100));
+    actor.attach_facet(virtual_facet).await.unwrap();
     
     let ctx = RequestContext::internal();
     let result = factory.spawn_built_actor(&ctx, Arc::new(actor), Some("test".to_string())).await;
@@ -436,8 +439,8 @@ async fn test_spawn_built_actor_virtual_prewarm() {
         "idle_timeout": "5m",
         "activation_strategy": "prewarm"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
-    actor.attach_facet(virtual_facet, 100, facet_config).await.unwrap();
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config, 100));
+    actor.attach_facet(virtual_facet).await.unwrap();
     
     let ctx = RequestContext::internal();
     let result = factory.spawn_built_actor(&ctx, Arc::new(actor), Some("test".to_string())).await;

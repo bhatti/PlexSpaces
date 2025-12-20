@@ -284,6 +284,7 @@ impl ActorServiceImpl {
             initial_state,
             config,
             labels,
+            vec![], // facets (empty - facets should be attached via config or separate API)
         ).await?;
         
         // Actor is now spawned and registered - create ActorRefImpl pointing to local node
@@ -582,6 +583,11 @@ impl ActorServiceImpl {
             
             match actor_ref.ask(message, timeout_duration).await {
                 Ok(reply) => {
+                    // Update Node metrics on success
+                    if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
+                        updater.increment_messages_routed().await;
+                        updater.increment_local_deliveries().await;
+                    }
                     metrics::counter!("plexspaces_actor_service_local_route_success_total",
                         "pattern" => "ask"
                     )
@@ -589,6 +595,11 @@ impl ActorServiceImpl {
                     Ok((message_id, Some(reply)))
                 }
                 Err(e) => {
+                    // Update Node metrics on failure
+                    if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
+                        updater.increment_messages_routed().await;
+                        updater.increment_failed_deliveries().await;
+                    }
                     use plexspaces_actor::ActorRefError;
                     let error_type = match e {
                         ActorRefError::Timeout => "timeout",
@@ -617,7 +628,7 @@ impl ActorServiceImpl {
             }
         } else {
             // TELL PATTERN: Use ActorRef::tell() - handles routing and metrics
-            actor_ref.tell(message).await
+            let result = actor_ref.tell(message).await
                 .map_err(|e| {
                     // Convert ActorRefError to appropriate Status
                     use plexspaces_actor::ActorRefError;
@@ -632,14 +643,24 @@ impl ActorServiceImpl {
                             Status::internal(format!("Failed to send message: {}", e))
                         }
                     }
-                })?;
+                });
+            
+            // Update Node metrics based on result
+            if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
+                updater.increment_messages_routed().await;
+                if result.is_ok() {
+                    updater.increment_local_deliveries().await;
+                } else {
+                    updater.increment_failed_deliveries().await;
+                }
+            }
             
             metrics::counter!("plexspaces_actor_service_local_route_success_total",
                 "pattern" => "tell"
             )
             .increment(1);
 
-            Ok((message_id, None))
+            result.map(|_| (message_id, None))
         }
     }
 
@@ -680,14 +701,22 @@ impl ActorServiceImpl {
         });
 
         // Forward to remote ActorService
-        let response = client.send_message(request).await.map_err(|e| {
-            metrics::counter!("plexspaces_actor_service_remote_route_error_total",
-                "target_node" => node_id.to_string(),
-                "error" => e.code().to_string()
-            )
-            .increment(1);
-            Status::unavailable(format!("Remote call to {} failed: {}", node_id, e))
-        })?;
+        let response = match client.send_message(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                // Update Node metrics on failure
+                if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
+                    updater.increment_messages_routed().await;
+                    updater.increment_failed_deliveries().await;
+                }
+                metrics::counter!("plexspaces_actor_service_remote_route_error_total",
+                    "target_node" => node_id.to_string(),
+                    "error" => e.code().to_string()
+                )
+                .increment(1);
+                return Err(Status::unavailable(format!("Remote call to {} failed: {}", node_id, e)));
+            }
+        };
 
         let response_inner = response.into_inner();
 
@@ -700,6 +729,12 @@ impl ActorServiceImpl {
             "target_node" => node_id.to_string()
         )
         .increment(1);
+
+        // Update Node metrics on success
+        if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
+            updater.increment_messages_routed().await;
+            updater.increment_remote_deliveries().await;
+        }
 
         // Convert response back to internal Message if present
         let reply_message = response_inner
@@ -1138,6 +1173,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 initial_state.clone(),
                 config.clone(),
                 labels.clone(),
+                vec![], // facets (empty - facets should be attached via config or separate API)
             ).await
             .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
         } else {

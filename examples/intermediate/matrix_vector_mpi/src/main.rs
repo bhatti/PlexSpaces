@@ -27,7 +27,8 @@
 use matrix_vector_mpi::*;
 
 use plexspaces_node::{NodeBuilder, ConfigBootstrap, CoordinationComputeTracker};
-use plexspaces_actor::ActorBuilder;
+use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use plexspaces_core::RequestContext;
 use plexspaces_tuplespace::TupleSpace;
 use plexspaces_mailbox::Message;
 use std::sync::Arc;
@@ -82,11 +83,27 @@ async fn main() -> Result<()> {
         let worker_actor = WorkerActor::new(space.clone(), worker_id, num_cols);
         let behavior = Box::new(worker_actor);
         
-        let ctx = plexspaces_core::RequestContext::internal();
-        let actor_ref = ActorBuilder::new(behavior)
-            .with_name(format!("worker-{}", worker_id))
-            .spawn(&ctx, node.service_locator().clone())
-            .await?;
+        let ctx = RequestContext::internal();
+        let worker_id_str = format!("worker-{}", worker_id);
+        let actor_id = format!("{}@{}", worker_id_str, node.id().as_str());
+        let service_locator = node.service_locator().clone();
+        let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
+            .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "matrix-vector-mpi", // actor_type
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![], // facets
+        ).await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn actor: {}", e))?;
+        let actor_ref = ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
+            service_locator.clone(),
+        );
         worker_refs.push(actor_ref);
         info!("  Created worker actor: worker-{}", worker_id);
     }

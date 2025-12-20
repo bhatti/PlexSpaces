@@ -44,9 +44,9 @@ async fn test_facet_storage_direct() {
         .await;
     
     // Attach TimerFacet
-    let timer_facet = Box::new(TimerFacet::new());
+    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
     actor
-        .attach_facet(timer_facet, 50, serde_json::json!({}))
+        .attach_facet(timer_facet)
         .await
         .unwrap();
     

@@ -294,31 +294,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Creating Parameter Server (centralized model weights)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    let behavior = Box::new(ParameterServerActor::new(0.01)); // learning_rate = 0.01
-    let actor = ActorBuilder::new(behavior)
-        .with_id("parameter-server@comparison-node-1".to_string())
-        .build()
-        .await;
+    // Create DurabilityFacet
+    let storage = MemoryJournalStorage::new();
+    let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
     
-    // Spawn using ActorFactory
-    // Note: Since actor has DurabilityFacet attached, we use spawn_built_actor
+    // Spawn using ActorFactory with facets
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
-    let actor_id = actor.id().clone();
+    let actor_id = "parameter-server@comparison-node-1".to_string();
     let ctx = plexspaces_core::RequestContext::internal();
-    let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &actor_id,
+        "GenServer",
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![durability_facet], // facets
+    ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    let ps_ref = plexspaces_core::ActorRef::new(actor_id)
-        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
     
-    let mailbox = node.actor_registry()
-        .lookup_mailbox(ps_ref.id())
-        .await?
-        .ok_or("Actor not found in registry")?;
-    
-    let parameter_server = plexspaces_actor::ActorRef::local(
-        ps_ref.id().clone(),
-        mailbox,
+    // Create ActorRef directly - no need to access mailbox
+    let parameter_server = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
         node.service_locator().clone(),
     );
 
@@ -360,18 +359,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build()
             .await;
         
-        let core_ref = node
-            .spawn_actor(actor)
-            .await?;
+        // Spawn using ActorFactory with facets
+        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+        use std::sync::Arc;
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+        let worker_id = format!("data-worker-{}@comparison-node-1", i);
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &worker_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![], // facets
+        ).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e))?;
         
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(core_ref.id())
-            .await?
-            .ok_or("Actor not found in registry")?;
-        
-        let worker = plexspaces_actor::ActorRef::local(
-            core_ref.id().clone(),
-            mailbox,
+        // Create ActorRef directly - no need to access mailbox
+        let worker = plexspaces_actor::ActorRef::remote(
+            worker_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
         data_workers.push(worker);
@@ -506,20 +515,28 @@ mod tests {
             .build()
             .await;
         
-        let core_ref = node
-            .spawn_actor(actor)
-            .await
-            .unwrap();
-
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(core_ref.id())
-            .await
-            .unwrap()
-            .unwrap();
+        // Spawn using ActorFactory with facets
+        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+        use std::sync::Arc;
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_id = "test-ps@test-node".to_string();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![], // facets
+        ).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
         
-        let ps = plexspaces_actor::ActorRef::local(
-            core_ref.id().clone(),
-            mailbox,
+        // Create ActorRef directly - no need to access mailbox
+        let ps = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
 

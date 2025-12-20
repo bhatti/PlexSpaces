@@ -44,6 +44,19 @@ mod postgres_integration_tests {
         }
     }
 
+    /// Helper to convert DurabilityConfig to Value
+    fn config_to_value(config: &DurabilityConfig) -> JsonValue {
+        serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        })
+    }
+
     /// Test actor: Simple counter
     struct CounterActor {
         count: u64,
@@ -147,7 +160,7 @@ mod postgres_integration_tests {
             counter: Arc::clone(&counter),
         };
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_replay_handler(Box::new(handler)).await;
         new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
 
@@ -200,7 +213,7 @@ mod postgres_integration_tests {
             counter: Arc::clone(&counter),
         };
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_state_loader(Box::new(state_loader)).await;
         new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
 
@@ -234,7 +247,7 @@ mod postgres_integration_tests {
 
         facet.on_detach(actor_id).await.unwrap();
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let result = new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await;
 
         assert!(result.is_err(), "Should fail with schema version mismatch");
@@ -274,7 +287,7 @@ mod postgres_integration_tests {
             counter: Arc::clone(&counter),
         };
 
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_state_loader(Box::new(state_loader)).await;
         new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
 

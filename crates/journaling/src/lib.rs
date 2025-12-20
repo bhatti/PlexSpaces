@@ -128,7 +128,12 @@
 //!     backend_config: None,
 //! };
 //!
-//! let facet = DurabilityFacet::new(storage, config);
+//! let config_value = serde_json::json!({
+//!     "backend": config.backend,
+//!     "checkpoint_interval": config.checkpoint_interval,
+//!     "replay_on_activation": config.replay_on_activation,
+//! });
+//! let facet = DurabilityFacet::new(storage, config_value, 50);
 //! // Attach to actor for durable execution
 //! # Ok(())
 //! # }

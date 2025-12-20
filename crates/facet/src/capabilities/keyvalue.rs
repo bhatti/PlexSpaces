@@ -32,13 +32,20 @@ use crate::{Facet, FacetError, InterceptResult};
 
 /// Key-value store facet
 pub struct KeyValueFacet {
+    /// Facet configuration as Value (immutable, for Facet trait)
+    config_value: Value,
+    /// Facet priority (immutable)
+    priority: i32,
     /// Store implementation
     store: Arc<RwLock<Box<dyn KeyValueStore>>>,
-    /// Configuration
+    /// Configuration (parsed from config_value)
     config: KeyValueConfig,
     /// Metrics
     metrics: Arc<RwLock<KeyValueMetrics>>,
 }
+
+/// Default priority for KeyValueFacet
+pub const KEYVALUE_FACET_DEFAULT_PRIORITY: i32 = 30;
 
 /// Configuration for key-value store facet
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -129,24 +136,33 @@ impl KeyValueStore for MemoryStore {
 
 impl Default for KeyValueFacet {
     fn default() -> Self {
-        Self::new()
+        Self::new(serde_json::json!({}), KEYVALUE_FACET_DEFAULT_PRIORITY)
     }
 }
 
 impl KeyValueFacet {
     /// Create a new key-value facet with default in-memory store
-    pub fn new() -> Self {
-        KeyValueFacet {
-            store: Arc::new(RwLock::new(Box::new(MemoryStore {
-                data: Arc::new(RwLock::new(HashMap::new())),
-            }))),
-            config: KeyValueConfig::default(),
-            metrics: Arc::new(RwLock::new(KeyValueMetrics::default())),
-        }
+    pub fn new(config: Value, priority: i32) -> Self {
+        let config_clone = config.clone();
+        let kv_config = serde_json::from_value::<KeyValueConfig>(config_clone)
+            .unwrap_or_else(|_| KeyValueConfig::default());
+        Self::with_config_internal(kv_config, config, priority)
+            .unwrap_or_else(|_| {
+                // Fallback to default if config parsing fails
+                KeyValueFacet {
+                    config_value: serde_json::json!({}),
+                    priority,
+                    store: Arc::new(RwLock::new(Box::new(MemoryStore {
+                        data: Arc::new(RwLock::new(HashMap::new())),
+                    }))),
+                    config: KeyValueConfig::default(),
+                    metrics: Arc::new(RwLock::new(KeyValueMetrics::default())),
+                }
+            })
     }
 
-    /// Create with specific configuration
-    pub fn with_config(config: KeyValueConfig) -> Result<Self, FacetError> {
+    /// Internal helper to create with specific configuration
+    fn with_config_internal(config: KeyValueConfig, config_value: Value, priority: i32) -> Result<Self, FacetError> {
         let store: Box<dyn KeyValueStore> = match config.store_type.as_str() {
             "memory" => Box::new(MemoryStore {
                 data: Arc::new(RwLock::new(HashMap::new())),
@@ -162,10 +178,18 @@ impl KeyValueFacet {
         };
 
         Ok(KeyValueFacet {
+            config_value,
+            priority,
             store: Arc::new(RwLock::new(store)),
             config,
             metrics: Arc::new(RwLock::new(KeyValueMetrics::default())),
         })
+    }
+    
+    /// Create with specific configuration (legacy method for backward compatibility)
+    pub fn with_config(config: KeyValueConfig) -> Result<Self, FacetError> {
+        let config_value = serde_json::to_value(&config).unwrap_or(serde_json::json!({}));
+        Self::with_config_internal(config, config_value, KEYVALUE_FACET_DEFAULT_PRIORITY)
     }
 
     /// Handle KV operations
@@ -269,14 +293,8 @@ impl Facet for KeyValueFacet {
         self
     }
 
-    async fn on_attach(&mut self, actor_id: &str, config: Value) -> Result<(), FacetError> {
-        // Update configuration if provided
-        if let Ok(kv_config) = serde_json::from_value::<KeyValueConfig>(config) {
-            self.config = kv_config;
-            // Reinitialize store with new config
-            *self = Self::with_config(self.config.clone())?;
-        }
-
+    async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
+        // Use stored config, ignore parameter (config is set in constructor)
         println!("KeyValue capability attached to actor: {}", actor_id);
         Ok(())
     }
@@ -332,6 +350,14 @@ impl Facet for KeyValueFacet {
             }
         }))
     }
+    
+    fn get_config(&self) -> Value {
+        self.config_value.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 // Note: CapabilityFacet trait removed - capabilities are just facets.
@@ -344,7 +370,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_keyvalue_facet() {
-        let mut facet = KeyValueFacet::new();
+        let mut facet = KeyValueFacet::new(serde_json::json!({}), 50);
 
         // Attach to actor
         facet.on_attach("test-actor", Value::Null).await.unwrap();
@@ -386,7 +412,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_type() {
-        let facet = KeyValueFacet::new();
+        let facet = KeyValueFacet::new(serde_json::json!({}), 50);
         assert_eq!(facet.facet_type(), "keyvalue");
     }
 }

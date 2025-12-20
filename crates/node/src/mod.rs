@@ -3727,13 +3727,14 @@ mod tests {
         
         let internal_ctx = RequestContext::internal();
         let actor_id = "test-actor@test-node".to_string();
-        let _message_sender = actor_factory.spawn_actor(
+          let _message_sender = actor_factory.spawn_actor(
             &internal_ctx,
             &actor_id,
             "test", // actor_type
             vec![], // initial_state
             None, // config
             std::collections::HashMap::new(), // labels
+            vec![], // facets
         ).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());

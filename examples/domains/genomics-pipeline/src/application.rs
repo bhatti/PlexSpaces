@@ -125,6 +125,7 @@ impl Application for GenomicsPipelineApplication {
         for i in 0..self.config.worker_pools.qc {
             let actor_id = format!("qc-{}@{}", i, node_id);
             let actor_id_for_factory = actor_id.clone();
+            let node_id_for_factory = node_id.clone();
             let spec = ActorSpec {
                 id: actor_id.clone(),
                 factory: Arc::new(move || {
@@ -143,7 +144,9 @@ impl Application for GenomicsPipelineApplication {
                         actor_id_for_factory.clone(),
                         Box::new(QCWorker::new(actor_id_for_factory.clone())),
                         mailbox,
-                        "genomics".to_string(),
+                        "default".to_string(), // tenant_id
+                        "genomics".to_string(), // namespace
+                        Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
                 restart: RestartPolicy::Permanent,
@@ -166,6 +169,7 @@ impl Application for GenomicsPipelineApplication {
         for i in 0..self.config.worker_pools.alignment {
             let actor_id = format!("alignment-{}@{}", i, node_id);
             let actor_id_for_factory = actor_id.clone();
+            let node_id_for_factory = node_id.clone();
             let spec = ActorSpec {
                 id: actor_id.clone(),
                 factory: Arc::new(move || {
@@ -184,7 +188,9 @@ impl Application for GenomicsPipelineApplication {
                         actor_id_for_factory.clone(),
                         Box::new(AlignmentWorker::new(actor_id_for_factory.clone())),
                         mailbox,
-                        "genomics".to_string(),
+                        "default".to_string(), // tenant_id
+                        "genomics".to_string(), // namespace
+                        Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
                 restart: RestartPolicy::Permanent,
@@ -209,6 +215,7 @@ impl Application for GenomicsPipelineApplication {
             let chromosome = format!("chr{}", i + 1);
             let actor_id_for_factory = actor_id.clone();
             let chromosome_for_factory = chromosome.clone();
+            let node_id_for_factory = node_id.clone();
             let spec = ActorSpec {
                 id: actor_id.clone(),
                 factory: Arc::new(move || {
@@ -227,7 +234,9 @@ impl Application for GenomicsPipelineApplication {
                         actor_id_for_factory.clone(),
                         Box::new(ChromosomeWorker::new(actor_id_for_factory.clone(), chromosome_for_factory.clone())),
                         mailbox,
-                        "genomics".to_string(),
+                        "default".to_string(), // tenant_id
+                        "genomics".to_string(), // namespace
+                        Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
                 restart: RestartPolicy::Permanent,
@@ -250,6 +259,7 @@ impl Application for GenomicsPipelineApplication {
         for i in 0..self.config.worker_pools.annotation {
             let actor_id = format!("annotation-{}@{}", i, node_id);
             let actor_id_for_factory = actor_id.clone();
+            let node_id_for_factory = node_id.clone();
             let spec = ActorSpec {
                 id: actor_id.clone(),
                 factory: Arc::new(move || {
@@ -268,7 +278,9 @@ impl Application for GenomicsPipelineApplication {
                         actor_id_for_factory.clone(),
                         Box::new(AnnotationWorker::new(actor_id_for_factory.clone())),
                         mailbox,
-                        "genomics".to_string(),
+                        "default".to_string(), // tenant_id
+                        "genomics".to_string(), // namespace
+                        Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
                 restart: RestartPolicy::Permanent,
@@ -291,6 +303,7 @@ impl Application for GenomicsPipelineApplication {
         for i in 0..self.config.worker_pools.report {
             let actor_id = format!("report-{}@{}", i, node_id);
             let actor_id_for_factory = actor_id.clone();
+            let node_id_for_factory = node_id.clone();
             let spec = ActorSpec {
                 id: actor_id.clone(),
                 factory: Arc::new(move || {
@@ -309,7 +322,9 @@ impl Application for GenomicsPipelineApplication {
                         actor_id_for_factory.clone(),
                         Box::new(ReportWorker::new(actor_id_for_factory.clone())),
                         mailbox,
-                        "genomics".to_string(),
+                        "default".to_string(), // tenant_id
+                        "genomics".to_string(), // namespace
+                        Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
                 restart: RestartPolicy::Permanent,
@@ -358,6 +373,10 @@ impl Application for GenomicsPipelineApplication {
         // For now, always return healthy
         HealthStatus::HealthStatusHealthy
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -377,24 +396,6 @@ mod tests {
 
         fn listen_addr(&self) -> &str {
             &self.addr
-        }
-
-        async fn spawn_actor(
-            &self,
-            actor_id: String,
-            _behavior: Box<dyn plexspaces_core::Actor>,
-            _namespace: String,
-        ) -> Result<String, ApplicationError> {
-            // Mock implementation for tests
-            Ok(actor_id)
-        }
-
-        async fn stop_actor(
-            &self,
-            _actor_id: &str,
-        ) -> Result<(), ApplicationError> {
-            // Mock implementation for tests
-            Ok(())
         }
     }
 

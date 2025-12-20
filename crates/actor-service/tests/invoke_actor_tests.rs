@@ -15,7 +15,7 @@
 use plexspaces_actor_service::ActorServiceImpl;
 use plexspaces_actor::{ActorBuilder, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{ActorRegistry, ReplyTracker, ServiceLocator, ReplyWaiterRegistry, Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, FacetManager, VirtualActorManager};
+use plexspaces_core::{ActorRegistry, ReplyTracker, ServiceLocator, ReplyWaiterRegistry, Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, FacetManager, VirtualActorManager, RequestContext};
 use plexspaces_mailbox::Message;
 use plexspaces_keyvalue::InMemoryKVStore;
 use plexspaces_object_registry::ObjectRegistry;
@@ -139,8 +139,9 @@ async fn create_test_registry_with_actors(
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+            let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
             self.inner
-                .lookup(tenant_id, namespace, obj_type, object_id)
+                .lookup(&ctx, obj_type, object_id)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -187,7 +188,7 @@ async fn create_test_registry_with_actors(
     service_locator.register_service(actor_factory.clone()).await;
     
     // Register actors with type information using spawn_actor
-    let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.clone(), "default".to_string());
+    let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), "default".to_string());
     for i in 0..num_actors {
         let actor_id = format!("{}-{}@{}", actor_type, i, node_id);
         
@@ -199,17 +200,17 @@ async fn create_test_registry_with_actors(
             vec![], // initial_state
             None, // config
             std::collections::HashMap::new(), // labels
+            vec![], // facets
         ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e))
             .unwrap();
         
         // Register with type information for efficient lookup
         actor_registry.register_actor(
+            &ctx,
             actor_id.clone(),
             message_sender,
             Some(actor_type.to_string()),
-            Some(tenant_id.to_string()),
-            Some("default".to_string()),
         ).await;
     }
     
@@ -238,7 +239,6 @@ async fn test_invoke_actor_get_success() {
     let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
     
     let request = InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
@@ -286,7 +286,6 @@ async fn test_invoke_actor_post_success() {
     let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
     
     let request = InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "POST".to_string(),
@@ -327,7 +326,6 @@ async fn test_invoke_actor_missing_actor_type() {
     let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
     
     let request = InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: String::new(), // Empty actor_type
         http_method: "GET".to_string(),
@@ -350,7 +348,6 @@ async fn test_invoke_actor_not_found() {
     let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
     
     let request = InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "nonexistent".to_string(),
         http_method: "GET".to_string(),
@@ -373,7 +370,6 @@ async fn test_invoke_actor_multiple_actors_random_selection() {
     let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
     
     let request = InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
@@ -414,7 +410,6 @@ async fn test_invoke_actor_default_tenant_id() {
     let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
     
     let request = InvokeActorRequest {
-        tenant_id: String::new(), // Empty - should default to "default"
         namespace: String::new(), // Empty - should default to "default"
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
@@ -455,7 +450,6 @@ async fn test_invoke_actor_get_query_params_to_json() {
     query_params.insert("key2".to_string(), "value2".to_string());
     
     let request = InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
@@ -499,7 +493,6 @@ async fn test_invoke_actor_post_headers_preserved() {
     headers.insert("Content-Type".to_string(), "application/json".to_string());
     
     let request = InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "POST".to_string(),
@@ -535,7 +528,6 @@ async fn test_invoke_actor_with_namespace() {
     let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
     
     let request = InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(), // Using default namespace
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
@@ -576,7 +568,6 @@ async fn test_invoke_actor_without_tenant_id_in_path() {
     let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
     
     let request = InvokeActorRequest {
-        tenant_id: String::new(), // Empty - should default to "default"
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),

@@ -31,13 +31,20 @@ use super::{Facet, FacetError, InterceptResult};
 
 /// Event emitter facet - adds event emission capability to any actor
 pub struct EventEmitterFacet {
+    /// Facet configuration as Value (immutable, for Facet trait)
+    config_value: Value,
+    /// Facet priority (immutable)
+    priority: i32,
     /// Event handlers/subscribers
     subscribers: Arc<RwLock<Vec<EventSubscriber>>>,
     /// Event filters
     filters: Vec<EventFilter>,
-    /// Configuration
+    /// Configuration (parsed from config_value)
     config: EventEmitterConfig,
 }
+
+/// Default priority for EventEmitterFacet
+pub const EVENT_EMITTER_FACET_DEFAULT_PRIORITY: i32 = 10;
 
 /// Configuration for event emitter facet
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -116,26 +123,33 @@ pub struct Event {
 
 impl Default for EventEmitterFacet {
     fn default() -> Self {
-        Self::new()
+        Self::new(serde_json::json!({}), EVENT_EMITTER_FACET_DEFAULT_PRIORITY)
     }
 }
 
 impl EventEmitterFacet {
     /// Create a new event emitter facet
-    pub fn new() -> Self {
-        EventEmitterFacet {
-            subscribers: Arc::new(RwLock::new(Vec::new())),
-            filters: Vec::new(),
-            config: EventEmitterConfig::default(),
+    pub fn new(config: Value, priority: i32) -> Self {
+        let mut emitter_config = EventEmitterConfig::default();
+        // Parse config values manually (EventEmitterConfig doesn't implement Deserialize)
+        if let Some(max_subscribers) = config.get("max_subscribers").and_then(|v| v.as_u64()) {
+            emitter_config.max_subscribers = max_subscribers as usize;
         }
-    }
-
-    /// Create with configuration
-    pub fn with_config(config: EventEmitterConfig) -> Self {
+        if let Some(async_emit) = config.get("async_emit").and_then(|v| v.as_bool()) {
+            emitter_config.async_emit = async_emit;
+        }
+        if let Some(buffer_size) = config.get("buffer_size").and_then(|v| v.as_u64()) {
+            emitter_config.buffer_size = buffer_size as usize;
+        }
+        if let Some(log_events) = config.get("log_events").and_then(|v| v.as_bool()) {
+            emitter_config.log_events = log_events;
+        }
         EventEmitterFacet {
+            config_value: config,
+            priority,
             subscribers: Arc::new(RwLock::new(Vec::new())),
             filters: Vec::new(),
-            config,
+            config: emitter_config,
         }
     }
 
@@ -231,12 +245,8 @@ impl Facet for EventEmitterFacet {
         self
     }
 
-    async fn on_attach(&mut self, actor_id: &str, config: Value) -> Result<(), FacetError> {
-        // Parse configuration
-        if let Ok(emitter_config) = serde_json::from_value::<EventEmitterConfig>(config) {
-            self.config = emitter_config;
-        }
-
+    async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
+        // Use stored config, ignore parameter (config is set in constructor)
         println!("Event emitter facet attached to actor: {}", actor_id);
         Ok(())
     }
@@ -275,6 +285,14 @@ impl Facet for EventEmitterFacet {
 
         Ok(InterceptResult::Continue)
     }
+    
+    fn get_config(&self) -> Value {
+        self.config_value.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 /// Migration helper to convert from GenEventBehavior
@@ -286,7 +304,7 @@ pub fn migrate_from_gen_event(/* gen_event: GenEventBehavior */) -> EventEmitter
     // 2. Convert to EventSubscribers
     // 3. Add to facet
 
-    EventEmitterFacet::new()
+    EventEmitterFacet::new(serde_json::json!({}), EVENT_EMITTER_FACET_DEFAULT_PRIORITY)
 }
 
 #[cfg(test)]
@@ -295,7 +313,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_emitter_facet() {
-        let mut facet = EventEmitterFacet::new();
+        let mut facet = EventEmitterFacet::new(serde_json::json!({}), 50);
 
         // Attach to actor
         facet.on_attach("test-actor", Value::Null).await.unwrap();
@@ -321,11 +339,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_max_subscribers() {
-        let config = EventEmitterConfig {
-            max_subscribers: 2,
-            ..Default::default()
-        };
-        let facet = EventEmitterFacet::with_config(config);
+        let config_value = serde_json::json!({
+            "max_subscribers": 2,
+        });
+        let facet = EventEmitterFacet::new(config_value, 50);
 
         // Add first subscriber
         facet

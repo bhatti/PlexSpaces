@@ -17,6 +17,8 @@ use genomics_pipeline::{
 };
 use plexspaces_mailbox::Message;
 use plexspaces_node::{ConfigBootstrap, CoordinationComputeTracker, NodeBuilder};
+use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use plexspaces_core::RequestContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, Level};
@@ -78,13 +80,25 @@ async fn main() -> Result<()> {
     // Spawn coordinator
     info!("🎭 Spawning coordinator...");
     metrics_tracker.start_coordinate();
-    let coordinator_behavior = Box::new(GenomicsCoordinator::new("coordinator-1".to_string()));
-    let coordinator_ref = node
-        .spawn_actor_builder()
-        .with_behavior(coordinator_behavior)
-        .with_name("coordinator")
-        .spawn()
-        .await?;
+    let coordinator_id = format!("coordinator@{}", node.id().as_str());
+    let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().get_service().await
+        .ok_or_else(|| anyhow::anyhow!("ActorFactory not found in ServiceLocator"))?;
+    let ctx = plexspaces_core::RequestContext::internal();
+    let _message_sender = actor_factory.spawn_actor(
+        &ctx,
+        &coordinator_id,
+        "GenServer", // actor_type
+        vec![], // initial_state
+        None, // config
+        std::collections::HashMap::new(), // labels
+        vec![], // facets
+    ).await
+    .map_err(|e| anyhow::anyhow!("Failed to spawn coordinator: {}", e))?;
+    let coordinator_ref = plexspaces_actor::ActorRef::remote(
+        coordinator_id.clone(),
+        node.id().as_str().to_string(),
+        node.service_locator().clone(),
+    );
     metrics_tracker.end_coordinate();
     info!("✅ Coordinator spawned: {}", coordinator_ref.id());
     println!();

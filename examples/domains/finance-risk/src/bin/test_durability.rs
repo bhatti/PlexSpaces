@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Failed to attach facet: {:?}", e))?;
 
     actor
-        .attach_facet(Box::new(facet), 100, serde_json::json!({}))
+        .attach_facet(Box::new(facet))
         .await
         .map_err(|e| format!("Failed to attach facet to actor: {:?}", e))?;
 
@@ -166,7 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Failed to attach facet: {:?}", e))?;
 
     actor2
-        .attach_facet(Box::new(facet2), 100, serde_json::json!({}))
+        .attach_facet(Box::new(facet2))
         .await
         .map_err(|e| format!("Failed to attach facet: {:?}", e))?;
 

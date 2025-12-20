@@ -156,21 +156,26 @@ impl Application for MatrixVectorApplication {
                 .await
                 .map_err(|e| ApplicationError::StartupFailed(format!("Failed to create mailbox for worker {}: {}", worker_id, e)))?;
             
-            // Create actor from behavior
-            let actor = Actor::new(actor_id.clone(), behavior, mailbox, "matrix-vector-mpi".to_string(), None);
+            // Spawn using ActorFactory directly (no need to create Actor first)
+            let actor_factory: Arc<ActorFactoryImpl> = node.service_locator()
+                .ok_or_else(|| ApplicationError::StartupFailed("ServiceLocator not available".to_string()))?
+                .get_service().await
+                .ok_or_else(|| ApplicationError::StartupFailed("ActorFactory not found in ServiceLocator".to_string()))?;
             
-            // Spawn using ActorFactory
-            let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
-                .ok_or_else(|| ApplicationError::StartupFailed(format!("ActorFactory not found in ServiceLocator")))?;
-            
-            let ctx = plexspaces_core::RequestContext::internal();
-            actor_factory.spawn_actor(
+            // Note: We need to use BehaviorFactory to create the actor from behavior
+            // For now, we'll use spawn_built_actor with ActorBuilder
+            use plexspaces_actor::ActorBuilder;
+            use plexspaces_core::RequestContext;
+            let ctx = RequestContext::internal();
+            let actor = ActorBuilder::new(behavior)
+                .with_id(actor_id.clone())
+                .build()
+                .await
+                .map_err(|e| ApplicationError::StartupFailed(format!("Failed to build actor: {}", e)))?;
+            actor_factory.spawn_built_actor(
                 &ctx,
-                &actor_id,
-                "matrix-vector-mpi", // actor_type
-                vec![], // initial_state
-                None, // config
-                std::collections::HashMap::new(), // labels
+                Arc::new(actor),
+                Some("matrix-vector-mpi".to_string()), // actor_type
             ).await
                 .map_err(|e| ApplicationError::StartupFailed(format!("Failed to spawn worker {}: {}", worker_id, e)))?;
             
@@ -265,6 +270,10 @@ impl Application for MatrixVectorApplication {
 
     fn version(&self) -> &str {
         "0.1.0"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

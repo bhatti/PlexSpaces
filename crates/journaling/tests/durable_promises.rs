@@ -14,6 +14,19 @@ mod sqlite_tests {
         SqliteJournalStorage::new(":memory:").await.unwrap()
     }
 
+    /// Helper to convert DurabilityConfig to Value
+    fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
+        serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        })
+    }
+
     #[tokio::test]
     async fn test_promise_creation_and_persistence() {
         let storage = create_test_storage().await;
@@ -29,7 +42,7 @@ mod sqlite_tests {
         };
 
         let actor_id = "test-actor-1";
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Create a promise
@@ -83,7 +96,7 @@ mod sqlite_tests {
         };
 
         let actor_id = "test-actor-2";
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Create a promise
@@ -250,7 +263,7 @@ mod sqlite_tests {
         };
 
         let actor_id = "test-actor-5";
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Create a promise with timeout

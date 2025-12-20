@@ -151,17 +151,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = PlexSpacesNode::new("node1".to_string()).await?;
     
     // Spawn a counter actor using ActorFactory
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor, ActorBuilder};
-    use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
     
     let actor_id = "counter@node1".to_string();
-    let behavior = Box::new(Counter { count: 0 });
-    let mut mailbox_config = mailbox_config_default();
-    mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
-    let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await?;
-    let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(), None);
-    
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| "ActorFactory not found")?;
     let ctx = plexspaces_core::RequestContext::internal();
@@ -172,10 +165,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets (empty for simple actor)
     ).await?;
     
-    // Get actor reference
-    let actor_ref = plexspaces_core::ActorRef::new(actor_id.clone())?;
+    // Get actor reference (location-transparent)
+    let actor_ref = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
+        node.service_locator().clone(),
+    );
     let reply = actor_ref.ask(5, Duration::from_secs(5)).await?;
     println!("Count: {}", reply);
     

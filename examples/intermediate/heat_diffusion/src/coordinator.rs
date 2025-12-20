@@ -31,7 +31,7 @@ use crate::region_actor::ActorPosition;
 use crate::region_behavior::{RegionBehavior, RegionMessage, RegionState};
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::ActorRef;
+use plexspaces_actor::ActorRef;
 use plexspaces_tuplespace::TupleSpace;
 use plexspaces_mailbox::Message;
 use std::sync::Arc;
@@ -93,18 +93,15 @@ impl Coordinator {
                 // Create actor with behavior
                 let behavior_box = Box::new(behavior);
                 
-                let actor = ActorBuilder::new(behavior_box)
-                    .with_name(position.actor_id())
-                    .build()
-                    .await;
-                
-                // Use ActorFactory to spawn actor
+                // Use ActorFactory to spawn actor directly
                 use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+                use plexspaces_core::RequestContext;
                 use std::sync::Arc;
-                let actor_factory: Arc<ActorFactoryImpl> = node.as_ref().service_locator().get_service().await
-                    .ok_or_else(|| format!("ActorFactory not found"))?;
-                let actor_id = actor.id().clone();
-                let ctx = plexspaces_core::RequestContext::internal();
+                let actor_id = position.actor_id();
+                let service_locator = node.as_ref().service_locator().clone();
+                let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
+                    .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
+                let ctx = RequestContext::internal();
                 let _message_sender = actor_factory.spawn_actor(
                     &ctx,
                     &actor_id,
@@ -112,10 +109,14 @@ impl Coordinator {
                     vec![], // initial_state
                     None, // config
                     std::collections::HashMap::new(), // labels
+                    vec![], // facets
                 ).await
-                    .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-                let actor_ref = plexspaces_core::ActorRef::new(actor_id)
-                    .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to spawn actor: {}", e))?;
+                let actor_ref = ActorRef::remote(
+                    actor_id.clone(),
+                    node.as_ref().id().as_str().to_string(),
+                    service_locator.clone(),
+                );
                 self.actor_refs.push(actor_ref);
             }
         }

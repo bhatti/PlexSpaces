@@ -271,6 +271,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             vec![], // initial_state
             None, // config
             std::collections::HashMap::new(), // labels
+            vec![], // facets
         ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e))?;
         let actor_ref = plexspaces_core::ActorRef::new(actor_id.clone())

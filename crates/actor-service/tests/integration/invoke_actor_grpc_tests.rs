@@ -49,7 +49,6 @@ async fn test_invoke_actor_get_counter() {
     let mut client = harness.get_node("node1").unwrap().client.clone();
     
     let request = Request::new(InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
@@ -114,7 +113,6 @@ async fn test_invoke_actor_post_counter() {
     let mut client = harness.get_node("node1").unwrap().client.clone();
     
     let request = Request::new(InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "POST".to_string(),
@@ -173,7 +171,6 @@ async fn test_invoke_actor_counter_increment_and_get() {
     
     // ACT 1: POST increment (tell pattern)
     let post_request = Request::new(InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "POST".to_string(),
@@ -199,7 +196,6 @@ async fn test_invoke_actor_counter_increment_and_get() {
     
     // ACT 2: GET counter value (ask pattern)
     let get_request = Request::new(InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
@@ -259,7 +255,6 @@ async fn test_invoke_actor_counter_multiple_increments() {
     // ACT: POST increment 3 times
     for i in 0..3 {
         let post_request = Request::new(InvokeActorRequest {
-            tenant_id: "default".to_string(),
             namespace: "default".to_string(),
             actor_type: "counter".to_string(),
             http_method: "POST".to_string(),
@@ -289,7 +284,6 @@ async fn test_invoke_actor_counter_multiple_increments() {
     
     // ACT: GET counter value
     let get_request = Request::new(InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
@@ -349,7 +343,6 @@ async fn test_invoke_actor_not_found() {
     let mut client = harness.get_node("node1").unwrap().client.clone();
     
     let request = Request::new(InvokeActorRequest {
-        tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         actor_type: "nonexistent".to_string(),
         http_method: "GET".to_string(),

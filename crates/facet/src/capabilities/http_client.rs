@@ -22,7 +22,23 @@ use crate::{Facet, FacetError};
 use async_trait::async_trait;
 
 /// HTTP client facet for making outbound HTTP requests
-pub struct HttpClientFacet;
+pub struct HttpClientFacet {
+    config: serde_json::Value,
+    priority: i32,
+}
+
+/// Default priority for HttpClientFacet
+pub const HTTP_CLIENT_FACET_DEFAULT_PRIORITY: i32 = 20;
+
+impl HttpClientFacet {
+    /// Create a new HTTP client facet
+    pub fn new(config: serde_json::Value, priority: i32) -> Self {
+        HttpClientFacet {
+            config,
+            priority,
+        }
+    }
+}
 
 #[async_trait]
 impl Facet for HttpClientFacet {
@@ -48,5 +64,13 @@ impl Facet for HttpClientFacet {
 
     async fn on_detach(&mut self, _actor_id: &str) -> Result<(), FacetError> {
         Ok(())
+    }
+    
+    fn get_config(&self) -> serde_json::Value {
+        self.config.clone()
+    }
+    
+    fn get_priority(&self) -> i32 {
+        self.priority
     }
 }

@@ -16,6 +16,19 @@ mod sqlite_tests {
         SqliteJournalStorage::new(":memory:").await.unwrap()
     }
 
+    /// Helper to convert DurabilityConfig to Value
+    fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
+        serde_json::json!({
+            "backend": config.backend,
+            "checkpoint_interval": config.checkpoint_interval,
+            "checkpoint_timeout": config.checkpoint_timeout,
+            "replay_on_activation": config.replay_on_activation,
+            "cache_side_effects": config.cache_side_effects,
+            "compression": config.compression,
+            "state_schema_version": config.state_schema_version,
+        })
+    }
+
     /// Test: Exact scenario from test_replay_missing_checkpoint
     /// This is the failing test - let's debug it step by step
     #[tokio::test]
@@ -89,7 +102,7 @@ mod sqlite_tests {
             backend_config: None,
             state_schema_version: 1,
         };
-        let mut new_facet = DurabilityFacet::new(storage.clone(), restart_config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&restart_config), 50);
         
         println!("Reattaching facet...");
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -182,7 +195,7 @@ mod sqlite_tests {
         // Phase 2: Detach and reattach
         facet1.on_detach(actor_id).await.unwrap();
         
-        let mut facet2 = DurabilityFacet::new(storage.clone(), config);
+        let mut facet2 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet2.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Phase 3: Write new entry and verify sequence

@@ -105,6 +105,11 @@ pub mod supervision;
 pub mod application;
 pub mod config;
 
+// Re-export CoordinationComputeMetrics as WorkflowMetrics for backward compatibility
+pub mod metrics {
+    pub use plexspaces_proto::metrics::v1::CoordinationComputeMetrics as WorkflowMetrics;
+}
+
 pub use models::*;
 pub use coordinator::GenomicsCoordinator;
 pub use workers::*;

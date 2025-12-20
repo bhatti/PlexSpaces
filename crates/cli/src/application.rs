@@ -121,9 +121,9 @@ pub async fn deploy(
         
         if is_yaml {
             // Load YAML release config
-            let loader = ConfigLoader::new(true); // Enable security validation
-            let spec = loader.load_release_spec_with_env_precedence(release_path)
-                .with_context(|| format!("Failed to load release config from {}", release_path))?;
+            let loader = ConfigLoader::new(); // Enable security validation
+              let spec = loader.load_release_spec_with_env_precedence(release_path).await
+                .map_err(|e| anyhow::anyhow!("Failed to load release config from {}: {}", release_path, e))?;
             Some(spec)
         } else {
             // Try TOML (for future support)

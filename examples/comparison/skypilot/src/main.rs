@@ -235,37 +235,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Creating SkyPilot scheduler (multi-cloud resource scheduling)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    let behavior = Box::new(SkyPilotSchedulerActor::new());
-    let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
-        .build()
-        .await;
-    
-    // Spawn using ActorFactory
+    // Spawn using ActorFactory with facets
+    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use std::sync::Arc;
     let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
-    let actor_id = actor.id().clone();
     let ctx = plexspaces_core::RequestContext::internal();
     let _message_sender = actor_factory.spawn_actor(
         &ctx,
         &actor_id,
-        "GenServer", // actor_type from SkyPilotSchedulerActor
+        "GenServer",
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
+        vec![], // facets
     ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    let actor_ref = plexspaces_core::ActorRef::new(actor_id)
-        .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
-
-    let mailbox = node.actor_registry()
-        .lookup_mailbox(actor_ref.id())
-        .await?
-        .ok_or("Actor not found in registry")?;
     
-    let scheduler = plexspaces_actor::ActorRef::local(
-        actor_ref.id().clone(),
-        mailbox,
+    // Create ActorRef directly - no need to access mailbox
+    let scheduler = plexspaces_actor::ActorRef::remote(
+        actor_id.clone(),
+        node.id().as_str().to_string(),
         node.service_locator().clone(),
     );
 
@@ -370,32 +360,25 @@ mod tests {
             .build();
 
         let actor_id: ActorId = "skypilot-scheduler/test-1@test-node".to_string();
-        let behavior = Box::new(SkyPilotSchedulerActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await;
-        
-        // Spawn using ActorFactory
-        // Note: Since actor has DurabilityFacet attached, we use spawn_built_actor
+        // Spawn using ActorFactory with facets
         let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
             .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
-        let actor_id = actor.id().clone();
         let ctx = plexspaces_core::RequestContext::internal();
-        let _message_sender = actor_factory.spawn_built_actor(&ctx, Arc::new(actor), Some("GenServer".to_string())).await
+        let _message_sender = actor_factory.spawn_actor(
+            &ctx,
+            &actor_id,
+            "GenServer",
+            vec![], // initial_state
+            None, // config
+            std::collections::HashMap::new(), // labels
+            vec![], // facets
+        ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
-        let actor_ref = plexspaces_core::ActorRef::new(actor_id)
-            .map_err(|e| format!("Failed to create ActorRef: {}", e)).unwrap();
-
-        let mailbox = node.actor_registry()
-            .lookup_mailbox(actor_ref.id())
-            .await
-            .unwrap()
-            .unwrap();
         
-        let scheduler = plexspaces_actor::ActorRef::local(
-            actor_ref.id().clone(),
-            mailbox,
+        // Create ActorRef directly - no need to access mailbox
+        let scheduler = plexspaces_actor::ActorRef::remote(
+            actor_id.clone(),
+            node.id().as_str().to_string(),
             node.service_locator().clone(),
         );
 

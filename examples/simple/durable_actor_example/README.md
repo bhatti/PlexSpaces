@@ -9,6 +9,10 @@ This example demonstrates all features of durable execution in PlexSpaces:
 3. **Deterministic Replay**: Actor state is recovered from journal on restart
 4. **Side Effect Caching**: External calls are cached during replay to prevent duplicates
 5. **Exactly-Once Semantics**: Guarantees no duplicate side effects
+6. **Channel-Based Mailbox**: Durable channels (SQLite/Kafka/Redis) as actor mailboxes with ACK/NACK
+7. **Dead Letter Queue (DLQ)**: Automatic handling of poisonous messages that fail repeatedly
+
+> **Comprehensive Documentation**: For detailed information on durability, recovery scenarios, edge cases, channel-based mailboxes, and DLQ patterns, see [Durability Documentation](../../../docs/durability.md).
 
 ## How It Works
 
@@ -76,6 +80,25 @@ The example uses:
 - **replay_on_activation**: true (replay journal on actor restart)
 - **cache_side_effects**: true (cache external calls during replay)
 
+## Integration Tests
+
+The example includes comprehensive integration tests covering:
+
+- Full durable actor lifecycle with journaling, checkpoints, and side effects
+- Side effect caching during replay
+- Checkpoint recovery
+- Channel-based mailbox with ACK/NACK
+- Dead letter queue (DLQ) for poisonous messages
+- Crash during message processing (edge case)
+- Channel mailbox with durability integration
+- Recovery with checkpoint (fast recovery)
+- Side effect idempotency during replay
+
+Run tests:
+```bash
+cargo test --features sqlite-backend -- --nocapture
+```
+
 ## Benefits
 
 1. **Fault Tolerance**: Actors can recover from crashes
@@ -83,4 +106,5 @@ The example uses:
 3. **Fast Recovery**: 90%+ faster with checkpoints
 4. **Time-Travel Debugging**: Can replay any point in actor history
 5. **Transparent**: No changes to actor code required
+7. **Channel-Based Mailbox**: Durable message delivery with ACK/NACK and DLQ support
 

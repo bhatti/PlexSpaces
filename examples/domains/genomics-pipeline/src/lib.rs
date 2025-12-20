@@ -6,7 +6,7 @@
 //! # Genomics DNA Sequencing Pipeline
 //!
 //! ## Purpose
-//! Production-grade example demonstrating PlexSpaces durable workflow capabilities
+//! Example demonstrating PlexSpaces durable workflow capabilities
 //! for DNA sequencing analysis pipelines. Processes raw FASTQ files through quality
 //! control, genome alignment, variant calling, annotation, and clinical report generation.
 //!

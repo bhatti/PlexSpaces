@@ -55,15 +55,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actor_id = "counter-actor-1";
 
     println!("1. Creating durable actor with journaling enabled");
-    let config_value = serde_json::json!({
+    let mut config_value = serde_json::json!({
         "backend": config.backend,
         "checkpoint_interval": config.checkpoint_interval,
-        "checkpoint_timeout": config.checkpoint_timeout,
         "replay_on_activation": config.replay_on_activation,
         "cache_side_effects": config.cache_side_effects,
         "compression": config.compression,
         "state_schema_version": config.state_schema_version,
     });
+    if let Some(ref timeout) = config.checkpoint_timeout {
+        // Handle Duration separately since it doesn't implement Serialize
+        let mut timeout_obj = serde_json::Map::new();
+        timeout_obj.insert("seconds".to_string(), serde_json::Value::Number(timeout.seconds.into()));
+        timeout_obj.insert("nanos".to_string(), serde_json::Value::Number(timeout.nanos.into()));
+        config_value["checkpoint_timeout"] = serde_json::Value::Object(timeout_obj);
+    }
     let mut facet = DurabilityFacet::new(storage.clone(), config_value, 50);
     facet.on_attach(actor_id, serde_json::json!({})).await?;
     println!("   ✓ Actor attached, journaling active\n");
@@ -140,15 +146,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   ✓ Actor detached\n");
 
     // Create new facet (simulating restart)
-    let config_value = serde_json::json!({
+    let mut config_value = serde_json::json!({
         "backend": config.backend,
         "checkpoint_interval": config.checkpoint_interval,
-        "checkpoint_timeout": config.checkpoint_timeout,
         "replay_on_activation": config.replay_on_activation,
         "cache_side_effects": config.cache_side_effects,
         "compression": config.compression,
         "state_schema_version": config.state_schema_version,
     });
+    if let Some(ref timeout) = config.checkpoint_timeout {
+        // Handle Duration separately since it doesn't implement Serialize
+        let mut timeout_obj = serde_json::Map::new();
+        timeout_obj.insert("seconds".to_string(), serde_json::Value::Number(timeout.seconds.into()));
+        timeout_obj.insert("nanos".to_string(), serde_json::Value::Number(timeout.nanos.into()));
+        config_value["checkpoint_timeout"] = serde_json::Value::Object(timeout_obj);
+    }
     let mut new_facet = DurabilityFacet::new(storage.clone(), config_value, 50);
     new_facet.on_attach(actor_id, serde_json::json!({})).await?;
     println!("   ✓ Actor restarted, replay completed");

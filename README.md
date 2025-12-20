@@ -16,7 +16,7 @@
 
 ## Overview
 
-PlexSpaces is a production-grade distributed actor framework that unifies the best patterns from Erlang/OTP, Orleans, Temporal, and modern serverless architectures. It provides a single, powerful abstraction for building durable workflows, stateful microservices, distributed ML workloads, and edge computing applications.
+PlexSpaces is a distributed actor framework that unifies the best patterns from Erlang/OTP, Orleans, Temporal, and modern serverless architectures. It provides a single, powerful abstraction for building durable workflows, stateful microservices, distributed ML workloads, and edge computing applications.
 
 ### What Makes PlexSpaces Unique
 

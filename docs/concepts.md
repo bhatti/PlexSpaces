@@ -293,6 +293,8 @@ let reply = actor_ref.ask(
 - **Deterministic Replay**: Replay from any point in history
 - **Exactly-Once Semantics**: Guaranteed message processing
 - **Time-Travel Debugging**: Replay past executions
+- **Channel-Based Mailbox**: Durable channels (Kafka, Redis) as actor mailboxes with ACK/NACK
+- **Dead Letter Queue (DLQ)**: Automatic handling of poisonous messages
 
 ### Example
 
@@ -320,6 +322,8 @@ let _message_sender = actor_factory.spawn_actor(
     vec![durability_facet], // facets
 ).await?;
 ```
+
+For comprehensive documentation on durability, including recovery scenarios, edge cases, channel-based mailboxes, and DLQ patterns, see [Durability Documentation](durability.md).
 
 ## Key Design Principles
 

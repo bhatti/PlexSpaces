@@ -158,6 +158,8 @@ Restate-inspired journaling for exactly-once semantics:
 - **Exactly-Once**: Guaranteed message processing
 - **Time-Travel Debugging**: Replay past executions
 
+For comprehensive documentation on durability, journaling, recovery, and channel-based mailboxes, see [Durability Documentation](durability.md).
+
 ### 4. WASM Runtime
 
 ```mermaid

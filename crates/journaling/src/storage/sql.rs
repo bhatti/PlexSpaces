@@ -1342,7 +1342,7 @@ impl JournalStorage for SqliteJournalStorage {
 /// PostgreSQL-based journal storage.
 ///
 /// ## Purpose
-/// Production-grade persistent journal storage using PostgreSQL, ideal for:
+/// Persistent journal storage using PostgreSQL, ideal for:
 /// - Multi-node production deployments
 /// - High-volume write workloads
 /// - Advanced querying with JSONB

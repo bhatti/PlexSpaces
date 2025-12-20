@@ -9,6 +9,7 @@ edition = "2021"
 plexspaces-journaling = { path = "../../../crates/journaling", features = ["sqlite-backend"] }
 plexspaces-facet = { path = "../../../crates/facet" }
 plexspaces-proto = { path = "../../../crates/proto" }
+plexspaces-channel = { path = "../../../crates/channel", features = ["sqlite-backend"] }
 tokio = { version = "1.0", features = ["full"] }
 serde_json = "1.0"
 prost = "0.12"
@@ -21,5 +22,5 @@ path = "src/main.rs"
 
 [features]
 default = []
-sqlite-backend = ["plexspaces-journaling/sqlite-backend"]
+sqlite-backend = ["plexspaces-journaling/sqlite-backend", "plexspaces-channel/sqlite-backend"]
 

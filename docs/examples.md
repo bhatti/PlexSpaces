@@ -33,18 +33,24 @@ cargo run
 
 **Location**: `examples/simple/durable_actor_example/`
 
-Learn durability and journaling with automatic state persistence and recovery.
+Learn durability and journaling with automatic state persistence and recovery. This example demonstrates all durability features including journaling, checkpoints, deterministic replay, side effect caching, channel-based mailboxes, and dead letter queues.
 
 **Features**:
-- State persistence
-- Automatic recovery
-- Journaling
+- State persistence and journaling
+- Automatic recovery and replay
+- Checkpointing for fast recovery
+- Side effect caching (exactly-once semantics)
+- Channel-based mailbox with ACK/NACK
+- Dead letter queue (DLQ) for poisonous messages
+- Edge case handling and failure scenarios
 
 **Run**:
 ```bash
 cd examples/simple/durable_actor_example
-cargo run
+cargo run --features sqlite-backend
 ```
+
+**Documentation**: For comprehensive durability documentation, see [Durability Documentation](durability.md).
 
 ### WASM Calculator
 

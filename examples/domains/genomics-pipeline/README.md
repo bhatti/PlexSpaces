@@ -2,7 +2,7 @@
 
 ## Overview
 
-A production-grade DNA sequencing analysis pipeline demonstrating PlexSpaces' durable workflow capabilities. Processes raw FASTQ files through quality control, genome alignment, variant calling, annotation, and clinical report generation.
+A DNA sequencing analysis pipeline demonstrating PlexSpaces' durable workflow capabilities. Processes raw FASTQ files through quality control, genome alignment, variant calling, annotation, and clinical report generation.
 
 **Based on**: Real-world bioinformatics pipelines (GATK, Illumina)
 

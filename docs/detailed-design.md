@@ -1357,6 +1357,8 @@ sequenceDiagram
 
 ## Journaling
 
+> **Comprehensive Documentation**: For detailed information on durability, journaling, recovery scenarios, channel-based mailboxes, and DLQ patterns, see [Durability Documentation](durability.md).
+
 ### Event Sourcing
 
 All actor state changes are recorded as events:

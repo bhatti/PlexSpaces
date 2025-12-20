@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Production-Grade Observability
+//! Observability
 //!
 //! ## Purpose
 //! Comprehensive observability integration for production deployments:
@@ -53,7 +53,7 @@ pub enum ObservabilityError {
     TracingSetupFailed(String),
 }
 
-/// Production-grade observability manager
+/// observability manager
 pub struct ObservabilityManager {
     /// Prometheus registry
     registry: Arc<Registry>,

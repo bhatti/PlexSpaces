@@ -166,18 +166,17 @@ async fn create_test_registry_with_node(
     let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
 
     // Register node as a service object (nodes are registered as services)
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let node_object_id = format!("_node@{}", node_id);
     let registration = ProtoObjectRegistration {
         object_id: node_object_id.clone(),
         object_type: ObjectType::ObjectTypeService as i32,
         object_category: "node".to_string(),
         grpc_address: node_address.to_string(),
-        tenant_id: "default".to_string(),
-        namespace: "default".to_string(),
         ..Default::default()
     };
 
-    object_registry_impl.register(registration).await.unwrap();
+    object_registry_impl.register(&ctx, registration).await.unwrap();
 
     let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
         inner: object_registry_impl,

@@ -9,6 +9,7 @@
 
 use async_trait::async_trait;
 use plexspaces_core::application::{Application, ApplicationError, ApplicationNode, HealthStatus};
+use plexspaces_core::ServiceLocator;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info};
@@ -546,7 +547,7 @@ mod tests {
         assert_eq!(app.name(), "finance-risk");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_start_application() {
         let mut app = FinanceRiskApplication::new();
         let node = Arc::new(MockNode {
@@ -563,7 +564,7 @@ mod tests {
         assert_eq!(supervisors.len(), 0);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_stop_application() {
         let mut app = FinanceRiskApplication::new();
         let node = Arc::new(MockNode {

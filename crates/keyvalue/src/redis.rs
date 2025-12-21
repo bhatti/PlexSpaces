@@ -375,7 +375,7 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Get storage statistics
-    async fn get_stats(&self, ctx: &RequestContext) -> KVResult<KVStats> {
+    async fn get_stats(&self, _ctx: &RequestContext) -> KVResult<KVStats> {
         let mut conn = self.manager.clone();
 
         // Get Redis INFO stats

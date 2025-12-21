@@ -1098,10 +1098,10 @@ impl Node {
         tokio::spawn(async move {
             // Register the node in ObjectRegistry
             // Use internal context for system operations
+            use plexspaces_core::RequestContext;
             use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
             let registration = ObjectRegistration {
-                tenant_id: "internal".to_string(),
-                namespace: "system".to_string(),
                 object_type: ObjectType::ObjectTypeService as i32,
                 object_id: node_id_str.clone(),
                 grpc_address: format!("http://{}", listen_addr),
@@ -1109,7 +1109,7 @@ impl Node {
                 ..Default::default()
             };
             let registration_result = node_for_registration.object_registry
-                .register(registration)
+                .register(&ctx, registration)
                 .await;
             if let Err(e) = registration_result {
                 eprintln!("Node {}: Failed to register in ObjectRegistry: {}", node_id_str, e);
@@ -3956,16 +3956,15 @@ mod tests {
 
         // Register node2 in ObjectRegistry on node1 (so node1 can find it)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
         let registration = ObjectRegistration {
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_id: "_node@node2".to_string(),
             grpc_address: "http://localhost:9999".to_string(),
             object_category: "Node".to_string(),
             ..Default::default()
         };
-        node1.object_registry().register(registration).await.unwrap();
+        node1.object_registry().register(&ctx, registration).await.unwrap();
 
         // Try to route message from node1 to actor on node2
         let message = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
@@ -4008,16 +4007,15 @@ mod tests {
 
         // Register remote node in ObjectRegistry (ActorRegistry looks up nodes here)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let registration = ObjectRegistration {
-            tenant_id: "internal".to_string(),
-            namespace: "system".to_string(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_id: "_node@node2".to_string(), // ActorRegistry looks for this format
             grpc_address: "http://localhost:9999".to_string(),
             object_category: "Node".to_string(),
             ..Default::default()
         };
-        node.object_registry().register(registration).await.unwrap();
+        node.object_registry().register(&ctx, registration).await.unwrap();
 
         // Try to find actor with @node2 suffix
         let actor_registry = get_actor_registry(&node).await;
@@ -4070,16 +4068,15 @@ mod tests {
 
         // Register node2 in ObjectRegistry on node1 (so node1 can find it via lookup_routing)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let registration = ObjectRegistration {
-            tenant_id: "internal".to_string(),
-            namespace: "system".to_string(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_id: "_node@node2".to_string(),
             grpc_address: "http://localhost:9999".to_string(),
             object_category: "Node".to_string(),
             ..Default::default()
         };
-        node1.object_registry().register(registration).await.unwrap();
+        node1.object_registry().register(&ctx, registration).await.unwrap();
 
         // Now node1 should find the actor via ObjectRegistry (lookup_routing uses ObjectRegistry, not TupleSpace)
         let actor_registry1 = get_actor_registry(&node1).await;

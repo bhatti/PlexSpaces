@@ -38,48 +38,55 @@ runtime:
     api_keys: []
   
   blob:
-    backend: "${BLOB_BACKEND:-minio}"
+    backend: "${BLOB_BACKEND:-local}"
     bucket: "${BLOB_BUCKET:-plexspaces}"
-    endpoint: "${BLOB_ENDPOINT:-http://minio:9000}"
-    access_key_id: "${BLOB_ACCESS_KEY_ID:-minioadmin}"
+    endpoint: "${BLOB_ENDPOINT:-}"
+    access_key_id: "${BLOB_ACCESS_KEY_ID:-}"
     # secret_access_key should be set via PLEXSPACES_BLOB_SECRET_ACCESS_KEY env var
     use_ssl: false
-    prefix: "/plexspaces"
+    prefix: "${BLOB_PREFIX:-/app/data/blob}"
   
   # Shared relational database for scheduler, workflow, object-registry, journaling, blob
+  # Defaults to SQLite for easier local development, can be overridden to PostgreSQL
   shared_database:
-    connection_string: "${DATABASE_URL:-postgres://plexspaces:plexspaces@postgres:5432/plexspaces}"
+    connection_string: "${DATABASE_URL:-sqlite:///app/data/plexspaces.db}"
     pool_size: 10
     auto_migrate: true
     migration_paths: []
   
-  # Locks backend (sql, redis, dynamodb)
+  # Locks backend (sqlite, sql/postgres, redis, dynamodb)
   locks_backend:
-    backend_type: "${LOCKS_BACKEND:-redis}"
+    backend_type: "${LOCKS_BACKEND:-sqlite}"
     redis:
       url: "${LOCKS_REDIS_URL:-redis://redis:6379/0}"
       pool_size: 10
       key_prefix: "plexspaces:locks:"
       cluster_mode: false
     sql:
-      connection_string: "${DATABASE_URL:-postgres://plexspaces:plexspaces@postgres:5432/plexspaces}"
+      connection_string: "${LOCKS_POSTGRES_URL:-${LOCKS_SQLITE_PATH:-${DATABASE_URL:-sqlite:///app/data/locks.db}}}"
       pool_size: 10
       auto_migrate: true
   
   # Channel backend (in-memory, redis, kafka, sqlite, nats)
+  # Note: PostgreSQL support coming soon, using SQLite for now
   channel_backend:
-    backend_type: "${CHANNEL_BACKEND:-redis}"
+    backend_type: "${CHANNEL_BACKEND:-sqlite}"
     redis:
       url: "${CHANNEL_REDIS_URL:-redis://redis:6379/0}"
       pool_size: 10
       key_prefix: "plexspaces:channel:"
       cluster_mode: false
+    sqlite:
+      database_path: "${CHANNEL_SQLITE_PATH:-:memory:}"
+      wal_mode: true
+      cleanup_acked: true
+      cleanup_age_seconds: 3600
   
-  # KeyValue backend (sql, redis, dynamodb)
+  # KeyValue backend (sqlite, sql/postgres, redis, dynamodb)
   keyvalue_backend:
-    backend_type: "${KEYVALUE_BACKEND:-sql}"
+    backend_type: "${KEYVALUE_BACKEND:-sqlite}"
     sql:
-      connection_string: "${DATABASE_URL:-postgres://plexspaces:plexspaces@postgres:5432/plexspaces}"
+      connection_string: "${PLEXSPACES_KV_POSTGRES_URL:-${PLEXSPACES_KV_SQLITE_PATH:-${DATABASE_URL:-sqlite:///app/data/keyvalue.db}}}"
       pool_size: 10
       auto_migrate: true
     redis:
@@ -88,11 +95,11 @@ runtime:
       key_prefix: "plexspaces:kv:"
       cluster_mode: false
   
-  # TupleSpace backend (sql, redis, dynamodb)
+  # TupleSpace backend (sqlite, sql/postgres, redis, dynamodb)
   tuplespace_backend:
-    backend_type: "${TUPLESPACE_BACKEND:-sql}"
+    backend_type: "${TUPLESPACE_BACKEND:-sqlite}"
     sql:
-      connection_string: "${DATABASE_URL:-postgres://plexspaces:plexspaces@postgres:5432/plexspaces}"
+      connection_string: "${TUPLESPACE_POSTGRES_URL:-${TUPLESPACE_SQLITE_PATH:-${DATABASE_URL:-sqlite:///app/data/tuplespace.db}}}"
       pool_size: 10
       auto_migrate: true
     redis:
@@ -111,6 +118,7 @@ shutdown:
   global_timeout_seconds: 30
   grace_period_seconds: 10
   grpc_drain_timeout_seconds: 10
+
 
 
 

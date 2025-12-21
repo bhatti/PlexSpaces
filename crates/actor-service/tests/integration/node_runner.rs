@@ -61,10 +61,11 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
 
     async fn register(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .register(registration)
+            .register(ctx, registration)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -84,12 +85,12 @@ async fn register_node(
         object_type: ObjectType::ObjectTypeService as i32,
         object_category: "node".to_string(),
         grpc_address: node_address.clone(),
-        tenant_id: "default".to_string(),
-        namespace: "default".to_string(),
+        // tenant_id and namespace come from RequestContext, not registration
         ..Default::default()
     };
 
-    registry.register(registration).await?;
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    registry.register(&ctx, registration).await?;
 
     println!("Registered node {} at {}", node_id, node_address);
     Ok(())

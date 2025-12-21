@@ -186,6 +186,9 @@ pub mod sql;
 #[cfg(feature = "redis-backend")]
 pub mod redis;
 
+#[cfg(feature = "blob-backend")]
+pub mod blob;
+
 pub use config::{create_keyvalue_from_config, create_keyvalue_from_env, BackendType, KVConfig};
 pub use error::{KVError, KVResult};
 pub use memory::InMemoryKVStore;
@@ -195,6 +198,9 @@ pub use sql::{PostgreSQLKVStore, SqliteKVStore};
 
 #[cfg(feature = "redis-backend")]
 pub use redis::RedisKVStore;
+
+#[cfg(feature = "blob-backend")]
+pub use blob::BlobKVStore;
 
 /// KeyValue store trait defining all operations.
 ///

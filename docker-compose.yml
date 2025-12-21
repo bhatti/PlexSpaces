@@ -2,12 +2,12 @@
 # Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 #
 # Docker Compose for PlexSpaces deployment
-# Production-ready setup with PostgreSQL, Redis, and MinIO
+# Production-ready setup with PostgreSQL and MinIO
 #
 # This setup demonstrates:
 # - Empty node with default application (no actors)
-# - Shared PostgreSQL database for scheduler, workflow, object-registry, journaling, blob
-# - Redis for channel and locks backends
+# - Shared PostgreSQL database for scheduler, workflow, object-registry, journaling, blob, locks
+# - SQLite for channels (single-node durability)
 # - MinIO for blob storage (S3-compatible)
 #
 # Configuration is managed via release.yaml and environment variables
@@ -29,23 +29,6 @@ services:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U plexspaces"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - plexspaces-net
-
-  # Redis for channel and locks backends
-  redis:
-    image: redis:7-alpine
-    container_name: plexspaces-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -109,11 +92,11 @@ services:
       # Database configuration
       - DATABASE_URL=postgres://plexspaces:plexspaces@postgres:5432/plexspaces
       
-      # Backend configurations
-      - LOCKS_BACKEND=redis
-      - LOCKS_REDIS_URL=redis://redis:6379/0
-      - CHANNEL_BACKEND=redis
-      - CHANNEL_REDIS_URL=redis://redis:6379/0
+      # Backend configurations (all using PostgreSQL)
+      - LOCKS_BACKEND=postgres
+      - LOCKS_POSTGRES_URL=postgres://plexspaces:plexspaces@postgres:5432/plexspaces
+      - CHANNEL_BACKEND=sqlite
+      - CHANNEL_SQLITE_PATH=:memory:
       - KEYVALUE_BACKEND=sql
       - TUPLESPACE_BACKEND=sql
       
@@ -139,14 +122,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       minio:
         condition: service_healthy
 
 volumes:
   postgres-data:
-  redis-data:
   minio-data:
 
 networks:

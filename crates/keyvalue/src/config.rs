@@ -77,7 +77,7 @@ use crate::{InMemoryKVStore, KVError, KVResult, KeyValueStore};
 use std::sync::Arc;
 
 /// Backend type configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub enum BackendType {
     /// In-memory HashMap backend (default, always available)
     InMemory,
@@ -100,6 +100,14 @@ pub enum BackendType {
         /// Redis key namespace prefix
         namespace: String,
     },
+    /// Blob backend from environment variables (requires blob-backend feature)
+    /// Created asynchronously in create_keyvalue_from_config
+    /// Uses object_store directly - no SQL database or blob service needed
+    #[cfg(feature = "blob-backend")]
+    BlobFromEnv {
+        /// Blob keyvalue configuration
+        config: crate::blob::BlobKVConfig,
+    },
 }
 
 #[allow(clippy::derivable_impls)]
@@ -110,7 +118,7 @@ impl Default for BackendType {
 }
 
 /// KeyValue store configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct KVConfig {
     /// Backend type
     pub backend: BackendType,
@@ -176,10 +184,25 @@ impl KVConfig {
                 BackendType::Redis { url, namespace }
             }
 
+            #[cfg(feature = "blob-backend")]
+            "blob" => {
+                // Create blob keyvalue store from environment variables
+                // Uses object_store directly - no blob service or SQL dependency
+                use crate::blob::BlobKVConfig;
+                BackendType::BlobFromEnv {
+                    config: BlobKVConfig::from_env(),
+                }
+            }
+
             other => {
+                let valid_options = if cfg!(feature = "blob-backend") {
+                    "in-memory, sqlite, postgres, redis, blob"
+                } else {
+                    "in-memory, sqlite, postgres, redis"
+                };
                 return Err(KVError::ConfigError(format!(
-                    "Unknown backend type: {}. Valid options: in-memory, sqlite, postgres, redis",
-                    other
+                    "Unknown backend type: {}. Valid options: {}",
+                    other, valid_options
                 )));
             }
         };
@@ -273,6 +296,19 @@ pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn K
         BackendType::Redis { .. } => Err(KVError::ConfigError(
             "Redis backend requires 'redis-backend' feature".to_string(),
         )),
+
+        #[cfg(feature = "blob-backend")]
+        BackendType::BlobFromEnv { config } => {
+            use crate::blob::BlobKVStore;
+            // Create blob keyvalue store directly from config
+            // Uses object_store directly - no SQL database needed
+            // Simple, reliable design: just uses MinIO/S3 directly
+            let kv = BlobKVStore::new(config)
+                .await
+                .map_err(|e| KVError::ConfigError(format!("Failed to create blob keyvalue store: {}", e)))?;
+            Ok(Arc::new(kv))
+        }
+
     }
 }
 
@@ -284,7 +320,12 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = KVConfig::default();
-        assert_eq!(config.backend, BackendType::InMemory);
+        // BackendType doesn't implement PartialEq, so we can't use assert_eq!
+        // Just verify it's created successfully
+        match config.backend {
+            BackendType::InMemory => {},
+            _ => panic!("Default should be InMemory"),
+        }
     }
 
     #[test]
@@ -294,7 +335,11 @@ mod tests {
         std::env::remove_var("PLEXSPACES_KV_BACKEND");
 
         let config = KVConfig::from_env().unwrap();
-        assert_eq!(config.backend, BackendType::InMemory);
+        // BackendType doesn't implement PartialEq, verify with pattern matching
+        match config.backend {
+            BackendType::InMemory => {},
+            _ => panic!("Default should be InMemory"),
+        }
     }
 
     #[test]
@@ -305,12 +350,13 @@ mod tests {
         std::env::set_var("PLEXSPACES_KV_SQLITE_PATH", "/tmp/test.db");
 
         let config = KVConfig::from_env().unwrap();
-        assert_eq!(
-            config.backend,
-            BackendType::Sqlite {
-                path: "/tmp/test.db".to_string()
-            }
-        );
+        // BackendType doesn't implement PartialEq, verify with pattern matching
+        match config.backend {
+            BackendType::Sqlite { path } => {
+                assert_eq!(path, "/tmp/test.db".to_string());
+            },
+            _ => panic!("Expected Sqlite backend"),
+        }
 
         // Cleanup
         std::env::remove_var("PLEXSPACES_KV_BACKEND");
@@ -325,13 +371,14 @@ mod tests {
         std::env::set_var("PLEXSPACES_KV_POSTGRES_POOL_SIZE", "5");
 
         let config = KVConfig::from_env().unwrap();
-        assert_eq!(
-            config.backend,
-            BackendType::PostgreSQL {
-                connection_string: "postgres://localhost/test".to_string(),
-                pool_size: 5
-            }
-        );
+        // BackendType doesn't implement PartialEq, verify with pattern matching
+        match config.backend {
+            BackendType::PostgreSQL { connection_string, pool_size } => {
+                assert_eq!(connection_string, "postgres://localhost/test".to_string());
+                assert_eq!(pool_size, 5);
+            },
+            _ => panic!("Expected PostgreSQL backend"),
+        }
 
         std::env::remove_var("PLEXSPACES_KV_BACKEND");
         std::env::remove_var("PLEXSPACES_KV_POSTGRES_URL");
@@ -346,13 +393,14 @@ mod tests {
         std::env::set_var("PLEXSPACES_KV_REDIS_NAMESPACE", "test:");
 
         let config = KVConfig::from_env().unwrap();
-        assert_eq!(
-            config.backend,
-            BackendType::Redis {
-                url: "redis://localhost:6379".to_string(),
-                namespace: "test:".to_string()
-            }
-        );
+        // BackendType doesn't implement PartialEq, verify with pattern matching
+        match config.backend {
+            BackendType::Redis { url, namespace } => {
+                assert_eq!(url, "redis://localhost:6379".to_string());
+                assert_eq!(namespace, "test:".to_string());
+            },
+            _ => panic!("Expected Redis backend"),
+        }
 
         std::env::remove_var("PLEXSPACES_KV_BACKEND");
         std::env::remove_var("PLEXSPACES_KV_REDIS_URL");
@@ -366,10 +414,15 @@ mod tests {
 
         let result = KVConfig::from_env();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unknown backend type"));
+        // from_env returns KVResult<KVConfig>, which is Result<KVConfig, KVError>
+        // KVError implements Display via thiserror
+        match result {
+            Err(e) => {
+                let error_msg = format!("{}", e);
+                assert!(error_msg.contains("Unknown backend type"));
+            },
+            Ok(_) => panic!("Expected error for invalid backend"),
+        }
 
         std::env::remove_var("PLEXSPACES_KV_BACKEND");
     }
@@ -379,12 +432,13 @@ mod tests {
         let config = KVConfig::new(BackendType::Sqlite {
             path: ":memory:".to_string(),
         });
-        assert_eq!(
-            config.backend,
-            BackendType::Sqlite {
-                path: ":memory:".to_string()
-            }
-        );
+        // BackendType doesn't implement PartialEq, verify with pattern matching
+        match config.backend {
+            BackendType::Sqlite { path } => {
+                assert_eq!(path, ":memory:".to_string());
+            },
+            _ => panic!("Expected Sqlite backend"),
+        }
     }
 
     #[tokio::test]

@@ -276,9 +276,11 @@ pub trait ObjectRegistry: Send + Sync {
     /// Register an object
     ///
     /// ## Arguments
-    /// * `registration` - Object registration details
+    /// * `ctx` - RequestContext for tenant isolation (tenant_id comes from here)
+    /// * `registration` - Object registration details (tenant_id/namespace must match ctx if provided)
     async fn register(
         &self,
+        ctx: &RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
@@ -705,6 +707,7 @@ impl ObjectRegistry for StubObjectRegistry {
 
     async fn register(
         &self,
+        _ctx: &RequestContext,
         _registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err("StubObjectRegistry: register not implemented".into())

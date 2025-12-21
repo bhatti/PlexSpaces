@@ -9,6 +9,7 @@ mod tests {
     use plexspaces_object_registry::ObjectRegistry;
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
     use plexspaces_keyvalue::SqliteKVStore;
+    use plexspaces_core::RequestContext;
     use std::sync::Arc;
 
     /// Helper to create a SQLite database for testing
@@ -27,36 +28,40 @@ mod tests {
             object_id: object_id.to_string(),
             object_type: object_type as i32,
             grpc_address: format!("http://{}:9001", node_id),
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
             object_category: "GenServer".to_string(),
             ..Default::default()
         }
+    }
+
+    /// Helper to create default RequestContext
+    fn default_ctx() -> RequestContext {
+        RequestContext::new_without_auth("default".to_string(), "default".to_string())
     }
 
     #[tokio::test]
     async fn test_multi_node_registration() {
         // Simulate multiple nodes sharing the same SQLite database
         let kv = create_test_db().await;
+        let ctx = default_ctx();
 
         // Node 1 registers an actor
         let registry1 = ObjectRegistry::new(kv.clone());
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
-        registry1.register(reg1).await.unwrap();
+        registry1.register(&ctx, reg1).await.unwrap();
 
         // Node 2 registers an actor
         let registry2 = ObjectRegistry::new(kv.clone());
         let reg2 = create_test_registration("actor2@node2", ObjectType::ObjectTypeActor, "node2");
-        registry2.register(reg2).await.unwrap();
+        registry2.register(&ctx, reg2).await.unwrap();
 
         // Node 3 registers a tuplespace
         let registry3 = ObjectRegistry::new(kv.clone());
         let reg3 = create_test_registration("ts1", ObjectType::ObjectTypeTuplespace, "node3");
-        registry3.register(reg3).await.unwrap();
+        registry3.register(&ctx, reg3).await.unwrap();
 
         // Node 1 can discover all actors (cross-node discovery)
         let actors = registry1
-            .discover("default", "default", Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(actors.len(), 2);
@@ -65,7 +70,7 @@ mod tests {
 
         // Node 2 can discover tuplespaces
         let tuplespaces = registry2
-            .discover(Some(ObjectType::ObjectTypeTuplespace), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeTuplespace), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(tuplespaces.len(), 1);
@@ -76,16 +81,17 @@ mod tests {
     async fn test_cross_node_lookup() {
         // Test that nodes can look up objects registered by other nodes
         let kv = create_test_db().await;
+        let ctx = default_ctx();
 
         // Node 1 registers an actor
         let registry1 = ObjectRegistry::new(kv.clone());
         let reg1 = create_test_registration("counter@node1", ObjectType::ObjectTypeActor, "node1");
-        registry1.register(reg1).await.unwrap();
+        registry1.register(&ctx, reg1).await.unwrap();
 
         // Node 2 looks up the actor registered by Node 1
         let registry2 = ObjectRegistry::new(kv.clone());
         let found = registry2
-            .lookup("default", "default", ObjectType::ObjectTypeActor, "counter@node1")
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "counter@node1")
             .await
             .unwrap();
 
@@ -99,11 +105,13 @@ mod tests {
     async fn test_concurrent_registration() {
         // Test concurrent registration from multiple nodes
         let kv = create_test_db().await;
+        let ctx = default_ctx();
 
         // Simulate concurrent registration from 3 nodes
         let mut handles = Vec::new();
         for i in 1..=3 {
             let kv_clone = kv.clone();
+            let ctx_clone = ctx.clone();
             let handle = tokio::spawn(async move {
                 let registry = ObjectRegistry::new(kv_clone);
                 let reg = create_test_registration(
@@ -111,7 +119,7 @@ mod tests {
                     ObjectType::ObjectTypeActor,
                     &format!("node{}", i),
                 );
-                registry.register(reg).await
+                registry.register(&ctx_clone, reg).await
             });
             handles.push(handle);
         }
@@ -124,7 +132,7 @@ mod tests {
         // Verify all were registered
         let registry = ObjectRegistry::new(kv.clone());
         let actors = registry
-            .discover("default", "default", Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(actors.len(), 3);
@@ -134,11 +142,12 @@ mod tests {
     async fn test_heartbeat_across_nodes() {
         // Test that heartbeat updates are visible across nodes
         let kv = create_test_db().await;
+        let ctx = default_ctx();
 
         // Node 1 registers an actor
         let registry1 = ObjectRegistry::new(kv.clone());
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
-        registry1.register(reg1).await.unwrap();
+        registry1.register(&ctx, reg1).await.unwrap();
 
         // Wait a bit
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -146,13 +155,13 @@ mod tests {
         // Node 2 updates heartbeat
         let registry2 = ObjectRegistry::new(kv.clone());
         registry2
-            .heartbeat("default", "default", ObjectType::ObjectTypeActor, "actor1@node1")
+            .heartbeat(&ctx, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
             .unwrap();
 
         // Node 1 can see the updated heartbeat
         let found = registry1
-            .lookup("default", "default", ObjectType::ObjectTypeActor, "actor1@node1")
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
             .unwrap()
             .unwrap();
@@ -163,22 +172,23 @@ mod tests {
     async fn test_unregister_from_different_node() {
         // Test that one node can unregister an object registered by another node
         let kv = create_test_db().await;
+        let ctx = default_ctx();
 
         // Node 1 registers an actor
         let registry1 = ObjectRegistry::new(kv.clone());
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
-        registry1.register(reg1).await.unwrap();
+        registry1.register(&ctx, reg1).await.unwrap();
 
         // Node 2 unregisters it
         let registry2 = ObjectRegistry::new(kv.clone());
         registry2
-            .unregister("default", "default", ObjectType::ObjectTypeActor, "actor1@node1")
+            .unregister(&ctx, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
             .unwrap();
 
         // Node 1 can no longer find it
         let found = registry1
-            .lookup("default", "default", ObjectType::ObjectTypeActor, "actor1@node1")
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
             .unwrap();
         assert!(found.is_none());
@@ -188,28 +198,29 @@ mod tests {
     async fn test_discover_by_capability() {
         // Test discovering objects by capabilities (using capabilities field, not metadata)
         let kv = create_test_db().await;
+        let ctx = default_ctx();
 
         // Register actors with different capabilities
         let registry = ObjectRegistry::new(kv.clone());
 
         let mut reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
         reg1.capabilities.push("wasm".to_string());
-        registry.register(reg1).await.unwrap();
+        registry.register(&ctx, reg1).await.unwrap();
 
         let mut reg2 = create_test_registration("actor2@node2", ObjectType::ObjectTypeActor, "node2");
         reg2.capabilities.push("firecracker".to_string());
-        registry.register(reg2).await.unwrap();
+        registry.register(&ctx, reg2).await.unwrap();
 
         // Discover all actors (should find both)
         let all_actors = registry
-            .discover("default", "default", Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(all_actors.len(), 2);
 
         // Verify capabilities are stored and can be retrieved
         let found = registry
-            .lookup("default", "default", ObjectType::ObjectTypeActor, "actor1@node1")
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
             .unwrap()
             .unwrap();
@@ -224,41 +235,40 @@ mod tests {
         let registry = ObjectRegistry::new(kv.clone());
 
         // Register in tenant1:namespace1
-        let mut reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
-        reg1.tenant_id = "tenant1".to_string();
-        reg1.namespace = "namespace1".to_string();
-        registry.register(reg1).await.unwrap();
+        let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "namespace1".to_string());
+        let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
+        registry.register(&ctx1, reg1).await.unwrap();
 
         // Register in tenant2:namespace2
-        let mut reg2 = create_test_registration("actor2@node2", ObjectType::ObjectTypeActor, "node2");
-        reg2.tenant_id = "tenant2".to_string();
-        reg2.namespace = "namespace2".to_string();
-        registry.register(reg2).await.unwrap();
+        let ctx2 = RequestContext::new_without_auth("tenant2".to_string(), "namespace2".to_string());
+        let reg2 = create_test_registration("actor2@node2", ObjectType::ObjectTypeActor, "node2");
+        registry.register(&ctx2, reg2).await.unwrap();
 
         // Discover in default namespace (should not find either)
+        let default_ctx = default_ctx();
         let default_actors = registry
-            .discover("default", "default", Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&default_ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(default_actors.len(), 0);
 
         // Lookup in tenant1:namespace1 (should find actor1)
         let found1 = registry
-            .lookup("tenant1", "namespace1", ObjectType::ObjectTypeActor, "actor1@node1")
+            .lookup(&ctx1, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
             .unwrap();
         assert!(found1.is_some());
 
         // Lookup in tenant2:namespace2 (should find actor2)
         let found2 = registry
-            .lookup("tenant2", "namespace2", ObjectType::ObjectTypeActor, "actor2@node2")
+            .lookup(&ctx2, ObjectType::ObjectTypeActor, "actor2@node2")
             .await
             .unwrap();
         assert!(found2.is_some());
 
         // Lookup actor1 in tenant2:namespace2 (should not find)
         let not_found = registry
-            .lookup("tenant2", "namespace2", ObjectType::ObjectTypeActor, "actor1@node1")
+            .lookup(&ctx2, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
             .unwrap();
         assert!(not_found.is_none());

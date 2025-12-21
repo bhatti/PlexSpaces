@@ -66,11 +66,15 @@
 //! use plexspaces_object_registry::ObjectRegistry;
 //! use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 //! use plexspaces_keyvalue::InMemoryKVStore;
+//! use plexspaces_core::RequestContext;
 //! use std::sync::Arc;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let kv = Arc::new(InMemoryKVStore::new());
 //! let registry = ObjectRegistry::new(kv);
+//!
+//! // Create RequestContext for tenant isolation
+//! let ctx = RequestContext::new_without_auth("default".to_string(), "production".to_string());
 //!
 //! // Register actor
 //! let registration = ObjectRegistration {
@@ -81,7 +85,7 @@
 //!     ..Default::default()
 //! };
 //!
-//! registry.register(registration).await?;
+//! registry.register(&ctx, registration).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -91,12 +95,14 @@
 //! # use plexspaces_object_registry::ObjectRegistry;
 //! # use plexspaces_proto::object_registry::v1::ObjectType;
 //! # use plexspaces_keyvalue::InMemoryKVStore;
+//! # use plexspaces_core::RequestContext;
 //! # use std::sync::Arc;
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! # let kv = Arc::new(InMemoryKVStore::new());
 //! # let registry = ObjectRegistry::new(kv);
+//! # let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
 //! // Discover all actors
-//! let actors = registry.discover(Some(ObjectType::ObjectTypeActor), None, None, None, None, 100).await?;
+//! let actors = registry.discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100).await?;
 //! println!("Found {} actors", actors.len());
 //! # Ok(())
 //! # }
@@ -226,6 +232,9 @@ impl ObjectRegistry {
     /// - `default:production:actor:counter@node1`
     /// - `acme:staging:tuplespace:ts-redis-acme-staging`
     /// - `default:default:service:order-svc-instance-1`
+    ///
+    /// ## Note
+    /// Empty tenant_id or namespace are defaulted to "default" to avoid double slashes in paths
     fn make_key(
         tenant_id: &str,
         namespace: &str,
@@ -239,13 +248,17 @@ impl ObjectRegistry {
             ObjectType::ObjectTypeVm => "vm",
             _ => "unknown",
         };
-        format!("{}:{}:{}:{}", tenant_id, namespace, type_str, object_id)
+        // Default to "default" for empty tenant/namespace to avoid double slashes in paths
+        let tenant = if tenant_id.is_empty() { "default" } else { tenant_id };
+        let ns = if namespace.is_empty() { "default" } else { namespace };
+        format!("{}:{}:{}:{}", tenant, ns, type_str, object_id)
     }
 
     /// Register object (actor, tuplespace, or service)
     ///
     /// ## Arguments
-    /// * `registration` - ObjectRegistration with object details
+    /// * `ctx` - RequestContext for tenant isolation (tenant_id comes from here)
+    /// * `registration` - ObjectRegistration with object details (namespace can be empty, will use ctx.namespace)
     ///
     /// ## Returns
     /// `Ok(())` on success
@@ -260,24 +273,25 @@ impl ObjectRegistry {
     /// # use plexspaces_object_registry::ObjectRegistry;
     /// # use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
     /// # use plexspaces_keyvalue::InMemoryKVStore;
+    /// # use plexspaces_core::RequestContext;
     /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let kv = Arc::new(InMemoryKVStore::new());
     /// # let registry = ObjectRegistry::new(kv);
+    /// let ctx = RequestContext::new_without_auth("default".to_string(), "production".to_string());
     /// let registration = ObjectRegistration {
     ///     object_id: "counter@node1".to_string(),
     ///     object_type: ObjectType::ObjectTypeActor as i32,
     ///     grpc_address: "http://node1:9001".to_string(),
-    ///     tenant_id: "default".to_string(),
-    ///     namespace: "production".to_string(),
     ///     ..Default::default()
     /// };
-    /// registry.register(registration).await?;
+    /// registry.register(&ctx, registration).await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn register(
         &self,
+        ctx: &RequestContext,
         mut registration: ObjectRegistration,
     ) -> Result<(), ObjectRegistryError> {
         // Validation
@@ -292,18 +306,27 @@ impl ObjectRegistry {
             ));
         }
 
-        // Validate tenant_id is not empty (required)
-        if registration.tenant_id.is_empty() {
-            return Err(ObjectRegistryError::InvalidInput(
-                "tenant_id is required and cannot be empty".to_string(),
-            ));
+        // Get tenant_id and namespace from RequestContext (not from registration)
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
+
+        // Verify that if registration has tenant_id/namespace set, they match the context
+        if !registration.tenant_id.is_empty() && registration.tenant_id != tenant_id {
+            return Err(ObjectRegistryError::InvalidInput(format!(
+                "registration.tenant_id '{}' does not match RequestContext tenant_id '{}'",
+                registration.tenant_id, tenant_id
+            )));
         }
-        // Validate namespace is not empty (required, no defaults)
-        if registration.namespace.is_empty() {
-            return Err(ObjectRegistryError::InvalidInput(
-                "namespace is required and cannot be empty".to_string(),
-            ));
+        if !registration.namespace.is_empty() && registration.namespace != namespace {
+            return Err(ObjectRegistryError::InvalidInput(format!(
+                "registration.namespace '{}' does not match RequestContext namespace '{}'",
+                registration.namespace, namespace
+            )));
         }
+
+        // Update registration with tenant_id and namespace from context
+        registration.tenant_id = tenant_id.to_string();
+        registration.namespace = namespace.to_string();
 
         // Set timestamps
         let now = chrono::Utc::now();
@@ -313,21 +336,18 @@ impl ObjectRegistry {
         });
         registration.updated_at = registration.created_at.clone();
 
-        // Generate key
+        // Generate key (make_key will default empty tenant/namespace to "default" for paths)
         let object_type = ObjectType::try_from(registration.object_type)
             .unwrap_or(ObjectType::ObjectTypeUnspecified);
         let key = Self::make_key(
-            &registration.tenant_id,
-            &registration.namespace,
+            tenant_id,
+            namespace,
             object_type,
             &registration.object_id,
         );
 
-        // Create RequestContext for tenant isolation
-        let ctx = RequestContext::new_without_auth(registration.tenant_id.clone(), registration.namespace.clone());
-
         // Check if already registered (optional - remove if overwrite is desired)
-        if self.kv_store.get(&ctx, &key).await?.is_some() {
+        if self.kv_store.get(ctx, &key).await?.is_some() {
             return Err(ObjectRegistryError::ObjectAlreadyRegistered(
                 registration.object_id.clone(),
             ));
@@ -336,7 +356,7 @@ impl ObjectRegistry {
         // Serialize and store
         let value = registration.encode_to_vec();
 
-        self.kv_store.put(&ctx, &key, value).await?;
+        self.kv_store.put(ctx, &key, value).await?;
 
         Ok(())
     }
@@ -344,8 +364,7 @@ impl ObjectRegistry {
     /// Unregister object
     ///
     /// ## Arguments
-    /// * `tenant_id` - Tenant identifier
-    /// * `namespace` - Namespace
+    /// * `ctx` - RequestContext for tenant isolation (tenant_id comes from here)
     /// * `object_type` - Type of object (Actor, TupleSpace, Service)
     /// * `object_id` - Object identifier
     ///
@@ -357,33 +376,25 @@ impl ObjectRegistry {
     /// - [`ObjectRegistryError::StorageError`]: KeyValueStore failure
     pub async fn unregister(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), ObjectRegistryError> {
-        let tenant = if tenant_id.is_empty() {
-            "default"
-        } else {
-            tenant_id
-        };
-        let ns = if namespace.is_empty() {
-            "default"
-        } else {
-            namespace
-        };
-
-        let key = Self::make_key(tenant, ns, object_type, object_id);
-
-        // Create RequestContext for tenant isolation
-        let ctx = RequestContext::new_without_auth(tenant.to_string(), ns.to_string());
+        // Get tenant_id and namespace from RequestContext
+        // make_key will default empty values to "default" for path generation
+        let key = Self::make_key(
+            ctx.tenant_id(),
+            ctx.namespace(),
+            object_type,
+            object_id,
+        );
 
         // Check if exists
-        if self.kv_store.get(&ctx, &key).await?.is_none() {
+        if self.kv_store.get(ctx, &key).await?.is_none() {
             return Err(ObjectRegistryError::ObjectNotFound(object_id.to_string()));
         }
 
-        self.kv_store.delete(&ctx, &key).await?;
+        self.kv_store.delete(ctx, &key).await?;
 
         Ok(())
     }
@@ -618,8 +629,7 @@ mod tests {
             object_id: object_id.to_string(),
             object_type: object_type as i32,
             grpc_address: format!("http://test-node:9001"),
-            tenant_id: "test-tenant".to_string(),
-            namespace: "test-namespace".to_string(),
+            // tenant_id and namespace are ignored - they come from RequestContext
             object_category: "GenServer".to_string(),
             ..Default::default()
         }
@@ -630,10 +640,10 @@ mod tests {
         let kv = Arc::new(InMemoryKVStore::new());
         let registry = ObjectRegistry::new(kv);
 
-        let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
-        registry.register(registration.clone()).await.unwrap();
-
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
+        registry.register(&ctx, registration.clone()).await.unwrap();
+
         let found = registry
             .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
@@ -650,11 +660,12 @@ mod tests {
         let kv = Arc::new(InMemoryKVStore::new());
         let registry = ObjectRegistry::new(kv);
 
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
-        registry.register(registration.clone()).await.unwrap();
+        registry.register(&ctx, registration.clone()).await.unwrap();
 
         // Try to register again - should fail
-        let result = registry.register(registration).await;
+        let result = registry.register(&ctx, registration).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -667,15 +678,15 @@ mod tests {
         let kv = Arc::new(InMemoryKVStore::new());
         let registry = ObjectRegistry::new(kv);
 
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
-        registry.register(registration).await.unwrap();
+        registry.register(&ctx, registration).await.unwrap();
 
         registry
-            .unregister("test-tenant", "test-namespace", ObjectType::ObjectTypeActor, "test-actor@node1")
+            .unregister(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
             .unwrap();
 
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let found = registry
             .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
@@ -689,20 +700,19 @@ mod tests {
         let kv = Arc::new(InMemoryKVStore::new());
         let registry = ObjectRegistry::new(kv);
 
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
-        registry.register(registration).await.unwrap();
+        registry.register(&ctx, registration).await.unwrap();
 
         // Wait a bit
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         // Update heartbeat
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         registry
             .heartbeat(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
             .unwrap();
 
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let found = registry
             .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
             .await
@@ -718,22 +728,16 @@ mod tests {
         let registry = ObjectRegistry::new(kv);
 
         // Note: discover() uses default:default prefix, so we need to register with default tenant/namespace
-        let mut reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor);
-        reg1.tenant_id = "default".to_string();
-        reg1.namespace = "default".to_string();
-        registry.register(reg1).await.unwrap();
-
-        let mut reg2 = create_test_registration("actor2@node1", ObjectType::ObjectTypeActor);
-        reg2.tenant_id = "default".to_string();
-        reg2.namespace = "default".to_string();
-        registry.register(reg2).await.unwrap();
-
-        let mut reg3 = create_test_registration("ts1", ObjectType::ObjectTypeTuplespace);
-        reg3.tenant_id = "default".to_string();
-        reg3.namespace = "default".to_string();
-        registry.register(reg3).await.unwrap();
-
         let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor);
+        registry.register(&ctx, reg1).await.unwrap();
+
+        let reg2 = create_test_registration("actor2@node1", ObjectType::ObjectTypeActor);
+        registry.register(&ctx, reg2).await.unwrap();
+
+        let reg3 = create_test_registration("ts1", ObjectType::ObjectTypeTuplespace);
+        registry.register(&ctx, reg3).await.unwrap();
+
         let actors = registry
             .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
             .await

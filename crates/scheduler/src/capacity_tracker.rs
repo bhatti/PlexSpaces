@@ -370,10 +370,10 @@ mod tests {
 
         let labels = HashMap::new();
         let registration = create_test_registration("node-1", metrics, labels);
-        registry.register(registration).await.unwrap();
+        let ctx = RequestContext::internal();
+        registry.register(&ctx, registration).await.unwrap();
 
         let tracker = CapacityTracker::new(registry);
-        let ctx = RequestContext::internal();
         let capacity = tracker.get_node_capacity(&ctx, "node-1").await.unwrap();
 
         assert!(capacity.is_some());
@@ -407,7 +407,8 @@ mod tests {
         let mut labels1 = HashMap::new();
         labels1.insert("zone".to_string(), "us-west".to_string());
         let registration1 = create_test_registration("node-1", metrics1, labels1);
-        registry.register(registration1).await.unwrap();
+        let ctx = RequestContext::internal();
+        registry.register(&ctx, registration1).await.unwrap();
 
         let mut metrics2 = HashMap::new();
         metrics2.insert("total_cpu_cores".to_string(), 8.0);
@@ -418,10 +419,9 @@ mod tests {
         let mut labels2 = HashMap::new();
         labels2.insert("zone".to_string(), "us-east".to_string());
         let registration2 = create_test_registration("node-2", metrics2, labels2);
-        registry.register(registration2).await.unwrap();
+        registry.register(&ctx, registration2).await.unwrap();
 
         let tracker = CapacityTracker::new(registry);
-        let ctx = RequestContext::internal();
         let capacities = tracker.list_node_capacities(&ctx, None, None).await.unwrap();
 
         assert_eq!(capacities.len(), 2);
@@ -438,10 +438,11 @@ mod tests {
         let mut metrics1 = HashMap::new();
         metrics1.insert("total_cpu_cores".to_string(), 4.0);
         metrics1.insert("total_memory_mb".to_string(), 8192.0);
+        let ctx = RequestContext::internal();
         let mut labels1 = HashMap::new();
         labels1.insert("zone".to_string(), "us-west".to_string());
         let registration1 = create_test_registration("node-1", metrics1, labels1);
-        registry.register(registration1).await.unwrap();
+        registry.register(&ctx, registration1).await.unwrap();
 
         let mut metrics2 = HashMap::new();
         metrics2.insert("total_cpu_cores".to_string(), 8.0);
@@ -449,7 +450,7 @@ mod tests {
         let mut labels2 = HashMap::new();
         labels2.insert("zone".to_string(), "us-east".to_string());
         let registration2 = create_test_registration("node-2", metrics2, labels2);
-        registry.register(registration2).await.unwrap();
+        registry.register(&ctx, registration2).await.unwrap();
 
         let tracker = CapacityTracker::new(registry);
 
@@ -479,8 +480,9 @@ mod tests {
         metrics1.insert("allocated_cpu_cores".to_string(), 3.0);
         metrics1.insert("allocated_memory_mb".to_string(), 7000.0);
         // Available: 1 CPU, ~1GB memory
+        let ctx = RequestContext::internal();
         let registration1 = create_test_registration("node-1", metrics1, HashMap::new());
-        registry.register(registration1).await.unwrap();
+        registry.register(&ctx, registration1).await.unwrap();
 
         let mut metrics2 = HashMap::new();
         metrics2.insert("total_cpu_cores".to_string(), 8.0);
@@ -489,7 +491,7 @@ mod tests {
         metrics2.insert("allocated_memory_mb".to_string(), 2048.0);
         // Available: 6 CPU, ~14GB memory
         let registration2 = create_test_registration("node-2", metrics2, HashMap::new());
-        registry.register(registration2).await.unwrap();
+        registry.register(&ctx, registration2).await.unwrap();
 
         let tracker = CapacityTracker::new(registry);
 

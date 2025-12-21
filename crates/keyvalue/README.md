@@ -26,6 +26,7 @@ TupleSpace is designed for coordination (dataflow patterns) with destructive `ta
 - **InMemoryKVStore**: HashMap-based implementation for testing
 - **SqlKVStore**: SQLite/PostgreSQL implementation for persistence
 - **RedisKVStore**: Redis implementation for distributed storage
+- **BlobKVStore**: Object storage (MinIO/S3/GCP/Azure) implementation using object_store directly
 
 ## Access Patterns
 
@@ -207,6 +208,26 @@ store.batch_put(batch).await?;
 - **Use Case**: High-performance caching, distributed storage
 - **Performance**: < 1ms latency, high throughput
 - **Features**: Pub/sub, TTL, clustering
+
+### Blob Storage (MinIO/S3/GCP/Azure)
+
+- **Use Case**: Object storage-backed keyvalue store, cloud-native deployments
+- **Performance**: Scalable, durable, cloud-optimized
+- **Features**: 
+  - Uses `object_store` directly (no SQL database needed)
+  - Supports MinIO, AWS S3, GCP Cloud Storage, Azure Blob Storage
+  - Path-based storage: `{prefix}/keyvalue/{tenant}/{namespace}/{key}`
+  - No blob service or SQL dependencies
+  - Simple, reliable design
+- **Configuration**:
+  ```bash
+  export PLEXSPACES_KV_BACKEND=blob
+  export BLOB_BACKEND=minio  # or s3, gcp, azure
+  export BLOB_BUCKET=plexspaces-test
+  export BLOB_ENDPOINT=http://localhost:9000  # for MinIO
+  export BLOB_ACCESS_KEY_ID=minioadmin_user
+  export BLOB_SECRET_ACCESS_KEY=minioadmin_pass
+  ```
 
 ## Monitoring & Metrics
 

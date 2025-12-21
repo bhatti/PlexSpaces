@@ -596,7 +596,7 @@ impl KeyValueStore for SqliteKVStore {
         Ok(rx)
     }
 
-    async fn watch_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(&self, _ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: prefix.to_string(),
@@ -1132,7 +1132,7 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(rx)
     }
 
-    async fn watch_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(&self, _ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: prefix.to_string(),

@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 use plexspaces_core::application::{Application, ApplicationNode, ApplicationError, HealthStatus};
+use plexspaces_core::ServiceLocator;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -115,12 +116,16 @@ impl Application for GenomicsPipelineApplication {
         let mut supervisors = self.supervisors.write().await;
         let node_id = node.id().to_string();
 
+        // Create ServiceLocator for supervisors
+        let service_locator = Arc::new(ServiceLocator::new());
+
         // Create supervisor for QC pool
         info!("Creating QC supervisor");
         let (qc_supervisor, _) = Supervisor::new(
             format!("qc-supervisor@{}", node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
         );
+        let qc_supervisor = qc_supervisor.with_service_locator(service_locator.clone());
 
         for i in 0..self.config.worker_pools.qc {
             let actor_id = format!("qc-{}@{}", i, node_id);
@@ -165,6 +170,7 @@ impl Application for GenomicsPipelineApplication {
             format!("alignment-supervisor@{}", node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
         );
+        let alignment_supervisor = alignment_supervisor.with_service_locator(service_locator.clone());
 
         for i in 0..self.config.worker_pools.alignment {
             let actor_id = format!("alignment-{}@{}", i, node_id);
@@ -209,6 +215,7 @@ impl Application for GenomicsPipelineApplication {
             format!("variant-supervisor@{}", node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
         );
+        let variant_supervisor = variant_supervisor.with_service_locator(service_locator.clone());
 
         for i in 0..self.config.worker_pools.chromosome {
             let actor_id = format!("variant-{}@{}", i, node_id);
@@ -255,6 +262,7 @@ impl Application for GenomicsPipelineApplication {
             format!("annotation-supervisor@{}", node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
         );
+        let annotation_supervisor = annotation_supervisor.with_service_locator(service_locator.clone());
 
         for i in 0..self.config.worker_pools.annotation {
             let actor_id = format!("annotation-{}@{}", i, node_id);
@@ -299,6 +307,7 @@ impl Application for GenomicsPipelineApplication {
             format!("report-supervisor@{}", node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
         );
+        let report_supervisor = report_supervisor.with_service_locator(service_locator.clone());
 
         for i in 0..self.config.worker_pools.report {
             let actor_id = format!("report-{}@{}", i, node_id);
@@ -405,7 +414,7 @@ mod tests {
         assert_eq!(app.name(), "genomics-pipeline");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_start_application() {
         let mut app = GenomicsPipelineApplication::new();
         let node = Arc::new(MockNode {
@@ -421,7 +430,7 @@ mod tests {
         assert_eq!(supervisors.len(), 5);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_stop_application() {
         let mut app = GenomicsPipelineApplication::new();
         let node = Arc::new(MockNode {

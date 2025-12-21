@@ -147,16 +147,15 @@ async fn register_node_in_object_registry(node: &Arc<Node>, remote_node_id: &str
     } else {
         address.to_string()
     };
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let registration = ObjectRegistration {
-        tenant_id: "internal".to_string(),
-        namespace: "system".to_string(),
         object_type: ObjectType::ObjectTypeService as i32,
         object_id: format!("_node@{}", remote_node_id),
         grpc_address,
         object_category: "Node".to_string(),
         ..Default::default()
     };
-    node.object_registry().register(registration).await.unwrap();
+    node.object_registry().register(&ctx, registration).await.unwrap();
 }
 
 /// Helper to register ActorFactory and ActorService in ServiceLocator (needed for tests)

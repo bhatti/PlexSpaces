@@ -207,14 +207,13 @@ async fn test_unified_tell_remote_grpc() {
     let kv_store2 = Arc::new(InMemoryKVStore::new());
     let registry2 = Arc::new(ObjectRegistryImpl::new(kv_store2));
     let node_object_id = format!("_node@{}", "node2");
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     registry2
-        .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
+        .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
             ..Default::default()
         })
         .await
@@ -314,14 +313,13 @@ async fn test_unified_ask_remote_grpc() {
     let kv_store2 = Arc::new(InMemoryKVStore::new());
     let registry2 = Arc::new(ObjectRegistryImpl::new(kv_store2));
     let node_object_id = format!("_node@{}", "node2");
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     registry2
-        .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
+        .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
             ..Default::default()
         })
         .await
@@ -452,14 +450,13 @@ async fn test_unified_ask_remote_grpc_timeout() {
     let kv_store2 = Arc::new(InMemoryKVStore::new());
     let registry2 = Arc::new(ObjectRegistryImpl::new(kv_store2));
     let node_object_id = format!("_node@{}", "node2");
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     registry2
-        .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
+        .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
-            tenant_id: "default".to_string(),
-            namespace: "default".to_string(),
             ..Default::default()
         })
         .await

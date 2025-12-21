@@ -1881,10 +1881,11 @@ mod tests {
 
         async fn register(
             &self,
+            ctx: &plexspaces_core::RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.inner
-                .register(registration)
+                .register(ctx, registration)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -1933,18 +1934,17 @@ mod tests {
         let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
         
         // Register node as a service object (nodes are registered as services)
+        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let node_object_id = format!("_node@{}", node_id);
         let registration = ProtoObjectRegistration {
             object_id: node_object_id.clone(),
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node_address.to_string(),
-            tenant_id: "internal".to_string(),
-            namespace: "system".to_string(),
             ..Default::default()
         };
         
-        object_registry_impl.register(registration).await.unwrap();
+        object_registry_impl.register(&ctx, registration).await.unwrap();
         
         let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
             inner: object_registry_impl,
@@ -2715,17 +2715,17 @@ mod tests {
         
         // Register node2
         let node2_object_id = format!("_node@node2");
+        use plexspaces_core::RequestContext;
         use plexspaces_proto::object_registry::v1::{ObjectRegistration as ProtoObjectRegistration, ObjectType};
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let node2_registration = ProtoObjectRegistration {
             object_id: node2_object_id,
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
-            tenant_id: "internal".to_string(),
-            namespace: "system".to_string(),
             ..Default::default()
         };
-        object_registry_impl1.register(node2_registration).await.unwrap();
+        object_registry_impl1.register(&ctx, node2_registration).await.unwrap();
         
         // Register node3
         let node3_object_id = format!("_node@node3");
@@ -2734,11 +2734,9 @@ mod tests {
             object_type: ObjectType::ObjectTypeService as i32,
             object_category: "node".to_string(),
             grpc_address: node3_address.clone(),
-            tenant_id: "internal".to_string(),
-            namespace: "system".to_string(),
             ..Default::default()
         };
-        object_registry_impl1.register(node3_registration).await.unwrap();
+        object_registry_impl1.register(&ctx, node3_registration).await.unwrap();
         
         // Create ActorRegistry with the ObjectRegistry that has both nodes
         let object_registry1: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {

@@ -171,14 +171,13 @@ impl VmRegistry {
             object_type: ObjectType::ObjectTypeVm as i32,
             object_category: "firecracker".to_string(),
             grpc_address: vm_entry.socket_path.clone(),
-            tenant_id: ctx.tenant_id().to_string(),
-            namespace: ctx.namespace().to_string(),
+            // tenant_id and namespace come from RequestContext, not registration
             health_status: health_status as i32,
             labels: vec!["firecracker".to_string(), "microvm".to_string()],
             ..Default::default()
         };
 
-        registry.register(registration).await?;
+        registry.register(&ctx, registration).await?;
         Ok(())
     }
 }

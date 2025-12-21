@@ -454,7 +454,7 @@ pub struct KeyValueFacet {
 ```
 
 **Configuration**:
-- `store_type`: `memory`, `redis`, `dynamodb`, `sqlite`
+- `store_type`: `memory`, `redis`, `dynamodb`, `sqlite`, `blob`
 - `connection_string`: Backend connection string
 
 **Features**:
@@ -462,6 +462,12 @@ pub struct KeyValueFacet {
 - TTL support
 - Atomic operations
 - Multi-tenant isolation
+
+**Backend Support**:
+- **InMemory**: HashMap-based (testing)
+- **SQLite/PostgreSQL**: Persistent SQL storage
+- **Redis**: Distributed with native TTL
+- **Blob**: Object storage (MinIO/S3/GCP/Azure) using object_store directly
 
 **Use Cases**: Caching, session storage, configuration, feature flags
 
@@ -1282,6 +1288,7 @@ let pattern = Pattern::new(vec![
 - **InMemory**: Single-node, testing
 - **Redis**: Multi-node, production
 - **PostgreSQL**: Multi-node, transactional
+- **Blob**: Object storage (MinIO/S3/GCP/Azure) - uses object_store directly, no SQL database needed
 
 ## Workflows
 

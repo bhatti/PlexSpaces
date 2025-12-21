@@ -69,6 +69,21 @@ pub enum KVError {
     /// IO error
     #[error("IO error: {0}")]
     IOError(#[from] std::io::Error),
+
+    /// Storage error (for blob backend)
+    #[error("Storage error: {0}")]
+    StorageError(String),
+
+    /// Operation not supported
+    #[error("Operation not supported: {0}")]
+    NotSupported(String),
+}
+
+#[cfg(feature = "blob-backend")]
+impl From<object_store::Error> for KVError {
+    fn from(err: object_store::Error) -> Self {
+        KVError::StorageError(err.to_string())
+    }
 }
 
 impl From<serde_json::Error> for KVError {

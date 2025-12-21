@@ -17,10 +17,18 @@ serde_json = "1.0"
 tracing = "0.1"
 
 # Optional SQL backend support (must match tuplespace version)
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "migrate"], optional = true }
+# Note: "any" feature required for AnyPool used by blob repository
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "any", "migrate"], optional = true }
 
 # Optional Redis backend support
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"], optional = true }
+
+# Optional Blob backend support
+# Uses object_store directly (no blob service or SQL dependency)
+object_store = { version = "0.10", features = ["aws", "gcp", "azure"], optional = true }
+futures = { workspace = true, optional = true }
+bytes = { version = "1.5", optional = true }
+chrono = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -28,12 +36,19 @@ anyhow = "1.0"
 env_logger = "0.11"
 criterion = { version = "0.5", features = ["async_tokio"] }
 serial_test = "3.0"
+tempfile = "3.10"
+reqwest = { version = "0.12", features = ["json"] }
+object_store = "0.10"
+# Ensure sqlx with sqlite and "any" feature is available in tests (for blob backend tests)
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
 
 [features]
 default = []
 sql-backend = ["sqlx"]
 redis-backend = ["redis"]
-all-backends = ["sql-backend", "redis-backend"]
+# blob-backend requires sql-backend (for repository) and ensures sqlx has "any" feature
+blob-backend = ["object_store", "futures", "bytes", "chrono"]
+all-backends = ["sql-backend", "redis-backend", "blob-backend"]
 
 [lib]
 doctest = false

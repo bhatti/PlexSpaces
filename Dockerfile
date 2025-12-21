@@ -76,7 +76,8 @@ WORKDIR /app
 COPY --from=builder /app/target/release/plexspaces-node ./plexspaces-node
 
 # Create config and data directories
-RUN mkdir -p /app/config /app/data && chown -R plexspaces:plexspaces /app
+# Data directory for SQLite databases and LocalFileSystem blob storage
+RUN mkdir -p /app/config /app/data /app/data/blob && chown -R plexspaces:plexspaces /app
 
 # Copy default release configuration
 COPY config/release.yaml /app/config/release.yaml
@@ -95,22 +96,30 @@ ENV NODE_ID=node1
 ENV NODE_LISTEN_ADDRESS=0.0.0.0:9001
 ENV GRPC_ADDRESS=0.0.0.0:9001
 
-# Database configuration (defaults, override in docker-compose)
-ENV DATABASE_URL=postgres://plexspaces:plexspaces@postgres:5432/plexspaces
+# Database configuration (defaults to SQLite, override in docker-compose)
+# SQLite is easier for local development and can be overridden to PostgreSQL
+ENV DATABASE_URL=sqlite:///app/data/plexspaces.db
 
 # Backend configurations (defaults, override in docker-compose)
-ENV LOCKS_BACKEND=redis
-ENV LOCKS_REDIS_URL=redis://redis:6379/0
-ENV CHANNEL_BACKEND=redis
-ENV CHANNEL_REDIS_URL=redis://redis:6379/0
-ENV KEYVALUE_BACKEND=sql
-ENV TUPLESPACE_BACKEND=sql
+# All storage uses SQLite by default (can be overridden to PostgreSQL)
+# Channels use SQLite for single-node durability
+ENV LOCKS_BACKEND=sqlite
+ENV LOCKS_SQLITE_PATH=sqlite:///app/data/locks.db
+ENV CHANNEL_BACKEND=sqlite
+ENV CHANNEL_SQLITE_PATH=/app/data/channels.db
+ENV KEYVALUE_BACKEND=sqlite
+ENV PLEXSPACES_KV_SQLITE_PATH=/app/data/keyvalue.db
+ENV TUPLESPACE_BACKEND=sqlite
+ENV TUPLESPACE_SQLITE_PATH=/app/data/tuplespace.db
 
-# Blob storage configuration (defaults, override in docker-compose)
-ENV BLOB_BACKEND=minio
+# Blob storage configuration (defaults to LocalFileSystem, override in docker-compose)
+# LocalFileSystem is easier for local development, docker-compose uses MinIO
+ENV BLOB_BACKEND=local
 ENV BLOB_BUCKET=plexspaces
-ENV BLOB_ENDPOINT=http://minio:9000
-ENV BLOB_ACCESS_KEY_ID=minioadmin
+ENV BLOB_PREFIX=/app/data/blob
+# MinIO settings (used in docker-compose, not needed for local backend)
+# ENV BLOB_ENDPOINT=http://minio:9000
+# ENV BLOB_ACCESS_KEY_ID=minioadmin
 # BLOB_SECRET_ACCESS_KEY should be set via secrets in docker-compose/k8s
 
 # Health check using gRPC health probe

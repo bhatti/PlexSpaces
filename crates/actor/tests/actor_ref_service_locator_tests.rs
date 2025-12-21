@@ -93,16 +93,15 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
     ));
     
     // Register node address in ObjectRegistry
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let node_registration = ObjectRegistration {
         object_id: "_node@remote-node".to_string(),
         object_type: ObjectType::ObjectTypeService as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:9999".to_string(),
-        tenant_id: "default".to_string(),
-        namespace: "default".to_string(),
         ..Default::default()
     };
-    object_registry_impl.register(node_registration).await.unwrap();
+    object_registry_impl.register(&ctx, node_registration).await.unwrap();
     
     // Create ActorRegistry with the ObjectRegistry that has the node registered
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
@@ -143,16 +142,15 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     ));
     
     // Register node address in ObjectRegistry
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let node_registration = ObjectRegistration {
         object_id: "_node@remote-node".to_string(),
         object_type: ObjectType::ObjectTypeService as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:9999".to_string(),
-        tenant_id: "default".to_string(),
-        namespace: "default".to_string(),
         ..Default::default()
     };
-    object_registry_impl.register(node_registration).await.unwrap();
+    object_registry_impl.register(&ctx, node_registration).await.unwrap();
     
     // Create ActorRegistry with the ObjectRegistry that has the node registered
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 

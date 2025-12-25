@@ -30,6 +30,8 @@ plexspaces-locks = { workspace = true }
 plexspaces-wasm-runtime = { workspace = true }
 plexspaces-blob = { path = "../blob", features = ["sql-backend", "server", "presigned-urls"] }
 plexspaces-firecracker = { workspace = true, optional = true }
+plexspaces-dashboard = { path = "../dashboard", optional = true }
+plexspaces-circuit-breaker = { workspace = true }
 
 # Core dependencies
 tokio = { workspace = true }
@@ -54,10 +56,11 @@ tonic = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 tokio-stream = { version = "0.1", features = ["net"] }
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any", "migrate"] }
 tonic-health = { workspace = true }
 tonic-web = { workspace = true }  # For gRPC-Web and gRPC-Gateway HTTP access
 futures = { workspace = true }  # For BoxStream in ChannelService
+futures-util = "0.3"  # For StreamExt in multipart handling
 tower = { version = "0.4", features = ["util", "timeout", "load"] }
 tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "fs"] }
 hyper = { version = "1.0", features = ["full"] }
@@ -65,10 +68,14 @@ http-body-util = "0.1"
 axum = { version = "0.7", features = ["multipart"] }
 url = "2.5"
 base64 = "0.22"
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+clap = { version = "4.4", features = ["derive"] }
+anyhow = "1.0"
 
 [features]
-default = []
+default = ["dashboard", "firecracker"]
 firecracker = ["plexspaces-firecracker"]
+dashboard = ["plexspaces-dashboard"]
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }
@@ -77,7 +84,9 @@ plexspaces-behavior = { workspace = true }
 plexspaces-persistence = { workspace = true }
 futures = { workspace = true }
 tempfile = "3.10"
+wat = "1.0"
 
 [lib]
 name = "plexspaces_node"
 path = "src/lib.rs"
+

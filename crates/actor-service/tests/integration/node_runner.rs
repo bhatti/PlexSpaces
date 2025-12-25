@@ -33,16 +33,13 @@ struct ObjectRegistryAdapter {
 impl CoreObjectRegistry for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        tenant_id: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_id: &str,
-        namespace: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::RequestContext;
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(&ctx, obj_type, object_id)
+            .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -66,6 +63,23 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
             .register(ctx, registration)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn discover(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        object_category: Option<String>,
+        capabilities: Option<Vec<String>>,
+        labels: Option<Vec<String>>,
+        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .discover(ctx, object_type, object_category, capabilities, labels, health_status, offset, limit)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -141,9 +155,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     service_locator.register_service(virtual_actor_manager).await;
     
-    // Register FacetManager (from ActorRegistry)
+    // Register FacetManager (from ActorRegistry) - use wrapper since FacetManager doesn't implement Service
+    use plexspaces_core::facet_service_wrapper::FacetManagerServiceWrapper;
     let facet_manager = actor_registry.facet_manager().clone();
-    service_locator.register_service(facet_manager).await;
+    let facet_manager_wrapper = Arc::new(FacetManagerServiceWrapper::new(facet_manager));
+    service_locator.register_service_by_name(plexspaces_core::service_locator::service_names::FACET_MANAGER, facet_manager_wrapper).await;
     
     // Register ActorFactoryImpl
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};

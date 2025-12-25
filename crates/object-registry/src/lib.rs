@@ -102,7 +102,7 @@
 //! # let registry = ObjectRegistry::new(kv);
 //! # let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
 //! // Discover all actors
-//! let actors = registry.discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100).await?;
+//! let actors = registry.discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100).await?;
 //! println!("Found {} actors", actors.len());
 //! # Ok(())
 //! # }
@@ -147,6 +147,7 @@ use plexspaces_proto::object_registry::v1::{
 };
 use prost::Message; // For encode_to_vec() and decode()
 use std::sync::Arc;
+use async_trait::async_trait;
 
 /// Error types for ObjectRegistry operations
 #[derive(Debug, thiserror::Error)]
@@ -246,6 +247,9 @@ impl ObjectRegistry {
             ObjectType::ObjectTypeTuplespace => "tuplespace",
             ObjectType::ObjectTypeService => "service",
             ObjectType::ObjectTypeVm => "vm",
+            ObjectType::ObjectTypeApplication => "application",
+            ObjectType::ObjectTypeWorkflow => "workflow",
+            ObjectType::ObjectTypeNode => "node",
             _ => "unknown",
         };
         // Default to "default" for empty tenant/namespace to avoid double slashes in paths
@@ -339,12 +343,21 @@ impl ObjectRegistry {
         // Generate key (make_key will default empty tenant/namespace to "default" for paths)
         let object_type = ObjectType::try_from(registration.object_type)
             .unwrap_or(ObjectType::ObjectTypeUnspecified);
-        let key = Self::make_key(
+        let full_key = Self::make_key(
             tenant_id,
             namespace,
             object_type,
             &registration.object_id,
         );
+        
+        // Extract just the key part (without tenant:namespace) since put() will add it via composite_key
+        // make_key returns "{tenant}:{namespace}:{type}:{id}", but put expects just "{type}:{id}"
+        let key_prefix = format!("{}:{}:", tenant_id, namespace);
+        let key = if full_key.starts_with(&key_prefix) {
+            full_key.strip_prefix(&key_prefix).unwrap_or(&full_key).to_string()
+        } else {
+            full_key
+        };
 
         // Check if already registered (optional - remove if overwrite is desired)
         if self.kv_store.get(ctx, &key).await?.is_some() {
@@ -381,13 +394,20 @@ impl ObjectRegistry {
         object_id: &str,
     ) -> Result<(), ObjectRegistryError> {
         // Get tenant_id and namespace from RequestContext
-        // make_key will default empty values to "default" for path generation
-        let key = Self::make_key(
+        let full_key = Self::make_key(
             ctx.tenant_id(),
             ctx.namespace(),
             object_type,
             object_id,
         );
+        
+        // Extract just the key part (without tenant:namespace) since get()/delete() will add it via composite_key
+        let key_prefix = format!("{}:{}:", ctx.tenant_id(), ctx.namespace());
+        let key = if full_key.starts_with(&key_prefix) {
+            full_key.strip_prefix(&key_prefix).unwrap_or(&full_key).to_string()
+        } else {
+            full_key
+        };
 
         // Check if exists
         if self.kv_store.get(ctx, &key).await?.is_none() {
@@ -419,7 +439,15 @@ impl ObjectRegistry {
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, ObjectRegistryError> {
-        let key = Self::make_key(ctx.tenant_id(), ctx.namespace(), object_type, object_id);
+        let full_key = Self::make_key(ctx.tenant_id(), ctx.namespace(), object_type, object_id);
+        
+        // Extract just the key part (without tenant:namespace) since get() will add it via composite_key
+        let key_prefix = format!("{}:{}:", ctx.tenant_id(), ctx.namespace());
+        let key = if full_key.starts_with(&key_prefix) {
+            full_key.strip_prefix(&key_prefix).unwrap_or(&full_key).to_string()
+        } else {
+            full_key
+        };
 
         match self.kv_store.get(ctx, &key).await? {
             Some(value) => {
@@ -446,6 +474,19 @@ impl ObjectRegistry {
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.lookup(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    /// Register an object (trait-compatible signature)
+    ///
+    /// This wraps `register()` to match the ObjectRegistry trait signature.
+    pub async fn register_trait(
+        &self,
+        ctx: &RequestContext,
+        registration: ObjectRegistration,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.register(ctx, registration)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -480,11 +521,13 @@ impl ObjectRegistry {
         capabilities: Option<Vec<String>>,
         labels: Option<Vec<String>>,
         health_status: Option<HealthStatus>,
+        offset: usize,
         limit: usize,
     ) -> Result<Vec<ObjectRegistration>, ObjectRegistryError> {
         // Build prefix for type filtering
-        // Key format: {tenant_id}:{namespace}:{object_type}:{object_id}
-        // So prefix should be: {tenant_id}:{namespace}:{type}:
+        // Key format in KV store: {tenant_id}:{namespace}:{object_type}:{object_id}
+        // But list() expects just the key part (without tenant:namespace) since it adds them via composite_key
+        // So prefix should be just: {type}: (or empty for all types)
         let prefix = match object_type {
             Some(obj_type) => {
                 let type_str = match obj_type {
@@ -492,23 +535,35 @@ impl ObjectRegistry {
                     ObjectType::ObjectTypeTuplespace => "tuplespace",
                     ObjectType::ObjectTypeService => "service",
                     ObjectType::ObjectTypeVm => "vm",
+                    ObjectType::ObjectTypeApplication => "application",
+                    ObjectType::ObjectTypeWorkflow => "workflow",
+                    ObjectType::ObjectTypeNode => "node",
                     _ => "",
                 };
                 if type_str.is_empty() {
-                    format!("{}:{}:", ctx.tenant_id(), ctx.namespace())
+                    String::new() // Empty prefix = all types
                 } else {
-                    format!("{}:{}:{}:", ctx.tenant_id(), ctx.namespace(), type_str)
+                    format!("{}:", type_str) // Just type: prefix
                 }
             }
-            None => format!("{}:{}:", ctx.tenant_id(), ctx.namespace()),
+            None => String::new(), // Empty prefix = all types
         };
 
         // List KeyValueStore with prefix (scoped to tenant/namespace via context)
+        // list() will add tenant:namespace via composite_key internally
         let keys = self.kv_store.list(&ctx, &prefix).await?;
 
         let mut results = Vec::new();
+        let mut skipped = 0;
 
         for key in keys {
+            // Skip items before offset
+            if skipped < offset {
+                skipped += 1;
+                continue;
+            }
+            
+            // Stop if we've reached the limit
             if results.len() >= limit {
                 break;
             }
@@ -584,7 +639,15 @@ impl ObjectRegistry {
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), ObjectRegistryError> {
-        let key = Self::make_key(ctx.tenant_id(), ctx.namespace(), object_type, object_id);
+        let full_key = Self::make_key(ctx.tenant_id(), ctx.namespace(), object_type, object_id);
+        
+        // Extract just the key part (without tenant:namespace) since get() will add it via composite_key
+        let key_prefix = format!("{}:{}:", ctx.tenant_id(), ctx.namespace());
+        let key = if full_key.starts_with(&key_prefix) {
+            full_key.strip_prefix(&key_prefix).unwrap_or(&full_key).to_string()
+        } else {
+            full_key
+        };
 
         // Use the provided RequestContext (no need to recreate)
 
@@ -616,6 +679,60 @@ impl ObjectRegistry {
         self.kv_store.put(ctx, &key, updated_value).await?;
 
         Ok(())
+    }
+}
+
+// ObjectRegistry now implements the trait directly - no wrapper needed!
+impl plexspaces_core::Service for ObjectRegistry {}
+
+#[async_trait::async_trait]
+impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistry {
+    async fn lookup(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+    ) -> Result<Option<plexspaces_core::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        self.lookup(ctx, obj_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn lookup_full(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<Option<plexspaces_core::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        self.lookup_full(ctx, object_type, object_id)
+            .await
+    }
+
+    async fn register(
+        &self,
+        ctx: &RequestContext,
+        registration: plexspaces_core::actor_context::ObjectRegistration,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // ObjectRegistration in core is a type alias to proto::ObjectRegistration, so no conversion needed
+        self.register_trait(ctx, registration)
+            .await
+    }
+
+    async fn discover(
+        &self,
+        ctx: &RequestContext,
+        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        object_category: Option<String>,
+        capabilities: Option<Vec<String>>,
+        labels: Option<Vec<String>>,
+        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<plexspaces_core::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        self.discover(ctx, object_type, object_category, capabilities, labels, health_status, offset, limit)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 }
 
@@ -739,7 +856,7 @@ mod tests {
         registry.register(&ctx, reg3).await.unwrap();
 
         let actors = registry
-            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
             .await
             .unwrap();
 

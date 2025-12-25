@@ -36,7 +36,7 @@
 //! ## Usage
 //! ```rust,no_run
 //! use plexspaces_keyvalue::RedisKVStore;
-//! use plexspaces_core::RequestContext;
+//! use plexspaces_common::RequestContext;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let store = RedisKVStore::new("redis://localhost:6379", "myapp").await?;
@@ -50,7 +50,7 @@
 
 use crate::{KVError, KVEvent, KVResult, KVStats, KeyValueStore};
 use async_trait::async_trait;
-use plexspaces_core::RequestContext;
+use plexspaces_common::RequestContext;
 use redis::{aio::ConnectionManager, AsyncCommands, Client, RedisResult};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -356,7 +356,7 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Delete all keys matching prefix
-    async fn clear_prefix(&self, ctx: &plexspaces_core::RequestContext, prefix: &str) -> KVResult<usize> {
+    async fn clear_prefix(&self, ctx: &plexspaces_common::RequestContext, prefix: &str) -> KVResult<usize> {
         let keys = self.list(ctx, prefix).await?;
         let mut count = 0usize;
 
@@ -369,7 +369,7 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Count keys matching prefix
-    async fn count_prefix(&self, ctx: &plexspaces_core::RequestContext, prefix: &str) -> KVResult<usize> {
+    async fn count_prefix(&self, ctx: &plexspaces_common::RequestContext, prefix: &str) -> KVResult<usize> {
         let keys = self.list(ctx, prefix).await?;
         Ok(keys.len())
     }
@@ -409,7 +409,7 @@ impl KeyValueStore for RedisKVStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::RequestContext;
+    use plexspaces_common::RequestContext;
 
     // Helper to create test store (requires running Redis instance)
     async fn create_test_store() -> RedisKVStore {

@@ -237,7 +237,11 @@ impl Default for ReplyWaiterRegistry {
 }
 
 // Implement Service trait for ServiceLocator
-impl Service for ReplyWaiterRegistry {}
+impl Service for ReplyWaiterRegistry {
+    fn service_name(&self) -> String {
+        crate::service_locator::service_names::REPLY_WAITER_REGISTRY.to_string()
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum ReplyWaiterError {

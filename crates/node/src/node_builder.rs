@@ -277,7 +277,7 @@ impl NodeBuilder {
     /// Build the node with the configured options
     ///
     /// ## Returns
-    /// * `Node` - The configured node instance
+    /// * `Node` - The configured node instance with all services initialized
     ///
     /// ## Defaults
     /// - Listen address: "0.0.0.0:9000" if not provided
@@ -285,34 +285,35 @@ impl NodeBuilder {
     /// - Heartbeat interval: 5000ms if not provided
     /// - Clustering: enabled if not provided
     ///
+    /// ## Services Initialization
+    /// This method automatically initializes all services using `create_default_service_locator`,
+    /// so the node is ready to use immediately after building. No need to call `start()` for
+    /// basic operations (though `start()` is still needed for gRPC server).
+    ///
     /// ## Release Config
-    /// If release_spec is provided, it will be set on the node and used during start().
-    /// Otherwise, start() will attempt to load from PLEXSPACES_RELEASE_CONFIG_PATH
-    /// or release.yaml/release.toml files.
+    /// If release_spec is provided, it will be set on the node and used during initialization.
+    /// Otherwise, defaults will be used.
     ///
     /// ## Example
     /// ```rust,ignore
     /// let node = NodeBuilder::new("my-node")
     ///     .with_listen_address("0.0.0.0:9000")
-    ///     .build();
+    ///     .build()
+    ///     .await;
+    /// // Node is ready to use - services are initialized
     /// ```
-    pub fn build(self) -> Node {
+    pub async fn build(self) -> Node {
         let mut node = Node::new(self.node_id, self.config);
-        // Store release_spec in node - it will be set during start() if not already set
-        // Note: We can't call async set_release_spec here since build() is sync
-        // The release_spec will be loaded in start() if not already set
+        
+        // Set release_spec if provided
         if let Some(release_spec) = self.release_spec {
-            // Use tokio::runtime::Handle to set release spec synchronously
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.block_on(async {
-                    node.set_release_spec(release_spec).await;
-                });
-            } else {
-                // No runtime available - store in a way that can be retrieved later
-                // For now, we'll rely on start() to load it from file/env
-                // This is a limitation of having a sync build() method
-            }
+            node.set_release_spec(release_spec).await;
         }
+        
+        // Initialize all services immediately
+        node.initialize_services().await
+            .expect("Failed to initialize services in NodeBuilder::build()");
+        
         node
     }
 }
@@ -321,9 +322,9 @@ impl NodeBuilder {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_node_builder_with_defaults() {
-        let node = NodeBuilder::new(NodeId::new("test-node")).build();
+    #[tokio::test]
+    async fn test_node_builder_with_defaults() {
+        let node = NodeBuilder::new(NodeId::new("test-node")).build().await;
 
         assert_eq!(node.id().as_str(), "test-node");
         // Verify default config
@@ -334,63 +335,63 @@ mod tests {
         assert!(config.clustering_enabled);
     }
 
-    #[test]
-    fn test_node_builder_with_listen_address() {
+    #[tokio::test]
+    async fn test_node_builder_with_listen_address() {
         let node = NodeBuilder::new("test-node")
             .with_listen_address("127.0.0.1:8080")
-            .build();
+            .build().await;
 
         assert_eq!(node.config().listen_addr, "127.0.0.1:8080");
     }
 
-    #[test]
-    fn test_node_builder_with_max_connections() {
+    #[tokio::test]
+    async fn test_node_builder_with_max_connections() {
         let node = NodeBuilder::new("test-node")
             .with_max_connections(200)
-            .build();
+            .build().await;
 
         assert_eq!(node.config().max_connections, 200);
     }
 
-    #[test]
-    fn test_node_builder_with_heartbeat_interval() {
+    #[tokio::test]
+    async fn test_node_builder_with_heartbeat_interval() {
         let node = NodeBuilder::new("test-node")
             .with_heartbeat_interval_ms(10000)
-            .build();
+            .build().await;
 
         assert_eq!(node.config().heartbeat_interval_ms, 10000);
     }
 
-    #[test]
-    fn test_node_builder_with_clustering() {
+    #[tokio::test]
+    async fn test_node_builder_with_clustering() {
         let node = NodeBuilder::new("test-node")
             .with_clustering_enabled(false)
-            .build();
+            .build().await;
 
         assert!(!node.config().clustering_enabled);
     }
 
-    #[test]
-    fn test_node_builder_with_metadata() {
+    #[tokio::test]
+    async fn test_node_builder_with_metadata() {
         let node = NodeBuilder::new("test-node")
             .with_metadata("environment", "production")
             .with_metadata("region", "us-east-1")
-            .build();
+            .build().await;
 
         let metadata = &node.config().metadata;
         assert_eq!(metadata.get("environment"), Some(&"production".to_string()));
         assert_eq!(metadata.get("region"), Some(&"us-east-1".to_string()));
     }
 
-    #[test]
-    fn test_node_builder_fluent_api() {
+    #[tokio::test]
+    async fn test_node_builder_fluent_api() {
         let node = NodeBuilder::new("test-node")
             .with_listen_address("0.0.0.0:9001")
             .with_max_connections(150)
             .with_heartbeat_interval_ms(7500)
             .with_clustering_enabled(true)
             .with_metadata("env", "test")
-            .build();
+            .build().await;
 
         assert_eq!(node.id().as_str(), "test-node");
         assert_eq!(node.config().listen_addr, "0.0.0.0:9001");
@@ -400,19 +401,19 @@ mod tests {
         assert_eq!(node.config().metadata.get("env"), Some(&"test".to_string()));
     }
 
-    #[test]
-    fn test_node_builder_with_node_id() {
+    #[tokio::test]
+    async fn test_node_builder_with_node_id() {
         let node_id = NodeId::new("custom-node-id");
-        let node = NodeBuilder::new(node_id).build();
+        let node = NodeBuilder::new(node_id).build().await;
 
         assert_eq!(node.id().as_str(), "custom-node-id");
     }
 
-    #[test]
-    fn test_node_builder_with_in_memory_backends() {
+    #[tokio::test]
+    async fn test_node_builder_with_in_memory_backends() {
         let node = NodeBuilder::new("test-node")
             .with_in_memory_backends()
-            .build();
+            .build().await;
 
         let metadata = &node.config().metadata;
         assert_eq!(metadata.get("backend.channel"), Some(&"in-memory".to_string()));
@@ -421,11 +422,11 @@ mod tests {
         assert_eq!(metadata.get("backend.keyvalue"), Some(&"in-memory".to_string()));
     }
 
-    #[test]
-    fn test_node_builder_with_redis_backends() {
+    #[tokio::test]
+    async fn test_node_builder_with_redis_backends() {
         let node = NodeBuilder::new("test-node")
             .with_redis_backends()
-            .build();
+            .build().await;
 
         let metadata = &node.config().metadata;
         assert_eq!(metadata.get("backend.channel"), Some(&"redis".to_string()));
@@ -434,11 +435,11 @@ mod tests {
         assert_eq!(metadata.get("backend.keyvalue"), Some(&"redis".to_string()));
     }
 
-    #[test]
-    fn test_node_builder_with_postgres_backends() {
+    #[tokio::test]
+    async fn test_node_builder_with_postgres_backends() {
         let node = NodeBuilder::new("test-node")
             .with_postgres_backends()
-            .build();
+            .build().await;
 
         let metadata = &node.config().metadata;
         assert_eq!(metadata.get("backend.channel"), Some(&"postgres".to_string()));
@@ -447,11 +448,11 @@ mod tests {
         assert_eq!(metadata.get("backend.keyvalue"), Some(&"postgres".to_string()));
     }
 
-    #[test]
-    fn test_node_builder_with_sqlite_journaling() {
+    #[tokio::test]
+    async fn test_node_builder_with_sqlite_journaling() {
         let node = NodeBuilder::new("test-node")
             .with_sqlite_journaling()
-            .build();
+            .build().await;
 
         let metadata = &node.config().metadata;
         assert_eq!(metadata.get("backend.journaling"), Some(&"sqlite".to_string()));

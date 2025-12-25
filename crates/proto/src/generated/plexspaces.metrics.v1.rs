@@ -272,6 +272,41 @@ pub struct ActorMetrics {
     /// Total errors
     #[prost(uint64, tag="7")]
     pub error_total: u64,
+    // ============================================================================
+    // LIFECYCLE METRICS (Phase 1-3)
+    // ============================================================================
+
+    /// Total init() calls (success + failure)
+    #[prost(uint64, tag="8")]
+    pub init_total: u64,
+    /// Total init() failures
+    #[prost(uint64, tag="9")]
+    pub init_errors_total: u64,
+    /// Total terminate() calls
+    #[prost(uint64, tag="10")]
+    pub terminate_total: u64,
+    /// Total terminate() errors
+    #[prost(uint64, tag="11")]
+    pub terminate_errors_total: u64,
+    /// Total exit messages handled (when trap_exit=true)
+    #[prost(uint64, tag="12")]
+    pub exit_handled_total: u64,
+    /// Total exit messages propagated (when trap_exit=false or handle_exit returns Propagate)
+    #[prost(uint64, tag="13")]
+    pub exit_propagated_total: u64,
+    /// Total exit handle errors
+    #[prost(uint64, tag="14")]
+    pub exit_handle_errors_total: u64,
+    // ============================================================================
+    // PARENT-CHILD METRICS (Phase 3)
+    // ============================================================================
+
+    /// Total parent-child relationships registered
+    #[prost(uint64, tag="15")]
+    pub parent_child_registered_total: u64,
+    /// Total parent-child relationships unregistered
+    #[prost(uint64, tag="16")]
+    pub parent_child_unregistered_total: u64,
 }
 // ============================================================================
 // SYSTEM METRICS (Detailed)

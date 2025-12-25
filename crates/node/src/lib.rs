@@ -28,8 +28,13 @@
 mod r#mod;
 pub use r#mod::*;
 
-// Application manager for Erlang/OTP-style application lifecycle
-pub mod application_manager;
+// Application manager moved to core crate to break cyclic dependency
+// Re-export for backward compatibility
+pub use plexspaces_core::ApplicationManager;
+
+// Extension trait for node-specific ApplicationManager functionality
+pub mod application_manager_ext;
+pub use application_manager_ext::ApplicationManagerExt;
 
 // gRPC service for remote actor communication
 pub mod grpc_service;
@@ -55,6 +60,9 @@ pub mod health_service;
 // Health checker trait for dependency checks
 pub mod health_checker;
 
+// Circuit breaker wrapper for health checkers
+pub mod health_checker_circuit_breaker;
+
 // Metrics service for Prometheus export (Phase 5)
 pub mod metrics_service;
 
@@ -72,6 +80,9 @@ pub mod system_service;
 
 // Automatic dependency registration (includes built-in dependencies)
 pub mod dependency_registration;
+
+// External dependency health checkers (MinIO, DynamoDB, SQS)
+pub mod external_dependency_checkers;
 
 // Application service for application-level deployment
 pub mod application_service;
@@ -110,6 +121,11 @@ pub mod service_locator_helpers;
 pub use config_bootstrap::{ConfigBootstrap, ConfigError};
 pub use metrics_helper::CoordinationComputeTracker;
 pub use service_locator_helpers::create_default_service_locator;
+pub mod health_service_helpers;
+pub use health_service_helpers::{create_and_register_health_service, create_default_health_service};
+
+// Object registry helper functions
+pub mod object_registry_helpers;
 
 // Re-export for convenience
 pub use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};

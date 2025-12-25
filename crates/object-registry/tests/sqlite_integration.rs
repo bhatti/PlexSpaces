@@ -61,7 +61,7 @@ mod tests {
 
         // Node 1 can discover all actors (cross-node discovery)
         let actors = registry1
-            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
             .await
             .unwrap();
         assert_eq!(actors.len(), 2);
@@ -70,7 +70,7 @@ mod tests {
 
         // Node 2 can discover tuplespaces
         let tuplespaces = registry2
-            .discover(&ctx, Some(ObjectType::ObjectTypeTuplespace), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeTuplespace), None, None, None, None, 0, 100)
             .await
             .unwrap();
         assert_eq!(tuplespaces.len(), 1);
@@ -132,7 +132,7 @@ mod tests {
         // Verify all were registered
         let registry = ObjectRegistry::new(kv.clone());
         let actors = registry
-            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
             .await
             .unwrap();
         assert_eq!(actors.len(), 3);
@@ -213,7 +213,7 @@ mod tests {
 
         // Discover all actors (should find both)
         let all_actors = registry
-            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
             .await
             .unwrap();
         assert_eq!(all_actors.len(), 2);

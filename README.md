@@ -58,7 +58,7 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 - **ActorRef**: Location-transparent actor references
 - **ActorContext**: Service access for actors
 - **TupleSpace**: Linda-style coordination
-- **Channels**: Queue and topic patterns
+- **Channels**: Queue and topic patterns (InMemory, Redis, Kafka, SQLite, NATS, UDP)
 - **Process Groups**: Group communication
 - **Journaling**: Event sourcing and replay
 
@@ -79,6 +79,9 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 - **Capability Providers**: HTTP, KeyValue, BlobStorage facets for I/O operations
 - **Security Facets**: Authentication, authorization, and encryption support
 - **Event-Driven**: EventEmitter facet for reactive programming patterns
+- **Graceful Shutdown**: Actors using non-memory channels stop accepting new messages but complete in-progress work
+- **UDP Multicast Channels**: Low-latency pub/sub for cluster-wide messaging
+- **Cluster Configuration**: Node grouping via `cluster_name` for shared channels
 
 ## Design Philosophy
 
@@ -288,11 +291,13 @@ See [Examples](examples/README.md) for the complete list.
 
 ## Documentation
 
+- **[Actor System](docs/actor-system.md)**: Comprehensive guide to the unified actor system - actors, supervisors, applications, facets, behaviors, lifecycle, linking/monitoring, and observability
 - **[Getting Started](docs/getting-started.md)**: Quick start guide and tutorials
 - **[Concepts](docs/concepts.md)**: Core concepts explained (Actors, Behaviors, Facets, TupleSpace, FaaS-Style Invocation, etc.)
 - **[Architecture](docs/architecture.md)**: System design, abstractions, and primitives (including FaaS Invocation)
 - **[Detailed Design](docs/detailed-design.md)**: Comprehensive component documentation with all facets, behaviors, APIs, and primitives (including InvokeActor Service)
 - **[Installation](docs/installation.md)**: Docker, Kubernetes, and manual setup
+- **[WASM Deployment](docs/wasm-deployment.md)**: Deploy polyglot WASM applications (Rust, Python, TypeScript, Go)
 - **[Use Cases](docs/use-cases.md)**: Real-world application patterns and use cases (including FaaS Platforms)
 - **[Examples](docs/examples.md)**: Example gallery with feature matrix
 - **[CLI Reference](docs/cli.md)**: Command-line tools and operations

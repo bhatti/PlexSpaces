@@ -8,7 +8,7 @@ description = "Multi-purpose key-value store for PlexSpaces framework"
 repository = "https://github.com/plexobject/plexspaces"
 
 [dependencies]
-plexspaces-core = { path = "../core" }
+plexspaces-common = { path = "../common" }
 async-trait = "0.1"
 tokio = { version = "1.41", features = ["sync", "time", "macros", "rt-multi-thread"] }
 thiserror = "2.0"

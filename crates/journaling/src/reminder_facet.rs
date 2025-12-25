@@ -54,6 +54,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+use metrics;
+use tracing;
 
 /// Trait for activating virtual actors (used by ReminderFacet)
 ///
@@ -534,6 +536,96 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
         
         let mut ref_guard = self.actor_ref.write().await;
         *ref_guard = None;
+        
+        Ok(())
+    }
+
+    /// Phase 4.3: Handle EXIT signal from linked actor
+    ///
+    /// ## Purpose
+    /// Pauses all reminders when actor receives EXIT signal from linked actor.
+    /// This prevents reminders from firing while the actor is terminating.
+    /// Reminders remain persisted and can be resumed after restart.
+    ///
+    /// ## When Called
+    /// - Only if `ActorContext.trap_exit = true`
+    /// - After `Actor::handle_exit()` is called
+    /// - Before actor terminates (if ExitAction::Propagate)
+    async fn on_exit(
+        &mut self,
+        actor_id: &str,
+        _from: &str,
+        _reason: &plexspaces_facet::ExitReason,
+    ) -> Result<(), FacetError> {
+        // Pause all reminders on EXIT (mark as inactive)
+        let mut reminders = self.reminders.write().await;
+        let mut paused_count = 0;
+        
+        for (reminder_name, reminder_state) in reminders.iter_mut() {
+            if reminder_state.is_active {
+                reminder_state.is_active = false;
+                paused_count += 1;
+                
+                // Persist paused state to storage
+                if let Err(e) = self.storage.update_reminder(reminder_state).await {
+                    tracing::warn!(
+                        actor_id = %actor_id,
+                        reminder_name = %reminder_name,
+                        error = %e,
+                        "Failed to persist paused reminder state"
+                    );
+                } else {
+                    tracing::debug!(
+                        actor_id = %actor_id,
+                        reminder_name = %reminder_name,
+                        "Paused reminder on EXIT signal"
+                    );
+                }
+            }
+        }
+        
+        if paused_count > 0 {
+            metrics::counter!("plexspaces_reminder_facet_exit_paused_total",
+                "actor_id" => actor_id.to_string(),
+                "reminder_count" => paused_count.to_string()
+            ).increment(paused_count as u64);
+            tracing::info!(
+                actor_id = %actor_id,
+                reminder_count = paused_count,
+                "Paused all reminders on EXIT signal"
+            );
+        }
+        
+        Ok(())
+    }
+
+    /// Phase 4.3: Handle DOWN notification from monitored actor
+    ///
+    /// ## Purpose
+    /// Logs DOWN notification for observability. ReminderFacet doesn't need to
+    /// take action on DOWN notifications (reminders are actor-specific).
+    ///
+    /// ## When Called
+    /// - After actor receives DOWN notification
+    /// - Actor continues running (DOWN is informational, not fatal)
+    async fn on_down(
+        &mut self,
+        actor_id: &str,
+        monitored_id: &str,
+        reason: &plexspaces_facet::ExitReason,
+    ) -> Result<(), FacetError> {
+        // Log DOWN notification for observability
+        tracing::debug!(
+            actor_id = %actor_id,
+            monitored_id = %monitored_id,
+            reason = ?reason,
+            "ReminderFacet received DOWN notification (no action needed)"
+        );
+        
+        metrics::counter!("plexspaces_reminder_facet_down_total",
+            "actor_id" => actor_id.to_string(),
+            "monitored_id" => monitored_id.to_string()
+        ).increment(1);
         
         Ok(())
     }

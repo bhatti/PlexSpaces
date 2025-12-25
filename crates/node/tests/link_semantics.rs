@@ -5,6 +5,7 @@
 
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_core::ExitReason;
 use std::sync::Arc;
 
 #[path = "test_helpers.rs"]
@@ -114,7 +115,8 @@ async fn test_cascading_failure_abnormal_death() {
     
     // Simulate abnormal death of actor1
     unregister_actor_helper(&node, actor1.id()).await.unwrap();
-    node.notify_actor_down(actor1.id(), "panic: test failure").await.unwrap();
+    let actor_registry = node.actor_registry().await.unwrap();
+    actor_registry.handle_actor_termination(actor1.id(), ExitReason::Error("panic: test failure".to_string())).await;
     
     // Wait for cascading failure to propagate - poll until actor2 is killed
     let cascading_complete = async {
@@ -147,7 +149,8 @@ async fn test_cascading_failure_normal_shutdown() {
     
     // Simulate normal shutdown of actor1
     unregister_actor_helper(&node, actor1.id()).await.unwrap();
-    node.notify_actor_down(actor1.id(), "normal").await.unwrap();
+    let actor_registry = node.actor_registry().await.unwrap();
+    actor_registry.handle_actor_termination(actor1.id(), ExitReason::Normal).await;
     
     // Wait for notification to be processed - normal shutdown shouldn't cascade
     let notification_processed = async {
@@ -179,7 +182,8 @@ async fn test_multiple_links() {
     
     // Verify actor3 is still linked (by checking cascading still works)
     unregister_actor_helper(&node, actor1.id()).await.unwrap();
-    node.notify_actor_down(actor1.id(), "panic: test").await.unwrap();
+    let actor_registry = node.actor_registry().await.unwrap();
+    actor_registry.handle_actor_termination(actor1.id(), ExitReason::Error("panic: test".to_string())).await;
     
     // Wait for cascading failure to propagate - poll until actor3 is killed
     let cascading_complete = async {
@@ -217,7 +221,8 @@ async fn test_link_chain_cascading() {
     
     // Kill actor1 abnormally
     unregister_actor_helper(&node, actor1.id()).await.unwrap();
-    node.notify_actor_down(actor1.id(), "panic: test").await.unwrap();
+    let actor_registry = node.actor_registry().await.unwrap();
+    actor_registry.handle_actor_termination(actor1.id(), ExitReason::Error("panic: test".to_string())).await;
     
     // Wait for cascading failure to propagate through the chain
     let cascading_complete = async {

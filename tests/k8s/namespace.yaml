@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Test namespace for dashboard testing
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: plexspaces-test
+  labels:
+    name: plexspaces-test
+    purpose: testing
+
+
+
+

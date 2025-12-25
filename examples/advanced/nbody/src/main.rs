@@ -104,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create node using NodeBuilder
     let node = NodeBuilder::new("nbody-node")
-        .build();
+        .build().await;
 
     // Create metrics tracker
     let mut metrics_tracker = CoordinationComputeTracker::new("nbody-simulation".to_string());

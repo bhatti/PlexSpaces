@@ -7,7 +7,7 @@ description = "Unified object registry for PlexSpaces (actors, tuplespaces, serv
 license = "LGPL-2.1-or-later"
 
 [dependencies]
-# Core types
+# Core types (for Service trait and ObjectRegistry trait)
 plexspaces-core = { path = "../core" }
 # Core proto definitions
 plexspaces-proto = { path = "../proto" }

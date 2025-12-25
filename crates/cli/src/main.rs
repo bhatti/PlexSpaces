@@ -69,6 +69,10 @@ enum Commands {
         #[arg(short, long)]
         wasm: Option<String>,
         
+        /// WASM module file path (alias for --wasm)
+        #[arg(long)]
+        wasm_module: Option<String>,
+        
         /// Application config file (TOML/JSON)
         #[arg(short, long)]
         config: Option<String>,
@@ -163,13 +167,15 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Deploy { node, app_id, name, version, wasm, config, release_config } => {
+        Commands::Deploy { node, app_id, name, version, wasm, wasm_module, config, release_config } => {
+            // Support both --wasm and --wasm-module flags
+            let wasm_file = wasm.or(wasm_module);
             application::deploy(
                 &node,
                 &app_id,
                 &name,
                 &version,
-                wasm.as_deref(),
+                wasm_file.as_deref(),
                 config.as_deref(),
                 release_config.as_deref(),
             ).await

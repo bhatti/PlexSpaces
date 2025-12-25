@@ -307,6 +307,13 @@ impl WorkflowService for WorkflowServiceImpl {
         // For now, use empty object
         let input = Value::Object(serde_json::Map::new());
 
+        // OBSERVABILITY: Log workflow execution start
+        tracing::info!(
+            definition_id = %req.definition_id,
+            definition_version = %version,
+            "Starting workflow execution"
+        );
+
         // Start execution using executor
         let execution_id = WorkflowExecutor::start_execution(
             &*self.storage,
@@ -418,6 +425,13 @@ impl WorkflowService for WorkflowServiceImpl {
         if req.execution_id.is_empty() {
             return Err(Status::invalid_argument("execution_id is required"));
         }
+
+        // OBSERVABILITY: Log workflow execution cancellation
+        tracing::info!(
+            execution_id = %req.execution_id,
+            reason = %req.reason,
+            "Cancelling workflow execution"
+        );
 
         // Update execution status to cancelled
         self.storage

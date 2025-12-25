@@ -1,0 +1,52 @@
+[package]
+name = "plexspaces-dashboard"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Dashboard service and UI for PlexSpaces monitoring"
+
+[dependencies]
+# Core dependencies
+plexspaces-core = { workspace = true }
+plexspaces-proto = { workspace = true }
+plexspaces-object-registry = { workspace = true }
+plexspaces-facet = { workspace = true }
+plexspaces-workflow = { workspace = true, optional = true }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = "0.1"
+
+# HTTP server
+axum = { version = "0.7", features = ["multipart"] }
+hyper = { version = "1.0", features = ["full"] }
+http-body-util = "0.1"
+tower = { version = "0.4", features = ["util"] }
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+# Utilities
+serde = { workspace = true }
+serde_json = "1.0"
+chrono = { workspace = true }
+tracing = { workspace = true }
+sysinfo = "0.30"  # For system metrics (CPU, memory, disk)
+
+[features]
+default = []
+workflow = ["plexspaces-workflow"]
+
+[dev-dependencies]
+tokio-test = "0.4"
+pretty_assertions = "1.4"
+plexspaces-node = { workspace = true }
+plexspaces-actor = { workspace = true }
+reqwest = { version = "0.12", features = ["multipart", "json"] }
+

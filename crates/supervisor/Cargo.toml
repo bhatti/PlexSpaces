@@ -15,6 +15,7 @@ plexspaces-core = { workspace = true }
 plexspaces-actor = { workspace = true }
 plexspaces-mailbox = { workspace = true }
 plexspaces-proto = { workspace = true }
+plexspaces-facet = { workspace = true }
 
 # Core dependencies
 tokio = { workspace = true }
@@ -24,6 +25,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { version = "2.0", features = ["serde"] }
 tracing = { workspace = true }
+prost-types = { workspace = true }
+metrics = "0.23"
 
 [dev-dependencies]
 plexspaces-behavior = { workspace = true }

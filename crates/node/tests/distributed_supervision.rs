@@ -20,6 +20,7 @@ use plexspaces_actor::ActorRef;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{grpc_service::ActorServiceImpl, Node, NodeConfig, NodeId};
 use plexspaces_proto::ActorServiceServer;
+use plexspaces_core::ExitReason;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -192,9 +193,8 @@ async fn test_local_actor_termination_notification() {
     .unwrap();
 
     // Act: Terminate the actor (unregister simulates termination)
-    node.notify_actor_down(&"worker@node1".to_string(), "normal")
-        .await
-        .unwrap();
+    let actor_registry = node.actor_registry().await.unwrap();
+    actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Normal).await;
 
     // Assert: Supervisor receives termination notification
     let notification = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
@@ -264,10 +264,8 @@ async fn test_remote_actor_termination_notification() {
         .unwrap();
 
     // Act: Actor on node2 terminates (node2 sends notification to node1)
-    node2
-        .notify_actor_down(&"worker@node2".to_string(), "shutdown")
-        .await
-        .unwrap();
+    let actor_registry2 = node2.actor_registry().await.unwrap();
+    actor_registry2.handle_actor_termination(&"worker@node2".to_string(), ExitReason::Shutdown).await;
 
     // Assert: Supervisor on node1 receives notification
     // Wait for notification using recv() with timeout instead of sleep
@@ -349,9 +347,8 @@ async fn test_multiple_monitors_same_actor() {
     assert!(mon2.is_ok(), "Second monitor should succeed");
 
     // Terminate actor
-    node.notify_actor_down(&"worker@node1".to_string(), "crash")
-        .await
-        .unwrap();
+    let actor_registry = node.actor_registry().await.unwrap();
+    actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Error("crash".to_string())).await;
 
     // Assert: BOTH supervisors receive notification
     let notif1 = tokio::time::timeout(Duration::from_millis(500), rx1.recv()).await;
@@ -442,9 +439,8 @@ async fn test_actor_crash_reason_propagation() {
 
     // Act: Terminate with specific error reason
     let crash_reason = "panic: index out of bounds at line 42";
-    node.notify_actor_down(&"worker@node1".to_string(), crash_reason)
-        .await
-        .unwrap();
+    let actor_registry = node.actor_registry().await.unwrap();
+    actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Error(crash_reason.to_string())).await;
 
     // Assert: Exact crash reason received
     let notification = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;

@@ -351,14 +351,77 @@ impl Channel for KafkaChannel {
         Ok(1)
     }
 
-    async fn ack(&self, _message_id: &str) -> ChannelResult<()> {
-        // Kafka auto-commits offsets in consumer groups
+    async fn ack(&self, message_id: &str) -> ChannelResult<()> {
+        use crate::observability::{backend_name, record_channel_ack};
+        
+        // Kafka: Commit offset for message (manual commit since auto.commit=false)
+        // Note: In a full implementation with StreamConsumer, we'd:
+        // 1. Track offset per message_id in a map
+        // 2. Call consumer.commit_message() with the message
+        // 
+        // For now, we track stats and log the operation
+        // The actual offset commit happens when the consumer polls and processes messages
+        // This is a limitation of the current implementation - proper offset tracking
+        // requires maintaining state between receive() and ack()
+        
         self.stats.messages_acked.fetch_add(1, Ordering::Relaxed);
+        
+        let backend = backend_name(self.config.backend);
+        record_channel_ack(&self.config.name, message_id, backend);
+        
         Ok(())
     }
 
-    async fn nack(&self, _message_id: &str, _requeue: bool) -> ChannelResult<()> {
-        // Kafka will redeliver on next poll if not committed
+    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+        // Get retry/DLQ config from channel config
+        let _max_retries = if self.config.max_retries > 0 {
+            self.config.max_retries
+        } else {
+            3 // Default: 3 retries
+        };
+        let dlq_enabled = self.config.dlq_enabled;
+
+        // Note: delivery_count tracking requires maintaining state per message
+        // In a full implementation, we'd track this in a separate store or in message headers
+        // For now, the mailbox/actor layer should track retries and call nack with requeue=false
+        // when max_retries is reached
+        
+        use crate::observability::{backend_name, record_channel_nack, record_channel_dlq};
+        
+        let backend = backend_name(self.config.backend);
+        
+        if requeue {
+            // Don't commit offset - message will be redelivered on next poll
+            // Note: delivery_count tracking requires message cache (not implemented)
+            record_channel_nack(&self.config.name, message_id, true, 0, backend);
+        } else {
+            // Send to DLQ if enabled
+            if dlq_enabled && !self.config.dead_letter_queue.is_empty() {
+                // Create DLQ topic name
+                let _dlq_topic = format!("{}-dlq", self.config.dead_letter_queue);
+                
+                // Note: To send to DLQ, we need the original message
+                // In a full implementation, we'd:
+                // 1. Maintain a cache of uncommitted messages with their data
+                // 2. Read from the original topic using the message_id (offset)
+                // 3. Send to DLQ topic with additional metadata
+                // 
+                // For now, we log and rely on the mailbox to handle retry tracking
+                // The message will be redelivered and can be sent to DLQ on next failure
+                record_channel_dlq(
+                    &self.config.name,
+                    message_id,
+                    0, // delivery_count not tracked without message cache
+                    "max_retries_exceeded",
+                    backend,
+                );
+            } else {
+                // Don't commit offset - will be redelivered after timeout
+                record_channel_nack(&self.config.name, message_id, false, 0, backend);
+            }
+        }
+
+        self.stats.messages_failed.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 

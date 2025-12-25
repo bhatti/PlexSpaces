@@ -130,6 +130,16 @@ async fn start_vm(
         return Err(anyhow::anyhow!("--node address is required when using --app flag"));
     }
 
+    // OBSERVABILITY: Log VM start attempt
+    tracing::info!(
+        vm_id = %vm_id,
+        empty = empty,
+        has_app = app.is_some(),
+        has_kernel = kernel.is_some(),
+        has_rootfs = rootfs.is_some(),
+        "Starting Firecracker VM"
+    );
+    
     if empty {
         println!("🚀 Starting empty Firecracker VM (framework only): {}", vm_id);
     } else if app.is_some() {
@@ -172,6 +182,13 @@ async fn start_vm(
         .await
         .context("Failed to boot VM")?;
 
+    // OBSERVABILITY: Log successful VM start
+    tracing::info!(
+        vm_id = %vm_id,
+        state = ?vm.state(),
+        socket_path = %vm_config.socket_path,
+        "Firecracker VM started successfully"
+    );
     println!("✅ VM started: {}", vm_id);
     println!("   State: {:?}", vm.state());
     println!("   Socket: {:?}", vm_config.socket_path);
@@ -199,6 +216,13 @@ async fn deploy_app_to_node(
     use std::fs;
     use tonic::transport::Channel;
 
+    // OBSERVABILITY: Log app deployment to node
+    tracing::info!(
+        vm_id = %vm_id,
+        node_addr = %node_addr,
+        wasm_path = %wasm_path.display(),
+        "Deploying application to node from Firecracker VM"
+    );
     println!("   📦 Deploying app to node {}: {}", node_addr, wasm_path.display());
 
     // Connect to node
@@ -274,6 +298,11 @@ async fn deploy_app_to_node(
 }
 
 async fn stop_vm(vm_id: &str) -> Result<()> {
+    // OBSERVABILITY: Log VM stop attempt
+    tracing::info!(
+        vm_id = %vm_id,
+        "Stopping Firecracker VM"
+    );
     println!("🛑 Stopping Firecracker VM: {}", vm_id);
     
     // Find VM socket path
@@ -304,6 +333,11 @@ async fn stop_vm(vm_id: &str) -> Result<()> {
     // Wait a bit for graceful shutdown
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
+    // OBSERVABILITY: Log successful VM stop
+    tracing::info!(
+        vm_id = %vm_id,
+        "Firecracker VM stopped successfully"
+    );
     println!("✅ VM stopped: {}", vm_id);
     Ok(())
 }

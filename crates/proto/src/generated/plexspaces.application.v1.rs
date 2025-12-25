@@ -172,6 +172,12 @@ pub struct ChildSpec {
     /// Nested supervisor (if type=SUPERVISOR)
     #[prost(message, optional, tag="7")]
     pub supervisor: ::core::option::Option<SupervisorSpec>,
+    /// Facet configuration (for automatic attachment during actor creation)
+    /// Facets are attached in priority order (high priority first) before actor.init() is called
+    /// All facets are automatically restored during supervisor restart
+    /// Phase 1: Unified Lifecycle - Multiple facets support
+    #[prost(message, repeated, tag="8")]
+    pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
 }
 /// Application instance (runtime representation).
 ///

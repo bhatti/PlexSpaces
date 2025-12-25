@@ -61,6 +61,35 @@ pub trait ActorMetricsExt {
     /// Increment error_total counter
     fn increment_error_total(&mut self);
     
+    // Lifecycle metrics (Phase 1-3)
+    /// Increment init_total counter
+    fn increment_init_total(&mut self);
+    
+    /// Increment init_errors_total counter
+    fn increment_init_errors_total(&mut self);
+    
+    /// Increment terminate_total counter
+    fn increment_terminate_total(&mut self);
+    
+    /// Increment terminate_errors_total counter
+    fn increment_terminate_errors_total(&mut self);
+    
+    /// Increment exit_handled_total counter
+    fn increment_exit_handled_total(&mut self);
+    
+    /// Increment exit_propagated_total counter
+    fn increment_exit_propagated_total(&mut self);
+    
+    /// Increment exit_handle_errors_total counter
+    fn increment_exit_handle_errors_total(&mut self);
+    
+    // Parent-child metrics (Phase 3)
+    /// Increment parent_child_registered_total counter
+    fn increment_parent_child_registered_total(&mut self);
+    
+    /// Increment parent_child_unregistered_total counter
+    fn increment_parent_child_unregistered_total(&mut self);
+    
     /// Get a snapshot of current metrics
     fn snapshot(&self) -> ActorMetrics;
 }
@@ -75,6 +104,17 @@ impl ActorMetricsExt for ActorMetrics {
             remote_deliveries: 0,
             failed_deliveries: 0,
             error_total: 0,
+            // Lifecycle metrics (Phase 1-3)
+            init_total: 0,
+            init_errors_total: 0,
+            terminate_total: 0,
+            terminate_errors_total: 0,
+            exit_handled_total: 0,
+            exit_propagated_total: 0,
+            exit_handle_errors_total: 0,
+            // Parent-child metrics (Phase 3)
+            parent_child_registered_total: 0,
+            parent_child_unregistered_total: 0,
         }
     }
 
@@ -108,6 +148,42 @@ impl ActorMetricsExt for ActorMetrics {
 
     fn increment_error_total(&mut self) {
         self.error_total = self.error_total.saturating_add(1);
+    }
+
+    fn increment_init_total(&mut self) {
+        self.init_total = self.init_total.saturating_add(1);
+    }
+
+    fn increment_init_errors_total(&mut self) {
+        self.init_errors_total = self.init_errors_total.saturating_add(1);
+    }
+
+    fn increment_terminate_total(&mut self) {
+        self.terminate_total = self.terminate_total.saturating_add(1);
+    }
+
+    fn increment_terminate_errors_total(&mut self) {
+        self.terminate_errors_total = self.terminate_errors_total.saturating_add(1);
+    }
+
+    fn increment_exit_handled_total(&mut self) {
+        self.exit_handled_total = self.exit_handled_total.saturating_add(1);
+    }
+
+    fn increment_exit_propagated_total(&mut self) {
+        self.exit_propagated_total = self.exit_propagated_total.saturating_add(1);
+    }
+
+    fn increment_exit_handle_errors_total(&mut self) {
+        self.exit_handle_errors_total = self.exit_handle_errors_total.saturating_add(1);
+    }
+
+    fn increment_parent_child_registered_total(&mut self) {
+        self.parent_child_registered_total = self.parent_child_registered_total.saturating_add(1);
+    }
+
+    fn increment_parent_child_unregistered_total(&mut self) {
+        self.parent_child_unregistered_total = self.parent_child_unregistered_total.saturating_add(1);
     }
 
     fn snapshot(&self) -> ActorMetrics {

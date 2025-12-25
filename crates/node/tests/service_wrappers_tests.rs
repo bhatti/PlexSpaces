@@ -22,7 +22,6 @@
 //! to the traits defined in plexspaces_core::actor_context.
 
 use plexspaces_node::service_wrappers::{
-    ActorServiceWrapper, ObjectRegistryWrapper,
     TupleSpaceProviderWrapper,
 };
 use plexspaces_node::{Node, NodeBuilder};
@@ -137,25 +136,21 @@ impl plexspaces_core::Actor for TestBehavior {
         .await
         .expect("Actor should be registered within 5 seconds");
 
-    // Create ActorServiceWrapper
+    // Use ActorServiceImpl directly (it implements ActorService trait)
     use plexspaces_actor_service::ActorServiceImpl;
     use plexspaces_core::actor_registry::ActorRegistry;
     use plexspaces_keyvalue::InMemoryKVStore;
     use plexspaces_object_registry::ObjectRegistry;
     let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
-    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = Arc::new(
-        ObjectRegistryWrapper::new(object_registry_impl)
-    );
+    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = Arc::new(ObjectRegistry::new(kv));
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node.id().as_str().to_string()));
     let service_locator = node.service_locator();
-    let actor_service_impl = Arc::new(ActorServiceImpl::new(service_locator, node.id().as_str().to_string()));
-    let wrapper = ActorServiceWrapper::new(actor_service_impl);
+    let actor_service = Arc::new(ActorServiceImpl::new(service_locator, node.id().as_str().to_string()));
 
-    // Send a message using ActorServiceWrapper
+    // Send a message using ActorServiceImpl directly
     // Note: This tests the wrapper's send method, which uses find_actor internally
     let message = Message::new(b"hello".to_vec());
-    let result = wrapper.send("test-actor@test-node", message).await;
+    let result = actor_service.send("test-actor@test-node", message).await;
 
     // The actor should be findable and message should be sent
     // If this fails, it's likely because find_actor isn't finding the actor in the registry
@@ -188,14 +183,10 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
     use plexspaces_keyvalue::InMemoryKVStore;
     use plexspaces_object_registry::ObjectRegistry;
     let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
-    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = Arc::new(
-        ObjectRegistryWrapper::new(object_registry_impl)
-    );
+    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = Arc::new(ObjectRegistry::new(kv));
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node.id().as_str().to_string()));
     let service_locator = node.service_locator();
-    let actor_service_impl = Arc::new(ActorServiceImpl::new(service_locator, node.id().as_str().to_string()));
-    let wrapper = ActorServiceWrapper::new(actor_service_impl);
+    let actor_service = Arc::new(ActorServiceImpl::new(service_locator, node.id().as_str().to_string()));
 
     // Try to send to remote actor (will fail because actor doesn't exist or remote not implemented)
     let message = Message::new(b"hello".to_vec());
@@ -233,12 +224,10 @@ async fn test_object_registry_wrapper() {
         namespace: "default".to_string(),
         ..Default::default()
     };
-    registry.register(registration).await.unwrap();
-    
-    // Create wrapper and test lookup
-    let wrapper = ObjectRegistryWrapper::new(registry);
-    
-    let result = wrapper.lookup("", "test-actor@node1", "default", Some(ObjectType::ObjectTypeActor)).await;
+    registry.register(&ctx, registration).await.unwrap();
+
+    // Test lookup using trait method signature: lookup(ctx, object_id, object_type)
+    let result = registry.lookup(&ctx, "test-actor@node1", Some(ObjectType::ObjectTypeActor)).await;
     assert!(result.is_ok());
     let found = result.unwrap();
     assert!(found.is_some());

@@ -22,3 +22,5 @@ node_modules
 .claude/
 .cursorrules
 archived*
+__pycache__
+*.wasm

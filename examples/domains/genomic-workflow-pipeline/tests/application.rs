@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_genomic_pipeline_application_starts_and_stops() {
-    let node = Arc::new(NodeBuilder::new("test-node".to_string()).build());
+        let node = Arc::new(NodeBuilder::new("test-node".to_string()).build().await);
 
     let mut app = GenomicsPipelineApplication::new();
 

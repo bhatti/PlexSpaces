@@ -75,7 +75,7 @@ async fn test_discover_vms_from_object_registry() {
 
     // Discover all VMs
     let vms = object_registry
-        .discover(&ctx, Some(ObjectType::ObjectTypeVm), None, None, None, None, 100)
+        .discover(&ctx, Some(ObjectType::ObjectTypeVm), None, None, None, None, 0, 100)
         .await
         .unwrap();
 

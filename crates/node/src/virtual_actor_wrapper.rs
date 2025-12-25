@@ -63,7 +63,7 @@ impl VirtualActorWrapper {
 impl MessageSender for VirtualActorWrapper {
     async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Get VirtualActorManager from ServiceLocator
-        let manager: Arc<VirtualActorManager> = self.service_locator.get_service().await
+        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::VIRTUAL_ACTOR_MANAGER).await
             .ok_or_else(|| "VirtualActorManager not registered in ServiceLocator".to_string())?;
         
         // Check if actor is activated (has mailbox)
@@ -75,8 +75,8 @@ impl MessageSender for VirtualActorWrapper {
             manager.queue_message(&self.actor_id, message).await;
             
             // Activate the virtual actor using ActorFactory
-            use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-            let factory: Arc<ActorFactoryImpl> = self.service_locator.get_service().await
+            use plexspaces_actor::get_actor_factory;
+            let factory = get_actor_factory(self.service_locator.as_ref()).await
                 .ok_or_else(|| "ActorFactory not registered in ServiceLocator".to_string())?;
             
             factory.activate_virtual_actor(&self.actor_id).await
@@ -89,7 +89,7 @@ impl MessageSender for VirtualActorWrapper {
         // Actor is activated - use MessageSender from registry
         // Get MessageSender (which will be ActorRef for activated actors)
         use plexspaces_core::ActorRegistry;
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service().await
+        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| "ActorRegistry not registered in ServiceLocator".to_string())?;
         
         let sender = registry.lookup_actor(&self.actor_id).await

@@ -137,7 +137,7 @@ impl ApplicationController {
         Ok(())
     }
 
-    /// Start an application
+    /// Start an application and its dependencies (Phase 5: Dependency Ordering)
     ///
     /// ## Arguments
     /// * `name` - Application name
@@ -148,19 +148,25 @@ impl ApplicationController {
     ///
     /// ## Errors
     /// - `ApplicationError::NotFound` if application not loaded
-    /// - `ApplicationError::StartFailed` if start fails
+    /// - `ApplicationError::StartFailed` if start fails or dependency fails
+    /// - `ApplicationError::StartFailed` if circular dependency detected
+    /// - `ApplicationError::StartFailed` if missing dependency
+    ///
+    /// ## Phase 5: Dependency Ordering
+    /// This method implements topological sort for startup:
+    /// 1. Resolve all dependencies recursively
+    /// 2. Detect circular dependencies
+    /// 3. Detect missing dependencies
+    /// 4. Start dependencies first (in topological order)
+    /// 5. Start the application itself
+    /// 6. Rollback on failure (stop started dependencies)
     pub async fn start(
         &self,
         name: &str,
         _env: HashMap<String, String>,
     ) -> Result<(), ApplicationError> {
-        // Get application
-        let app = {
-            let apps = self.applications.read().await;
-            apps.get(name)
-                .cloned()
-                .ok_or_else(|| ApplicationError::NotFound(name.to_string()))?
-        };
+        // Phase 5: Resolve dependency order using topological sort
+        let startup_order = self.resolve_startup_order(name).await?;
 
         // Get ApplicationNode
         let node = {
@@ -172,32 +178,267 @@ impl ApplicationController {
                 .clone()
         };
 
-        // Update state to starting
-        {
-            let mut states = self.states.write().await;
-            if let Some(state) = states.get_mut(name) {
-                state.status = ApplicationStatus::ApplicationStatusStarting as i32;
-                state.start_timestamp_ms = chrono::Utc::now().timestamp_millis();
+        // Start applications in topological order
+        let mut started_apps: Vec<String> = Vec::new();
+        let mut rollback_needed = false;
+        let mut failed_app: Option<String> = None;
+
+        for app_name in startup_order.iter() {
+            // Check if already running
+            let is_running = {
+                let states = self.states.read().await;
+                if let Some(state) = states.get(app_name) {
+                    state.status == ApplicationStatus::ApplicationStatusRunning as i32
+                } else {
+                    false
+                }
+            };
+
+            if is_running {
+                // Skip already running applications
+                continue;
+            }
+
+            // Get application
+            let app = {
+                let apps = self.applications.read().await;
+                apps.get(app_name)
+                    .cloned()
+                    .ok_or_else(|| ApplicationError::NotFound(app_name.clone()))?
+            };
+
+            // Update state to starting
+            {
+                let mut states = self.states.write().await;
+                if let Some(state) = states.get_mut(app_name) {
+                    state.status = ApplicationStatus::ApplicationStatusStarting as i32;
+                    state.start_timestamp_ms = chrono::Utc::now().timestamp_millis();
+                }
+            }
+
+            // Start application
+            let start_result = {
+                let mut app_guard = app.write().await;
+                app_guard.start(node.clone()).await
+            };
+
+            match start_result {
+                Ok(()) => {
+                    // Update state to running
+                    {
+                        let mut states = self.states.write().await;
+                        if let Some(state) = states.get_mut(app_name) {
+                            state.status = ApplicationStatus::ApplicationStatusRunning.into();
+                        }
+                    }
+                    started_apps.push(app_name.clone());
+                }
+                Err(e) => {
+                    // Update state to failed
+                    {
+                        let mut states = self.states.write().await;
+                        if let Some(state) = states.get_mut(app_name) {
+                            state.status = ApplicationStatus::ApplicationStatusFailed.into();
+                        }
+                    }
+                    rollback_needed = true;
+                    failed_app = Some(app_name.clone());
+                    // Return error after rollback
+                    break;
+                }
             }
         }
 
-        // Start application (requires &mut self, so we need to get write lock)
-        {
-            let mut app_guard = app.write().await;
-            app_guard.start(node).await.map_err(|e| {
-                ApplicationError::StartFailed(format!("Failed to start {}: {}", name, e))
-            })?;
-        }
-
-        // Update state to running
-        {
-            let mut states = self.states.write().await;
-            if let Some(state) = states.get_mut(name) {
-                state.status = ApplicationStatus::ApplicationStatusRunning.into();
+        // Rollback on failure (stop started applications in reverse order)
+        if rollback_needed {
+            for app_name in started_apps.iter().rev() {
+                let _ = self.stop_internal(app_name, 30).await; // Ignore errors during rollback
             }
+            return Err(ApplicationError::StartFailed(format!(
+                "Failed to start {}: dependency {} failed to start",
+                name,
+                failed_app.as_ref().unwrap_or(&"unknown".to_string())
+            )));
         }
 
         Ok(())
+    }
+
+    /// Resolve startup order using topological sort (Phase 5)
+    ///
+    /// ## Returns
+    /// Vector of application names in topological order (dependencies first)
+    ///
+    /// ## Errors
+    /// - `ApplicationError::StartFailed` if circular dependency detected
+    /// - `ApplicationError::StartFailed` if missing dependency
+    async fn resolve_startup_order(&self, name: &str) -> Result<Vec<String>, ApplicationError> {
+        // Check if application exists
+        {
+            let configs = self.configs.read().await;
+            if !configs.contains_key(name) {
+                return Err(ApplicationError::NotFound(name.to_string()));
+            }
+        }
+
+        // Build dependency graph
+        let (graph, reverse_graph) = self.build_dependency_graph().await?;
+
+        // Check for circular dependencies using DFS
+        if self.has_cycle(name, &graph, &mut std::collections::HashSet::new(), &mut std::collections::HashSet::new()) {
+            return Err(ApplicationError::StartFailed(format!(
+                "Circular dependency detected involving application: {}",
+                name
+            )));
+        }
+
+        // Topological sort using Kahn's algorithm
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut queue = std::collections::VecDeque::new();
+        let mut result = Vec::new();
+
+        // Calculate in-degrees
+        let configs = self.configs.read().await;
+        for (app_name, _) in configs.iter() {
+            let degree = graph.get(app_name).map(|deps| deps.len()).unwrap_or(0);
+            in_degree.insert(app_name.clone(), degree);
+            if degree == 0 {
+                queue.push_back(app_name.clone());
+            }
+        }
+        drop(configs);
+
+        // Process queue
+        while let Some(current) = queue.pop_front() {
+            result.push(current.clone());
+
+            // Reduce in-degree of dependents
+            if let Some(dependents) = reverse_graph.get(&current) {
+                for dependent in dependents {
+                    if let Some(degree) = in_degree.get_mut(dependent) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push_back(dependent.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Filter to only include applications in the dependency chain of `name`
+        let mut filtered_result = Vec::new();
+        let mut to_include: std::collections::HashSet<String> = std::collections::HashSet::new();
+        
+        // Collect all dependencies of `name` (including transitive)
+        self.collect_dependencies(name, &graph, &mut to_include);
+        to_include.insert(name.to_string());
+
+        // Add applications in topological order if they're in the dependency chain
+        for app_name in result {
+            if to_include.contains(&app_name) {
+                filtered_result.push(app_name);
+            }
+        }
+
+        // Ensure `name` is last (after all its dependencies)
+        if !filtered_result.contains(&name.to_string()) {
+            filtered_result.push(name.to_string());
+        } else {
+            // Move to end if already present
+            let pos = filtered_result.iter().position(|x| x == name).unwrap();
+            filtered_result.remove(pos);
+            filtered_result.push(name.to_string());
+        }
+
+        Ok(filtered_result)
+    }
+
+    /// Build dependency graph (Phase 5)
+    ///
+    /// ## Returns
+    /// Tuple of (graph: app -> dependencies, reverse_graph: app -> dependents)
+    async fn build_dependency_graph(
+        &self,
+    ) -> Result<(HashMap<String, Vec<String>>, HashMap<String, Vec<String>>), ApplicationError> {
+        let configs = self.configs.read().await;
+        let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+        let mut reverse_graph: HashMap<String, Vec<String>> = HashMap::new();
+
+        for (app_name, config) in configs.iter() {
+            // Verify all dependencies exist
+            for dep in &config.dependencies {
+                if !configs.contains_key(dep) {
+                    return Err(ApplicationError::StartFailed(format!(
+                        "Application {} depends on {} which is not loaded",
+                        app_name, dep
+                    )));
+                }
+            }
+
+            // Build forward graph (app -> dependencies)
+            graph.insert(app_name.clone(), config.dependencies.clone());
+
+            // Build reverse graph (app -> dependents)
+            for dep in &config.dependencies {
+                reverse_graph
+                    .entry(dep.clone())
+                    .or_insert_with(Vec::new)
+                    .push(app_name.clone());
+            }
+        }
+
+        Ok((graph, reverse_graph))
+    }
+
+    /// Check for cycles using DFS (Phase 5)
+    /// Note: Made synchronous to avoid async recursion issues
+    fn has_cycle(
+        &self,
+        node: &str,
+        graph: &HashMap<String, Vec<String>>,
+        visited: &mut std::collections::HashSet<String>,
+        rec_stack: &mut std::collections::HashSet<String>,
+    ) -> bool {
+        visited.insert(node.to_string());
+        rec_stack.insert(node.to_string());
+
+        if let Some(deps) = graph.get(node) {
+            for dep in deps {
+                if !visited.contains(dep) {
+                    if self.has_cycle(dep, graph, visited, rec_stack) {
+                        return true;
+                    }
+                } else if rec_stack.contains(dep) {
+                    return true; // Cycle detected
+                }
+            }
+        }
+
+        rec_stack.remove(node);
+        false
+    }
+
+    /// Collect all dependencies recursively (Phase 5)
+    /// Note: Made synchronous to avoid async recursion issues
+    fn collect_dependencies(
+        &self,
+        name: &str,
+        graph: &HashMap<String, Vec<String>>,
+        result: &mut std::collections::HashSet<String>,
+    ) {
+        if let Some(deps) = graph.get(name) {
+            for dep in deps {
+                if result.insert(dep.clone()) {
+                    // Recursively collect dependencies of dependencies
+                    self.collect_dependencies(dep, graph, result);
+                }
+            }
+        }
+    }
+
+    /// Internal stop method (used for rollback)
+    async fn stop_internal(&self, name: &str, timeout_secs: u64) -> Result<(), ApplicationError> {
+        self.stop(name, timeout_secs).await
     }
 
     /// Stop an application gracefully
@@ -346,6 +587,10 @@ impl Default for ApplicationController {
 // ============================================================================
 // TESTS (TDD Approach)
 // ============================================================================
+
+#[cfg(test)]
+#[path = "tests/dependency_ordering_tests.rs"]
+mod dependency_ordering_tests;
 
 #[cfg(test)]
 mod tests {

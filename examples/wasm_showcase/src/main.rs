@@ -716,7 +716,7 @@ async fn run_python_demo() -> Result<()> {
 
 /// Helper to start a node
 async fn start_node(node_id: &str) -> Result<(Arc<Node>, tokio::task::JoinHandle<()>)> {
-    let node = NodeBuilder::new(node_id.to_string()).build();
+    let node = NodeBuilder::new(node_id.to_string()).build().await;
     let node_arc = Arc::new(node);
     let node_clone = node_arc.clone();
     

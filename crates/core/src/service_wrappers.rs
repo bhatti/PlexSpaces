@@ -86,7 +86,5 @@ impl TupleSpaceProvider for TupleSpaceProviderWrapper {
     }
 }
 
-// Note: ActorServiceWrapper, ObjectRegistryWrapper have been moved to crates/node/src/service_wrappers.rs to avoid circular dependencies.
 // NodeOperationsWrapper has been removed - ActorFactory uses ActorRegistry and VirtualActorManager directly.
-// Only TupleSpaceProviderWrapper remains here since TupleSpace is already in core.
 

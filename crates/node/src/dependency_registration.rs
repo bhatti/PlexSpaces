@@ -36,6 +36,8 @@
 //! - Supports both critical and non-critical dependencies
 
 use crate::health_checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult};
+use crate::health_checker_circuit_breaker::CircuitBreakerHealthChecker;
+use crate::external_dependency_checkers::{MinIOHealthChecker, DynamoDBHealthChecker, SQSHealthChecker};
 use crate::health_service::PlexSpacesHealthReporter;
 use plexspaces_core::ObjectRegistry;
 use plexspaces_proto::object_registry::v1::ObjectType;
@@ -68,10 +70,13 @@ pub async fn register_builtin_dependencies(
             url: redis_url.clone(),
         };
         let checker = Arc::new(checker);
-        reporter.register_readiness_checker(checker.clone()).await;
-        reporter.register_startup_checker(checker.clone()).await;
+        // Wrap with circuit breaker (using existing CircuitBreaker implementation)
+        let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
+        let cb_checker = Arc::new(cb_checker);
+        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        eprintln!("✅ Registered Redis health checker (critical)");
+        eprintln!("✅ Registered Redis health checker (critical) with circuit breaker");
     }
 
     // Check for PostgreSQL (used by KeyValue store and TupleSpace)
@@ -83,10 +88,13 @@ pub async fn register_builtin_dependencies(
             connection_string: postgres_url.clone(),
         };
         let checker = Arc::new(checker);
-        reporter.register_readiness_checker(checker.clone()).await;
-        reporter.register_startup_checker(checker.clone()).await;
+        // Wrap with circuit breaker (using existing CircuitBreaker implementation)
+        let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
+        let cb_checker = Arc::new(cb_checker);
+        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        eprintln!("✅ Registered PostgreSQL health checker (critical)");
+        eprintln!("✅ Registered PostgreSQL health checker (critical) with circuit breaker");
     }
 
     // Check for Kafka (messaging)
@@ -95,10 +103,104 @@ pub async fn register_builtin_dependencies(
             brokers: kafka_brokers.clone(),
         };
         let checker = Arc::new(checker);
-        reporter.register_readiness_checker(checker.clone()).await;
-        reporter.register_startup_checker(checker.clone()).await;
+        // Wrap with circuit breaker (using existing CircuitBreaker implementation)
+        let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
+        let cb_checker = Arc::new(cb_checker);
+        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        eprintln!("✅ Registered Kafka health checker (critical)");
+        eprintln!("✅ Registered Kafka health checker (critical) with circuit breaker");
+    }
+
+    // Check for MinIO (blob storage)
+    if let Ok(minio_endpoint) = std::env::var("BLOB_ENDPOINT")
+        .or_else(|_| std::env::var("PLEXSPACES_MINIO_ENDPOINT"))
+    {
+        let access_key = std::env::var("BLOB_ACCESS_KEY_ID")
+            .or_else(|_| std::env::var("PLEXSPACES_MINIO_ACCESS_KEY"))
+            .ok();
+        let secret_key = std::env::var("BLOB_SECRET_ACCESS_KEY")
+            .or_else(|_| std::env::var("PLEXSPACES_MINIO_SECRET_KEY"))
+            .ok();
+        
+        // MinIO is critical if blob backend is minio
+        let is_critical = std::env::var("BLOB_BACKEND")
+            .unwrap_or_default()
+            .to_lowercase() == "minio";
+        
+        let checker = MinIOHealthChecker::new(
+            minio_endpoint.clone(),
+            access_key,
+            secret_key,
+            is_critical,
+        );
+        let checker = Arc::new(checker);
+        // Wrap with circuit breaker (using existing CircuitBreaker implementation)
+        let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
+        let cb_checker = Arc::new(cb_checker);
+        reporter.register_readiness_checker(cb_checker.clone()).await;
+        if is_critical {
+            reporter.register_startup_checker(cb_checker.clone()).await;
+        }
+        registered_count += 1;
+        eprintln!("✅ Registered MinIO health checker (critical: {}) with circuit breaker", is_critical);
+    }
+
+    // Check for DynamoDB (storage backend)
+    if let Ok(aws_region) = std::env::var("AWS_REGION")
+        .or_else(|_| std::env::var("PLEXSPACES_DYNAMODB_REGION"))
+    {
+        let table_name = std::env::var("PLEXSPACES_DYNAMODB_TABLE").ok();
+        
+        // DynamoDB is critical if used as storage backend
+        let is_critical = std::env::var("KEYVALUE_BACKEND")
+            .or_else(|_| std::env::var("TUPLESPACE_BACKEND"))
+            .unwrap_or_default()
+            .to_lowercase() == "dynamodb";
+        
+        let checker = DynamoDBHealthChecker::new(
+            aws_region.clone(),
+            table_name,
+            is_critical,
+        );
+        let checker = Arc::new(checker);
+        // Wrap with circuit breaker (using existing CircuitBreaker implementation)
+        let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
+        let cb_checker = Arc::new(cb_checker);
+        reporter.register_readiness_checker(cb_checker.clone()).await;
+        if is_critical {
+            reporter.register_startup_checker(cb_checker.clone()).await;
+        }
+        registered_count += 1;
+        eprintln!("✅ Registered DynamoDB health checker (critical: {}) with circuit breaker", is_critical);
+    }
+
+    // Check for SQS (channel backend)
+    if let Ok(aws_region) = std::env::var("AWS_REGION")
+        .or_else(|_| std::env::var("PLEXSPACES_SQS_REGION"))
+    {
+        let queue_url = std::env::var("PLEXSPACES_SQS_QUEUE_URL").ok();
+        
+        // SQS is critical if used as channel backend
+        let is_critical = std::env::var("CHANNEL_BACKEND")
+            .unwrap_or_default()
+            .to_lowercase() == "sqs";
+        
+        let checker = SQSHealthChecker::new(
+            aws_region.clone(),
+            queue_url,
+            is_critical,
+        );
+        let checker = Arc::new(checker);
+        // Wrap with circuit breaker (using existing CircuitBreaker implementation)
+        let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
+        let cb_checker = Arc::new(cb_checker);
+        reporter.register_readiness_checker(cb_checker.clone()).await;
+        if is_critical {
+            reporter.register_startup_checker(cb_checker.clone()).await;
+        }
+        registered_count += 1;
+        eprintln!("✅ Registered SQS health checker (critical: {}) with circuit breaker", is_critical);
     }
 
     Ok(registered_count)

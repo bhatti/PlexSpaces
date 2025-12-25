@@ -34,7 +34,7 @@
 
 use crate::{KVError, KVEvent, KVEventType, KVResult, KVStats, KeyValueStore};
 use async_trait::async_trait;
-use plexspaces_core::RequestContext;
+use plexspaces_common::RequestContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -482,7 +482,7 @@ mod tests {
     use super::*;
 
     fn test_ctx() -> RequestContext {
-        plexspaces_core::RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string())
+        plexspaces_common::RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string())
     }
 
     #[tokio::test]
@@ -508,7 +508,7 @@ mod tests {
     async fn test_tenant_isolation() {
         let kv = InMemoryKVStore::new();
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "default".to_string());
-        let ctx2 = plexspaces_core::RequestContext::new_without_auth("tenant2".to_string(), "default".to_string());
+        let ctx2 = plexspaces_common::RequestContext::new_without_auth("tenant2".to_string(), "default".to_string());
 
         // Put same key for different tenants
         kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
@@ -528,7 +528,7 @@ mod tests {
     async fn test_namespace_isolation() {
         let kv = InMemoryKVStore::new();
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
-        let ctx2 = plexspaces_core::RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string());
+        let ctx2 = plexspaces_common::RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string());
 
         // Put same key for different namespaces
         kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();

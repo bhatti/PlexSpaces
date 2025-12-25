@@ -188,6 +188,7 @@
 
 mod channel;
 mod in_memory;
+mod observability;
 
 #[cfg(feature = "redis-backend")]
 mod redis_backend;
@@ -201,9 +202,20 @@ mod nats_backend;
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_backend;
 
+#[cfg(feature = "udp-backend")]
+mod udp_backend;
+
+// Mock backend for testing
+#[cfg(any(test, feature = "test-utils"))]
+pub mod mock_backend;
+
+#[cfg(any(test, feature = "test-utils"))]
+pub use mock_backend::MockChannel;
+
 // Re-export all public items
 pub use channel::*;
 pub use in_memory::*;
+pub use observability::*;
 
 #[cfg(feature = "redis-backend")]
 pub use redis_backend::*;
@@ -216,3 +228,6 @@ pub use nats_backend::*;
 
 #[cfg(feature = "sqlite-backend")]
 pub use sqlite_backend::*;
+
+#[cfg(feature = "udp-backend")]
+pub use udp_backend::*;

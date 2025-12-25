@@ -669,11 +669,16 @@ impl ActorBuilder {
         // Extract actor ID before spawning (needed for ActorRef creation)
         let actor_id = actor.id().clone();
         
-        // Get ActorFactory from ServiceLocator
-        use crate::actor_factory_impl::ActorFactoryImpl;
-        use crate::ActorFactory;
-        let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
-            .ok_or_else(|| "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string())?;
+        // Get ActorFactory from ServiceLocator as trait object to avoid TypeId mismatch
+        // Using trait objects (Arc<dyn ActorFactory>) instead of concrete types (Arc<ActorFactoryImpl>)
+        // avoids TypeId issues when the same type is accessed through different import paths.
+        // Trait objects have stable TypeIds regardless of import paths.
+        use crate::get_actor_factory;
+        
+        let actor_factory: Arc<dyn crate::ActorFactory> = get_actor_factory(service_locator.as_ref()).await
+            .ok_or_else(|| {
+                format!("ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.")
+            })?;
         
         // Use spawn_built_actor since the actor is already built
         // This avoids recreating the actor that was just built
@@ -849,23 +854,10 @@ mod tests {
         use std::sync::Arc;
 
         // Create a test node with unique port to avoid conflicts
+        // Services are automatically initialized in build()
         let node = Arc::new(NodeBuilder::new("test-node-spawn".to_string())
             .with_listen_address("127.0.0.1:0") // Port 0 = OS-assigned free port
-            .build());
-        
-        // Register ActorFactoryImpl (required for spawning actors)
-        use crate::actor_factory_impl::ActorFactoryImpl;
-        let actor_factory_impl = Arc::new(ActorFactoryImpl::new(node.service_locator().clone()));
-        node.service_locator().register_service(actor_factory_impl).await;
-        
-        // Start node in background to avoid blocking (for gRPC server)
-        let node_for_start = node.clone();
-        tokio::spawn(async move {
-            let _ = node_for_start.start().await;
-        });
-        
-        // Wait a bit for node to initialize
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            .build().await);
 
         // Spawn actor using ActorBuilder
         use plexspaces_core::RequestContext;
@@ -879,12 +871,21 @@ mod tests {
 
         assert_eq!(actor_ref.id(), "spawned-actor@test-node-spawn");
         
-        // Verify actor is registered in the node's registry
+        // Verify actor is registered in the node's registry (with retry for async registration)
+        use plexspaces_core::service_locator::service_names;
         let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .get_service().await
+            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .expect("ActorRegistry not found");
         
-        let found = actor_registry.lookup_actor(&"spawned-actor@test-node-spawn".to_string()).await;
+        // Retry lookup with timeout (actor registration is async)
+        let mut found = None;
+        for _ in 0..10 {
+            found = actor_registry.lookup_actor(&"spawned-actor@test-node-spawn".to_string()).await;
+            if found.is_some() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
         assert!(found.is_some(), "Actor should be registered in ActorRegistry");
     }
 
@@ -895,23 +896,10 @@ mod tests {
         use std::sync::Arc;
 
         // Create a test node with unique port to avoid conflicts
+        // Services are automatically initialized in build()
         let node = Arc::new(NodeBuilder::new("test-node-resource-spawn".to_string())
             .with_listen_address("127.0.0.1:0") // Port 0 = OS-assigned free port
-            .build());
-        
-        // Register ActorFactoryImpl (required for spawning actors)
-        use crate::actor_factory_impl::ActorFactoryImpl;
-        let actor_factory_impl = Arc::new(ActorFactoryImpl::new(node.service_locator().clone()));
-        node.service_locator().register_service(actor_factory_impl).await;
-        
-        // Start node in background to avoid blocking (for gRPC server)
-        let node_for_start = node.clone();
-        tokio::spawn(async move {
-            let _ = node_for_start.start().await;
-        });
-        
-        // Wait a bit for node to initialize
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            .build().await);
 
         // Spawn actor with resource requirements
         use plexspaces_core::RequestContext;
@@ -935,12 +923,21 @@ mod tests {
 
         assert_eq!(actor_ref.id(), "resource-spawned-actor@test-node-resource-spawn");
         
-        // Verify actor is registered
+        // Verify actor is registered (with retry for async registration)
+        use plexspaces_core::service_locator::service_names;
         let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .get_service().await
+            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .expect("ActorRegistry not found");
         
-        let found = actor_registry.lookup_actor(&"resource-spawned-actor@test-node-resource-spawn".to_string()).await;
+        // Retry lookup with timeout (actor registration is async)
+        let mut found = None;
+        for _ in 0..10 {
+            found = actor_registry.lookup_actor(&"resource-spawned-actor@test-node-resource-spawn".to_string()).await;
+            if found.is_some() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
         assert!(found.is_some(), "Actor should be registered");
     }
 
@@ -951,23 +948,10 @@ mod tests {
         use std::sync::Arc;
 
         // Create a test node with unique port to avoid conflicts
+        // Services are automatically initialized in build()
         let node = Arc::new(NodeBuilder::new("test-node-mailbox-spawn".to_string())
             .with_listen_address("127.0.0.1:0") // Port 0 = OS-assigned free port
-            .build());
-        
-        // Register ActorFactoryImpl (required for spawning actors)
-        use crate::actor_factory_impl::ActorFactoryImpl;
-        let actor_factory_impl = Arc::new(ActorFactoryImpl::new(node.service_locator().clone()));
-        node.service_locator().register_service(actor_factory_impl).await;
-        
-        // Start node in background to avoid blocking (for gRPC server)
-        let node_for_start = node.clone();
-        tokio::spawn(async move {
-            let _ = node_for_start.start().await;
-        });
-        
-        // Wait a bit for node to initialize
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            .build().await);
 
         // Create custom mailbox config
         let mut mailbox_config = MailboxConfig::default();
@@ -986,12 +970,21 @@ mod tests {
 
         assert_eq!(actor_ref.id(), "mailbox-actor@test-node-mailbox-spawn");
         
-        // Verify actor is registered
+        // Verify actor is registered (with retry for async registration)
+        use plexspaces_core::service_locator::service_names;
         let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .get_service().await
+            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .expect("ActorRegistry not found");
         
-        let found = actor_registry.lookup_actor(&"mailbox-actor@test-node-mailbox-spawn".to_string()).await;
+        // Retry lookup with timeout (actor registration is async)
+        let mut found = None;
+        for _ in 0..10 {
+            found = actor_registry.lookup_actor(&"mailbox-actor@test-node-mailbox-spawn".to_string()).await;
+            if found.is_some() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
         assert!(found.is_some(), "Actor should be registered");
     }
 
@@ -1001,10 +994,10 @@ mod tests {
         use std::sync::Arc;
 
         // Create an empty ServiceLocator without ActorFactory
-        use plexspaces_node::create_default_service_locator;
-        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        // This tests the error case when ActorFactory is not registered
+        let service_locator = Arc::new(ServiceLocator::new());
 
-        // Attempt to spawn actor - should fail
+        // Attempt to spawn actor - should fail because ActorFactory is not registered
         use plexspaces_core::RequestContext;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let result = ActorBuilder::new(Box::new(TestBehavior))
@@ -1016,7 +1009,7 @@ mod tests {
         assert!(result.is_err(), "Should fail when ActorFactory is not in ServiceLocator");
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("ActorFactory not found"), 
-                "Error should mention ActorFactory not found");
+                "Error message should mention ActorFactory not found, got: {}", error_msg);
     }
 
     #[tokio::test]
@@ -1025,23 +1018,10 @@ mod tests {
         use std::sync::Arc;
 
         // Create a test node with unique port to avoid conflicts
+        // Services are automatically initialized in build()
         let node = Arc::new(NodeBuilder::new("test-node-multi-spawn".to_string())
             .with_listen_address("127.0.0.1:0") // Port 0 = OS-assigned free port
-            .build());
-        
-        // Register ActorFactoryImpl (required for spawning actors)
-        use crate::actor_factory_impl::ActorFactoryImpl;
-        let actor_factory_impl = Arc::new(ActorFactoryImpl::new(node.service_locator().clone()));
-        node.service_locator().register_service(actor_factory_impl).await;
-        
-        // Start node in background to avoid blocking (for gRPC server)
-        let node_for_start = node.clone();
-        tokio::spawn(async move {
-            let _ = node_for_start.start().await;
-        });
-        
-        // Wait a bit for node to initialize
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            .build().await);
 
         // Spawn multiple actors
         use plexspaces_core::RequestContext;
@@ -1059,14 +1039,23 @@ mod tests {
 
         assert_eq!(actor_refs.len(), 5);
         
-        // Verify all actors are registered
+        // Verify all actors are registered (with retry for async registration)
+        use plexspaces_core::service_locator::service_names;
         let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .get_service().await
+            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .expect("ActorRegistry not found");
         
         for i in 0..5 {
             let actor_id = format!("multi-actor-{}@test-node-multi-spawn", i);
-            let found = actor_registry.lookup_actor(&actor_id).await;
+            // Retry lookup with timeout (actor registration is async)
+            let mut found = None;
+            for _ in 0..10 {
+                found = actor_registry.lookup_actor(&actor_id).await;
+                if found.is_some() {
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
             assert!(found.is_some(), "Actor {} should be registered", actor_id);
         }
     }

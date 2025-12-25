@@ -30,7 +30,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::task::JoinHandle;
-use plexspaces_core::{ActorId, Service, ServiceLocator, ActorRegistry, MessageSender, VirtualActorManager, FacetManager, ActorContext, RequestContext};
+use plexspaces_core::{ActorId, Service, ServiceLocator, ActorRegistry, MessageSender, VirtualActorManager, FacetManagerServiceWrapper, ActorContext, RequestContext, ExitReason};
+use plexspaces_facet::FacetManager;
+use plexspaces_core::service_locator::service_names;
 use plexspaces_proto::ActorLifecycleEvent;
 use prost_types::Timestamp;
 use crate::{ActorFactory, Actor, ActorRef};
@@ -95,7 +97,7 @@ impl ActorFactoryImpl {
         actor_id: ActorId,
         join_handle: JoinHandle<()>,
     ) {
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service().await
+        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
             .unwrap_or_else(|| panic!("ActorRegistry not registered in ServiceLocator"));
         let actor_id_clone = actor_id.clone();
         
@@ -203,11 +205,32 @@ impl ActorFactoryImpl {
             // Publish lifecycle event
             registry.publish_lifecycle_event(lifecycle_event).await;
             
-            // Notify all monitors (Erlang-style DOWN messages)
-            registry.notify_actor_down(&actor_id_clone, &reason).await;
+            // Phase 6: Handle actor termination - notify monitors and propagate to links
+            // Convert reason string to ExitReason
+            let exit_reason = match reason.as_str() {
+                "normal" => ExitReason::Normal,
+                "shutdown" => ExitReason::Shutdown,
+                "killed" => ExitReason::Killed,
+                _ => ExitReason::Error(reason.clone()),
+            };
+            registry.handle_actor_termination(&actor_id_clone, exit_reason).await;
             
-            // Unregister actor
-            registry.unregister_with_cleanup(&actor_id_clone).await;
+            // CRITICAL: Unregister actor to prevent memory leaks
+            // This ensures all registry entries are cleaned up on termination
+            if let Err(e) = registry.unregister_with_cleanup(&actor_id_clone).await {
+                // Log error but don't fail - actor is already terminated
+                tracing::warn!(
+                    actor_id = %actor_id_clone,
+                    error = %e,
+                    "Failed to unregister actor during termination cleanup (non-fatal)"
+                );
+            }
+            
+            // OBSERVABILITY: Track unregistration completion
+            metrics::counter!("plexspaces_actor_unregistered_total",
+                "actor_id" => actor_id_clone.clone(),
+                "reason" => reason.clone()
+            ).increment(1);
         });
     }
 }
@@ -216,9 +239,9 @@ impl ActorFactoryImpl {
 impl ActorFactory for ActorFactoryImpl {
     async fn activate_virtual_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Get services from ServiceLocator
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service().await
+        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
-        let manager: Arc<VirtualActorManager> = self.service_locator.get_service().await
+        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER).await
             .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
         
         // Normalize actor ID
@@ -370,17 +393,43 @@ impl ActorFactory for ActorFactoryImpl {
         actor: Arc<Actor>,
         actor_type: Option<String>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
+        // Extract actor_type from behavior if not provided
+        let actor_type = if let Some(atype) = actor_type {
+            Some(atype)
+        } else {
+            // Extract from behavior.behavior_type() before unwrapping Arc
+            let behavior_guard = actor.behavior().read().await;
+            let behavior_type = behavior_guard.behavior_type();
+            drop(behavior_guard);
+            match behavior_type {
+                plexspaces_core::BehaviorType::GenServer => Some("GenServer".to_string()),
+                plexspaces_core::BehaviorType::GenEvent => Some("GenEvent".to_string()),
+                plexspaces_core::BehaviorType::GenStateMachine => Some("GenStateMachine".to_string()),
+                plexspaces_core::BehaviorType::Workflow => Some("Workflow".to_string()),
+                plexspaces_core::BehaviorType::Custom(s) => Some(s),
+            }
+        };
+        
+        // Add observability logging
+        let actor_id_before_unwrap = actor.id().clone();
+        tracing::info!(
+            actor_id = %actor_id_before_unwrap,
+            actor_type = ?actor_type,
+            "Spawning built actor"
+        );
+        
         // Unwrap the Arc to get the Actor
         let mut actor = Arc::try_unwrap(actor)
             .map_err(|_| "Actor Arc has multiple references - cannot unwrap")?;
         
         // Get services from ServiceLocator
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service().await
+        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
-        let manager: Arc<VirtualActorManager> = self.service_locator.get_service().await
+        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER).await
             .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
-        let facet_manager: Arc<FacetManager> = self.service_locator.get_service().await
+        let facet_manager_wrapper = self.service_locator.get_service_by_name::<plexspaces_core::FacetManagerServiceWrapper>(service_names::FACET_MANAGER).await
             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
+        let facet_manager = facet_manager_wrapper.inner_clone();
         
         // Normalize actor ID
         let local_node_id = registry.local_node_id();
@@ -414,7 +463,15 @@ impl ActorFactory for ActorFactoryImpl {
             "namespace" => actor_namespace.clone()
         ).increment(1);
         
-        tracing::info!(actor_id = %actor_id, node_id = %local_node_id, namespace = %actor_namespace, "Actor spawned");
+        // OBSERVABILITY: Log actor spawn with full context
+        tracing::info!(
+            actor_id = %actor_id,
+            node_id = %local_node_id,
+            namespace = %actor_namespace,
+            tenant_id = %actor_tenant_id,
+            actor_type = ?actor_type,
+            "Actor spawned"
+        );
 
         // Create RequestContext for registry operations (moves values)
         let ctx = RequestContext::new_without_auth(actor_tenant_id, actor_namespace);
@@ -493,12 +550,19 @@ impl ActorFactory for ActorFactoryImpl {
             // Get mailbox (for creating ActorRef)
             let mailbox = actor.mailbox().clone();
             
-            // Register VirtualActorWrapper (MessageSender - mailbox is internal)
+            // Create VirtualActorWrapper (MessageSender - mailbox is internal)
+            // Note: For lazy virtual actors, we register immediately since start() is deferred
+            // For eager virtual actors, registration happens inside Actor::start() after init() succeeds
             let virtual_wrapper = Arc::new(VirtualActorWrapper::new(
                 actor_id.clone(),
                 self.service_locator.clone(),
             ));
-            registry.register_actor(&ctx, actor_id.clone(), virtual_wrapper, actor_type.clone()).await;
+            
+            // Register for lazy virtual actors (they're registered but not started)
+            // For eager activation, registration happens in Actor::start() after init()
+            if !should_activate_eagerly {
+                registry.register_actor(&ctx, actor_id.clone(), virtual_wrapper.clone(), actor_type.clone()).await;
+            }
             
             // Create ActorRef
             let actor_ref = ActorRef::local(
@@ -515,9 +579,28 @@ impl ActorFactory for ActorFactoryImpl {
             if should_activate_eagerly {
                 tracing::debug!(actor_id = %actor_id, "Virtual actor with eager activation - starting immediately");
                 
-                // Start the actor
+                // Create ActorRef for return value
+                // Note: Registration happens INSIDE Actor::start() AFTER init() succeeds
+                let mailbox = actor.mailbox().clone();
+                let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+                    actor_id.clone(),
+                    mailbox.clone(),
+                    self.service_locator.clone(),
+                ));
+                
+                // Start the actor (calls init() internally, then registers in ActorRegistry)
+                // If init() fails, actor is not registered (prevents memory leaks)
                 let join_handle = actor.start().await
-                    .map_err(|e| format!("Failed to start actor: {}", e))?;
+                    .map_err(|e| {
+                        tracing::warn!(
+                            actor_id = %actor_id,
+                            error = %e,
+                            "Virtual actor start() failed (init() error) - actor not registered"
+                        );
+                        format!("Failed to start actor: {}", e)
+                    })?;
+                
+                // Actor is now registered (registration happened inside Actor::start() after init() succeeded)
                 
                 // Wrap in Arc after starting
                 let actor_arc = Arc::new(actor);
@@ -553,34 +636,62 @@ impl ActorFactory for ActorFactoryImpl {
             }
             
             // Create ActorRef for lazy virtual actor (implements MessageSender)
+            // Note: For lazy virtual actors, registration happens on first activation
             let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
                 actor_id.clone(),
                 mailbox.clone(),
                 self.service_locator.clone(),
             ));
+            
+            // Register ActorRef for lazy virtual actors (they're registered but not started)
+            registry.register_actor(&ctx, actor_id.clone(), actor_ref.clone(), actor_type.clone()).await;
+            
             return Ok(actor_ref);
         }
         
         // Normal actor - start immediately
         // Store facets
         let facets_clone = actor.facets().clone();
-        facet_manager.store_facets(actor_id.clone(), facets_clone).await;
+        facet_manager.store_facets(&actor_id.to_string(), facets_clone).await;
         
         // Get mailbox (for creating ActorRef)
         let mailbox = actor.mailbox().clone();
         
-        // Create ActorRef (implements MessageSender)
+        // Create ActorRef (implements MessageSender) for return value
+        // Note: Registration happens INSIDE Actor::start() AFTER init() succeeds
+        // This ensures failed actors are never registered (prevents memory leaks)
+        // and allows supervisor to wait for init() before starting next child
         let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
             actor_id.clone(),
             mailbox.clone(),
             self.service_locator.clone(),
         ));
-        // Register ActorRef in registry (as MessageSender trait object)
-        registry.register_actor(&ctx, actor_id.clone(), actor_ref.clone(), actor_type).await;
         
-        // Start actor
+        // Start actor (calls init() internally, then registers in ActorRegistry)
+        // If init() fails, actor is not registered (prevents memory leaks)
         let join_handle = actor.start().await
-            .map_err(|e| format!("Failed to start actor: {}", e))?;
+            .map_err(|e| {
+                // OBSERVABILITY: Log start failure due to init() error
+                tracing::warn!(
+                    actor_id = %actor_id,
+                    error = %e,
+                    "Actor start() failed (init() error) - actor not registered"
+                );
+                format!("Failed to start actor: {}", e)
+            })?;
+        
+        // Actor is now registered (registration happened inside Actor::start() after init() succeeded)
+        // However, we need to ensure the ActorRef we return is registered in the actors map
+        // Create ActorRef (implements MessageSender) - this is what will be returned
+        let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+            actor_id.clone(),
+            mailbox.clone(),
+            self.service_locator.clone(),
+        ));
+        
+        // Explicitly register the ActorRef in the actors map (in case register_in_registry didn't work)
+        // This ensures lookup_actor() will find it
+        registry.register_actor(&ctx, actor_id.clone(), actor_ref.clone(), actor_type.clone()).await;
         
         // Store actor in Arc after starting
         let actor_arc = Arc::new(actor);
@@ -598,13 +709,6 @@ impl ActorFactory for ActorFactoryImpl {
                 ),
             ),
         }).await;
-        
-        // Create ActorRef (implements MessageSender)
-        let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
-            actor_id.clone(),
-            mailbox.clone(),
-            self.service_locator.clone(),
-        ));
         
         // Setup facets (skipped - requires journaling crate)
         // TODO: Call FacetSetupService if available
@@ -627,7 +731,7 @@ impl ActorFactory for ActorFactoryImpl {
     
     async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Get services from ServiceLocator
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service().await
+        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
         
         let local_node_id = registry.local_node_id();
@@ -744,4 +848,8 @@ impl ActorFactory for ActorFactoryImpl {
 }
 
 // Implement Service trait so ActorFactoryImpl can be registered in ServiceLocator
-impl Service for ActorFactoryImpl {}
+impl Service for ActorFactoryImpl {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL.to_string()
+    }
+}

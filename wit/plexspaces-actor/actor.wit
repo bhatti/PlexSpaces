@@ -52,13 +52,13 @@ interface types {
     variant tuple-field {
         string-value(string),
         integer-value(s64),
-        float-value(float64),
+        float-value(f64),
         bytes-value(list<u8>),
         boolean-value(bool),
     }
 
     /// Tuple (ordered list of fields)
-    type tuple = list<tuple-field>;
+    type tuple-value = list<tuple-field>;
 
     /// Pattern field for matching tuples
     variant pattern-field {
@@ -94,7 +94,7 @@ interface types {
 /// These are IMPORTS from the actor's perspective - the runtime provides
 /// these functions for actors to call.
 interface host {
-    use types.{actor-id, payload, tuple, pattern, actor-result};
+    use types.{actor-id, payload, tuple-value, pattern, actor-result};
 
     /// Send message to another actor (fire-and-forget)
     ///
@@ -165,7 +165,7 @@ interface host {
     /// if result.is_err():
     ///     return None, result.err()
     /// ```
-    tuplespace-write: func(tuple: tuple) -> result<_, string>;
+    tuplespace-write: func(tuple-value: tuple-value) -> result<_, string>;
 
     /// Read tuple from TupleSpace (non-destructive)
     ///
@@ -208,12 +208,12 @@ interface host {
     ///         # Process tuple
     ///         pass
     /// ```
-    tuplespace-read: func(pattern: pattern) -> result<option<tuple>, string>;
+    tuplespace-read: func(pattern: pattern) -> result<option<tuple-value>, string>;
 
     /// Take tuple from TupleSpace (destructive read)
     ///
     /// Like read, but removes the tuple from the space.
-    tuplespace-take: func(pattern: pattern) -> result<option<tuple>, string>;
+    tuplespace-take: func(pattern: pattern) -> result<option<tuple-value>, string>;
 
     /// Count matching tuples in TupleSpace
     ///
@@ -429,7 +429,7 @@ interface actor {
     ///     }
     /// }
     /// ```
-    handle-message: func(from: string, message-type: string, payload: payload) -> actor-result;
+    handle-message: func(from-actor: string, message-type: string, payload: payload) -> actor-result;
 
     /// Snapshot actor state for persistence
     ///
@@ -485,7 +485,7 @@ interface actor {
     ///     }
     /// }
     /// ```
-    handle-request: func(from: string, message-type: string, payload: payload) -> actor-result;
+    handle-request: func(from-actor: string, message-type: string, payload: payload) -> actor-result;
 
     /// Handle event notification (GenEvent behavior)
     ///
@@ -513,7 +513,7 @@ interface actor {
     ///     }
     /// }
     /// ```
-    handle-event: func(from: string, message-type: string, payload: payload) -> result<_, string>;
+    handle-event: func(from-actor: string, message-type: string, payload: payload) -> result<_, string>;
 
     /// Handle state transition (GenFSM behavior)
     ///
@@ -539,7 +539,7 @@ interface actor {
     ///     }
     /// }
     /// ```
-    handle-transition: func(from: string, message-type: string, payload: payload) -> result<string, string>;
+    handle-transition: func(from-actor: string, message-type: string, payload: payload) -> result<string, string>;
 }
 
 /// PlexSpaces Actor World

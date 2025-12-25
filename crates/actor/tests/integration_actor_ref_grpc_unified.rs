@@ -26,39 +26,36 @@ struct ObjectRegistryAdapter {
 impl CoreObjectRegistry for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        tenant_id: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_id: &str,
-        namespace: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-        let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(&ctx, obj_type, object_id)
+            .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup_full(&ctx, object_type, object_id)
+            .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn register(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .register(registration)
+            .register(ctx, registration)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -211,7 +208,7 @@ async fn test_unified_tell_remote_grpc() {
     registry2
         .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             ..Default::default()
@@ -256,7 +253,7 @@ async fn test_unified_tell_remote_grpc() {
     registry1
         .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             tenant_id: "default".to_string(),
@@ -317,7 +314,7 @@ async fn test_unified_ask_remote_grpc() {
     registry2
         .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             ..Default::default()
@@ -393,7 +390,7 @@ async fn test_unified_ask_remote_grpc() {
     registry1
         .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             tenant_id: "default".to_string(),
@@ -454,7 +451,7 @@ async fn test_unified_ask_remote_grpc_timeout() {
     registry2
         .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             ..Default::default()
@@ -496,7 +493,7 @@ async fn test_unified_ask_remote_grpc_timeout() {
     registry1
         .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             tenant_id: "default".to_string(),

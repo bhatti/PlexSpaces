@@ -104,6 +104,34 @@ def snapshot_state() -> bytes:
     return json.dumps(state).encode('utf-8')
 
 
+# componentize-py expects an Actor class
+class Actor:
+    """Actor class for componentize-py compatibility."""
+    
+    @staticmethod
+    def handle_request(from_actor: str, message_type: str, payload: bytes) -> bytes:
+        return handle_request(from_actor, message_type, payload)
+    
+    @staticmethod
+    def handle_event(from_actor: str, message_type: str, payload: bytes) -> None:
+        return handle_event(from_actor, message_type, payload)
+    
+    @staticmethod
+    def handle_transition(from_actor: str, message_type: str, payload: bytes) -> str:
+        return handle_transition(from_actor, message_type, payload)
+    
+    @staticmethod
+    def snapshot_state() -> bytes:
+        return snapshot_state()
+
+
+
+
+
+
+
+
+
 
 
 

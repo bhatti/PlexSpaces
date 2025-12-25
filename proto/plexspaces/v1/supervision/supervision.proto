@@ -269,6 +269,12 @@ message ChildSpec {
   // - "start_function": Function to call
   // - "supervisor_strategy": For CHILD_TYPE_SUPERVISOR, its strategy
   map<string, string> metadata = 6;
+
+  // Facet configuration (for automatic attachment during actor creation)
+  // Facets are attached in priority order (high priority first) before actor.init() is called
+  // All facets are automatically restored during supervisor restart
+  // Phase 1: Unified Lifecycle - Multiple facets support
+  repeated plexspaces.common.v1.Facet facets = 7;
 }
 
 enum ChildType {

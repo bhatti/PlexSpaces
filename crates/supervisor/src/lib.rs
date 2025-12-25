@@ -28,5 +28,15 @@
 mod r#mod;
 pub use r#mod::*;
 
+// Child specification module (Phase 2: Unified ChildSpec)
+mod child_spec;
+pub use child_spec::{ChildSpec, StartedChild, StartFn, ShutdownSpec};
+// Note: ChildType and RestartStrategy are re-exported from mod.rs for backward compatibility
+// The new child_spec module has its own ChildType and RestartStrategy that align with proto
+
+// Facet helpers module (Phase 1: Unified Lifecycle)
+mod facet_helpers;
+pub use facet_helpers::{create_facet_from_proto, create_facets_from_proto};
+
 // Re-export SupervisorStats from proto (for public API)
 pub use plexspaces_proto::supervision::v1::SupervisorStats;

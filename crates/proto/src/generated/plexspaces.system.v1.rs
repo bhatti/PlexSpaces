@@ -281,6 +281,48 @@ pub struct HealthProbeConfig {
     /// - Supports both critical and non-critical dependencies
     #[prost(message, optional, tag="6")]
     pub dependency_registration: ::core::option::Option<DependencyRegistrationConfig>,
+    /// Circuit breaker configuration for dependency health checks
+    ///
+    /// ## Purpose
+    /// Configures circuit breaker behavior for dependency health monitoring.
+    /// When enabled, dependencies are wrapped with circuit breakers to track
+    /// state transitions and support degraded mode.
+    ///
+    /// ## Design Notes
+    /// - Circuit breakers prevent cascading failures
+    /// - Support degraded mode for non-critical dependencies
+    /// - Auto-recovery through half-open state testing
+    #[prost(message, optional, tag="7")]
+    pub circuit_breaker_config: ::core::option::Option<DependencyCircuitBreakerConfig>,
+}
+/// Circuit breaker configuration for dependency health checks
+///
+/// ## Purpose
+/// Configures how circuit breakers are applied to dependency health checkers.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DependencyCircuitBreakerConfig {
+    /// Whether to enable circuit breakers for dependency health checks
+    #[prost(bool, tag="1")]
+    pub enabled: bool,
+    /// Default failure threshold (number of consecutive failures before opening circuit)
+    ///
+    /// Default: 5
+    #[prost(uint32, tag="2")]
+    pub default_failure_threshold: u32,
+    /// Default timeout before attempting recovery (seconds)
+    ///
+    /// Default: 60
+    #[prost(uint64, tag="3")]
+    pub default_timeout_secs: u64,
+    /// Default success threshold (number of successes in half-open to close circuit)
+    ///
+    /// Default: 2
+    #[prost(uint32, tag="4")]
+    pub default_success_threshold: u32,
+    /// Per-dependency overrides (key = dependency name, value = circuit breaker config)
+    #[prost(map="string, message", tag="5")]
+    pub dependency_overrides: ::std::collections::HashMap<::prost::alloc::string::String, super::super::circuitbreaker::prv::CircuitBreakerConfig>,
 }
 /// Dependency registration configuration
 ///
@@ -314,6 +356,7 @@ pub struct DependencyRegistrationConfig {
 /// - Critical dependencies block readiness/startup if unhealthy
 /// - Non-critical dependencies allow partial failure (circuit breaker fallback)
 /// - Each dependency has a name and check function
+/// - Circuit breaker integration tracks state transitions
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DependencyCheck {
@@ -340,6 +383,70 @@ pub struct DependencyCheck {
     /// Additional details (key-value pairs)
     #[prost(map="string, message", tag="7")]
     pub details: ::std::collections::HashMap<::prost::alloc::string::String, ::prost_types::Value>,
+    /// Circuit breaker information (if circuit breaker is enabled)
+    #[prost(message, optional, tag="8")]
+    pub circuit_breaker: ::core::option::Option<DependencyCircuitBreakerInfo>,
+}
+/// Circuit breaker information for a dependency
+///
+/// ## Purpose
+/// Tracks circuit breaker state and metrics for dependency health monitoring.
+/// This allows the dashboard and monitoring systems to see circuit breaker state
+/// transitions and understand why a dependency is in degraded mode.
+///
+/// ## Design Notes
+/// - Circuit breaker state indicates if dependency is available (closed), unavailable (open),
+///    or testing recovery (half-open)
+/// - Metrics provide visibility into failure patterns and recovery attempts
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DependencyCircuitBreakerInfo {
+    /// Circuit breaker name (matches dependency name)
+    #[prost(string, tag="1")]
+    pub circuit_name: ::prost::alloc::string::String,
+    /// Current circuit breaker state
+    /// Uses circuitbreaker.prv.CircuitState enum
+    /// 0 = CLOSED (healthy), 1 = OPEN (unavailable), 2 = HALF_OPEN (testing recovery)
+    #[prost(int32, tag="2")]
+    pub state: i32,
+    /// Circuit breaker metrics (if available)
+    /// Note: This is a reference to circuitbreaker.prv.CircuitBreakerMetrics
+    /// We store key metrics here for dashboard display
+    #[prost(message, optional, tag="3")]
+    pub metrics: ::core::option::Option<CircuitBreakerHealthMetrics>,
+}
+/// Circuit breaker health metrics (subset of full CircuitBreakerMetrics)
+///
+/// ## Purpose
+/// Key metrics from circuit breaker for health monitoring dashboard.
+/// Full metrics available via circuit breaker service if needed.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CircuitBreakerHealthMetrics {
+    /// Total requests through circuit breaker
+    #[prost(uint64, tag="1")]
+    pub total_requests: u64,
+    /// Failed requests
+    #[prost(uint64, tag="2")]
+    pub failed_requests: u64,
+    /// Rejected requests (circuit open)
+    #[prost(uint64, tag="3")]
+    pub rejected_requests: u64,
+    /// Current error rate (0.0 to 1.0)
+    #[prost(double, tag="4")]
+    pub error_rate: f64,
+    /// Consecutive failures
+    #[prost(uint32, tag="5")]
+    pub consecutive_failures: u32,
+    /// Number of times circuit has opened
+    #[prost(uint64, tag="6")]
+    pub trip_count: u64,
+    /// Time circuit last opened
+    #[prost(message, optional, tag="7")]
+    pub last_opened: ::core::option::Option<::prost_types::Timestamp>,
+    /// Duration in current state
+    #[prost(message, optional, tag="8")]
+    pub time_in_state: ::core::option::Option<::prost_types::Duration>,
 }
 /// Health check result with dependency breakdown
 ///

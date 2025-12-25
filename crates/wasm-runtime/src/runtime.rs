@@ -12,7 +12,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use wasmtime::{Engine, Module};
 
-/// Loaded WASM module with metadata
+#[cfg(feature = "component-model")]
+use wasmtime::component::Component;
+
+/// Loaded WASM module or component with metadata
 #[derive(Clone)]
 pub struct WasmModule {
     /// Module name
@@ -24,11 +27,46 @@ pub struct WasmModule {
     /// SHA-256 hash of module bytes
     pub hash: String,
 
-    /// Compiled wasmtime module
+    /// Compiled wasmtime module (for traditional modules)
+    #[cfg(not(feature = "component-model"))]
     pub(crate) module: Arc<Module>,
+
+    /// Compiled wasmtime module or component (for both traditional modules and components)
+    #[cfg(feature = "component-model")]
+    pub(crate) module: WasmModuleInner,
 
     /// Module size in bytes
     pub size_bytes: u64,
+}
+
+#[cfg(feature = "component-model")]
+#[derive(Clone)]
+pub enum WasmModuleInner {
+    /// Traditional WASM module
+    Module(Arc<Module>),
+    /// WASM component (WIT-based)
+    Component(Arc<Component>),
+}
+
+#[cfg(feature = "component-model")]
+impl WasmModuleInner {
+    pub fn as_module(&self) -> Option<&Arc<Module>> {
+        match self {
+            WasmModuleInner::Module(m) => Some(m),
+            WasmModuleInner::Component(_) => None,
+        }
+    }
+
+    pub fn as_component(&self) -> Option<&Arc<Component>> {
+        match self {
+            WasmModuleInner::Module(_) => None,
+            WasmModuleInner::Component(c) => Some(c),
+        }
+    }
+
+    pub fn is_component(&self) -> bool {
+        matches!(self, WasmModuleInner::Component(_))
+    }
 }
 
 impl std::fmt::Debug for WasmModule {
@@ -155,18 +193,134 @@ impl WasmRuntime {
 
         // Compile module
         let compile_start = std::time::Instant::now();
-        let module = Module::new(&self.engine, bytes)
-            .map_err(|e| {
-                metrics::counter!("plexspaces_wasm_module_load_errors_total").increment(1);
-                WasmError::CompilationError(e.to_string())
-            })?;
+        
+        // Verify WASM magic number before attempting to parse
+        if bytes.len() < 4 {
+            metrics::counter!("plexspaces_wasm_module_load_errors_total").increment(1);
+            return Err(WasmError::CompilationError(format!(
+                "WASM module too small: {} bytes (minimum 4 bytes for magic number)",
+                bytes.len()
+            )));
+        }
+        
+        let magic = &bytes[0..4];
+        if magic != b"\0asm" {
+            metrics::counter!("plexspaces_wasm_module_load_errors_total").increment(1);
+            return Err(WasmError::CompilationError(format!(
+                "Invalid WASM magic number: got {:02x?}, expected 0061736d. File may be corrupted or not a WASM module.",
+                magic
+            )));
+        }
+        
+        tracing::debug!(
+            module_name = name,
+            module_version = version,
+            module_size = bytes.len(),
+            magic_number = format!("{:02x?}", magic),
+            "Attempting to compile WASM module"
+        );
+        
+        // Try to parse as standard module first
+        // If that fails and component-model is enabled, try as component
+        let module = match Module::new(&self.engine, bytes) {
+            Ok(m) => m,
+            Err(module_err) => {
+                // If component-model is enabled, try parsing as component
+                #[cfg(feature = "component-model")]
+                {
+                    use wasmtime::component::Component;
+                    match Component::new(&self.engine, bytes) {
+                        Ok(component) => {
+                            let compile_duration = compile_start.elapsed();
+                            tracing::info!(
+                                module_name = name,
+                                module_version = version,
+                                "Successfully parsed as WASM component (WIT-based)"
+                            );
+                            // Store component - we'll handle instantiation in WasmInstance
+                            let module_hash = hash.clone();
+                            let wasm_module = WasmModule {
+                                name: name.to_string(),
+                                version: version.to_string(),
+                                hash: module_hash.clone(),
+                                module: WasmModuleInner::Component(Arc::new(component)),
+                                size_bytes: bytes.len() as u64,
+                            };
+
+                            // Cache module (with LRU eviction if needed)
+                            {
+                                let mut cache = self.module_cache.write().await;
+                                cache.insert(module_hash.clone(), Arc::new(wasm_module.clone()));
+                            }
+
+                            let total_duration = start_time.elapsed();
+                            metrics::histogram!("plexspaces_wasm_module_load_duration_seconds").record(total_duration.as_secs_f64());
+                            metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds").record(compile_duration.as_secs_f64());
+                            metrics::counter!("plexspaces_wasm_modules_loaded_total").increment(1);
+                            metrics::counter!("plexspaces_wasm_components_loaded_total").increment(1);
+
+                            tracing::info!(
+                                module_name = name,
+                                module_version = version,
+                                module_hash = %module_hash,
+                                module_size = bytes.len(),
+                                load_duration_ms = total_duration.as_millis(),
+                                "WASM component loaded successfully"
+                            );
+
+                            return Ok(wasm_module);
+                        }
+                        Err(component_err) => {
+                            metrics::counter!("plexspaces_wasm_module_load_errors_total").increment(1);
+                            tracing::error!(
+                                module_name = name,
+                                module_version = version,
+                                module_size = bytes.len(),
+                                module_error = %module_err,
+                                component_error = %component_err,
+                                first_16_bytes = format!("{:02x?}", bytes.iter().take(16).collect::<Vec<_>>()),
+                                "WASM file failed to parse as both module and component"
+                            );
+                            return Err(WasmError::CompilationError(format!(
+                                "failed to parse WebAssembly file as module or component. \
+                                Module error: {}. Component error: {}",
+                                module_err, component_err
+                            )));
+                        }
+                    }
+                }
+                #[cfg(not(feature = "component-model"))]
+                {
+                    metrics::counter!("plexspaces_wasm_module_load_errors_total").increment(1);
+                    tracing::error!(
+                        module_name = name,
+                        module_version = version,
+                        module_size = bytes.len(),
+                        error = %module_err,
+                        first_16_bytes = format!("{:02x?}", bytes.iter().take(16).collect::<Vec<_>>()),
+                        "WASM module compilation failed. Note: component-model feature is disabled, \
+                        so WASM components (WIT-based) cannot be loaded. Enable component-model feature \
+                        to support components from componentize-py."
+                    );
+                    return Err(WasmError::CompilationError(format!(
+                        "failed to parse WebAssembly module: {}. \
+                        Note: If this is a WASM component (WIT-based from componentize-py), \
+                        enable the component-model feature and use Component::new() instead of Module::new()",
+                        module_err
+                    )));
+                }
+            }
+        };
         let compile_duration = compile_start.elapsed();
 
         let wasm_module = WasmModule {
             name: name.to_string(),
             version: version.to_string(),
             hash: hash.clone(),
+            #[cfg(not(feature = "component-model"))]
             module: Arc::new(module),
+            #[cfg(feature = "component-model")]
+            module: WasmModuleInner::Module(Arc::new(module)),
             size_bytes: bytes.len() as u64,
         };
 

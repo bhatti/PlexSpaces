@@ -28,12 +28,18 @@ use std::time::Duration;
 use async_trait::async_trait;
 use crate::{Service, ActorMetricsHandle};
 
-/// Trait for updating NodeMetrics from message routing
+/// Trait for accessing NodeMetrics (both reading and updating)
 ///
-/// This allows the monitoring helper to update NodeMetrics without
-/// directly depending on the Node type.
+/// This allows components to access NodeMetrics without directly depending on the Node type.
+/// Combines reading and updating capabilities into a single trait for simplicity.
+///
+/// NodeMetrics includes node_id and cluster_name fields, so all node identity information
+/// is available via get_metrics().
 #[async_trait]
-pub trait NodeMetricsUpdater: Send + Sync {
+pub trait NodeMetricsAccessor: Send + Sync {
+    /// Get current NodeMetrics (includes node_id and cluster_name)
+    async fn get_metrics(&self) -> plexspaces_proto::node::v1::NodeMetrics;
+    
     /// Increment messages_routed counter
     async fn increment_messages_routed(&self);
     
@@ -58,8 +64,8 @@ pub trait NodeMetricsUpdater: Send + Sync {
 /// * `duration` - Time taken for routing
 /// * `success` - Whether routing succeeded
 /// * `error_type` - Error type if routing failed
-/// * `metrics_updater` - Optional NodeMetricsUpdater to update NodeMetrics (for backward compatibility)
-/// * `actor_metrics` - Optional ActorMetricsHandle to update ActorMetrics (preferred)
+    /// * `metrics_accessor` - Optional NodeMetricsAccessor to update NodeMetrics
+    /// * `actor_metrics` - Optional ActorMetricsHandle to update ActorMetrics (preferred)
 pub async fn record_message_routing_metrics(
     actor_id: &str,
     node_id: &str,
@@ -68,7 +74,7 @@ pub async fn record_message_routing_metrics(
     duration: Duration,
     success: bool,
     error_type: Option<&str>,
-    metrics_updater: Option<Arc<dyn NodeMetricsUpdater + Send + Sync>>,
+    metrics_accessor: Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>,
     actor_metrics: Option<ActorMetricsHandle>,
 ) {
     let location = if is_local { "local" } else { "remote" };
@@ -90,17 +96,17 @@ pub async fn record_message_routing_metrics(
         }
     }
     
-    // Update NodeMetrics if updater is available (for backward compatibility)
-    if let Some(ref updater) = metrics_updater {
-        updater.increment_messages_routed().await;
+    // Update NodeMetrics if accessor is available
+    if let Some(ref accessor) = metrics_accessor {
+        accessor.increment_messages_routed().await;
         if success {
             if is_local {
-                updater.increment_local_deliveries().await;
+                accessor.increment_local_deliveries().await;
             } else {
-                updater.increment_remote_deliveries().await;
+                accessor.increment_remote_deliveries().await;
             }
         } else {
-            updater.increment_failed_deliveries().await;
+            accessor.increment_failed_deliveries().await;
         }
     }
     

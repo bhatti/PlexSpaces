@@ -169,14 +169,47 @@ buf --version || (echo "Install buf: https://buf.build/docs/installation" && exi
 # Generate proto files
 make proto
 
-# Build
-make build
+# Build release version (recommended)
+make release
 
-# Run tests
-make test
+# Or build CLI manually
+cargo build --release --bin plexspaces -p plexspaces-cli
 
-# Install CLI
-cargo install --path crates/cli
+# Binary location
+./target/release/plexspaces
+```
+
+#### Starting a Node
+
+```bash
+# Start with default settings
+cargo run --release --bin plexspaces -- start
+
+# Or use the built binary
+./target/release/plexspaces start
+
+# Or with custom node ID and address
+cargo run --release --bin plexspaces -- start \
+  --node-id my-node-1 \
+  --listen-addr 0.0.0.0:9001
+
+# With release config file (if supported)
+cargo run --release --bin plexspaces -- start \
+  --node-id my-node-1 \
+  --listen-addr 0.0.0.0:9001
+```
+
+**Default ports:**
+- gRPC: `9001`
+- HTTP/Dashboard: `9002`
+
+**Verify node is running:**
+```bash
+# Check health
+curl http://localhost:9002/api/v1/health
+
+# View dashboard
+open http://localhost:9002
 ```
 
 ## Security
@@ -202,6 +235,7 @@ PlexSpaces provides comprehensive security features including:
 | `PLEXSPACES_JOURNALING_BACKEND` | Journaling backend | `sqlite` |
 | `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` |
 | `PLEXSPACES_CHANNEL_BACKEND` | Channel backend | `inmemory` |
+| `PLEXSPACES_CLUSTER_NAME` | Cluster name for UDP channels | - |
 
 ### HTTP Endpoints
 
@@ -258,6 +292,12 @@ tuplespace:
 channel:
   backend: redis
   url: "redis://localhost:6379"
+
+# UDP channel configuration (for cluster-wide multicast)
+udp:
+  multicast_address: "239.255.0.1"
+  multicast_port: 9999
+  cluster_name: "my-cluster"  # Nodes with same cluster_name can communicate
 ```
 
 ## Backend Options
@@ -276,9 +316,19 @@ channel:
 
 ### Channel Backends
 
-- **InMemory**: Single-node, testing
-- **Redis**: Multi-node, pub/sub
-- **NATS**: Multi-node, lightweight
+- **InMemory**: Single-node, testing (non-durable)
+- **Redis**: Multi-node, pub/sub, durable (Redis Streams)
+- **Kafka**: Multi-node, high-throughput, durable
+- **SQLite**: Single-node, durable, file-based persistence
+- **NATS**: Multi-node, lightweight, pub/sub
+- **UDP**: Multi-node, low-latency multicast pub/sub (best-effort, non-durable)
+
+**Channel Selection Guide**:
+- **Development/Testing**: InMemory or SQLite
+- **Production (Durable)**: Redis, Kafka, or SQLite
+- **Low-Latency Cluster Messaging**: UDP multicast (requires `cluster_name` configuration)
+- **High-Throughput**: Kafka
+- **Lightweight Pub/Sub**: NATS or Redis
 
 ## Production Deployment
 
@@ -385,6 +435,239 @@ kill -9 <PID>
 1. Verify seed nodes are accessible
 2. Check firewall rules
 3. Ensure all nodes use same cluster configuration
+
+## Deploying WASM Applications
+
+> **📖 For comprehensive WASM deployment guide with polyglot examples, see [WASM Deployment Guide](wasm-deployment.md)**
+
+### Quick Reference
+
+### Method 1: HTTP Multipart Upload (Recommended for Large Files)
+
+**Best for**: Files >5MB (Python WASM, unoptimized builds)
+
+```bash
+# HTTP gateway runs on gRPC port + 1 (e.g., 9002 if gRPC is 9001)
+curl -X POST http://localhost:9002/api/v1/applications/deploy \
+  -F "application_id=calculator-app" \
+  -F "name=calculator" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm"
+```
+
+**Max file size**: 100MB
+
+### Method 2: Using the CLI Tool (Small Files Only)
+
+**Best for**: Files <5MB (Rust, optimized JavaScript/Go)
+
+```bash
+# Deploy using the CLI (gRPC, 5MB limit)
+./target/release/plexspaces deploy \
+  --node localhost:9001 \
+  --app-id calculator-app \
+  --name calculator \
+  --version 1.0.0 \
+  --wasm examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
+
+# Or using --wasm-module (alias)
+./target/release/plexspaces deploy \
+  --node localhost:9001 \
+  --app-id calculator-app \
+  --name calculator \
+  --wasm-module examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
+```
+
+**Note**: The CLI command is `deploy`, not `application deploy`. Use `--wasm` or `--wasm-module` for the WASM file path. For files >5MB, use HTTP multipart upload instead.
+
+> **📖 See [WASM Deployment Guide](wasm-deployment.md) for complete polyglot examples (Rust, Python, TypeScript, Go)**
+
+### Method 3: Using the Deployment Script
+
+```bash
+# Deploy using the helper script
+./scripts/deploy-wasm-app-test.sh \
+  http://localhost:9002 \
+  calculator-app \
+  examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
+```
+
+The script will:
+1. Check if WASM file exists
+2. Encode WASM to base64
+3. Deploy via gRPC or HTTP API
+4. Verify deployment
+
+### Method 4: Using gRPC Directly (grpcurl) - Small Files Only
+
+```bash
+# Install grpcurl if needed
+# macOS: brew install grpcurl
+# Linux: See https://github.com/fullstorydev/grpcurl
+
+# Encode WASM file
+WASM_BASE64=$(base64 -w 0 calculator_actor.wasm)
+
+# Deploy via gRPC
+grpcurl -plaintext \
+  -d "{
+    \"application_id\": \"calculator-app\",
+    \"name\": \"calculator\",
+    \"version\": \"1.0.0\",
+    \"wasm_module\": {
+      \"name\": \"calculator\",
+      \"version\": \"1.0.0\",
+      \"module_bytes\": \"${WASM_BASE64}\"
+    }
+  }" \
+  localhost:9001 \
+  plexspaces.application.v1.ApplicationService/DeployApplication
+```
+
+### Method 5: Using HTTP API (gRPC-Gateway) - Small Files Only
+
+```bash
+# Encode WASM file
+WASM_BASE64=$(base64 -w 0 calculator_actor.wasm)
+
+# Deploy via HTTP
+curl -X POST http://localhost:9002/api/v1/applications \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"application_id\": \"calculator-app\",
+    \"name\": \"calculator\",
+    \"version\": \"1.0.0\",
+    \"wasm_module\": {
+      \"name\": \"calculator\",
+      \"version\": \"1.0.0\",
+      \"module_bytes\": \"${WASM_BASE64}\"
+    }
+  }"
+```
+
+## Deploying Python WASM Actors
+
+### Step 1: Build Python WASM Actors
+
+```bash
+cd examples/simple/wasm_calculator
+
+# Build all Python actors
+./scripts/build_python_actors.sh
+
+# WASM files will be in:
+# wasm-modules/calculator_actor.wasm
+# wasm-modules/advanced_calculator_actor.wasm
+# wasm-modules/durable_calculator_actor.wasm
+# wasm-modules/tuplespace_calculator_actor.wasm
+# wasm-modules/channel_calculator_actor.wasm
+```
+
+**Prerequisites for Python WASM:**
+- Python 3.9+
+- `componentize-py` (install with `pip install componentize-py`)
+
+### Step 2: Deploy Each Actor
+
+```bash
+# Deploy calculator actor (HTTP multipart for large Python WASM)
+curl -X POST http://localhost:9002/api/v1/applications/deploy \
+  -F "application_id=calculator-app" \
+  -F "name=calculator" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm"
+
+# Deploy durable calculator actor
+curl -X POST http://localhost:9002/api/v1/applications/deploy \
+  -F "application_id=durable-calculator-app" \
+  -F "name=durable-calculator" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/durable_calculator_actor.wasm"
+
+# Deploy tuplespace calculator actor
+curl -X POST http://localhost:9002/api/v1/applications/deploy \
+  -F "application_id=tuplespace-calculator-app" \
+  -F "name=tuplespace-calculator" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/tuplespace_calculator_actor.wasm"
+```
+
+## Verifying Deployment
+
+### Check Applications
+
+```bash
+# List all applications
+curl http://localhost:9002/api/v1/dashboard/applications | jq
+
+# Or check via dashboard API
+curl http://localhost:9002/api/v1/dashboard/applications | jq '.applications[]'
+```
+
+### View Dashboard
+
+```bash
+# Open dashboard in browser
+open http://localhost:9002
+
+# Or view specific endpoints
+curl http://localhost:9002/api/v1/dashboard/summary | jq
+curl http://localhost:9002/api/v1/dashboard/applications | jq
+curl http://localhost:9002/api/v1/dashboard/actors | jq
+```
+
+## Complete Deployment Example
+
+```bash
+# 1. Build PlexSpaces binaries
+make release
+
+# 2. Start node (in one terminal)
+cargo run --release --bin plexspaces -- start --node-id test-node --listen-addr 0.0.0.0:9001
+
+# 3. Build Python WASM actors (in another terminal)
+cd examples/simple/wasm_calculator
+./scripts/build_python_actors.sh
+
+# 4. Deploy calculator actor (HTTP multipart for large Python WASM)
+cd ../..
+curl -X POST http://localhost:9002/api/v1/applications/deploy \
+  -F "application_id=calculator-app" \
+  -F "name=calculator" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm"
+
+# 5. Verify deployment
+curl http://localhost:9002/api/v1/dashboard/applications | jq '.applications[] | select(.name == "calculator")'
+
+# 6. View dashboard
+open http://localhost:9002
+```
+
+## Troubleshooting Deployment
+
+### Deployment fails
+
+```bash
+# Check node is running
+curl http://localhost:9002/api/v1/health
+
+# Check WASM file exists and is valid
+file examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
+
+# Check gRPC connection
+grpcurl -plaintext localhost:9001 list
+```
+
+### WASM file too large
+
+```bash
+# Check file size
+ls -lh examples/simple/wasm_calculator/wasm-modules/*.wasm
+
+# Python WASM files are typically ~39MB (includes Python runtime)
+# This is normal for componentize-py builds
+```
 
 ## Next Steps
 

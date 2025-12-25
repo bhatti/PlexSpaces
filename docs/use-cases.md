@@ -192,6 +192,14 @@ Low-latency real-time applications:
 - WebSocket support
 - Pub/sub patterns
 
+**Key Features**:
+- Multiple backends: InMemory, Redis, Kafka, SQLite, NATS, UDP
+- ACK/NACK semantics for reliable processing
+- Dead Letter Queue (DLQ) for poisonous messages
+- Graceful shutdown for non-memory channels
+- Message recovery on restart
+- UDP multicast for low-latency cluster messaging
+
 **Example**: See [Channel Examples](../examples/simple/channel_example/) example.
 
 ## Comparison with Other Solutions

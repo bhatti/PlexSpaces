@@ -34,7 +34,7 @@
 //! - Checks are async to support network calls
 //! - Errors indicate unhealthy dependencies
 
-use plexspaces_proto::system::v1::{DependencyCheck, HealthStatus};
+use plexspaces_proto::system::v1::{DependencyCheck, DependencyCircuitBreakerInfo, HealthStatus};
 use prost_types::{Duration, Timestamp};
 use std::time::SystemTime;
 use thiserror::Error;
@@ -107,6 +107,17 @@ pub trait HealthChecker: Send + Sync {
     /// * `Ok(())` - Dependency is healthy
     /// * `Err(HealthCheckError)` - Dependency is unhealthy
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult;
+    
+    /// Get circuit breaker info if this checker is wrapped with a circuit breaker
+    ///
+    /// ## Returns
+    /// `Some(DependencyCircuitBreakerInfo)` if wrapped with circuit breaker, `None` otherwise
+    ///
+    /// ## Default Implementation
+    /// Returns `None` by default. Circuit breaker wrappers should override this.
+    async fn get_circuit_breaker_info(&self) -> Option<plexspaces_proto::system::v1::DependencyCircuitBreakerInfo> {
+        None
+    }
 }
 
 /// Context for health checks
@@ -128,13 +139,14 @@ impl Default for HealthCheckContext {
 ///
 /// ## Purpose
 /// Executes a health check and converts the result to a proto DependencyCheck.
+/// If the checker is wrapped with a circuit breaker, includes circuit breaker info.
 ///
 /// ## Arguments
 /// * `checker` - The health checker to run
 /// * `ctx` - Health check context
 ///
 /// ## Returns
-/// `DependencyCheck` with status, error message, and timing
+/// `DependencyCheck` with status, error message, timing, and circuit breaker info
 pub async fn run_health_check(
     checker: &dyn HealthChecker,
     ctx: &HealthCheckContext,
@@ -149,6 +161,10 @@ pub async fn run_health_check(
         .duration_since(start)
         .unwrap_or_default();
 
+    // Get circuit breaker info if checker is wrapped with circuit breaker
+    // Uses trait method which returns None for non-circuit-breaker checkers
+    let circuit_breaker_info = checker.get_circuit_breaker_info().await;
+
     match result {
         Ok(()) => DependencyCheck {
             name,
@@ -161,6 +177,7 @@ pub async fn run_health_check(
                 nanos: response_time.subsec_nanos() as i32,
             }),
             details: std::collections::HashMap::new(),
+            circuit_breaker: circuit_breaker_info,
         },
         Err(e) => DependencyCheck {
             name,
@@ -173,6 +190,7 @@ pub async fn run_health_check(
                 nanos: response_time.subsec_nanos() as i32,
             }),
             details: std::collections::HashMap::new(),
+            circuit_breaker: circuit_breaker_info,
         },
     }
 }
@@ -197,6 +215,8 @@ impl HealthChecker for PingChecker {
     async fn check(&self, _ctx: &HealthCheckContext) -> HealthCheckResult {
         Ok(())  // Always succeeds
     }
+
+    // PingChecker doesn't have circuit breaker, so default implementation returns None
 }
 
 /// Shutdown check (fails if shutdown in progress)
@@ -236,6 +256,8 @@ impl HealthChecker for ShutdownChecker {
             Ok(())
         }
     }
+
+    // ShutdownChecker doesn't have circuit breaker, so default implementation returns None
 }
 
 #[cfg(test)]

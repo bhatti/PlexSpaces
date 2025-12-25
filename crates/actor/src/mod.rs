@@ -207,8 +207,34 @@ use crate::resource::{ActorHealth, ResourceContract, ResourceProfile, ResourceUs
 
 // Import from external crates
 use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError,
+    Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, ExitAction, ExitReason,
 };
+
+/// Parse ExitReason from string representation (used for EXIT messages)
+fn parse_exit_reason_from_str(reason_str: &str, metadata: &std::collections::HashMap<String, String>) -> ExitReason {
+    if reason_str == "Normal" {
+        ExitReason::Normal
+    } else if reason_str == "Shutdown" {
+        ExitReason::Shutdown
+    } else if reason_str == "Killed" {
+        ExitReason::Killed
+    } else if reason_str.starts_with("Error:") {
+        let error_msg = reason_str.strip_prefix("Error:").unwrap_or("unknown error").to_string();
+        ExitReason::Error(error_msg)
+    } else if reason_str.starts_with("Linked:") {
+        let linked_actor_id = reason_str.strip_prefix("Linked:").unwrap_or("unknown").to_string();
+        let linked_error_str = metadata.get("exit_linked_error")
+            .map(|s| s.as_str())
+            .unwrap_or("Normal");
+        let linked_reason = parse_exit_reason_from_str(linked_error_str, metadata);
+        ExitReason::Linked {
+            actor_id: linked_actor_id,
+            reason: Box::new(linked_reason),
+        }
+    } else {
+        ExitReason::Normal // Default
+    }
+}
 use plexspaces_facet::{Facet, FacetContainer};
 use plexspaces_mailbox::{Mailbox, Message};
 use plexspaces_journaling::ReplayHandler;
@@ -246,6 +272,8 @@ pub enum ActorState {
     Activating,
     /// Actor is deactivating (saving state, running on_deactivate)
     Deactivating,
+    /// Actor is stopping (shutdown in progress) - NEW
+    Stopping,
     /// Actor is migrating to another node
     Migrating,
     /// Actor has crashed (includes error message)
@@ -269,6 +297,7 @@ impl ActorState {
             ActorState::Inactive => ProtoState::ActorStateInactive,
             ActorState::Activating => ProtoState::ActorStateActivating,
             ActorState::Deactivating => ProtoState::ActorStateDeactivating,
+            ActorState::Stopping => ProtoState::ActorStateStopping,
             ActorState::Migrating => ProtoState::ActorStateMigrating,
             ActorState::Failed(_) => ProtoState::ActorStateFailed,
             ActorState::Terminated => ProtoState::ActorStateTerminated,
@@ -287,6 +316,7 @@ impl ActorState {
             ProtoState::ActorStateInactive => ActorState::Inactive,
             ProtoState::ActorStateActivating => ActorState::Activating,
             ProtoState::ActorStateDeactivating => ActorState::Deactivating,
+            ProtoState::ActorStateStopping => ActorState::Stopping,
             ProtoState::ActorStateMigrating => ActorState::Migrating,
             ProtoState::ActorStateFailed => ActorState::Failed(error_message.unwrap_or_default()),
             ProtoState::ActorStateTerminated => ActorState::Terminated,
@@ -614,7 +644,148 @@ impl Actor {
         
         tracing::info!(actor_id = %self.id, "Actor created");
 
-        // Call STATIC lifecycle hook (ALWAYS runs)
+        // Step 1: State → Activating
+        *self.state.write().await = ActorState::Activating;
+        
+        // OBSERVABILITY: Track state transition
+        metrics::counter!("plexspaces_actor_state_transitions_total",
+            "actor_id" => self.id.clone(),
+            "from" => "Creating",
+            "to" => "Activating"
+        ).increment(1);
+        
+        tracing::debug!(actor_id = %self.id, "Actor activating - starting unified lifecycle");
+
+        // Step 2: Actor initialization
+        // Note: Facets are already attached before start() is called (via attach_facet() in actor_factory)
+        // Supervisor waits for init() to complete before starting next child
+        // If init() fails, actor is not registered and supervisor handles error
+        let init_start = std::time::Instant::now();
+        {
+            let mut behavior = self.behavior.write().await;
+            match behavior.init(&self.context).await {
+                Ok(()) => {
+                    // Init succeeded - track metrics
+                    let init_duration = init_start.elapsed();
+                    metrics::counter!("plexspaces_actor_init_total",
+                        "actor_id" => self.id.clone(),
+                        "status" => "success"
+                    ).increment(1);
+                    metrics::histogram!("plexspaces_actor_init_duration_seconds",
+                        "actor_id" => self.id.clone()
+                    ).record(init_duration.as_secs_f64());
+                    tracing::debug!(
+                        actor_id = %self.id,
+                        duration_ms = init_duration.as_millis(),
+                        "Actor init() completed successfully"
+                    );
+                }
+                Err(e) => {
+                    // Set error state and message (sync operations only in error handler)
+                    let init_duration = init_start.elapsed();
+                    *self.state.write().await = ActorState::Failed(e.to_string());
+                    let _ = self.set_error_message(e.to_string()).await;
+                    
+                    // Track init failure metrics
+                    metrics::counter!("plexspaces_actor_init_total",
+                        "actor_id" => self.id.clone(),
+                        "status" => "failure"
+                    ).increment(1);
+                    metrics::histogram!("plexspaces_actor_init_duration_seconds",
+                        "actor_id" => self.id.clone()
+                    ).record(init_duration.as_secs_f64());
+                    metrics::counter!("plexspaces_actor_init_errors_total",
+                        "actor_id" => self.id.clone(),
+                        "error_type" => format!("{:?}", e)
+                    ).increment(1);
+                    
+                    tracing::error!(
+                        actor_id = %self.id,
+                        error = %e,
+                        duration_ms = init_duration.as_millis(),
+                        "Actor init() failed - actor will not start or register"
+                    );
+                    return Err(e);
+                }
+            }
+        }
+
+        // Step 3: Facet post-init setup (Phase 1: Unified Lifecycle)
+        // Call on_init_complete() for ALL facets (in priority order, descending)
+        // This allows facets to perform setup that requires actor to be initialized
+        let facets_init_complete_start = std::time::Instant::now();
+        {
+            let mut facets = self.facets.write().await;
+            let facet_errors = facets.call_on_init_complete(&self.id).await;
+            
+            if !facet_errors.is_empty() {
+                // Log errors but don't fail activation (facets may have non-critical errors)
+                for error in &facet_errors {
+                    metrics::counter!("plexspaces_facet_errors_total",
+                        "facet_type" => "unknown",
+                        "error_type" => format!("{:?}", error),
+                        "operation" => "on_init_complete"
+                    ).increment(1);
+                    tracing::warn!(
+                        actor_id = %self.id,
+                        error = %error,
+                        "Facet on_init_complete() returned error (non-fatal)"
+                    );
+                }
+            }
+            
+            let facets_init_complete_duration = facets_init_complete_start.elapsed();
+            metrics::histogram!("plexspaces_facet_init_complete_duration_seconds",
+                "actor_id" => self.id.clone()
+            ).record(facets_init_complete_duration.as_secs_f64());
+            tracing::debug!(
+                actor_id = %self.id,
+                facet_count = facets.list_facets().len(),
+                duration_ms = facets_init_complete_duration.as_millis(),
+                "Facet on_init_complete() called for all facets"
+            );
+        }
+
+        // Step 4: Behavior post-facet setup (Phase 1: Unified Lifecycle)
+        // Call on_facets_ready() to allow behavior to initialize after facets are ready
+        let facets_ready_start = std::time::Instant::now();
+        {
+            let mut behavior = self.behavior.write().await;
+            match behavior.on_facets_ready(&self.context).await {
+                Ok(()) => {
+                    let facets_ready_duration = facets_ready_start.elapsed();
+                    metrics::histogram!("plexspaces_actor_facets_ready_duration_seconds",
+                        "actor_id" => self.id.clone()
+                    ).record(facets_ready_duration.as_secs_f64());
+                    tracing::debug!(
+                        actor_id = %self.id,
+                        duration_ms = facets_ready_duration.as_millis(),
+                        "Actor on_facets_ready() completed successfully"
+                    );
+                }
+                Err(e) => {
+                    // Log error but don't fail activation (behavior may have non-critical errors)
+                    let facets_ready_duration = facets_ready_start.elapsed();
+                    metrics::counter!("plexspaces_actor_facets_ready_errors_total",
+                        "actor_id" => self.id.clone(),
+                        "error_type" => format!("{:?}", e)
+                    ).increment(1);
+                    tracing::warn!(
+                        actor_id = %self.id,
+                        error = %e,
+                        duration_ms = facets_ready_duration.as_millis(),
+                        "Actor on_facets_ready() returned error (non-fatal)"
+                    );
+                }
+            }
+        }
+
+        // Step 5: Register in ActorRegistry AFTER init() succeeds
+        // This ensures failed actors are never visible to other actors
+        // Critical for supervisor tree: supervisor waits for init() before starting next child
+        self.register_in_registry().await?;
+
+        // Step 6: Call STATIC lifecycle hook (ALWAYS runs) - for backward compatibility
         self.on_activate().await?;
 
         // Start message processing
@@ -656,15 +827,186 @@ impl Actor {
                             message_id = %message.id,
                             "Actor message loop: ✅ Dequeued message, processing..."
                         );
-                        // Process message with facets
+                        
+                        // Check if this is an EXIT message (from linked actor death)
+                        if message.is_exit() {
+                            if let Some((from_actor_id, reason_str)) = message.try_parse_exit() {
+                                // Parse exit reason from string
+                                let exit_reason = parse_exit_reason_from_str(&reason_str, &message.metadata);
+                                // Check if actor traps exits
+                                if context.trap_exit {
+                                    // Phase 4: Monitoring/Linking Integration - Call facet.on_exit() for ALL facets
+                                    // Facets receive EXIT signal in priority order (high priority first)
+                                    // This allows facets to handle EXIT signals (e.g., TimerFacet cancels timers)
+                                    let facet_exit_start = std::time::Instant::now();
+                                    let facet_exit_reason = match &exit_reason {
+                                        plexspaces_core::ExitReason::Normal => plexspaces_facet::ExitReason::Normal,
+                                        plexspaces_core::ExitReason::Shutdown => plexspaces_facet::ExitReason::Shutdown,
+                                        plexspaces_core::ExitReason::Killed => plexspaces_facet::ExitReason::Killed,
+                                        plexspaces_core::ExitReason::Error(msg) => plexspaces_facet::ExitReason::Error(msg.clone()),
+                                        plexspaces_core::ExitReason::Linked { actor_id, reason } => {
+                                            plexspaces_facet::ExitReason::Error(format!("Linked: {} -> {:?}", actor_id, reason))
+                                        },
+                                    };
+                                    
+                                    let facet_exit_errors = {
+                                        let mut facets_guard = facets.write().await;
+                                        facets_guard.call_on_exit(&actor_id_for_logging, &from_actor_id, &facet_exit_reason).await
+                                    };
+                                    
+                                    let facet_exit_duration = facet_exit_start.elapsed();
+                                    if !facet_exit_errors.is_empty() {
+                                        metrics::counter!("plexspaces_facet_exit_errors_total",
+                                            "actor_id" => actor_id_for_logging.clone(),
+                                            "error_count" => facet_exit_errors.len().to_string()
+                                        ).increment(facet_exit_errors.len() as u64);
+                                        tracing::warn!(
+                                            actor_id = %actor_id_for_logging,
+                                            from = %from_actor_id,
+                                            error_count = facet_exit_errors.len(),
+                                            "Some facets failed to handle EXIT signal (continuing with behavior.handle_exit)"
+                                        );
+                                    } else {
+                                        tracing::debug!(
+                                            actor_id = %actor_id_for_logging,
+                                            from = %from_actor_id,
+                                            duration_ms = facet_exit_duration.as_millis(),
+                                            "All facets handled EXIT signal successfully"
+                                        );
+                                    }
+                                    metrics::histogram!("plexspaces_facet_exit_duration_seconds",
+                                        "actor_id" => actor_id_for_logging.clone()
+                                    ).record(facet_exit_duration.as_secs_f64());
+                                    metrics::counter!("plexspaces_facet_exit_total",
+                                        "actor_id" => actor_id_for_logging.clone()
+                                    ).increment(1);
+                                    
+                                    // Call handle_exit() - actor can decide to propagate or handle
+                                    let handle_exit_start = std::time::Instant::now();
+                                    let mut behavior_guard = behavior.write().await;
+                                    match behavior_guard.handle_exit(&context, &from_actor_id, &exit_reason).await {
+                                        Ok(ExitAction::Propagate) => {
+                                            // Actor decided to propagate - terminate this actor
+                                            let handle_exit_duration = handle_exit_start.elapsed();
+                                            metrics::counter!("plexspaces_actor_exit_handled_total",
+                                                "actor_id" => actor_id_for_logging.clone(),
+                                                "action" => "propagate"
+                                            ).increment(1);
+                                            metrics::histogram!("plexspaces_actor_exit_handle_duration_seconds",
+                                                "actor_id" => actor_id_for_logging.clone()
+                                            ).record(handle_exit_duration.as_secs_f64());
+                                            tracing::info!(
+                                                actor_id = %actor_id_for_logging,
+                                                from = %from_actor_id,
+                                                reason = ?exit_reason,
+                                                duration_ms = handle_exit_duration.as_millis(),
+                                                "EXIT from linked actor - propagating (actor will terminate)"
+                                            );
+                                            // Call terminate() before breaking
+                                            let _ = behavior_guard.terminate(&context, &exit_reason).await;
+                                            break;
+                                        }
+                                        Ok(ExitAction::Handle) => {
+                                            // Actor decided to handle - continue running
+                                            let handle_exit_duration = handle_exit_start.elapsed();
+                                            metrics::counter!("plexspaces_actor_exit_handled_total",
+                                                "actor_id" => actor_id_for_logging.clone(),
+                                                "action" => "handle"
+                                            ).increment(1);
+                                            metrics::histogram!("plexspaces_actor_exit_handle_duration_seconds",
+                                                "actor_id" => actor_id_for_logging.clone()
+                                            ).record(handle_exit_duration.as_secs_f64());
+                                            tracing::debug!(
+                                                actor_id = %actor_id_for_logging,
+                                                from = %from_actor_id,
+                                                reason = ?exit_reason,
+                                                duration_ms = handle_exit_duration.as_millis(),
+                                                "EXIT from linked actor - handled (actor continues)"
+                                            );
+                                            // Continue loop
+                                        }
+                                        Err(e) => {
+                                            let handle_exit_duration = handle_exit_start.elapsed();
+                                            metrics::counter!("plexspaces_actor_exit_handled_total",
+                                                "actor_id" => actor_id_for_logging.clone(),
+                                                "action" => "error"
+                                            ).increment(1);
+                                            metrics::counter!("plexspaces_actor_exit_handle_errors_total",
+                                                "actor_id" => actor_id_for_logging.clone(),
+                                                "error_type" => format!("{:?}", e)
+                                            ).increment(1);
+                                            tracing::error!(
+                                                actor_id = %actor_id_for_logging,
+                                                from = %from_actor_id,
+                                                error = %e,
+                                                duration_ms = handle_exit_duration.as_millis(),
+                                                "Error handling EXIT - terminating actor"
+                                            );
+                                            // Error handling EXIT - terminate actor
+                                            let _ = behavior_guard.terminate(&context, &exit_reason).await;
+                                            break;
+                                        }
+                                    }
+                                    drop(behavior_guard);
+                                } else {
+                                    // Actor doesn't trap exits - terminate immediately (Erlang default behavior)
+                                    metrics::counter!("plexspaces_actor_exit_propagated_total",
+                                        "actor_id" => actor_id_for_logging.clone(),
+                                        "from" => from_actor_id.clone(),
+                                        "trapped" => "false"
+                                    ).increment(1);
+                                    tracing::info!(
+                                        actor_id = %actor_id_for_logging,
+                                        from = %from_actor_id,
+                                        reason = ?exit_reason,
+                                        "EXIT from linked actor - not trapping, terminating"
+                                    );
+                                    let mut behavior_guard = behavior.write().await;
+                                    let linked_reason = ExitReason::Linked {
+                                        actor_id: from_actor_id,
+                                        reason: Box::new(exit_reason),
+                                    };
+                                    let _ = behavior_guard.terminate(&context, &linked_reason).await;
+                                    break;
+                                }
+                                continue; // Skip normal message processing for EXIT messages
+                            }
+                        }
+                        
+                        // Process normal message with facets
                         let result = Self::process_message(
-                            message,
+                            message.clone(),
                             &actor_id_for_logging,
                             &behavior,
                             &context,
                             &last_message_time,
                             &facets,
                         ).await;
+
+                        // ACK/NACK message based on processing result
+                        // Only for channels that support ack/nack (Redis, Kafka, etc.)
+                        if result.is_ok() {
+                            // Successful processing - ACK the message
+                            if let Err(e) = mailbox.ack_message(&message).await {
+                                tracing::warn!(
+                                    actor_id = %actor_id_for_logging,
+                                    message_id = %message.id,
+                                    error = %e,
+                                    "Failed to ack message after successful processing"
+                                );
+                            }
+                        } else {
+                            // Failed processing - NACK the message (will retry or DLQ)
+                            let error_msg = result.as_ref().err().map(|e| e.to_string());
+                            if let Err(e) = mailbox.nack_message(&message, error_msg.as_deref()).await {
+                                tracing::warn!(
+                                    actor_id = %actor_id_for_logging,
+                                    message_id = %message.id,
+                                    error = %e,
+                                    "Failed to nack message after failed processing"
+                                );
+                            }
+                        }
 
                         if let Err(e) = &result {
                             // OBSERVABILITY: Error already tracked in process_message
@@ -697,6 +1039,9 @@ impl Actor {
                 }
             }
 
+            // Note: terminate() is called in Actor::stop() before the message loop exits
+            // So we don't need to call it again here. The message loop just exits cleanly.
+            
             // Mark as stopped
             *state.write().await = ActorState::Terminated;
         });
@@ -709,23 +1054,228 @@ impl Actor {
     /// Stop the actor
     pub async fn stop(&mut self) -> Result<(), ActorError> {
         let state = self.state.read().await.clone();
-        if state != ActorState::Active && state != ActorState::Inactive {
+        // Check if already stopped or stopping - return early to avoid calling terminate() multiple times
+        if state == ActorState::Stopping || state == ActorState::Terminated || matches!(state, ActorState::Failed(_)) {
             return Ok(()); // Already stopped or stopping
+        }
+        // Only proceed if Active or Inactive
+        if state != ActorState::Active && state != ActorState::Inactive {
+            return Ok(()); // Invalid state for stopping
         }
         drop(state);
 
-        // Signal shutdown first
+        tracing::info!(actor_id = %self.id, "Stopping actor - starting graceful shutdown");
+
+        // Mark as stopping (prevents new messages from being processed and duplicate terminate() calls)
+        *self.state.write().await = ActorState::Stopping;
+
+        // Step 1: Signal shutdown to message loop (stops processing new messages)
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;
         }
 
-        // Abort the processor task (graceful via shutdown signal above)
+        // Step 2: For non-memory channels, gracefully shutdown mailbox
+        // This will:
+        // - Stop accepting new messages via enqueue()
+        // - Stop receiving new messages from channel backend
+        // - Wait for in-progress messages to complete (with timeout)
+        // - Close the channel
+        if !self.mailbox.is_in_memory() {
+            let timeout = Some(std::time::Duration::from_secs(30));
+            if let Err(e) = self.mailbox.graceful_shutdown(timeout).await {
+                tracing::warn!(
+                    actor_id = %self.id,
+                    error = %e,
+                    "Mailbox graceful shutdown had errors (continuing with actor stop)"
+                );
+            }
+        }
+
+        // Step 3: Wait for message loop to complete (it will exit when shutdown signal is received)
+        // The message loop will complete in-progress messages before exiting
+        // Note: We can't await the JoinHandle directly since we only have AbortHandle
+        // The loop will exit when shutdown signal is received, so we just abort to ensure it stops
         if let Some(handle) = self.processor_handle.take() {
+            // Give message loop a moment to finish current message
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            // Abort the handle (the loop should already be exiting due to shutdown signal)
             handle.abort();
         }
 
-        // Call STATIC lifecycle hook (ALWAYS runs)
-        // This replaces the old optional trait-based lifecycle
+        // Step 4: Facet pre-terminate cleanup (Phase 1: Unified Lifecycle)
+        // Call on_terminate_start() for ALL facets (in priority order, descending)
+        // This allows facets to perform cleanup before actor terminates (e.g., cancel timers, flush journal)
+        let exit_reason = ExitReason::Shutdown;
+        let facets_terminate_start_time = std::time::Instant::now();
+        {
+            let mut facets = self.facets.write().await;
+            // Convert ExitReason to facet's ExitReason
+            // Manual conversion to avoid circular dependency
+            let facet_exit_reason = match &exit_reason {
+                ExitReason::Normal => plexspaces_facet::ExitReason::Normal,
+                ExitReason::Shutdown => plexspaces_facet::ExitReason::Shutdown,
+                ExitReason::Killed => plexspaces_facet::ExitReason::Killed,
+                ExitReason::Error(msg) => plexspaces_facet::ExitReason::Error(msg.clone()),
+                ExitReason::Linked { actor_id, reason } => {
+                    let linked_reason = match reason.as_ref() {
+                        ExitReason::Normal => plexspaces_facet::ExitReason::Normal,
+                        ExitReason::Shutdown => plexspaces_facet::ExitReason::Shutdown,
+                        ExitReason::Killed => plexspaces_facet::ExitReason::Killed,
+                        ExitReason::Error(msg) => plexspaces_facet::ExitReason::Error(msg.clone()),
+                        ExitReason::Linked { .. } => plexspaces_facet::ExitReason::Error("linked".to_string()),
+                    };
+                    plexspaces_facet::ExitReason::Linked {
+                        actor_id: actor_id.clone(),
+                        reason: Box::new(linked_reason),
+                    }
+                }
+            };
+            let facet_errors = facets.call_on_terminate_start(&self.id, &facet_exit_reason).await;
+            
+            if !facet_errors.is_empty() {
+                // Log errors but don't fail shutdown (facets may have non-critical errors)
+                for error in &facet_errors {
+                    metrics::counter!("plexspaces_facet_errors_total",
+                        "facet_type" => "unknown",
+                        "error_type" => format!("{:?}", error),
+                        "operation" => "on_terminate_start"
+                    ).increment(1);
+                    tracing::warn!(
+                        actor_id = %self.id,
+                        error = %error,
+                        "Facet on_terminate_start() returned error (non-fatal)"
+                    );
+                }
+            }
+            
+            let facets_terminate_start_duration = facets_terminate_start_time.elapsed();
+            metrics::histogram!("plexspaces_facet_terminate_start_duration_seconds",
+                "actor_id" => self.id.clone()
+            ).record(facets_terminate_start_duration.as_secs_f64());
+            tracing::debug!(
+                actor_id = %self.id,
+                facet_count = facets.list_facets().len(),
+                duration_ms = facets_terminate_start_duration.as_millis(),
+                "Facet on_terminate_start() called for all facets"
+            );
+        }
+
+        // Step 5: Behavior pre-facet-detachment cleanup (Phase 1: Unified Lifecycle)
+        // Call on_facets_detaching() to allow behavior to clean up before facets are detached
+        let facets_detaching_start = std::time::Instant::now();
+        {
+            let mut behavior = self.behavior.write().await;
+            match behavior.on_facets_detaching(&self.context, &exit_reason).await {
+                Ok(()) => {
+                    let facets_detaching_duration = facets_detaching_start.elapsed();
+                    metrics::histogram!("plexspaces_actor_facets_detaching_duration_seconds",
+                        "actor_id" => self.id.clone()
+                    ).record(facets_detaching_duration.as_secs_f64());
+                    tracing::debug!(
+                        actor_id = %self.id,
+                        duration_ms = facets_detaching_duration.as_millis(),
+                        "Actor on_facets_detaching() completed successfully"
+                    );
+                }
+                Err(e) => {
+                    // Log error but don't fail shutdown (behavior may have non-critical errors)
+                    let facets_detaching_duration = facets_detaching_start.elapsed();
+                    metrics::counter!("plexspaces_actor_facets_detaching_errors_total",
+                        "actor_id" => self.id.clone(),
+                        "error_type" => format!("{:?}", e)
+                    ).increment(1);
+                    tracing::warn!(
+                        actor_id = %self.id,
+                        error = %e,
+                        duration_ms = facets_detaching_duration.as_millis(),
+                        "Actor on_facets_detaching() returned error (non-fatal)"
+                    );
+                }
+            }
+        }
+
+        // Step 6: Actor cleanup - Call terminate() lifecycle hook
+        // This is called even on crash if possible (via panic handling in message loop)
+        // No new messages will be delivered after terminate() starts
+        let terminate_start = std::time::Instant::now();
+        {
+            let mut behavior = self.behavior.write().await;
+            match behavior.terminate(&self.context, &exit_reason).await {
+                Ok(()) => {
+                    let terminate_duration = terminate_start.elapsed();
+                    metrics::counter!("plexspaces_actor_terminate_total",
+                        "actor_id" => self.id.clone(),
+                        "reason" => "shutdown"
+                    ).increment(1);
+                    metrics::histogram!("plexspaces_actor_terminate_duration_seconds",
+                        "actor_id" => self.id.clone()
+                    ).record(terminate_duration.as_secs_f64());
+                    tracing::debug!(
+                        actor_id = %self.id,
+                        duration_ms = terminate_duration.as_millis(),
+                        "Actor terminate() completed successfully"
+                    );
+                }
+                Err(e) => {
+                    let terminate_duration = terminate_start.elapsed();
+                    metrics::counter!("plexspaces_actor_terminate_total",
+                        "actor_id" => self.id.clone(),
+                        "reason" => "shutdown"
+                    ).increment(1);
+                    metrics::histogram!("plexspaces_actor_terminate_duration_seconds",
+                        "actor_id" => self.id.clone()
+                    ).record(terminate_duration.as_secs_f64());
+                    metrics::counter!("plexspaces_actor_terminate_errors_total",
+                        "actor_id" => self.id.clone(),
+                        "error_type" => format!("{:?}", e)
+                    ).increment(1);
+                    tracing::warn!(
+                        actor_id = %self.id,
+                        error = %e,
+                        duration_ms = terminate_duration.as_millis(),
+                        "terminate() returned error (continuing shutdown)"
+                    );
+                    // Don't fail shutdown if terminate() fails - continue with cleanup
+                }
+            }
+        }
+
+        // Step 7: Facet detachment (Phase 1: Unified Lifecycle)
+        // Detach ALL facets in reverse priority order (ascending priority, reverse of attach)
+        let facets_detach_start = std::time::Instant::now();
+        {
+            let mut facets = self.facets.write().await;
+            let facet_errors = facets.detach_all(&self.id).await;
+            
+            if !facet_errors.is_empty() {
+                // Log errors but don't fail shutdown (facets may have non-critical errors)
+                for error in &facet_errors {
+                    metrics::counter!("plexspaces_facet_errors_total",
+                        "facet_type" => "unknown",
+                        "error_type" => format!("{:?}", error),
+                        "operation" => "on_detach"
+                    ).increment(1);
+                    tracing::warn!(
+                        actor_id = %self.id,
+                        error = %error,
+                        "Facet detach() returned error (non-fatal)"
+                    );
+                }
+            }
+            
+            let facets_detach_duration = facets_detach_start.elapsed();
+            metrics::histogram!("plexspaces_facet_detach_all_duration_seconds",
+                "actor_id" => self.id.clone()
+            ).record(facets_detach_duration.as_secs_f64());
+            tracing::debug!(
+                actor_id = %self.id,
+                facet_count = facets.list_facets().len(),
+                duration_ms = facets_detach_duration.as_millis(),
+                "All facets detached"
+            );
+        }
+
+        // Step 8: Call STATIC lifecycle hook (ALWAYS runs) - for backward compatibility
         self.on_deactivate().await?;
 
         // OBSERVABILITY: Track actor termination
@@ -829,7 +1379,8 @@ impl Actor {
         // Coordinate with mailbox for DurabilityFacet graceful shutdown
         if facet_type == "durability" {
             // Flush pending messages to durable backend before detaching
-            self.mailbox.graceful_shutdown().await
+            let timeout = Some(std::time::Duration::from_secs(30));
+            self.mailbox.graceful_shutdown(timeout).await
                 .map_err(|e| ActorError::MailboxError(format!("Failed to gracefully shutdown mailbox: {}", e)))?;
             
             // Record final mailbox stats
@@ -1011,6 +1562,72 @@ impl Actor {
         
         tracing::info!("Actor deactivated successfully");
 
+        Ok(())
+    }
+
+    /// Register actor in ActorRegistry (called AFTER init() succeeds)
+    ///
+    /// ## Purpose
+    /// Registers the actor in ActorRegistry so it can be discovered and messaged.
+    /// Called internally by `start()` after `init()` succeeds to ensure failed actors
+    /// are never registered (prevents memory leaks).
+    ///
+    /// ## Design Notes
+    /// - Registration happens AFTER init() succeeds (as per actors_gaps2.txt design)
+    /// - Supervisor waits for init() to complete before starting next child
+    /// - If init() fails, actor is never registered (no cleanup needed)
+    /// - This is critical for supervisor tree building
+    ///
+    /// ## Returns
+    /// Ok(()) if registration succeeds, ActorError otherwise
+    async fn register_in_registry(&self) -> Result<(), ActorError> {
+        use plexspaces_core::{ActorRegistry, RequestContext, MessageSender};
+        use crate::ActorRef;
+        use std::sync::Arc;
+        
+        // Get ActorRegistry from ServiceLocator
+        if let Some(registry) = self.context.service_locator
+            .get_service::<ActorRegistry>().await
+        {
+            let ctx = RequestContext::new_without_auth(
+                self.context.tenant_id.clone(),
+                self.context.namespace.clone(),
+            );
+
+            // Create ActorRef for registration
+            let actor_ref = ActorRef::local(
+                self.id.clone(),
+                self.mailbox.clone(),
+                self.context.service_locator.clone(),
+            );
+
+            // Get actor_type from context metadata or config
+            // Note: ActorConfig doesn't have actor_type field, so we use None for now
+            // Actor type can be passed separately when spawning via ActorFactory
+            let actor_type: Option<String> = None;
+
+            // Register actor in registry
+            registry.register_actor(
+                &ctx,
+                self.id.clone(),
+                Arc::new(actor_ref) as Arc<dyn MessageSender>,
+                actor_type,
+            ).await;
+
+            // OBSERVABILITY: Log successful registration
+            tracing::debug!(
+                actor_id = %self.id,
+                "Actor registered in ActorRegistry (after init() succeeded)"
+            );
+        } else {
+            // Registry not available - log warning but don't fail
+            // This allows actors to be created in test environments without full service setup
+            tracing::warn!(
+                actor_id = %self.id,
+                "ActorRegistry not available in ServiceLocator - actor not registered"
+            );
+        }
+        
         Ok(())
     }
 

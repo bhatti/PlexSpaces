@@ -206,8 +206,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service_locator = node.service_locator();
     
     // Wait for services to be registered
+    use plexspaces_core::service_locator::service_names;
     for _ in 0..10 {
-        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
+        if service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
             break;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

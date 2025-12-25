@@ -27,6 +27,11 @@
 mod r#mod;
 pub use r#mod::*;
 
+// Facet Manager - centralized facet management
+// Always available (no feature gate) - uses String for IDs to avoid circular dependency
+pub mod facet_manager;
+pub use facet_manager::FacetManager;
+
 // Capabilities - facet implementations
 pub mod capabilities;
 

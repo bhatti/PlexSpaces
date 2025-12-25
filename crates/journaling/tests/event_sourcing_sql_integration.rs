@@ -153,8 +153,8 @@ use plexspaces_facet::Facet;
 
         // First page
         let page_request = PageRequest {
-            page_size: 3,
-            page_token: String::new(),
+            offset: 0,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -166,12 +166,12 @@ use plexspaces_facet::Facet;
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].sequence, 1);
-        assert!(!page_response.next_page_token.is_empty());
+        assert!(page_response.has_next);
 
         // Second page
         let page_request2 = PageRequest {
-            page_size: 3,
-            page_token: page_response.next_page_token,
+            offset: page_response.offset + page_response.limit,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -183,7 +183,7 @@ use plexspaces_facet::Facet;
 
         assert_eq!(events2.len(), 3);
         assert_eq!(events2[0].sequence, 4);
-        assert!(!page_response2.next_page_token.is_empty());
+        assert!(page_response2.has_next);
     }
 
     #[tokio::test]
@@ -207,8 +207,8 @@ use plexspaces_facet::Facet;
 
         // First page
         let page_request = PageRequest {
-            page_size: 2,
-            page_token: String::new(),
+            offset: 0,
+            limit: 2,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -221,12 +221,13 @@ use plexspaces_facet::Facet;
         assert_eq!(history.events.len(), 2);
         assert_eq!(history.latest_sequence, 5);
         assert!(history.page_response.is_some());
-        assert!(!history.page_response.as_ref().unwrap().next_page_token.is_empty());
+        assert!(history.page_response.as_ref().unwrap().has_next);
 
         // Second page
+        let page_response = history.page_response.as_ref().unwrap();
         let page_request2 = PageRequest {
-            page_size: 2,
-            page_token: history.page_response.as_ref().unwrap().next_page_token.clone(),
+            offset: page_response.offset + page_response.limit,
+            limit: 2,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -420,8 +421,8 @@ use plexspaces_facet::Facet;
 
         // Replay from sequence 5 with pagination
         let page_request = PageRequest {
-            page_size: 3,
-            page_token: String::new(),
+            offset: 0,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };

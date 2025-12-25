@@ -14,8 +14,12 @@ PlexSpaces provides **durable execution** for actors through journaling and dete
 - **Checkpointing**: Periodic state snapshots for fast recovery (90%+ faster than full replay)
 - **Side Effect Caching**: External calls are cached during replay to prevent duplicates
 - **Exactly-Once Semantics**: Guarantees no duplicate side effects or state corruption
-- **Channel-Based Mailbox**: Durable channels (Kafka, Redis) can serve as actor mailboxes with ACK/NACK
+- **Channel-Based Mailbox**: Durable channels (Kafka, Redis, SQLite, NATS) can serve as actor mailboxes with ACK/NACK
+- **UDP Channels**: Best-effort multicast channels for low-latency cluster-wide messaging (no ACK/NACK)
 - **Dead Letter Queue (DLQ)**: Automatic handling of poisonous messages that fail repeatedly
+- **Message Recovery**: Unacked messages are automatically recovered on restart
+- **Graceful Shutdown**: Channels stop accepting new messages but complete in-progress processing
+- **Observability**: Comprehensive observability helpers for metrics and logging
 
 ### Design Principles
 
@@ -289,6 +293,71 @@ sequenceDiagram
         Note over DLQ: Message moved to DLQ<br/>for manual inspection
     end
 ```
+
+### Shutdown and Restart Recovery
+
+Durable channels support graceful shutdown and automatic message recovery:
+
+**Graceful Shutdown** (for non-memory channels):
+- **Stop Accepting New Messages**: When `graceful_shutdown()` is called, the mailbox stops accepting new messages via `enqueue()`
+- **Complete In-Progress Messages**: The mailbox waits for all in-progress messages to complete (with configurable timeout)
+- **Stop Receiving from Channel**: The mailbox stops receiving new messages from the channel backend
+- **Close Channel**: The underlying channel is explicitly closed
+- **ACK/NACK In-Progress**: Messages that are currently being processed can still be ACKed/NACKed
+- **In-Memory Channels**: Continue accepting messages during shutdown (no persistence needed)
+
+**Actor Integration**:
+- When `Actor::stop()` is called, it signals the actor's message loop to stop processing new messages
+- For non-memory channels, `Actor::stop()` calls `mailbox.graceful_shutdown()` with a 30-second timeout
+- The actor completes all in-progress message processing before terminating
+- Replies are sent for completed messages before shutdown
+
+**Restart Recovery**:
+- Durable backends (Redis, SQLite, Kafka) automatically recover unacked messages
+- On channel recreation, unacked messages are redelivered
+- Processing continues from the next unacked message
+- No message loss for durable backends
+- ACKed messages are not redelivered (exactly-once semantics)
+
+**Example Flow**:
+1. Channel receives messages 1-10
+2. Processes messages 1-3 and ACKs them
+3. Receives messages 4-5 but crashes before ACK
+4. On restart, channel recovers messages 4-5
+5. Processing continues with messages 4-5, then 6-10
+
+**Implementation Details**:
+- `Mailbox::graceful_shutdown(timeout)` orchestrates the shutdown sequence
+- `shutdown_flag` prevents new message acceptance for non-memory channels
+- `in_progress_count` tracks active message processing
+- Channel `close()` method stops accepting/receiving messages
+- Timeout ensures shutdown completes even if in-progress messages hang
+
+See [Shutdown/Restart Tests](../crates/channel/tests/shutdown_restart_test.rs) and [Shutdown Tests](../crates/mailbox/tests/shutdown_tests.rs) for comprehensive examples.
+
+### Observability
+
+All channel operations support comprehensive observability:
+
+- **Structured Logging**: Consistent logging with channel name, message ID, backend type
+- **Metrics Ready**: Helpers designed for easy integration with metrics systems
+- **Error Tracking**: Automatic error logging with context
+- **Latency Measurement**: Built-in latency tracking for operations
+
+```rust
+use plexspaces_channel::observability::*;
+
+// Record ACK
+record_channel_ack("my-channel", &message_id, "redis");
+
+// Record NACK with retry info
+record_channel_nack("my-channel", &message_id, true, 2, "redis");
+
+// Record DLQ event
+record_channel_dlq("my-channel", &message_id, 3, "max_retries_exceeded", "redis");
+```
+
+See [Channel Observability Helpers](../archived_docs/CHANNEL_OBSERVABILITY_HELPERS.md) for details.
 
 ### Example: Channel-Based Mailbox
 

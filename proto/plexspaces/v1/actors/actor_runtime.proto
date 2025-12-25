@@ -688,9 +688,65 @@ enum ActorState {
   ACTOR_STATE_INACTIVE = 3;      // Actor is suspended/not processing (replaces "Suspended")
   ACTOR_STATE_ACTIVATING = 4;    // Actor is activating (loading state, running on_activate)
   ACTOR_STATE_DEACTIVATING = 5;  // Actor is deactivating (saving state, running on_deactivate)
-  ACTOR_STATE_MIGRATING = 6;     // Actor is migrating to another node
-  ACTOR_STATE_FAILED = 7;        // Actor has crashed (error message in Actor.error_message field)
-  ACTOR_STATE_TERMINATED = 8;    // Actor has permanently stopped (replaces "Stopped")
+  ACTOR_STATE_STOPPING = 6;      // Actor is stopping (shutdown in progress)
+  ACTOR_STATE_MIGRATING = 7;     // Actor is migrating to another node
+  ACTOR_STATE_FAILED = 8;        // Actor has crashed (error message in Actor.error_message field)
+  ACTOR_STATE_TERMINATED = 9;    // Actor has permanently stopped (replaces "Stopped")
+}
+
+// Exit reason for actor termination (Erlang/OTP-style)
+//
+// ## Purpose
+// Defines why an actor terminated, enabling proper supervision decisions
+// and link/monitor propagation semantics.
+//
+// ## Erlang Equivalent
+// Maps to Erlang's exit reasons:
+// - normal: Normal termination (not an error)
+// - shutdown: Graceful shutdown requested
+// - kill: Forcefully killed
+// - {error, Reason}: Error with message
+// - {linked, Pid, Reason}: Linked actor died
+//
+// ## Usage
+// - Used in Actor::terminate() and Actor::handle_exit() lifecycle hooks
+// - Propagated to linked actors (if trap_exit=false, causes cascading crash)
+// - Used by supervisors to decide restart policies
+enum ExitReason {
+  EXIT_REASON_UNSPECIFIED = 0;
+  EXIT_REASON_NORMAL = 1;        // Normal termination (not an error)
+  EXIT_REASON_SHUTDOWN = 2;      // Shutdown requested (graceful)
+  EXIT_REASON_KILLED = 3;        // Killed forcefully
+  EXIT_REASON_ERROR = 4;        // Error with message (error_message field contains details)
+  EXIT_REASON_LINKED = 5;        // Linked actor died (linked_actor_id and linked_reason fields)
+}
+
+// Exit action when handling EXIT from linked actor
+//
+// ## Purpose
+// Determines how an actor responds to EXIT signal from a linked actor.
+// Only relevant when ActorContext.trap_exit = true.
+//
+// ## Erlang Equivalent
+// Maps to Erlang's handle_exit behavior:
+// - Propagate: Actor will also terminate (default link behavior)
+// - Handle: Actor continues running (traps the exit)
+enum ExitAction {
+  EXIT_ACTION_UNSPECIFIED = 0;
+  EXIT_ACTION_PROPAGATE = 1;     // Propagate exit - this actor will also terminate
+  EXIT_ACTION_HANDLE = 2;        // Handle exit - this actor continues running
+}
+
+// Exit reason details (for EXIT_REASON_ERROR and EXIT_REASON_LINKED)
+message ExitReasonDetails {
+  // Error message (for EXIT_REASON_ERROR)
+  string error_message = 1 [(buf.validate.field).string.max_len = 2048];
+
+  // Linked actor ID (for EXIT_REASON_LINKED)
+  string linked_actor_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // Linked actor's exit reason (for EXIT_REASON_LINKED)
+  ExitReason linked_reason = 3;
 }
 
 // Actor configuration

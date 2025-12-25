@@ -20,8 +20,8 @@ async fn test_node_creates_service_locator() {
     // Wait for services to be registered - poll until they're available
     let registration_future = async {
         loop {
-            let actor_registry: Option<Arc<ActorRegistry>> = service_locator.get_service().await;
-            let reply_tracker: Option<Arc<ReplyTracker>> = service_locator.get_service().await;
+            let actor_registry: Option<Arc<ActorRegistry>> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await;
+            let reply_tracker: Option<Arc<ReplyTracker>> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::REPLY_TRACKER).await;
             if actor_registry.is_some() && reply_tracker.is_some() {
                 return (actor_registry, reply_tracker);
             }
@@ -135,6 +135,6 @@ async fn test_node_service_locator_shutdown() {
     service_locator.shutdown().await;
     
     // Verify services are still accessible after shutdown
-    let actor_registry: Option<Arc<ActorRegistry>> = service_locator.get_service().await;
+    let actor_registry: Option<Arc<ActorRegistry>> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await;
     assert!(actor_registry.is_some());
 }

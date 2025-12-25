@@ -202,7 +202,11 @@ impl VirtualActorManager {
 }
 
 // Implement Service trait so VirtualActorManager can be registered in ServiceLocator
-impl Service for VirtualActorManager {}
+impl Service for VirtualActorManager {
+    fn service_name(&self) -> String {
+        crate::service_locator::service_names::VIRTUAL_ACTOR_MANAGER.to_string()
+    }
+}
 
 
 

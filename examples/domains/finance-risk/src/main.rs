@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = Arc::new(
         NodeBuilder::new("finance-risk-node")
             .with_listen_address("0.0.0.0:9000")
-            .build(),
+            .build().await,
     );
     info!("✅ Node created: finance-risk-node");
     println!();

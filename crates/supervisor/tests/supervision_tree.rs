@@ -37,12 +37,23 @@ use tokio::time::sleep;
 
 use plexspaces_actor::Actor;
 use plexspaces_behavior::MockBehavior;
-use plexspaces_core::ActorId;
+use plexspaces_core::{ActorId, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_persistence::MemoryJournal;
 use plexspaces_supervisor::{
     ActorSpec, ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
 };
+
+/// Helper function to create a supervisor with ServiceLocator
+fn create_supervisor_with_locator(
+    id: String,
+    strategy: SupervisionStrategy,
+) -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
+    let service_locator = Arc::new(ServiceLocator::new());
+    let (mut supervisor, event_rx) = Supervisor::new(id, strategy);
+    supervisor = supervisor.with_service_locator(service_locator);
+    (supervisor, event_rx)
+}
 
 /// Helper function to create an ActorSpec with mailbox created on a separate thread
 /// This avoids blocking the async runtime
@@ -104,24 +115,27 @@ fn create_actor_spec(
 #[tokio::test]
 async fn test_two_level_supervision_tree() {
     // Create root supervisor (OneForOne)
-    let (root_supervisor, mut root_events) = Supervisor::new(
+    let service_locator = Arc::new(ServiceLocator::new());
+    let (mut root_supervisor, mut root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
         },
     );
+    root_supervisor = root_supervisor.with_service_locator(service_locator.clone());
 
     println!("✅ Root supervisor created");
 
     // Create child supervisor (OneForAll)
-    let (child_supervisor, mut child_events) = Supervisor::new(
+    let (mut child_supervisor, mut child_events) = Supervisor::new(
         "child-supervisor".to_string(),
         SupervisionStrategy::OneForAll {
             max_restarts: 3,
             within_seconds: 60,
         },
     );
+    child_supervisor = child_supervisor.with_service_locator(service_locator.clone());
 
     println!("✅ Child supervisor created");
 
@@ -175,7 +189,7 @@ async fn test_two_level_supervision_tree() {
 #[tokio::test]
 async fn test_three_level_supervision_tree() {
     // Create root supervisor
-    let (root_supervisor, mut root_events) = Supervisor::new(
+    let (root_supervisor, mut root_events) = create_supervisor_with_locator(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
@@ -184,7 +198,7 @@ async fn test_three_level_supervision_tree() {
     );
 
     // Create 2 mid-level supervisors
-    let (mid1_supervisor, mid1_events) = Supervisor::new(
+    let (mid1_supervisor, mid1_events) = create_supervisor_with_locator(
         "mid-supervisor-1".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
@@ -192,7 +206,7 @@ async fn test_three_level_supervision_tree() {
         },
     );
 
-    let (mid2_supervisor, mid2_events) = Supervisor::new(
+    let (mid2_supervisor, mid2_events) = create_supervisor_with_locator(
         "mid-supervisor-2".to_string(),
         SupervisionStrategy::OneForAll {
             max_restarts: 3,
@@ -290,7 +304,7 @@ async fn test_three_level_supervision_tree() {
 #[tokio::test]
 async fn test_failure_isolation_across_branches() {
     // Create root supervisor with OneForOne strategy (isolates branches)
-    let (root_supervisor, mut root_events) = Supervisor::new(
+    let (root_supervisor, mut root_events) = create_supervisor_with_locator(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
@@ -299,7 +313,7 @@ async fn test_failure_isolation_across_branches() {
     );
 
     // Create Branch1 with OneForAll strategy (restarts all children on failure)
-    let (branch1_supervisor, branch1_events) = Supervisor::new(
+    let (branch1_supervisor, branch1_events) = create_supervisor_with_locator(
         "branch1-supervisor".to_string(),
         SupervisionStrategy::OneForAll {
             max_restarts: 5,
@@ -308,7 +322,7 @@ async fn test_failure_isolation_across_branches() {
     );
 
     // Create Branch2 with OneForOne strategy (only restarts failed child)
-    let (branch2_supervisor, branch2_events) = Supervisor::new(
+    let (branch2_supervisor, branch2_events) = create_supervisor_with_locator(
         "branch2-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
@@ -407,7 +421,7 @@ async fn test_failure_isolation_across_branches() {
 #[tokio::test]
 async fn test_cascading_shutdown() {
     // Create root supervisor
-    let (mut root_supervisor, mut root_events) = Supervisor::new(
+    let (mut root_supervisor, mut root_events) = create_supervisor_with_locator(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
@@ -416,7 +430,7 @@ async fn test_cascading_shutdown() {
     );
 
     // Create 2 mid-level supervisors
-    let (mid1_supervisor, mid1_events) = Supervisor::new(
+    let (mid1_supervisor, mid1_events) = create_supervisor_with_locator(
         "mid-supervisor-1".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
@@ -424,7 +438,7 @@ async fn test_cascading_shutdown() {
         },
     );
 
-    let (mid2_supervisor, mid2_events) = Supervisor::new(
+    let (mid2_supervisor, mid2_events) = create_supervisor_with_locator(
         "mid-supervisor-2".to_string(),
         SupervisionStrategy::OneForAll {
             max_restarts: 3,
@@ -473,9 +487,34 @@ async fn test_cascading_shutdown() {
 
     println!("✅ Three-level tree created");
 
-    // Consume initial ChildStarted events
-    let _ = root_events.recv().await; // mid-supervisor-1 started
-    let _ = root_events.recv().await; // mid-supervisor-2 started
+    // Consume initial ChildStarted events for supervisors
+    let mut supervisor_started = 0;
+    while supervisor_started < 2 {
+        if let Some(event) = root_events.recv().await {
+            match event {
+                SupervisorEvent::ChildStarted(id) => {
+                    let id_str = id.to_string();
+                    if id_str == "mid-supervisor-1" || id_str == "mid-supervisor-2" {
+                        supervisor_started += 1;
+                        println!("✅ Supervisor {} started", id_str);
+                    }
+                }
+                _ => {
+                    // Consume other events (e.g., forwarded ChildStarted for actors)
+                }
+            }
+        }
+    }
+
+    // Consume any remaining forwarded events from child supervisors (ChildStarted for actors)
+    // These are forwarded from mid-level supervisors when they add actors
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    while let Ok(Some(_)) = tokio::time::timeout(
+        tokio::time::Duration::from_millis(50),
+        root_events.recv()
+    ).await {
+        // Drain any remaining forwarded events
+    }
 
     // Shutdown root supervisor (should cascade to all children)
     root_supervisor.shutdown().await.unwrap();
@@ -483,25 +522,46 @@ async fn test_cascading_shutdown() {
 
     // Verify ChildStopped events for both supervisors
     // Events may arrive in reverse order due to shutdown order
+    // Use timeout to avoid hanging if events don't arrive
     let mut stopped_ids = Vec::new();
-    for _ in 0..2 {
-        if let Some(event) = root_events.recv().await {
-            match event {
-                SupervisorEvent::ChildStopped(id) => {
-                    stopped_ids.push(id);
-                    println!(
-                        "✅ Received ChildStopped for {}",
-                        stopped_ids.last().unwrap()
-                    );
+    let timeout = tokio::time::Duration::from_secs(5);
+    let mut attempts = 0;
+    const MAX_ATTEMPTS: usize = 10; // Allow for forwarded events from child supervisors
+    
+    while stopped_ids.len() < 2 && attempts < MAX_ATTEMPTS {
+        match tokio::time::timeout(timeout, root_events.recv()).await {
+            Ok(Some(SupervisorEvent::ChildStopped(id))) => {
+                let id_str = id.to_string();
+                // Only count supervisor IDs, ignore forwarded actor events
+                if id_str == "mid-supervisor-1" || id_str == "mid-supervisor-2" {
+                    stopped_ids.push(id_str.clone());
+                    println!("✅ Received ChildStopped for supervisor {}", id_str);
+                } else {
+                    println!("⚠️ Received ChildStopped for non-supervisor: {}", id_str);
                 }
-                _ => {}
+            }
+            Ok(Some(other)) => {
+                println!("⚠️ Received unexpected event: {:?}", other);
+            }
+            Ok(None) => {
+                println!("⚠️ Event channel closed");
+                break;
+            }
+            Err(_) => {
+                println!("⚠️ Timeout waiting for events");
+                break;
             }
         }
+        attempts += 1;
     }
+    
+    println!("📊 Collected stopped_ids: {:?}", stopped_ids);
 
     // Verify both supervisors were stopped
-    assert!(stopped_ids.contains(&"mid-supervisor-1".to_string()));
-    assert!(stopped_ids.contains(&"mid-supervisor-2".to_string()));
+    assert!(stopped_ids.contains(&"mid-supervisor-1".to_string()), 
+            "Expected mid-supervisor-1 in stopped_ids, got: {:?}", stopped_ids);
+    assert!(stopped_ids.contains(&"mid-supervisor-2".to_string()),
+            "Expected mid-supervisor-2 in stopped_ids, got: {:?}", stopped_ids);
 
     println!("✅ Test passed: Cascading shutdown worked correctly");
 }

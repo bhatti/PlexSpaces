@@ -23,7 +23,7 @@
 //! and extracting capacity information from node metrics.
 //!
 //! ## Design
-//! - Queries ObjectRegistry for nodes (ObjectType::ObjectTypeService)
+//! - Queries ObjectRegistry for nodes (ObjectType::ObjectTypeNode)
 //! - Extracts capacity from metrics map (sent via heartbeat)
 //! - Provides methods to get node capacities, filter by labels, etc.
 
@@ -78,7 +78,7 @@ impl CapacityTracker {
     ) -> CapacityTrackerResult<Option<NodeCapacity>> {
         let registration = self
             .registry
-            .lookup(ctx, ObjectType::ObjectTypeService, node_id)
+            .lookup(ctx, ObjectType::ObjectTypeNode, node_id)
             .await
             .map_err(|e| CapacityTrackerError::RegistryError(e.to_string()))?;
 
@@ -105,16 +105,17 @@ impl CapacityTracker {
     ) -> CapacityTrackerResult<HashMap<String, NodeCapacity>> {
         // Discover all nodes (registered as services)
         // For capacity tracking, use internal context to see all nodes
-        let internal_ctx = RequestContext::internal();
+        // Use the provided context (which should be RequestContext::internal() for tests)
         let nodes = self
             .registry
             .discover(
-                &internal_ctx,
-                Some(ObjectType::ObjectTypeService),
+                ctx,
+                Some(ObjectType::ObjectTypeNode),
                 None, // object_category
                 None, // capabilities
                 None, // labels (we'll filter by node labels separately)
                 None, // health_status
+                0, // offset
                 1000, // limit
             )
             .await
@@ -277,7 +278,7 @@ mod tests {
         ObjectRegistration {
             object_id: node_id.to_string(),
             object_name: node_id.to_string(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             version: "1.0.0".to_string(),
             tenant_id: "internal".to_string(),
             namespace: "system".to_string(),
@@ -421,6 +422,12 @@ mod tests {
         let registration2 = create_test_registration("node-2", metrics2, labels2);
         registry.register(&ctx, registration2).await.unwrap();
 
+        // Verify nodes are registered before creating tracker
+        let node1 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-1").await.unwrap();
+        let node2 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-2").await.unwrap();
+        assert!(node1.is_some(), "node-1 should be registered");
+        assert!(node2.is_some(), "node-2 should be registered");
+        
         let tracker = CapacityTracker::new(registry);
         let capacities = tracker.list_node_capacities(&ctx, None, None).await.unwrap();
 
@@ -452,6 +459,12 @@ mod tests {
         let registration2 = create_test_registration("node-2", metrics2, labels2);
         registry.register(&ctx, registration2).await.unwrap();
 
+        // Verify nodes are registered before creating tracker
+        let node1 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-1").await.unwrap();
+        let node2 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-2").await.unwrap();
+        assert!(node1.is_some(), "node-1 should be registered");
+        assert!(node2.is_some(), "node-2 should be registered");
+        
         let tracker = CapacityTracker::new(registry);
 
         // Filter by zone=us-west
@@ -493,6 +506,12 @@ mod tests {
         let registration2 = create_test_registration("node-2", metrics2, HashMap::new());
         registry.register(&ctx, registration2).await.unwrap();
 
+        // Verify nodes are registered before creating tracker
+        let node1 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-1").await.unwrap();
+        let node2 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-2").await.unwrap();
+        assert!(node1.is_some(), "node-1 should be registered");
+        assert!(node2.is_some(), "node-2 should be registered");
+        
         let tracker = CapacityTracker::new(registry);
 
         // Filter by minimum 4 CPU cores

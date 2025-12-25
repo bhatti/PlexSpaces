@@ -53,6 +53,9 @@ use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 use tonic_health::server::{health_reporter, HealthReporter};
 
+// Make PlexSpacesHealthReporter implement Service trait for ServiceLocator registration
+impl plexspaces_core::Service for PlexSpacesHealthReporter {}
+
 /// PlexSpaces health reporter with K8s probe support
 ///
 /// ## Purpose
@@ -120,6 +123,10 @@ pub struct PlexSpacesHealthReporter {
     
     /// Shutdown flag to prevent new requests
     shutdown_flag: Arc<tokio::sync::RwLock<bool>>,
+    
+    /// ServiceLocator reference (for setting shutdown flag)
+    /// This allows HealthService to be the source of truth for shutdown
+    service_locator: Option<Arc<plexspaces_core::ServiceLocator>>,
 }
 
 impl PlexSpacesHealthReporter {
@@ -139,7 +146,24 @@ impl PlexSpacesHealthReporter {
     ///     .serve(addr).await?;
     /// ```
     pub fn new() -> (Self, impl tonic::server::NamedService) {
-        Self::with_config(Default::default())
+        Self::with_config_and_service_locator(Default::default(), None)
+    }
+    
+    /// Create health reporter with ServiceLocator reference
+    ///
+    /// ## Arguments
+    /// * `service_locator` - ServiceLocator to update shutdown flag on
+    ///
+    /// ## Returns
+    /// Tuple of health reporter and gRPC service
+    ///
+    /// ## Note
+    /// Prefer using `health_service_helpers::create_and_register_health_service()`
+    /// which handles both creation and registration in ServiceLocator.
+    pub fn with_service_locator(
+        service_locator: Arc<plexspaces_core::ServiceLocator>,
+    ) -> (Self, impl tonic::server::NamedService) {
+        Self::with_config_and_service_locator(Default::default(), Some(service_locator))
     }
 
     /// Create health reporter with custom configuration
@@ -150,6 +174,21 @@ impl PlexSpacesHealthReporter {
     /// ## Returns
     /// Tuple of health reporter and gRPC service
     pub fn with_config(config: HealthProbeConfig) -> (Self, impl tonic::server::NamedService) {
+        Self::with_config_and_service_locator(config, None)
+    }
+    
+    /// Create health reporter with custom configuration and ServiceLocator
+    ///
+    /// ## Arguments
+    /// * `config` - Health probe configuration (thresholds, timeouts, etc.)
+    /// * `service_locator` - Optional ServiceLocator to update shutdown flag on
+    ///
+    /// ## Returns
+    /// Tuple of health reporter and gRPC service
+    pub fn with_config_and_service_locator(
+        config: HealthProbeConfig,
+        service_locator: Option<Arc<plexspaces_core::ServiceLocator>>,
+    ) -> (Self, impl tonic::server::NamedService) {
         let (reporter, service) = health_reporter();
 
         let initial_state = NodeHealthState {
@@ -173,6 +212,7 @@ impl PlexSpacesHealthReporter {
             startup_checkers: Arc::new(RwLock::new(Vec::new())),
             service_status: Arc::new(RwLock::new(std::collections::HashMap::new())),
             shutdown_flag: Arc::new(tokio::sync::RwLock::new(false)),
+            service_locator,
         };
 
         (health_reporter, service)
@@ -239,17 +279,31 @@ impl PlexSpacesHealthReporter {
     ///
     /// ## Returns
     /// Tuple of (is_ready, reason_if_not_ready)
+    ///
+    /// ## Design Notes
+    /// - Critical dependencies must be healthy for readiness
+    /// - Non-critical dependencies can fail (degraded mode) but readiness remains true
+    /// - Circuit breakers track dependency state transitions
     pub async fn check_readiness(&self) -> (bool, String) {
         // Record metrics
         metrics::counter!("plexspaces_node_readiness_checks_total").increment(1);
         let checkers = self.readiness_checkers.read().await;
         let ctx = HealthCheckContext::default();
 
-        // Check critical dependencies only
+        // Track degraded dependencies
+        let mut degraded_dependencies = Vec::new();
+
+        // Check all dependencies (critical and non-critical)
         for checker in checkers.iter() {
-            if checker.is_critical() {
-                if let Err(e) = checker.check(&ctx).await {
+            let check_result = checker.check(&ctx).await;
+            
+            if let Err(e) = check_result {
+                if checker.is_critical() {
+                    // Critical dependency failed - node not ready
                     return (false, format!("Critical dependency '{}' unhealthy: {}", checker.name(), e));
+                } else {
+                    // Non-critical dependency failed - degraded mode
+                    degraded_dependencies.push(checker.name().to_string());
                 }
             }
         }
@@ -268,6 +322,14 @@ impl PlexSpacesHealthReporter {
         };
         if state.in_flight_requests > threshold {
             return (false, format!("Queue depth {} exceeds threshold {}", state.in_flight_requests, threshold));
+        }
+
+        // If we have degraded dependencies, still ready but note degraded mode
+        if !degraded_dependencies.is_empty() {
+            let reason = format!("Degraded mode: non-critical dependencies unhealthy: {}", degraded_dependencies.join(", "));
+            // Still return true (ready) but with degraded reason for observability
+            // The detailed health check will show DEGRADED status
+            return (true, reason);
         }
 
         (true, String::new())
@@ -313,6 +375,7 @@ impl PlexSpacesHealthReporter {
         let readiness_checkers = self.readiness_checkers.read().await;
         for checker in readiness_checkers.iter() {
             if include_non_critical || checker.is_critical() {
+                // run_health_check already includes circuit breaker info via trait method
                 let check_result = run_health_check(checker.as_ref(), &ctx).await;
                 dependency_checks.push(check_result);
             }
@@ -452,9 +515,16 @@ impl PlexSpacesHealthReporter {
         drop(state);
 
         // Set shutdown flag to prevent new requests
+        // This is the source of truth for shutdown - update both local flag and ServiceLocator
         {
             let mut flag = self.shutdown_flag.write().await;
             *flag = true;
+        }
+        
+        // Also update ServiceLocator shutdown flag (if registered)
+        if let Some(ref service_locator) = self.service_locator {
+            service_locator.set_shutdown(true).await;
+            tracing::info!("ServiceLocator shutdown flag set via HealthService");
         }
         
         // Update all service statuses to NOT_SERVING (K8s removes from service immediately)
@@ -867,6 +937,7 @@ mod tests {
                 default_namespace: String::new(),
                 default_tenant: String::new(),
             }),
+            circuit_breaker_config: None,
             monitoring_interval: Some(prost_types::Duration {
                 seconds: 5,
                 nanos: 0,
@@ -900,6 +971,7 @@ mod tests {
                 default_namespace: String::new(),
                 default_tenant: String::new(),
             }),
+            circuit_breaker_config: None,
             monitoring_interval: None,
             drain_timeout: None,
             queue_depth_threshold: 10, // Low threshold

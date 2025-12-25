@@ -244,6 +244,7 @@ mod tests {
                         nanos: 0,
                     }),
                     supervisor: None,
+                    facets: vec![], // Phase 1: Unified Lifecycle - facets support
                 },
                 ChildSpec {
                     id: "worker2".to_string(),
@@ -256,6 +257,7 @@ mod tests {
                         nanos: 0,
                     }),
                     supervisor: None,
+                    facets: vec![], // Phase 1: Unified Lifecycle - facets support
                 },
             ],
         }
@@ -368,6 +370,7 @@ mod tests {
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
             supervisor: None,
+            facets: vec![], // Phase 1: Unified Lifecycle - facets support
         };
 
         let policy = SupervisorBuilder::convert_restart_policy(&child_spec);
@@ -389,6 +392,7 @@ mod tests {
             restart: ProtoRestartPolicy::RestartPolicyTransient as i32,
             shutdown_timeout: None,
             supervisor: None,
+            facets: vec![], // Phase 1: Unified Lifecycle - facets support
         };
 
         let policy = SupervisorBuilder::convert_restart_policy(&child_spec);
@@ -410,6 +414,7 @@ mod tests {
             restart: ProtoRestartPolicy::RestartPolicyTemporary as i32,
             shutdown_timeout: None,
             supervisor: None,
+            facets: vec![], // Phase 1: Unified Lifecycle - facets support
         };
 
         let policy = SupervisorBuilder::convert_restart_policy(&child_spec);
@@ -431,6 +436,7 @@ mod tests {
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
             supervisor: None,
+            facets: vec![], // Phase 1: Unified Lifecycle - facets support
         };
 
         let child_type = SupervisorBuilder::convert_child_type(&child_spec);
@@ -452,6 +458,7 @@ mod tests {
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
             supervisor: None,
+            facets: vec![], // Phase 1: Unified Lifecycle - facets support
         };
 
         let child_type = SupervisorBuilder::convert_child_type(&child_spec);
@@ -481,6 +488,7 @@ mod tests {
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
             supervisor: None,
+            facets: vec![], // Phase 1: Unified Lifecycle - facets support
         };
 
         let result = SupervisorBuilder::add_child_to_supervisor(&supervisor, &child_spec).await;
@@ -510,6 +518,7 @@ mod tests {
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
             supervisor: None,
+            facets: vec![], // Phase 1: Unified Lifecycle - facets support
         };
 
         let result = SupervisorBuilder::add_child_to_supervisor(&supervisor, &child_spec).await;

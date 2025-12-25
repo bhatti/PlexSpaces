@@ -211,6 +211,26 @@ enum ObjectType {
   // object_category: "firecracker", "qemu", etc.
   // grpc_address: VM's API socket path or management endpoint
   OBJECT_TYPE_VM = 4;
+
+  // Application: PlexSpaces application (Erlang-style)
+  // Examples: calculator-app, order-processing-app
+  // object_category: Application name (e.g., "calculator")
+  // grpc_address: Node's ApplicationService endpoint
+  // node_id: Node where application is deployed
+  OBJECT_TYPE_APPLICATION = 5;
+
+  // Workflow: Workflow execution instance
+  // Examples: workflow-exec-123, order-workflow-456
+  // object_category: Workflow definition ID
+  // grpc_address: Node's WorkflowService endpoint
+  // node_id: Node where workflow is running
+  OBJECT_TYPE_WORKFLOW = 6;
+
+  // Node: PlexSpaces node instance
+  // Examples: node-1, k8s-pod-abc123
+  // object_category: "Node"
+  // grpc_address: Node's gRPC endpoint
+  OBJECT_TYPE_NODE = 7;
 }
 
 // Health status (common across all object types)

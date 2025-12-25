@@ -61,7 +61,7 @@ use object_store::{
     path::Path as ObjectPath,
     ObjectMeta, ObjectStore,
 };
-use plexspaces_core::RequestContext;
+use plexspaces_common::RequestContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};

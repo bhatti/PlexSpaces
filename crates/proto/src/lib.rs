@@ -129,6 +129,12 @@ pub mod channel {
     }
 }
 
+pub mod dashboard {
+    pub mod v1 {
+        include!("generated/plexspaces.dashboard.v1.rs");
+    }
+}
+
 pub mod pool {
     pub mod v1 {
         include!("generated/plexspaces.pool.v1.rs");

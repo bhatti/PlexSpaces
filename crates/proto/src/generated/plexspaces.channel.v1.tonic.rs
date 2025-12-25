@@ -4,6 +4,8 @@ pub mod channel_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    /** Channel service for managing channels
+*/
     #[derive(Debug, Clone)]
     pub struct ChannelServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -84,6 +86,8 @@ pub mod channel_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        /** Create a new channel
+*/
         pub async fn create_channel(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateChannelRequest>,
@@ -114,6 +118,8 @@ pub mod channel_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Send message to channel
+*/
         pub async fn send(
             &mut self,
             request: impl tonic::IntoRequest<super::SendRequest>,
@@ -136,6 +142,8 @@ pub mod channel_service_client {
                 .insert(GrpcMethod::new("plexspaces.channel.v1.ChannelService", "Send"));
             self.inner.unary(req, path, codec).await
         }
+        /** Receive message from channel
+*/
         pub async fn receive(
             &mut self,
             request: impl tonic::IntoRequest<super::ReceiveRequest>,
@@ -163,6 +171,8 @@ pub mod channel_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Subscribe to channel (streaming)
+*/
         pub async fn subscribe(
             &mut self,
             request: impl tonic::IntoRequest<super::SubscribeRequest>,
@@ -190,6 +200,8 @@ pub mod channel_service_client {
                 );
             self.inner.server_streaming(req, path, codec).await
         }
+        /** Publish to channel (for pub/sub pattern)
+*/
         pub async fn publish(
             &mut self,
             request: impl tonic::IntoRequest<super::PublishRequest>,
@@ -217,6 +229,8 @@ pub mod channel_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Acknowledge message (for at-least-once delivery)
+*/
         pub async fn ack(
             &mut self,
             request: impl tonic::IntoRequest<super::AckRequest>,
@@ -239,6 +253,8 @@ pub mod channel_service_client {
                 .insert(GrpcMethod::new("plexspaces.channel.v1.ChannelService", "Ack"));
             self.inner.unary(req, path, codec).await
         }
+        /** Negative acknowledge (requeue message)
+*/
         pub async fn nack(
             &mut self,
             request: impl tonic::IntoRequest<super::NackRequest>,
@@ -261,6 +277,8 @@ pub mod channel_service_client {
                 .insert(GrpcMethod::new("plexspaces.channel.v1.ChannelService", "Nack"));
             self.inner.unary(req, path, codec).await
         }
+        /** Get channel statistics
+*/
         pub async fn get_stats(
             &mut self,
             request: impl tonic::IntoRequest<super::GetStatsRequest>,
@@ -327,6 +345,8 @@ pub mod channel_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with ChannelServiceServer.
     #[async_trait]
     pub trait ChannelService: Send + Sync + 'static {
+        /** Create a new channel
+*/
         async fn create_channel(
             &self,
             request: tonic::Request<super::CreateChannelRequest>,
@@ -334,10 +354,14 @@ pub mod channel_service_server {
             tonic::Response<super::CreateChannelResponse>,
             tonic::Status,
         >;
+        /** Send message to channel
+*/
         async fn send(
             &self,
             request: tonic::Request<super::SendRequest>,
         ) -> std::result::Result<tonic::Response<super::SendResponse>, tonic::Status>;
+        /** Receive message from channel
+*/
         async fn receive(
             &self,
             request: tonic::Request<super::ReceiveRequest>,
@@ -348,22 +372,32 @@ pub mod channel_service_server {
             >
             + Send
             + 'static;
+        /** Subscribe to channel (streaming)
+*/
         async fn subscribe(
             &self,
             request: tonic::Request<super::SubscribeRequest>,
         ) -> std::result::Result<tonic::Response<Self::SubscribeStream>, tonic::Status>;
+        /** Publish to channel (for pub/sub pattern)
+*/
         async fn publish(
             &self,
             request: tonic::Request<super::PublishRequest>,
         ) -> std::result::Result<tonic::Response<super::PublishResponse>, tonic::Status>;
+        /** Acknowledge message (for at-least-once delivery)
+*/
         async fn ack(
             &self,
             request: tonic::Request<super::AckRequest>,
         ) -> std::result::Result<tonic::Response<super::AckResponse>, tonic::Status>;
+        /** Negative acknowledge (requeue message)
+*/
         async fn nack(
             &self,
             request: tonic::Request<super::NackRequest>,
         ) -> std::result::Result<tonic::Response<super::NackResponse>, tonic::Status>;
+        /** Get channel statistics
+*/
         async fn get_stats(
             &self,
             request: tonic::Request<super::GetStatsRequest>,
@@ -379,6 +413,8 @@ pub mod channel_service_server {
             tonic::Status,
         >;
     }
+    /** Channel service for managing channels
+*/
     #[derive(Debug)]
     pub struct ChannelServiceServer<T: ChannelService> {
         inner: _Inner<T>,

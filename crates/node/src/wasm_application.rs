@@ -56,6 +56,7 @@ use tokio::sync::RwLock;
 /// - Handles serialization/deserialization of messages
 struct WasmActorBehavior {
     instance: Arc<WasmInstance>,
+    actor_type: String, // Actor type for dashboard grouping (e.g., application name or child spec id)
 }
 
 #[async_trait]
@@ -113,7 +114,8 @@ impl Actor for WasmActorBehavior {
     }
 
     fn behavior_type(&self) -> BehaviorType {
-        BehaviorType::GenServer
+        // Return custom behavior type with actor_type name for dashboard grouping
+        BehaviorType::Custom(self.actor_type.clone())
     }
 }
 
@@ -295,6 +297,7 @@ impl WasmApplication {
         queue.push_back(supervisor_spec);
 
         // Traverse tree breadth-first
+        // Note: In Erlang-style supervision, supervisors are also actors, so we spawn them too
         while let Some(current_spec) = queue.pop_front() {
             // Initialize all children in the current supervisor
             for child in &current_spec.children {
@@ -305,7 +308,12 @@ impl WasmApplication {
                         actor_ids.push(actor_id);
                     }
                     plexspaces_proto::application::v1::ChildType::ChildTypeSupervisor => {
-                        // Add child supervisor to queue for processing
+                        // In Erlang-style supervision, supervisors are also actors
+                        // Spawn the supervisor actor first, then process its children
+                        let supervisor_actor_id = Self::spawn_worker_actor_internal(node.clone(), child, &module_hash, self.runtime.clone()).await?;
+                        actor_ids.push(supervisor_actor_id);
+                        
+                        // Then add child supervisor to queue for processing its children
                         if let Some(child_supervisor_spec) = &child.supervisor {
                             queue.push_back(child_supervisor_spec);
                         } else {
@@ -382,14 +390,19 @@ impl WasmApplication {
                 ))
             })?;
 
-        // Create behavior that wraps WASM instance
-        let behavior: Box<dyn Actor> = Box::new(WasmActorBehavior {
-            instance: Arc::new(wasm_instance),
-        });
-
         // Format actor ID as "actor@node" for ActorRef compatibility
         let node_id = node.id();
         let actor_id = format!("{}@{}", child_spec.id, node_id);
+        
+        // Use child_spec.id as actor_type for better dashboard visibility
+        // This allows actors to be grouped by actor name in the dashboard
+        let actor_type = child_spec.id.clone();
+
+        // Create behavior that wraps WASM instance with actor_type
+        let behavior: Box<dyn Actor> = Box::new(WasmActorBehavior {
+            instance: Arc::new(wasm_instance),
+            actor_type: actor_type.clone(),
+        });
 
         // Get ServiceLocator from node
         let service_locator = node.service_locator()
@@ -403,7 +416,7 @@ impl WasmApplication {
         use plexspaces_actor::ActorBuilder;
         use plexspaces_core::RequestContext;
         let internal_ctx = RequestContext::internal();
-        // spawn() will extract tenant_id and namespace from RequestContext
+        // spawn() will extract actor_type from behavior.behavior_type() which now returns Custom(actor_type)
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(actor_id.clone())
             .spawn(&internal_ctx, service_locator)
@@ -538,7 +551,7 @@ impl WasmApplication {
             
             use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
             
-            let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
+            let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
                 .ok_or_else(|| ApplicationError::ActorStopFailed(
                     actor_id.to_string(),
                     "ActorFactory not found in ServiceLocator".to_string()
@@ -1079,6 +1092,7 @@ mod tests {
                     restart: RestartPolicy::RestartPolicyPermanent.into(),
                     shutdown_timeout: Some(Duration { seconds: 5, nanos: 0 }),
                     supervisor: None,
+                    facets: vec![], // Phase 1: Unified Lifecycle - facets support
                 },
             ],
         };

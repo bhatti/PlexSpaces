@@ -24,37 +24,36 @@ struct ObjectRegistryAdapter {
 impl CoreObjectRegistry for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        tenant_id: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_id: &str,
-        namespace: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn lookup_full(
         &self,
-        tenant_id: &str,
-        namespace: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .lookup(tenant_id, namespace, object_type, object_id)
+            .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn register(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .register(registration)
+            .register(ctx, registration)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -135,13 +134,13 @@ fn create_context_with_real_actor_service(
     struct MockObjectRegistry;
     #[async_trait::async_trait]
     impl CoreObjectRegistry for MockObjectRegistry {
-        async fn lookup(&self, _tenant_id: &str, _object_id: &str, _namespace: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn lookup(&self, _ctx: &plexspaces_core::RequestContext, _object_id: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(None)
         }
-        async fn lookup_full(&self, _tenant_id: &str, _namespace: &str, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn lookup_full(&self, _ctx: &plexspaces_core::RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(None)
         }
-        async fn register(&self, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn register(&self, _ctx: &plexspaces_core::RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
         }
     }
@@ -192,12 +191,13 @@ async fn test_tell_with_grpc_remote() {
     // Create registry and register node2
     let kv_store = Arc::new(InMemoryKVStore::new());
     let registry2 = Arc::new(ObjectRegistryImpl::new(kv_store));
-    let node_object_id = format!("_node@{}", "node2");
+    // Nodes are registered with object_id = node_id (no "_node@" prefix)
+    let node_object_id = "node2".to_string();
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     registry2
         .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             ..Default::default()
@@ -239,11 +239,12 @@ async fn test_tell_with_grpc_remote() {
     // Create node1 with registry that knows about node2
     let kv_store1 = Arc::new(InMemoryKVStore::new());
     let registry1 = Arc::new(ObjectRegistryImpl::new(kv_store1));
-    let node_object_id = format!("_node@{}", "node2");
+    // Nodes are registered with object_id = node_id (no "_node@" prefix)
+    let node_object_id = "node2".to_string();
     registry1
         .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             tenant_id: "default".to_string(),
@@ -295,12 +296,13 @@ async fn test_ask_with_grpc_remote() {
     
     let kv_store2 = Arc::new(InMemoryKVStore::new());
     let registry2 = Arc::new(ObjectRegistryImpl::new(kv_store2));
-    let node_object_id = format!("_node@{}", "node2");
+    // Nodes are registered with object_id = node_id (no "_node@" prefix)
+    let node_object_id = "node2".to_string();
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     registry2
         .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             ..Default::default()
@@ -384,11 +386,12 @@ async fn test_ask_with_grpc_remote() {
     // Create node1 with registry that knows about node2
     let kv_store1 = Arc::new(InMemoryKVStore::new());
     let registry1 = Arc::new(ObjectRegistryImpl::new(kv_store1));
-    let node_object_id = format!("_node@{}", "node2");
+    // Nodes are registered with object_id = node_id (no "_node@" prefix)
+    let node_object_id = "node2".to_string();
     registry1
         .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             tenant_id: "default".to_string(),
@@ -439,12 +442,13 @@ async fn test_ask_with_grpc_timeout() {
     
     let kv_store2 = Arc::new(InMemoryKVStore::new());
     let registry2 = Arc::new(ObjectRegistryImpl::new(kv_store2));
-    let node_object_id = format!("_node@{}", "node2");
+    // Nodes are registered with object_id = node_id (no "_node@" prefix)
+    let node_object_id = "node2".to_string();
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     registry2
         .register(&ctx, plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             ..Default::default()
@@ -484,11 +488,12 @@ async fn test_ask_with_grpc_timeout() {
     // Create node1
     let kv_store1 = Arc::new(InMemoryKVStore::new());
     let registry1 = Arc::new(ObjectRegistryImpl::new(kv_store1));
-    let node_object_id = format!("_node@{}", "node2");
+    // Nodes are registered with object_id = node_id (no "_node@" prefix)
+    let node_object_id = "node2".to_string();
     registry1
         .register(plexspaces_proto::object_registry::v1::ObjectRegistration {
             object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
+            object_type: ObjectType::ObjectTypeNode as i32,
             object_category: "node".to_string(),
             grpc_address: node2_address.clone(),
             tenant_id: "default".to_string(),

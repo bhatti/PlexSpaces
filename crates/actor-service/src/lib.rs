@@ -178,8 +178,9 @@ impl ActorServiceImpl {
     
     /// Get ActorRegistry from ServiceLocator (lazy initialization)
     async fn get_actor_registry(&self) -> Arc<ActorRegistry> {
+        use plexspaces_core::service_locator::service_names;
         self.service_locator
-            .get_service()
+            .get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY)
             .await
             .expect("ActorRegistry must be registered in ServiceLocator")
     }
@@ -267,7 +268,7 @@ impl ActorServiceImpl {
         // Use ActorFactory from ServiceLocator (direct dependency - no callbacks needed)
         use plexspaces_actor::ActorFactory;
         use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-        let actor_factory: Arc<ActorFactoryImpl> = self.service_locator.get_service().await
+        let actor_factory: Arc<ActorFactoryImpl> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
             .ok_or_else(|| format!(
                 "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called and ActorFactory is registered. Actor ID would be: {}",
                 local_actor_id
@@ -584,9 +585,9 @@ impl ActorServiceImpl {
             match actor_ref.ask(message, timeout_duration).await {
                 Ok(reply) => {
                     // Update Node metrics on success
-                    if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
-                        updater.increment_messages_routed().await;
-                        updater.increment_local_deliveries().await;
+                    if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+                        accessor.increment_messages_routed().await;
+                        accessor.increment_local_deliveries().await;
                     }
                     metrics::counter!("plexspaces_actor_service_local_route_success_total",
                         "pattern" => "ask"
@@ -596,9 +597,9 @@ impl ActorServiceImpl {
                 }
                 Err(e) => {
                     // Update Node metrics on failure
-                    if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
-                        updater.increment_messages_routed().await;
-                        updater.increment_failed_deliveries().await;
+                    if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+                        accessor.increment_messages_routed().await;
+                        accessor.increment_failed_deliveries().await;
                     }
                     use plexspaces_actor::ActorRefError;
                     let error_type = match e {
@@ -646,12 +647,12 @@ impl ActorServiceImpl {
                 });
             
             // Update Node metrics based on result
-            if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
-                updater.increment_messages_routed().await;
+            if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+                accessor.increment_messages_routed().await;
                 if result.is_ok() {
-                    updater.increment_local_deliveries().await;
+                    accessor.increment_local_deliveries().await;
                 } else {
-                    updater.increment_failed_deliveries().await;
+                    accessor.increment_failed_deliveries().await;
                 }
             }
             
@@ -705,9 +706,9 @@ impl ActorServiceImpl {
             Ok(r) => r,
             Err(e) => {
                 // Update Node metrics on failure
-                if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
-                    updater.increment_messages_routed().await;
-                    updater.increment_failed_deliveries().await;
+                if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+                    accessor.increment_messages_routed().await;
+                    accessor.increment_failed_deliveries().await;
                 }
                 metrics::counter!("plexspaces_actor_service_remote_route_error_total",
                     "target_node" => node_id.to_string(),
@@ -731,9 +732,9 @@ impl ActorServiceImpl {
         .increment(1);
 
         // Update Node metrics on success
-        if let Some(updater) = self.service_locator.get_node_metrics_updater().await {
-            updater.increment_messages_routed().await;
-            updater.increment_remote_deliveries().await;
+        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+            accessor.increment_messages_routed().await;
+            accessor.increment_remote_deliveries().await;
         }
 
         // Convert response back to internal Message if present
@@ -1044,6 +1045,46 @@ impl ActorServiceImpl {
 
 // Reply trait removed - use ActorService::send_reply() directly instead
 
+/// Implement ActorService trait from core (for ActorContext)
+#[async_trait]
+impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
+    async fn spawn_actor(
+        &self,
+        actor_id: &str,
+        actor_type: &str,
+        initial_state: Vec<u8>,
+    ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        // Use internal context for spawning
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_ref_impl = self.spawn_actor(&ctx, actor_id, actor_type, initial_state, None, std::collections::HashMap::new()).await
+            .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+        plexspaces_core::ActorRef::new(actor_ref_impl.id().to_string())
+            .map_err(|e| format!("Failed to create ActorRef: {}", e).into())
+    }
+
+    async fn send(
+        &self,
+        actor_id: &str,
+        message: Message,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        self.send_message(actor_id, message).await
+    }
+
+    async fn send_reply(
+        &self,
+        correlation_id: Option<&str>,
+        sender_id: &plexspaces_core::ActorId,
+        target_actor_id: plexspaces_core::ActorId,
+        reply_message: Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.send_reply(correlation_id, sender_id, target_actor_id, reply_message).await
+            .map_err(|e| format!("Failed to send reply: {}", e).into())
+    }
+}
+
+/// Implement Service trait for ActorServiceImpl (for ServiceLocator registration)
+impl plexspaces_core::Service for ActorServiceImpl {}
+
 /// Implement the ActorService gRPC trait
 #[async_trait]
 impl ActorServiceTrait for ActorServiceImpl {
@@ -1120,7 +1161,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let labels_for_ctx = request.get_ref().labels.clone();
         
         // Create RequestContext from request metadata (before consuming request)
-        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
             request.metadata(),
             &labels_for_ctx,
             &self.service_locator,
@@ -1162,7 +1203,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         
         // Use ActorFactory to spawn the actor locally
         use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-        let actor_factory_opt: Option<Arc<ActorFactoryImpl>> = self.service_locator.get_service().await;
+        let actor_factory_opt: Option<Arc<ActorFactoryImpl>> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await;
         
         if let Some(factory) = actor_factory_opt {
             // Spawn actor using ActorFactory
@@ -1327,7 +1368,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         
         // Create RequestContext from gRPC request - uses shared validation from RequestContext
         // tenant_id comes from auth or default config, not from request body
-        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
             &self.service_locator,
@@ -1853,16 +1894,13 @@ mod tests {
     impl ObjectRegistryTrait for ObjectRegistryAdapter {
         async fn lookup(
             &self,
-            tenant_id: &str,
+            ctx: &plexspaces_core::RequestContext,
             object_id: &str,
-            namespace: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            use plexspaces_core::RequestContext;
             let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-            let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
             self.inner
-                .lookup(&ctx, obj_type, object_id)
+                .lookup(ctx, obj_type, object_id)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -1889,6 +1927,23 @@ mod tests {
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
+
+        async fn discover(
+            &self,
+            ctx: &plexspaces_core::RequestContext,
+            object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+            object_category: Option<String>,
+            capabilities: Option<Vec<String>>,
+            labels: Option<Vec<String>>,
+            health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+            offset: usize,
+            limit: usize,
+        ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            self.inner
+                .discover(ctx, object_type, object_category, capabilities, labels, health_status, offset, limit)
+                .await
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        }
     }
 
     /// Helper to create a test ActorRegistry
@@ -1906,8 +1961,9 @@ mod tests {
         use plexspaces_node::create_default_service_locator;
         // Create default service locator which already has most services
         let service_locator = create_default_service_locator(Some(node_id.clone()), None, None).await;
-        // Register actor_registry if not already registered
-        service_locator.register_service(actor_registry.clone()).await;
+        // Register actor_registry with explicit service name to ensure it's found
+        use plexspaces_core::service_locator::service_names;
+        service_locator.register_service_by_name(service_names::ACTOR_REGISTRY, actor_registry.clone()).await;
         ActorServiceImpl::new(service_locator, node_id)
     }
 
@@ -1933,13 +1989,12 @@ mod tests {
         let kv = Arc::new(InMemoryKVStore::new());
         let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
         
-        // Register node as a service object (nodes are registered as services)
+        // Register node using ObjectTypeNode
         let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-        let node_object_id = format!("_node@{}", node_id);
         let registration = ProtoObjectRegistration {
-            object_id: node_object_id.clone(),
-            object_type: ObjectType::ObjectTypeService as i32,
-            object_category: "node".to_string(),
+            object_id: node_id.to_string(),
+            object_type: ObjectType::ObjectTypeNode as i32,
+            object_category: "Node".to_string(),
             grpc_address: node_address.to_string(),
             ..Default::default()
         };
@@ -2335,7 +2390,8 @@ mod tests {
         for _ in 0..10 {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             // Check if ActorRegistry is registered by trying to get it
-            if service.service_locator.get_service::<ActorRegistry>().await.is_some() {
+            use plexspaces_core::service_locator::service_names;
+            if service.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
                 break;
             }
         }
@@ -2533,7 +2589,8 @@ mod tests {
         for _ in 0..10 {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             // Check if ActorRegistry is registered by trying to get it
-            if service1.service_locator.get_service::<ActorRegistry>().await.is_some() {
+            use plexspaces_core::service_locator::service_names;
+            if service1.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
                 break;
             }
         }
@@ -2585,7 +2642,8 @@ mod tests {
         // Wait for service registration
         for _ in 0..10 {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            if service1.service_locator.get_service::<ActorRegistry>().await.is_some() {
+            use plexspaces_core::service_locator::service_names;
+            if service1.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
                 break;
             }
         }
@@ -2643,7 +2701,8 @@ mod tests {
         for _ in 0..10 {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             // Check if ActorRegistry is registered by trying to get it
-            if service1.service_locator.get_service::<ActorRegistry>().await.is_some() {
+            use plexspaces_core::service_locator::service_names;
+            if service1.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
                 break;
             }
         }
@@ -2714,25 +2773,23 @@ mod tests {
         let object_registry_impl1 = Arc::new(ObjectRegistry::new(kv1));
         
         // Register node2
-        let node2_object_id = format!("_node@node2");
         use plexspaces_core::RequestContext;
         use plexspaces_proto::object_registry::v1::{ObjectRegistration as ProtoObjectRegistration, ObjectType};
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let node2_registration = ProtoObjectRegistration {
-            object_id: node2_object_id,
-            object_type: ObjectType::ObjectTypeService as i32,
-            object_category: "node".to_string(),
+            object_id: "node2".to_string(),
+            object_type: ObjectType::ObjectTypeNode as i32,
+            object_category: "Node".to_string(),
             grpc_address: node2_address.clone(),
             ..Default::default()
         };
         object_registry_impl1.register(&ctx, node2_registration).await.unwrap();
         
         // Register node3
-        let node3_object_id = format!("_node@node3");
         let node3_registration = ProtoObjectRegistration {
-            object_id: node3_object_id,
-            object_type: ObjectType::ObjectTypeService as i32,
-            object_category: "node".to_string(),
+            object_id: "node3".to_string(),
+            object_type: ObjectType::ObjectTypeNode as i32,
+            object_category: "Node".to_string(),
             grpc_address: node3_address.clone(),
             ..Default::default()
         };
@@ -2749,7 +2806,8 @@ mod tests {
         // Wait for service registration
         for _ in 0..10 {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            if service1.service_locator.get_service::<ActorRegistry>().await.is_some() {
+            use plexspaces_core::service_locator::service_names;
+            if service1.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
                 break;
             }
         }
@@ -2787,7 +2845,8 @@ mod tests {
         // Wait for service registration
         for _ in 0..10 {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            if service.service_locator.get_service::<ActorRegistry>().await.is_some() {
+            use plexspaces_core::service_locator::service_names;
+            if service.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
                 break;
             }
         }

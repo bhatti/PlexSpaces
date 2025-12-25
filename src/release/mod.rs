@@ -448,6 +448,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
         version: toml.release.version,
         description: toml.release.description,
         node: Some(NodeConfig {
+            cluster_name: String::new(),
             id: toml.node.id,
             listen_address: toml.node.listen_address,
             cluster_seed_nodes: toml.node.cluster_seed_nodes,
@@ -1011,6 +1012,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
+            cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1130,6 +1132,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
+            cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1208,6 +1211,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
+            cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1298,6 +1302,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
+            cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1366,6 +1371,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
+            cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1427,6 +1433,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
+            cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],

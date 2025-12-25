@@ -63,12 +63,16 @@ pub struct RetryPolicy {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PageRequest {
+    /// Offset for pagination (0-based, default: 0)
     #[prost(int32, tag="1")]
-    pub page_size: i32,
-    #[prost(string, tag="2")]
-    pub page_token: ::prost::alloc::string::String,
+    pub offset: i32,
+    /// Limit/Page size (default: 50, max: 1000)
+    #[prost(int32, tag="2")]
+    pub limit: i32,
+    /// Filter string (optional)
     #[prost(string, tag="3")]
     pub filter: ::prost::alloc::string::String,
+    /// Order by field (optional)
     #[prost(string, tag="4")]
     pub order_by: ::prost::alloc::string::String,
 }
@@ -76,10 +80,18 @@ pub struct PageRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PageResponse {
-    #[prost(string, tag="1")]
-    pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="2")]
+    /// Total number of items (across all pages)
+    #[prost(int32, tag="1")]
     pub total_size: i32,
+    /// Current offset
+    #[prost(int32, tag="2")]
+    pub offset: i32,
+    /// Current limit/page size
+    #[prost(int32, tag="3")]
+    pub limit: i32,
+    /// Whether there are more pages (has_next = offset + limit < total_size)
+    #[prost(bool, tag="4")]
+    pub has_next: bool,
 }
 // ============================================================================
 // FACET SYSTEM - Core Extensibility Mechanism

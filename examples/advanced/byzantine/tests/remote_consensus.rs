@@ -139,6 +139,10 @@ impl plexspaces_core::Actor for GeneralBehavior {
 /// Helper to register a remote node in ObjectRegistry (needed for gRPC client lookup)
 async fn register_node_in_object_registry(node: &Arc<Node>, remote_node_id: &str, address: &str) {
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+    use std::collections::HashMap;
+    use plexspaces_proto::prost_types::Timestamp;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
     // Extract host:port from http://host:port format
     let grpc_address = if address.starts_with("http://") {
         address.strip_prefix("http://").unwrap().to_string()
@@ -147,15 +151,28 @@ async fn register_node_in_object_registry(node: &Arc<Node>, remote_node_id: &str
     } else {
         address.to_string()
     };
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+    let ctx = plexspaces_core::RequestContext::internal();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let timestamp = Timestamp {
+        seconds: now.as_secs() as i64,
+        nanos: now.subsec_nanos() as i32,
+    };
     let registration = ObjectRegistration {
-        object_type: ObjectType::ObjectTypeService as i32,
-        object_id: format!("_node@{}", remote_node_id),
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_id: remote_node_id.to_string(), // Use node_id directly, no "_node@" prefix
+        object_name: format!("Node {}", remote_node_id),
+        node_id: remote_node_id.to_string(),
         grpc_address,
         object_category: "Node".to_string(),
+        tenant_id: "internal".to_string(),
+        namespace: "system".to_string(),
+        health_status: 1, // Healthy
+        created_at: Some(timestamp.clone()),
+        updated_at: Some(timestamp),
         ..Default::default()
     };
-    node.object_registry().register(&ctx, registration).await.unwrap();
+    let object_registry = node.object_registry().await.unwrap();
+    object_registry.register(&ctx, registration).await.unwrap();
 }
 
 /// Helper to register ActorFactory and ActorService in ServiceLocator (needed for tests)
@@ -169,8 +186,9 @@ async fn register_actor_factory(node: &Arc<Node>) {
 
     let service_locator = node.service_locator();
     // Wait for ActorRegistry to be registered
+    use plexspaces_core::service_locator::service_names;
     for _ in 0..10 {
-        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
+        if service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
             break;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -187,22 +205,20 @@ async fn register_actor_factory(node: &Arc<Node>) {
     service_locator.register_service(Arc::new(behavior_registry)).await;
 
     // Register ActorService for tests that need it
-    use plexspaces_node::service_wrappers::ActorServiceWrapper;
     use plexspaces_core::ActorService;
     use plexspaces_actor_service::ActorServiceImpl;
     let actor_service_impl = Arc::new(ActorServiceImpl::new(
         service_locator.clone(),
         node.id().as_str().to_string(),
     ));
-    let actor_service_wrapper = Arc::new(ActorServiceWrapper::new(actor_service_impl));
-    service_locator.register_actor_service(actor_service_wrapper).await;
+    service_locator.register_actor_service(actor_service_impl.clone() as Arc<dyn ActorService + Send + Sync>).await;
 
-    // Register NodeMetricsUpdater for Node stats tracking
-    use plexspaces_node::service_wrappers::NodeMetricsUpdaterWrapper;
-    let metrics_updater = Arc::new(NodeMetricsUpdaterWrapper::new(node.clone()));
-    service_locator.register_service(metrics_updater.clone()).await;
-    let metrics_updater_trait: Arc<dyn plexspaces_core::NodeMetricsUpdater + Send + Sync> = metrics_updater.clone() as Arc<dyn plexspaces_core::NodeMetricsUpdater + Send + Sync>;
-    service_locator.register_node_metrics_updater(metrics_updater_trait).await;
+    // Register NodeMetricsAccessor for Node stats tracking
+    use plexspaces_node::service_wrappers::NodeMetricsAccessorWrapper;
+    let metrics_accessor = Arc::new(NodeMetricsAccessorWrapper::new(node.clone()));
+    service_locator.register_service(metrics_accessor.clone()).await;
+    let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> = metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
+    service_locator.register_node_metrics_accessor(metrics_accessor_trait).await;
 }
 
 /// Helper to start a gRPC server for testing
@@ -232,8 +248,8 @@ async fn start_test_server(node: Arc<Node>) -> String {
 async fn test_byzantine_generals_two_nodes() {
     // Setup: Create 2 nodes
     use plexspaces_node::NodeBuilder;
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
-    let node2 = Arc::new(NodeBuilder::new("node2").build());
+        let node1 = Arc::new(NodeBuilder::new("node1").build().await);
+        let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
     // Start gRPC servers
     let node1_address = start_test_server(node1.clone()).await;
@@ -267,10 +283,11 @@ async fn test_byzantine_generals_two_nodes() {
     let service_locator1 = node1.service_locator();
     let service_locator2 = node2.service_locator();
     
-    // Get ActorFactory instances
-    let actor_factory1: Arc<ActorFactoryImpl> = service_locator1.get_service().await
+    // Get ActorFactory instances (as trait objects to avoid TypeId mismatch)
+    use plexspaces_actor::get_actor_factory;
+    let actor_factory1 = get_actor_factory(service_locator1.as_ref()).await
         .expect("ActorFactory not found");
-    let actor_factory2: Arc<ActorFactoryImpl> = service_locator2.get_service().await
+    let actor_factory2 = get_actor_factory(service_locator2.as_ref()).await
         .expect("ActorFactory not found");
     
     // Helper to serialize GeneralBehavior state
@@ -362,8 +379,8 @@ async fn test_byzantine_generals_two_nodes() {
 #[tokio::test]
 async fn test_byzantine_connection_pooling() {
     use plexspaces_node::NodeBuilder;
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
-    let node2 = Arc::new(NodeBuilder::new("node2").build());
+        let node1 = Arc::new(NodeBuilder::new("node1").build().await);
+        let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
     let node2_address = start_test_server(node2.clone()).await;
     
@@ -384,7 +401,8 @@ async fn test_byzantine_connection_pooling() {
     use std::collections::HashMap;
     let ctx = RequestContext::internal();
     let service_locator2 = node2.service_locator();
-    let actor_factory2: Arc<ActorFactoryImpl> = service_locator2.get_service().await
+    use plexspaces_actor::get_actor_factory;
+    let actor_factory2 = get_actor_factory(service_locator2.as_ref()).await
         .expect("ActorFactory not found");
     
     fn serialize_general_state(id: String, is_commander: bool, is_traitor: bool) -> Vec<u8> {
@@ -435,7 +453,7 @@ async fn test_byzantine_connection_pooling() {
 #[tokio::test]
 async fn test_byzantine_node_failure() {
     use plexspaces_node::NodeBuilder;
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
+    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
 
     // Register ActorFactory for node1 (needed for tests)
     register_actor_factory(&node1).await;
@@ -466,8 +484,8 @@ async fn test_byzantine_node_failure() {
 #[tokio::test]
 async fn test_cross_node_actor_discovery() {
     use plexspaces_node::NodeBuilder;
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
-    let node2 = Arc::new(NodeBuilder::new("node2").build());
+        let node1 = Arc::new(NodeBuilder::new("node1").build().await);
+        let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
     let node2_address = start_test_server(node2.clone()).await;
     node1.register_remote_node(NodeId::new("node2"), node2_address.clone()).await.unwrap();
@@ -485,7 +503,8 @@ async fn test_cross_node_actor_discovery() {
     use std::collections::HashMap;
     let ctx = RequestContext::internal();
     let service_locator2 = node2.service_locator();
-    let actor_factory2: Arc<ActorFactoryImpl> = service_locator2.get_service().await
+    use plexspaces_actor::get_actor_factory;
+    let actor_factory2 = get_actor_factory(service_locator2.as_ref()).await
         .expect("ActorFactory not found");
     
     fn serialize_general_state(id: String, is_commander: bool, is_traitor: bool) -> Vec<u8> {
@@ -508,7 +527,8 @@ async fn test_cross_node_actor_discovery() {
 
     // Node1 should discover actor on node2 via ActorRegistry lookup_routing
     let service_locator1 = node1.service_locator();
-    let registry1: Arc<plexspaces_core::ActorRegistry> = service_locator1.get_service().await.expect("ActorRegistry not found");
+    use plexspaces_core::service_locator::service_names;
+    let registry1: Arc<plexspaces_core::ActorRegistry> = service_locator1.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.expect("ActorRegistry not found");
     let routing = registry1.lookup_routing(&ctx, &"general@node2".to_string()).await.expect("Should find routing info");
     
     assert!(routing.is_some(), "Should find actor on remote node");

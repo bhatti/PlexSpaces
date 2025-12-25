@@ -505,15 +505,11 @@ impl TupleSpace {
     /// ## Examples
     /// ```rust,no_run
     /// # use plexspaces_tuplespace::*;
-    /// # use plexspaces_tuplespace::storage::sql::*;
     /// # async fn example() -> Result<(), TupleSpaceError> {
-    /// // SQLite storage
-    /// let storage = SqlStorage::new_sqlite(SqliteStorageConfig {
-    ///     database_path: "/tmp/tuples.db".to_string(),
-    ///     pool_size: 1,
-    ///     table_name: "tuples".to_string(),
-    /// }).await?;
-    /// let tuplespace = TupleSpace::with_storage(Box::new(storage));
+    /// // Memory storage (always available)
+    /// use plexspaces_tuplespace::storage::memory::MemoryStorage;
+    /// let storage = MemoryStorage::new(Default::default());
+    /// let tuplespace = TupleSpace::with_storage_and_tenant(Box::new(storage), "tenant", "namespace");
     /// # Ok(())
     /// # }
     /// ```

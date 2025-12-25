@@ -17,14 +17,13 @@ struct ObjectRegistryAdapter {
 impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        tenant_id: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_id: &str,
-        namespace: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.inner
-            .lookup(tenant_id, namespace, obj_type, object_id)
+            .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }

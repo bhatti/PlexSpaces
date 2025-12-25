@@ -31,7 +31,8 @@
 //! - Release config support: Can pass release-level configuration
 
 use crate::application_impl::SpecApplication;
-use crate::application_manager::ApplicationManager;
+use crate::application_manager_ext::ApplicationManagerExt;
+use plexspaces_core::ApplicationManager;
 use crate::wasm_application::WasmApplication;
 use crate::Node;
 use std::sync::Arc;
@@ -49,6 +50,7 @@ use plexspaces_wasm_runtime::WasmDeploymentService;
 use tonic::{Request, Response, Status};
 
 /// Application service implementation
+#[derive(Clone)]
 pub struct ApplicationServiceImpl {
     node: Arc<Node>,
     application_manager: Arc<ApplicationManager>,
@@ -72,7 +74,7 @@ impl ApplicationService for ApplicationServiceImpl {
     ) -> Result<Response<DeployApplicationResponse>, Status> {
         let req = request.into_inner();
         
-        // Record metrics
+        // OBSERVABILITY: Record metrics and log deployment attempt
         metrics::counter!("plexspaces_node_application_deploy_attempts_total",
             "application_name" => req.name.clone()
         ).increment(1);
@@ -81,6 +83,8 @@ impl ApplicationService for ApplicationServiceImpl {
             application_name = %req.name,
             version = %req.version,
             has_wasm_module = req.wasm_module.is_some(),
+            has_config = req.config.is_some(),
+            has_release_config = req.release_config.is_some(),
             "Deploying application"
         );
 
@@ -123,6 +127,16 @@ impl ApplicationService for ApplicationServiceImpl {
                 merge_release_config(&mut merged_config, release_config);
             }
             
+            // Extract namespace and tenant_id from ApplicationSpec if available
+            // ApplicationSpec doesn't have metadata field, so use defaults for now
+            // TODO: Add namespace/tenant_id fields to ApplicationSpec proto if needed
+            let (namespace, tenant_id) = ("default".to_string(), "internal".to_string());
+            
+            // Clone values for observability logging before moving them
+            let module_hash_for_log = module_hash.clone();
+            let namespace_for_log = namespace.clone();
+            let tenant_id_for_log = tenant_id.clone();
+            
             let wasm_app = WasmApplication::new(
                 app_name.clone(),
                 app_version,
@@ -138,18 +152,39 @@ impl ApplicationService for ApplicationServiceImpl {
                 application_name = %app_name,
                 "Registering WASM application with ApplicationManager"
             );
-            self.node
-                .register_application(app)
-                .await
-                .map_err(|e| {
-                    tracing::error!(
-                        application_id = %req.application_id,
-                        application_name = %app_name,
-                        error = %e,
-                        "Failed to register WASM application"
-                    );
-                    Status::internal(format!("Failed to register application: {}", e))
-                })?;
+            
+            // Get ApplicationManager and register with namespace/tenant
+            use plexspaces_core::service_locator::service_names;
+            if let Some(app_manager) = self.node.service_locator().get_service_by_name::<plexspaces_core::ApplicationManager>(service_names::APPLICATION_MANAGER).await {
+                // Register application with namespace/tenant metadata
+                app_manager.register_with_metadata(app, namespace, tenant_id).await
+                    .map_err(|e| {
+                        tracing::error!(
+                            application_id = %req.application_id,
+                            application_name = %app_name,
+                            error = %e,
+                            "Failed to register WASM application"
+                        );
+                        Status::internal(format!("Failed to register application: {}", e))
+                    })?;
+            } else {
+                return Err(Status::internal("ApplicationManager not found in ServiceLocator"));
+            }
+            
+            // Register application with object-registry
+            use crate::object_registry_helpers::register_application;
+            use plexspaces_core::RequestContext;
+            if let Some(object_registry) = self.node.service_locator().get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
+                let ctx = RequestContext::internal();
+                let node_id = self.node.id().as_str();
+                let listen_addr = self.node.config().listen_addr.as_str();
+                let grpc_address = format!("http://{}", listen_addr);
+                if let Err(e) = register_application(&object_registry, &ctx, &app_name, &req.version, node_id, &grpc_address).await {
+                    tracing::warn!(application = %app_name, error = %e, "Failed to register application with object-registry");
+                } else {
+                    tracing::info!(application = %app_name, node_id = %node_id, "Registered application with object-registry");
+                }
+            }
 
             // Start application
             tracing::info!(
@@ -170,9 +205,17 @@ impl ApplicationService for ApplicationServiceImpl {
                     Status::internal(format!("Failed to start application: {}", e))
                 })?;
 
+            // OBSERVABILITY: Log successful deployment with metrics
+            metrics::counter!("plexspaces_node_application_deploy_success_total",
+                "application_name" => app_name.clone()
+            ).increment(1);
             tracing::info!(
                 application_id = %req.application_id,
                 application_name = %app_name,
+                version = %req.version,
+                module_hash = %module_hash_for_log,
+                namespace = %namespace_for_log,
+                tenant_id = %tenant_id_for_log,
                 "WASM application deployed and started successfully"
             );
 
@@ -235,6 +278,22 @@ impl ApplicationService for ApplicationServiceImpl {
                 );
                 Status::internal(format!("Failed to register application: {}", e))
             })?;
+        
+        // Register application with object-registry
+        use crate::object_registry_helpers::register_application;
+        use plexspaces_core::RequestContext;
+        use plexspaces_core::service_locator::service_names;
+        if let Some(object_registry) = self.node.service_locator().get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
+            let ctx = RequestContext::internal();
+            let node_id = self.node.id().as_str();
+            let listen_addr = self.node.config().listen_addr.as_str();
+            let grpc_address = format!("http://{}", listen_addr);
+            if let Err(e) = register_application(&object_registry, &ctx, &app_name, &req.version, node_id, &grpc_address).await {
+                tracing::warn!(application = %app_name, error = %e, "Failed to register application with object-registry");
+            } else {
+                tracing::info!(application = %app_name, node_id = %node_id, "Registered application with object-registry");
+            }
+        }
 
         // Start application
         tracing::info!(
@@ -275,11 +334,15 @@ impl ApplicationService for ApplicationServiceImpl {
     ) -> Result<Response<UndeployApplicationResponse>, Status> {
         let req = request.into_inner();
         
-        // Record metrics
+        // OBSERVABILITY: Record metrics and log undeployment attempt
         metrics::counter!("plexspaces_node_application_undeploy_attempts_total",
             "application_id" => req.application_id.clone()
         ).increment(1);
-        tracing::info!(application_id = %req.application_id, "Undeploying application");
+        tracing::info!(
+            application_id = %req.application_id,
+            timeout_seconds = req.timeout.map(|d| d.seconds).unwrap_or(30),
+            "Undeploying application"
+        );
 
         if req.application_id.is_empty() {
             return Err(Status::invalid_argument("application_id is required"));
@@ -297,6 +360,15 @@ impl ApplicationService for ApplicationServiceImpl {
             .unregister(&req.application_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to unregister application: {}", e)))?;
+
+        // OBSERVABILITY: Log successful undeployment
+        metrics::counter!("plexspaces_node_application_undeploy_success_total",
+            "application_id" => req.application_id.clone()
+        ).increment(1);
+        tracing::info!(
+            application_id = %req.application_id,
+            "Application undeployed successfully"
+        );
 
         Ok(Response::new(UndeployApplicationResponse {
             success: true,
@@ -373,8 +445,7 @@ impl ApplicationService for ApplicationServiceImpl {
                 };
 
                 // Get environment variables from ApplicationSpec if available
-                let env = self.application_manager
-                    .get_application_spec(&req.application_id)
+                let env = ApplicationManagerExt::get_application_spec(&self.application_manager, &req.application_id)
                     .await
                     .map(|spec| spec.env)
                     .unwrap_or_default();

@@ -28,8 +28,22 @@ pub struct ChannelConfig {
     /// Optional: Dead-letter queue for failed messages
     #[prost(string, tag="21")]
     pub dead_letter_queue: ::prost::alloc::string::String,
+    /// Maximum number of retries before sending to DLQ (default: 3)
+    /// After N failures, message is sent to Dead Letter Queue instead of requeuing
+    /// Set to 0 to disable retries (immediate DLQ on first failure)
+    /// Only applies to channels that support ack/nack/dlq (Redis, Kafka, etc.)
+    /// InMemory channels ignore this (no retry/DLQ support)
+    #[prost(uint32, tag="22")]
+    pub max_retries: u32,
+    /// Enable Dead Letter Queue (DLQ) for failed messages (default: true)
+    /// When enabled, messages that fail max_retries times are sent to DLQ
+    /// When disabled, messages are dropped after max_retries failures
+    /// Only applies to channels that support DLQ (Redis, Kafka, etc.)
+    /// InMemory channels ignore this (no retry/DLQ support)
+    #[prost(bool, tag="23")]
+    pub dlq_enabled: bool,
     /// Backend-specific configuration
-    #[prost(oneof="channel_config::BackendConfig", tags="10, 11, 12, 13, 14")]
+    #[prost(oneof="channel_config::BackendConfig", tags="10, 11, 12, 13, 14, 15")]
     pub backend_config: ::core::option::Option<channel_config::BackendConfig>,
 }
 /// Nested message and enum types in `ChannelConfig`.
@@ -48,6 +62,8 @@ pub mod channel_config {
         Sqlite(super::SqliteConfig),
         #[prost(message, tag="14")]
         Nats(super::NatsConfig),
+        #[prost(message, tag="15")]
+        Udp(super::UdpConfig),
     }
 }
 /// In-memory channel configuration
@@ -297,6 +313,50 @@ pub struct NatsConfig {
     #[prost(string, tag="12")]
     pub tls_ca_path: ::prost::alloc::string::String,
 }
+/// UDP configuration (for multicast pub/sub within a cluster)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UdpConfig {
+    /// Multicast address for pub/sub (default: "239.255.0.1")
+    /// - Must be in multicast range (224.0.0.0 to 239.255.255.255)
+    /// - All nodes in cluster must use same multicast address
+    #[prost(string, tag="1")]
+    pub multicast_address: ::prost::alloc::string::String,
+    /// Multicast port (default: 9999)
+    /// - All nodes in cluster must use same port
+    #[prost(uint32, tag="2")]
+    pub multicast_port: u32,
+    /// Local bind address (default: "0.0.0.0")
+    /// - "0.0.0.0" binds to all interfaces
+    /// - Specific IP binds to that interface only
+    #[prost(string, tag="3")]
+    pub bind_address: ::prost::alloc::string::String,
+    /// Time-to-live (TTL) for multicast packets (default: 1)
+    /// - 1 = local network only
+    /// - Higher values allow routing across subnets
+    #[prost(uint32, tag="4")]
+    pub ttl: u32,
+    /// Maximum message size in bytes (default: 65507, max UDP packet size)
+    /// - Messages larger than this will be fragmented
+    /// - Recommended: 1400 bytes for Ethernet MTU
+    #[prost(uint32, tag="5")]
+    pub max_message_size: u32,
+    /// Enable unicast mode for point-to-point messaging (default: false)
+    /// - If true, uses unicast instead of multicast
+    /// - Requires target address for each send
+    #[prost(bool, tag="6")]
+    pub unicast_mode: bool,
+    /// Cluster name (required for multicast)
+    /// - Nodes with same cluster_name can communicate
+    /// - Must match node's cluster_name
+    #[prost(string, tag="7")]
+    pub cluster_name: ::prost::alloc::string::String,
+    /// Interface name to bind to (optional)
+    /// - If set, binds to specific network interface
+    /// - If empty, uses bind_address
+    #[prost(string, tag="8")]
+    pub interface_name: ::prost::alloc::string::String,
+}
 /// Channel message envelope
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -540,6 +600,13 @@ pub enum ChannelBackend {
     /// - JetStream for persistence (optional)
     /// - Cross-node, cross-datacenter
     ChannelBackendNats = 4,
+    /// UDP multicast for lightweight pub/sub within a cluster
+    /// - Very low latency, high throughput
+    /// - Multicast pub/sub for cluster-wide messaging
+    /// - Unicast point-to-point messaging
+    /// - No persistence, best-effort delivery
+    /// - Requires nodes to share same cluster_name
+    ChannelBackendUdp = 5,
     /// Custom backend (user-provided implementation)
     ChannelBackendCustom = 99,
 }
@@ -555,6 +622,7 @@ impl ChannelBackend {
             ChannelBackend::ChannelBackendKafka => "CHANNEL_BACKEND_KAFKA",
             ChannelBackend::ChannelBackendSqlite => "CHANNEL_BACKEND_SQLITE",
             ChannelBackend::ChannelBackendNats => "CHANNEL_BACKEND_NATS",
+            ChannelBackend::ChannelBackendUdp => "CHANNEL_BACKEND_UDP",
             ChannelBackend::ChannelBackendCustom => "CHANNEL_BACKEND_CUSTOM",
         }
     }
@@ -566,6 +634,7 @@ impl ChannelBackend {
             "CHANNEL_BACKEND_KAFKA" => Some(Self::ChannelBackendKafka),
             "CHANNEL_BACKEND_SQLITE" => Some(Self::ChannelBackendSqlite),
             "CHANNEL_BACKEND_NATS" => Some(Self::ChannelBackendNats),
+            "CHANNEL_BACKEND_UDP" => Some(Self::ChannelBackendUdp),
             "CHANNEL_BACKEND_CUSTOM" => Some(Self::ChannelBackendCustom),
             _ => None,
         }

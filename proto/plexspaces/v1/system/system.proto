@@ -40,6 +40,7 @@ import "google/protobuf/empty.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/metrics/metrics.proto";
+import "plexspaces/prv/circuitbreaker/circuitbreaker.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
 option java_package = "com.bhatti.plexspaces.system.v1";
@@ -362,6 +363,40 @@ message HealthProbeConfig {
   // - Uses object-registry to discover services by name/type
   // - Supports both critical and non-critical dependencies
   DependencyRegistrationConfig dependency_registration = 6;
+
+  // Circuit breaker configuration for dependency health checks
+  //
+  // ## Purpose
+  // Configures circuit breaker behavior for dependency health monitoring.
+  // When enabled, dependencies are wrapped with circuit breakers to track
+  // state transitions and support degraded mode.
+  //
+  // ## Design Notes
+  // - Circuit breakers prevent cascading failures
+  // - Support degraded mode for non-critical dependencies
+  // - Auto-recovery through half-open state testing
+  DependencyCircuitBreakerConfig circuit_breaker_config = 7;
+}
+
+// Circuit breaker configuration for dependency health checks
+//
+// ## Purpose
+// Configures how circuit breakers are applied to dependency health checkers.
+message DependencyCircuitBreakerConfig {
+  // Whether to enable circuit breakers for dependency health checks
+  bool enabled = 1;
+
+  // Default failure threshold (number of consecutive failures before opening circuit)
+  uint32 default_failure_threshold = 2;  // Default: 5
+
+  // Default timeout before attempting recovery (seconds)
+  uint64 default_timeout_secs = 3;  // Default: 60
+
+  // Default success threshold (number of successes in half-open to close circuit)
+  uint32 default_success_threshold = 4;  // Default: 2
+
+  // Per-dependency overrides (key = dependency name, value = circuit breaker config)
+  map<string, plexspaces.circuitbreaker.prv.CircuitBreakerConfig> dependency_overrides = 5;
 }
 
 // Dependency registration configuration
@@ -394,6 +429,7 @@ message DependencyRegistrationConfig {
 // - Critical dependencies block readiness/startup if unhealthy
 // - Non-critical dependencies allow partial failure (circuit breaker fallback)
 // - Each dependency has a name and check function
+// - Circuit breaker integration tracks state transitions
 message DependencyCheck {
   // Name of the dependency (e.g., "database", "redis", "external-api")
   string name = 1;
@@ -417,6 +453,66 @@ message DependencyCheck {
 
   // Additional details (key-value pairs)
   map<string, google.protobuf.Value> details = 7;
+
+  // Circuit breaker information (if circuit breaker is enabled)
+  DependencyCircuitBreakerInfo circuit_breaker = 8;
+}
+
+// Circuit breaker information for a dependency
+//
+// ## Purpose
+// Tracks circuit breaker state and metrics for dependency health monitoring.
+// This allows the dashboard and monitoring systems to see circuit breaker state
+// transitions and understand why a dependency is in degraded mode.
+//
+// ## Design Notes
+// - Circuit breaker state indicates if dependency is available (closed), unavailable (open),
+//   or testing recovery (half-open)
+// - Metrics provide visibility into failure patterns and recovery attempts
+message DependencyCircuitBreakerInfo {
+  // Circuit breaker name (matches dependency name)
+  string circuit_name = 1;
+
+  // Current circuit breaker state
+  // Uses circuitbreaker.prv.CircuitState enum
+  // 0 = CLOSED (healthy), 1 = OPEN (unavailable), 2 = HALF_OPEN (testing recovery)
+  int32 state = 2;
+
+  // Circuit breaker metrics (if available)
+  // Note: This is a reference to circuitbreaker.prv.CircuitBreakerMetrics
+  // We store key metrics here for dashboard display
+  CircuitBreakerHealthMetrics metrics = 3;
+}
+
+// Circuit breaker health metrics (subset of full CircuitBreakerMetrics)
+//
+// ## Purpose
+// Key metrics from circuit breaker for health monitoring dashboard.
+// Full metrics available via circuit breaker service if needed.
+message CircuitBreakerHealthMetrics {
+  // Total requests through circuit breaker
+  uint64 total_requests = 1;
+
+  // Failed requests
+  uint64 failed_requests = 2;
+
+  // Rejected requests (circuit open)
+  uint64 rejected_requests = 3;
+
+  // Current error rate (0.0 to 1.0)
+  double error_rate = 4;
+
+  // Consecutive failures
+  uint32 consecutive_failures = 5;
+
+  // Number of times circuit has opened
+  uint64 trip_count = 6;
+
+  // Time circuit last opened
+  google.protobuf.Timestamp last_opened = 7;
+
+  // Duration in current state
+  google.protobuf.Duration time_in_state = 8;
 }
 
 // Health check result with dependency breakdown

@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node Dashboard - PlexSpaces</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.24/dist/uPlot.min.css">
+</head>
+<body>
+    <div class="dashboard-container" x-data="nodeDashboard()">
+        <header class="dashboard-header">
+            <h1>Node Dashboard</h1>
+            <a href="/" class="back-link">← Back to Home</a>
+        </header>
+
+        <!-- Node Info -->
+        <section class="node-info-section" id="node-info" hx-get="/api/v1/dashboard/node/:node_id" hx-trigger="load, every 5s" hx-swap="none" hx-on::after-swap="renderNodeInfo(event)">
+            <div>Loading node information...</div>
+        </section>
+
+        <!-- Widgets Section -->
+        <section class="widgets-section">
+            <div class="widget">
+                <div class="widget-header">Node Metrics</div>
+                <div class="widget-content" id="node-metrics">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Tenants</div>
+                <div class="widget-value" id="tenants-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Applications</div>
+                <div class="widget-value" id="applications-count">-</div>
+            </div>
+            <div class="widget widget-chart">
+                <div class="widget-header">Actors by Type</div>
+                <div id="actors-chart"></div>
+            </div>
+        </section>
+
+        <!-- Applications Search -->
+        <section class="search-section">
+            <h2>Applications</h2>
+            <div class="search-filters">
+                <input type="text" placeholder="Application name/ID" x-model="appFilters.name" @input.debounce.500ms="loadApplications()">
+                <input type="text" placeholder="Namespace" x-model="appFilters.namespace" @input.debounce.500ms="loadApplications()">
+                <input type="text" placeholder="Tenant ID (admin)" x-model="appFilters.tenant_id" @input.debounce.500ms="loadApplications()">
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Application ID</th>
+                            <th>Name</th>
+                            <th>Version</th>
+                            <th>Status</th>
+                            <th>Namespace</th>
+                            <th>Tenant ID</th>
+                            <th>Created At</th>
+                        </tr>
+                    </thead>
+                    <tbody id="applications-table-body" hx-get="/api/v1/dashboard/applications?node_id=:node_id" hx-trigger="load, every 10s" hx-swap="none" hx-on::after-swap="renderApplicationsTable(event)">
+                        <tr><td colspan="7">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="applications-pagination"></div>
+        </section>
+
+        <!-- Actors Search -->
+        <section class="search-section">
+            <h2>Actors</h2>
+            <div class="search-filters">
+                <input type="text" placeholder="Actor ID" x-model="actorFilters.actor_id" @input.debounce.500ms="loadActors()">
+                <input type="text" placeholder="Actor Group" x-model="actorFilters.group" @input.debounce.500ms="loadActors()">
+                <input type="text" placeholder="Actor Type" x-model="actorFilters.type" @input.debounce.500ms="loadActors()">
+                <select x-model="actorFilters.status" @change="loadActors()">
+                    <option value="">All</option>
+                    <option value="running">Running</option>
+                    <option value="terminated">Terminated</option>
+                </select>
+                <input type="datetime-local" placeholder="Since" x-model="actorFilters.since" @change="loadActors()">
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Actor ID</th>
+                            <th>Type</th>
+                            <th>Group</th>
+                            <th>Status</th>
+                            <th>Metrics</th>
+                            <th>Journal Size</th>
+                            <th>Last Checkpoint</th>
+                            <th>Created At</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="actors-table-body" hx-get="/api/v1/dashboard/actors?node_id=:node_id&offset=0&limit=50" hx-trigger="load, every 10s" hx-swap="none" hx-on::after-swap="renderActorsTable(event)">
+                        <tr><td colspan="8">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="actors-pagination"></div>
+        </section>
+
+        <!-- Workflows Table -->
+        <section class="table-section">
+            <h2>Workflows</h2>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Workflow ID</th>
+                            <th>Definition ID</th>
+                            <th>Status</th>
+                            <th>Current Step</th>
+                            <th>Created At</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workflows-table-body" hx-get="/api/v1/dashboard/workflows?node_id=:node_id&offset=0&limit=50" hx-trigger="load, every 10s" hx-swap="none" hx-on::after-swap="renderWorkflowsTable(event)">
+                        <tr><td colspan="6">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="workflows-pagination"></div>
+        </section>
+    </div>
+
+    <script src="/static/dashboard.js"></script>
+    <script>
+        function nodeDashboard() {
+            return {
+                appFilters: {
+                    name: '',
+                    namespace: '',
+                    tenant_id: ''
+                },
+                actorFilters: {
+                    actor_id: '',
+                    group: '',
+                    type: '',
+                    status: '',
+                    since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
+                },
+                loadApplications() {
+                    htmx.trigger('#applications-table-body', 'refresh');
+                },
+                loadActors() {
+                    htmx.trigger('#actors-table-body', 'refresh');
+                }
+            }
+        }
+
+        // Render node info from JSON response
+        function renderNodeInfo(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const section = document.getElementById('node-info');
+                if (!section) return;
+
+                if (!response.node) {
+                    section.innerHTML = '<div class="error">Node not found</div>';
+                    return;
+                }
+
+                const node = response.node;
+                section.innerHTML = `
+                    <div class="node-details">
+                        <h2>${escapeHtml(node.id || '-')}</h2>
+                        <div class="node-meta">
+                            <span class="label">Cluster:</span> <span>${escapeHtml(node.cluster_name || '-')}</span>
+                            <span class="label">Status:</span> <span class="status-${node.status === 2 ? 'active' : 'inactive'}">${node.status === 2 ? 'Active' : 'Inactive'}</span>
+                        </div>
+                    </div>
+                `;
+
+                // Update node metrics widget
+                if (response.node_metrics) {
+                    const metrics = response.node_metrics;
+                    const metricsEl = document.getElementById('node-metrics');
+                    if (metricsEl) {
+                        const memUsedMB = (metrics.memory_used_bytes / (1024 * 1024)).toFixed(1);
+                        const memAvailMB = (metrics.memory_available_bytes / (1024 * 1024)).toFixed(1);
+                        metricsEl.innerHTML = `
+                            <div>CPU: ${metrics.cpu_usage_percent.toFixed(1)}%</div>
+                            <div>Memory: ${memUsedMB}MB / ${memAvailMB}MB</div>
+                            <div>Uptime: ${formatUptime(metrics.uptime_seconds)}</div>
+                            <div>Messages Routed: ${metrics.messages_routed || 0}</div>
+                            <div>Local Deliveries: ${metrics.local_deliveries || 0}</div>
+                            <div>Remote Deliveries: ${metrics.remote_deliveries || 0}</div>
+                            <div>Failed Deliveries: ${metrics.failed_deliveries || 0}</div>
+                            <div>Messages Processed: ${metrics.messages_processed || 0}</div>
+                            <div>Actors: ${metrics.active_actors || 0} / ${metrics.actor_count || 0}</div>
+                            <div>Connected Nodes: ${metrics.connected_nodes || 0}</div>
+                        `;
+                    }
+                }
+
+                // Update summary widgets
+                if (response.summary) {
+                    const summary = response.summary;
+                    
+                    const tenantsEl = document.getElementById('tenants-count');
+                    if (tenantsEl) {
+                        tenantsEl.textContent = summary.total_tenants || 0;
+                    }
+                    
+                    const appsEl = document.getElementById('applications-count');
+                    if (appsEl) {
+                        appsEl.textContent = summary.total_applications || 0;
+                    }
+                    
+                    // Update actors chart
+                    if (summary.actors_by_type && Object.keys(summary.actors_by_type).length > 0) {
+                        const chartEl = document.getElementById('actors-chart');
+                        if (chartEl && typeof initActorsChart === 'function') {
+                            initActorsChart(summary.actors_by_type);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to render node info:', e);
+                const section = document.getElementById('node-info');
+                if (section) {
+                    section.innerHTML = '<div class="error">Error loading node information</div>';
+                }
+            }
+        }
+
+        // Helper to format uptime
+        function formatUptime(seconds) {
+            if (!seconds) return '0s';
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${mins}m`;
+            if (mins > 0) return `${mins}m ${secs}s`;
+            return `${secs}s`;
+        }
+
+        // Render applications table from JSON response
+        function renderApplicationsTable(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const tbody = document.getElementById('applications-table-body');
+                if (!tbody) return;
+
+                if (!response.applications || response.applications.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7">No applications found</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = response.applications.map(app => {
+                    const statusText = app.status === 3 ? 'Active' : app.status === 2 ? 'Starting' : app.status === 1 ? 'Loading' : app.status === 4 ? 'Stopping' : app.status === 5 ? 'Stopped' : app.status === 6 ? 'Failed' : 'Unknown';
+                    const statusClass = app.status === 2 ? 'status-active' : 'status-inactive';
+                    const createdAt = app.created_at ? formatTimestamp(app.created_at) : '-';
+                    return `
+                        <tr>
+                            <td>${escapeHtml(app.application_id || '-')}</td>
+                            <td>${escapeHtml(app.name || '-')}</td>
+                            <td>${escapeHtml(app.version || '-')}</td>
+                            <td><span class="${statusClass}">${statusText}</span></td>
+                            <td>${escapeHtml(app.namespace || '-')}</td>
+                            <td>${escapeHtml(app.tenant_id || '-')}</td>
+                            <td>${createdAt}</td>
+                            <td><a href="#" onclick="showApplicationDetail('${escapeHtml(app.name || '')}'); return false;">View</a></td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                // Update pagination
+                if (response.page) {
+                    updatePagination('applications-pagination', response.page);
+                }
+            } catch (e) {
+                console.error('Failed to render applications table:', e);
+                const tbody = document.getElementById('applications-table-body');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="7">Error loading applications</td></tr>';
+                }
+            }
+        }
+
+        // Render actors table from JSON response
+        function renderActorsTable(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const tbody = document.getElementById('actors-table-body');
+                if (!tbody) return;
+
+                if (!response.actors || response.actors.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8">No actors found</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = response.actors.map(actor => {
+                    return `
+                        <tr>
+                            <td>${escapeHtml(actor.actor_id || '-')}</td>
+                            <td>${escapeHtml(actor.actor_type || '-')}</td>
+                            <td>${escapeHtml(actor.actor_group || '-')}</td>
+                            <td>${escapeHtml(actor.status || '-')}</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                // Update pagination
+                if (response.page) {
+                    updatePagination('actors-pagination', response.page);
+                }
+            } catch (e) {
+                console.error('Failed to render actors table:', e);
+                const tbody = document.getElementById('actors-table-body');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="8">Error loading actors</td></tr>';
+                }
+            }
+        }
+
+        // Render workflows table from JSON response
+        function renderWorkflowsTable(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const tbody = document.getElementById('workflows-table-body');
+                if (!tbody) return;
+
+                if (!response.workflows || response.workflows.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No workflows found</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = response.workflows.map(wf => {
+                    const statusText = wf.status === 2 ? 'Running' : wf.status === 1 ? 'Completed' : wf.status === 3 ? 'Failed' : 'Unknown';
+                    const statusClass = wf.status === 2 ? 'status-active' : wf.status === 1 ? 'status-completed' : wf.status === 3 ? 'status-failed' : '';
+                    const createdAt = wf.created_at ? formatTimestamp(wf.created_at) : '-';
+                    return `
+                        <tr>
+                            <td>${escapeHtml(wf.workflow_id || wf.execution_id || '-')}</td>
+                            <td>${escapeHtml(wf.definition_id || '-')}</td>
+                            <td><span class="${statusClass}">${statusText}</span></td>
+                            <td>${escapeHtml(wf.node_id || '-')}</td>
+                            <td>${createdAt}</td>
+                            <td>-</td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                // Update pagination
+                if (response.page) {
+                    updatePagination('workflows-pagination', response.page);
+                }
+            } catch (e) {
+                console.error('Failed to render workflows table:', e);
+                const tbody = document.getElementById('workflows-table-body');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="6">Error loading workflows</td></tr>';
+                }
+            }
+        }
+
+        // Helper function to format timestamp
+        function formatTimestamp(ts) {
+            if (!ts) return '-';
+            if (typeof ts === 'object' && ts.seconds) {
+                const date = new Date(ts.seconds * 1000 + (ts.nanos || 0) / 1000000);
+                return date.toLocaleString();
+            }
+            return String(ts);
+        }
+
+        // Update HTMX URLs with actual node_id after page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Extract node_id from current URL
+            const pathParts = window.location.pathname.split('/');
+            const nodeIdIndex = pathParts.indexOf('node');
+            if (nodeIdIndex !== -1 && nodeIdIndex + 1 < pathParts.length) {
+                const nodeId = pathParts[nodeIdIndex + 1];
+                
+                // Update all HTMX URLs that have :node_id placeholder
+                document.querySelectorAll('[hx-get*=":node_id"]').forEach(el => {
+                    const hxGet = el.getAttribute('hx-get');
+                    if (hxGet) {
+                        el.setAttribute('hx-get', hxGet.replace(':node_id', nodeId));
+                    }
+                });
+            }
+        });
+
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '-';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+    
+    <footer class="dashboard-footer" style="margin-top: 2rem; padding: 1rem; border-top: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; color: #666;">
+        <div>PlexSpaces Dashboard</div>
+        <div id="system-info" style="text-align: right;" hx-get="/api/v1/dashboard/system-info" hx-trigger="load" hx-swap="none" hx-on::after-swap="updateSystemInfo(event)">
+            <span>Loading...</span>
+        </div>
+    </footer>
+    
+    <script>
+        function updateSystemInfo(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const infoEl = document.getElementById('system-info');
+                if (infoEl && response.version) {
+                    const commit = response.git_commit ? response.git_commit.substring(0, 7) : 'unknown';
+                    const date = response.build_date || 'unknown';
+                    infoEl.innerHTML = `v${response.version} | ${commit} | ${date}`;
+                }
+            } catch (e) {
+                console.error('Failed to update system info:', e);
+            }
+        }
+        // Show application detail modal
+        function showApplicationDetail(appName) {
+            fetch(`/api/v1/dashboard/application/${encodeURIComponent(appName)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const modal = document.getElementById('detail-modal');
+                    const modalContent = document.getElementById('detail-modal-content');
+                    if (!modal || !modalContent) {
+                        console.error('Modal elements not found');
+                        return;
+                    }
+                    
+                    const app = data.application;
+                    const actors = data.actors || [];
+                    
+                    modalContent.innerHTML = `
+                        <div class="modal-header">
+                            <h2>Application: ${escapeHtml(app.name || '-')}</h2>
+                            <button onclick="closeModal()" class="modal-close">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="modal-section">
+                                <h3>Details</h3>
+                                <p><span class="label">Version:</span> ${escapeHtml(app.version || '-')}</p>
+                                <p><span class="label">Status:</span> <span class="status-${app.status === 3 ? 'active' : 'inactive'}">${app.status === 3 ? 'Active' : app.status === 2 ? 'Starting' : app.status === 1 ? 'Loading' : app.status === 4 ? 'Stopping' : app.status === 5 ? 'Stopped' : app.status === 6 ? 'Failed' : 'Unknown'}</span></p>
+                                <p><span class="label">Nodes:</span> ${app.node_count || 1}</p>
+                                <p><span class="label">Deployed At:</span> ${app.deployed_at ? formatTimestamp(app.deployed_at) : '-'}</p>
+                            </div>
+                            <div class="modal-section">
+                                <h3>Actors (${actors.length})</h3>
+                                <div class="actors-list">
+                                    ${actors.length > 0 
+                                        ? actors.map(a => `<div class="actor-item"><a href="#" onclick="showActorDetail('${escapeHtml(a.actor_id)}'); return false;">${escapeHtml(a.actor_id)}</a> <span class="actor-type">${escapeHtml(a.actor_type || 'unknown')}</span></div>`).join('')
+                                        : '<p>No actors found</p>'}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    modal.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Failed to load application detail:', error);
+                    alert('Failed to load application details: ' + error.message);
+                });
+        }
+        
+        // Show actor detail modal
+        function showActorDetail(actorId) {
+            fetch(`/api/v1/dashboard/actor/${encodeURIComponent(actorId)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const modal = document.getElementById('detail-modal');
+                    const modalContent = document.getElementById('detail-modal-content');
+                    if (!modal || !modalContent) {
+                        console.error('Modal elements not found');
+                        return;
+                    }
+                    
+                    const actor = data.actor;
+                    const metrics = actor.metrics || {};
+                    
+                    modalContent.innerHTML = `
+                        <div class="modal-header">
+                            <h2>Actor: ${escapeHtml(actor.actor_id || '-')}</h2>
+                            <button onclick="closeModal()" class="modal-close">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="modal-section">
+                                <h3>Details</h3>
+                                <p><span class="label">Type:</span> ${escapeHtml(actor.actor_type || '-')}</p>
+                                <p><span class="label">Group:</span> ${escapeHtml(actor.actor_group || '-')}</p>
+                                <p><span class="label">Status:</span> <span class="status-${actor.status === 'running' ? 'active' : 'inactive'}">${escapeHtml(actor.status || '-')}</span></p>
+                                <p><span class="label">Node:</span> ${escapeHtml(actor.node_id || '-')}</p>
+                                <p><span class="label">Namespace:</span> ${escapeHtml(actor.namespace || '-')}</p>
+                                <p><span class="label">Tenant:</span> ${escapeHtml(actor.tenant_id || '-')}</p>
+                            </div>
+                            <div class="modal-section">
+                                <h3>Metrics</h3>
+                                <p><span class="label">Messages Routed:</span> ${metrics.messages_routed || 0}</p>
+                                <p><span class="label">Local Deliveries:</span> ${metrics.local_deliveries || 0}</p>
+                                <p><span class="label">Remote Deliveries:</span> ${metrics.remote_deliveries || 0}</p>
+                                <p><span class="label">Failed Deliveries:</span> ${metrics.failed_deliveries || 0}</p>
+                                <p><span class="label">Errors:</span> ${metrics.error_total || 0}</p>
+                                <p><span class="label">Spawn Total:</span> ${metrics.spawn_total || 0}</p>
+                            </div>
+                        </div>
+                    `;
+                    modal.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Failed to load actor detail:', error);
+                    alert('Failed to load actor details: ' + error.message);
+                });
+        }
+        
+        // Close modal
+        function closeModal() {
+            const modal = document.getElementById('detail-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('detail-modal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+    </script>
+    
+    <!-- Detail Modal -->
+    <div id="detail-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div id="detail-modal-content"></div>
+        </div>
+    </div>
+</body>
+</html>

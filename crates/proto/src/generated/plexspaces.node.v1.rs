@@ -76,6 +76,13 @@ pub struct NodeConfig {
     /// Defaults to "default" if not set.
     #[prost(string, tag="5")]
     pub default_namespace: ::prost::alloc::string::String,
+    /// Cluster name for grouping nodes that share UDP/ZeroMQ channels
+    ///
+    /// Nodes with the same cluster_name can communicate via UDP multicast
+    /// or ZeroMQ channels. Used for service discovery and channel configuration.
+    /// If empty, node is not part of any cluster.
+    #[prost(string, tag="6")]
+    pub cluster_name: ::prost::alloc::string::String,
 }
 /// Runtime configuration
 ///
@@ -472,6 +479,13 @@ pub struct Node {
     /// Security: Only for local development. Production should use proper cert management.
     #[prost(bool, tag="24")]
     pub auto_generate_certs: bool,
+    /// Cluster name for grouping nodes that share UDP/ZeroMQ channels
+    ///
+    /// Nodes with the same cluster_name can communicate via UDP multicast
+    /// or ZeroMQ channels. Used for service discovery and channel configuration.
+    /// If empty, node is not part of any cluster.
+    #[prost(string, tag="25")]
+    pub cluster_name: ::prost::alloc::string::String,
     /// Type-specific configuration
     #[prost(oneof="node::Config", tags="10, 11, 12")]
     pub config: ::core::option::Option<node::Config>,
@@ -651,6 +665,13 @@ pub struct NodeMetrics {
     /// Connected nodes in cluster
     #[prost(uint32, tag="12")]
     pub connected_nodes: u32,
+    /// Node identity (for components that need node info without depending on Node type)
+    /// Node ID for this metrics instance
+    #[prost(string, tag="13")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Cluster name for this node (from node config)
+    #[prost(string, tag="14")]
+    pub cluster_name: ::prost::alloc::string::String,
 }
 /// Request to register a node
 #[allow(clippy::derive_partial_eq_without_eq)]

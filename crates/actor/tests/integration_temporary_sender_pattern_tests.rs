@@ -8,7 +8,7 @@ use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryI
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorError, Actor, BehaviorType, ActorRegistry, application::ApplicationNode, ActorService};
 use plexspaces_mailbox::{Message, Mailbox, mailbox_config_default};
-use plexspaces_node::{NodeBuilder, service_wrappers::ActorServiceWrapper};
+use plexspaces_node::NodeBuilder;
 use plexspaces_actor_service::ActorServiceImpl;
 use plexspaces_proto::actor::v1::actor_service_server::ActorServiceServer;
 use serde::{Deserialize, Serialize};
@@ -127,14 +127,13 @@ async fn create_test_registry_with_node(
     impl ObjectRegistryTrait for ObjectRegistryAdapter {
         async fn lookup(
             &self,
-            tenant_id: &str,
+            ctx: &plexspaces_core::RequestContext,
             object_id: &str,
-            namespace: &str,
             object_type: Option<ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             let obj_type = object_type.unwrap_or(ObjectType::ObjectTypeUnspecified);
             self.inner
-                .lookup(tenant_id, namespace, obj_type, object_id)
+                .lookup(ctx, obj_type, object_id)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -153,10 +152,11 @@ async fn create_test_registry_with_node(
 
         async fn register(
             &self,
+            ctx: &plexspaces_core::RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.inner
-                .register(registration)
+                .register(ctx, registration)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -167,10 +167,11 @@ async fn create_test_registry_with_node(
 
     // Register node as a service object (nodes are registered as services)
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
-    let node_object_id = format!("_node@{}", node_id);
+    // Nodes are registered with object_id = node_id (no "_node@" prefix)
+    let node_object_id = node_id.to_string();
     let registration = ProtoObjectRegistration {
         object_id: node_object_id.clone(),
-        object_type: ObjectType::ObjectTypeService as i32,
+        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "node".to_string(),
         grpc_address: node_address.to_string(),
         ..Default::default()
@@ -325,7 +326,6 @@ async fn test_outside_sender_calling_ask() {
     
     // Manually register ActorService (normally done in create_actor_context_arc, but actors need it for send_reply)
     use plexspaces_actor_service::ActorServiceImpl;
-    use plexspaces_node::service_wrappers::ActorServiceWrapper;
     use plexspaces_core::ActorService;
     
     // Wait for Node's ServiceLocator to have services registered (including ReplyWaiterRegistry)
@@ -333,15 +333,14 @@ async fn test_outside_sender_calling_ask() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     
     // Create ActorServiceImpl using Node's ServiceLocator (ensures shared ReplyWaiterRegistry)
-    // This is the proper way - ActorServiceImpl will use the same ServiceLocator as ActorRef
+    // ActorServiceImpl now implements ActorService trait directly, no wrapper needed
     let actor_service_impl = Arc::new(ActorServiceImpl::new(
         node.service_locator().clone(),
         node.id().as_str().to_string(),
     ));
     
-    let actor_service_wrapper = Arc::new(ActorServiceWrapper::new(actor_service_impl.clone()));
-    node.service_locator().register_service(actor_service_wrapper.clone()).await;
-    let actor_service_trait: Arc<dyn ActorService> = actor_service_wrapper.clone() as Arc<dyn ActorService>;
+    node.service_locator().register_service(actor_service_impl.clone()).await;
+    let actor_service_trait: Arc<dyn ActorService> = actor_service_impl.clone() as Arc<dyn ActorService>;
     node.service_locator().register_actor_service(actor_service_trait).await;
 
     // Create and spawn counter actor
@@ -413,7 +412,6 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     
     // Manually register ActorService (normally done in create_actor_context_arc, but actors need it for send_reply)
     use plexspaces_actor_service::ActorServiceImpl;
-    use plexspaces_node::service_wrappers::ActorServiceWrapper;
     use plexspaces_core::ActorService;
     
     // Wait for Node's ServiceLocator to have services registered (including ReplyWaiterRegistry)
@@ -421,15 +419,14 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     
     // Create ActorServiceImpl using Node's ServiceLocator (ensures shared ReplyWaiterRegistry)
-    // This is the proper way - ActorServiceImpl will use the same ServiceLocator as ActorRef
+    // ActorServiceImpl now implements ActorService trait directly, no wrapper needed
     let actor_service_impl = Arc::new(ActorServiceImpl::new(
         node.service_locator().clone(),
         node.id().as_str().to_string(),
     ));
     
-    let actor_service_wrapper = Arc::new(ActorServiceWrapper::new(actor_service_impl.clone()));
-    node.service_locator().register_service(actor_service_wrapper.clone()).await;
-    let actor_service_trait: Arc<dyn ActorService> = actor_service_wrapper.clone() as Arc<dyn ActorService>;
+    node.service_locator().register_service(actor_service_impl.clone()).await;
+    let actor_service_trait: Arc<dyn ActorService> = actor_service_impl.clone() as Arc<dyn ActorService>;
     node.service_locator().register_actor_service(actor_service_trait).await;
 
     // Create two counter actors using ActorFactory
@@ -440,7 +437,7 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     let actor2_id = "counter-2@test-node-local-ask".to_string();
     
     // Use ActorFactory to spawn actors (already imported above)
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
         .ok_or_else(|| "ActorFactory not found".to_string())?;
     
     // Spawn actors using spawn_actor
@@ -546,7 +543,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
 
     // ARRANGE: Set up node1 with forwarder actor
     // Create node1 - ActorRef::remote will handle routing to node2
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
+    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
 
     // Start node1 in background to initialize services
     let node1_for_start = node1.clone();
@@ -645,7 +642,7 @@ async fn test_chained_asks_multi_node() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // ARRANGE: Set up node1 with forwarder actor
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
+    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
 
     // Start node1 in background to initialize services
     let node1_for_start = node1.clone();
@@ -742,7 +739,7 @@ async fn test_concurrent_asks_multi_node() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // ARRANGE: Set up node1
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
+    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
 
     // Start node1 in background to initialize services
     let node1_for_start = node1.clone();
@@ -831,7 +828,6 @@ async fn test_unified_send_reply_api() {
     
     // Manually register ActorService (normally done in create_actor_context_arc, but actors need it for send_reply)
     use plexspaces_actor_service::ActorServiceImpl;
-    use plexspaces_node::service_wrappers::ActorServiceWrapper;
     use plexspaces_core::ActorService;
     
     // Wait for Node's ServiceLocator to have services registered (including ReplyWaiterRegistry)
@@ -839,15 +835,14 @@ async fn test_unified_send_reply_api() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     
     // Create ActorServiceImpl using Node's ServiceLocator (ensures shared ReplyWaiterRegistry)
-    // This is the proper way - ActorServiceImpl will use the same ServiceLocator as ActorRef
+    // ActorServiceImpl now implements ActorService trait directly, no wrapper needed
     let actor_service_impl = Arc::new(ActorServiceImpl::new(
         node.service_locator().clone(),
         node.id().as_str().to_string(),
     ));
     
-    let actor_service_wrapper = Arc::new(ActorServiceWrapper::new(actor_service_impl.clone()));
-    node.service_locator().register_service(actor_service_wrapper.clone()).await;
-    let actor_service_trait: Arc<dyn ActorService> = actor_service_wrapper.clone() as Arc<dyn ActorService>;
+    node.service_locator().register_service(actor_service_impl.clone()).await;
+    let actor_service_trait: Arc<dyn ActorService> = actor_service_impl.clone() as Arc<dyn ActorService>;
     node.service_locator().register_actor_service(actor_service_trait).await;
 
     // Create and spawn counter actor

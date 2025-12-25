@@ -102,7 +102,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         
         // Graceful shutdown should flush messages
-        mailbox.graceful_shutdown().await.unwrap();
+        mailbox.graceful_shutdown(Some(std::time::Duration::from_secs(5))).await.unwrap();
         
         // Verify mailbox stats are accessible
         let stats = mailbox.get_stats().await;
@@ -151,7 +151,7 @@ mod tests {
         // 1. Call mailbox.graceful_shutdown()
         // 2. Record final stats
         // 3. Call facet.on_detach()
-        mailbox.graceful_shutdown().await.unwrap();
+        mailbox.graceful_shutdown(Some(std::time::Duration::from_secs(5))).await.unwrap();
         facet.on_detach("test-actor-123").await.unwrap();
     }
 

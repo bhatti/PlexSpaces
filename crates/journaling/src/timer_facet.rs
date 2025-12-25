@@ -50,6 +50,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+use metrics;
+use tracing;
 
 // Optional dependency for distributed locking
 #[cfg(feature = "locks")]
@@ -568,6 +570,80 @@ impl Facet for TimerFacet {
         
         let mut ref_guard = self.actor_ref.write().await;
         *ref_guard = None;
+        
+        Ok(())
+    }
+
+    /// Phase 4.3: Handle EXIT signal from linked actor
+    ///
+    /// ## Purpose
+    /// Cancels all timers when actor receives EXIT signal from linked actor.
+    /// This prevents timers from firing after the actor is about to terminate.
+    ///
+    /// ## When Called
+    /// - Only if `ActorContext.trap_exit = true`
+    /// - After `Actor::handle_exit()` is called
+    /// - Before actor terminates (if ExitAction::Propagate)
+    async fn on_exit(
+        &mut self,
+        actor_id: &str,
+        _from: &str,
+        _reason: &plexspaces_facet::ExitReason,
+    ) -> Result<(), FacetError> {
+        // Cancel all timers on EXIT
+        let mut timers = self.timers.write().await;
+        let timer_count = timers.len();
+        for (timer_name, handle) in timers.drain() {
+            handle.handle.abort();
+            tracing::debug!(
+                actor_id = %actor_id,
+                timer_name = %timer_name,
+                "Cancelled timer on EXIT signal"
+            );
+        }
+        
+        if timer_count > 0 {
+            metrics::counter!("plexspaces_timer_facet_exit_cancelled_total",
+                "actor_id" => actor_id.to_string(),
+                "timer_count" => timer_count.to_string()
+            ).increment(timer_count as u64);
+            tracing::info!(
+                actor_id = %actor_id,
+                timer_count = timer_count,
+                "Cancelled all timers on EXIT signal"
+            );
+        }
+        
+        Ok(())
+    }
+
+    /// Phase 4.3: Handle DOWN notification from monitored actor
+    ///
+    /// ## Purpose
+    /// Logs DOWN notification for observability. TimerFacet doesn't need to
+    /// take action on DOWN notifications (timers are actor-specific).
+    ///
+    /// ## When Called
+    /// - After actor receives DOWN notification
+    /// - Actor continues running (DOWN is informational, not fatal)
+    async fn on_down(
+        &mut self,
+        actor_id: &str,
+        monitored_id: &str,
+        reason: &plexspaces_facet::ExitReason,
+    ) -> Result<(), FacetError> {
+        // Log DOWN notification for observability
+        tracing::debug!(
+            actor_id = %actor_id,
+            monitored_id = %monitored_id,
+            reason = ?reason,
+            "TimerFacet received DOWN notification (no action needed)"
+        );
+        
+        metrics::counter!("plexspaces_timer_facet_down_total",
+            "actor_id" => actor_id.to_string(),
+            "monitored_id" => monitored_id.to_string()
+        ).increment(1);
         
         Ok(())
     }

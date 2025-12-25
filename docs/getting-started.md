@@ -4,6 +4,8 @@ This guide will help you get started with PlexSpaces in minutes. You'll learn ho
 
 **New to PlexSpaces?** Start here, then read the [Concepts Guide](concepts.md) to understand the fundamentals.
 
+> **📖 For comprehensive actor system documentation**, see [Actor System Guide](actor-system.md) which covers actors, supervisors, applications, facets, behaviors, lifecycle, linking/monitoring, and observability in detail.
+
 
 ## Prerequisites
 
@@ -38,6 +40,8 @@ make test
 ```
 
 See [Installation Guide](installation.md) for detailed setup instructions.
+
+**Note**: For actors using non-memory channels (Redis, Kafka, SQLite, NATS), graceful shutdown is automatically handled. When an actor stops, it completes all in-progress messages before terminating. See [Durability Guide](durability.md) for details on graceful shutdown and message recovery.
 
 ## Your First Actor
 

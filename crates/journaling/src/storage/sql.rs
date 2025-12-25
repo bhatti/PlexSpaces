@@ -912,14 +912,14 @@ impl JournalStorage for SqliteJournalStorage {
         page_request: &PageRequest,
     ) -> JournalResult<(Vec<ActorEvent>, PageResponse)> {
         // Decode page_token to get starting sequence
-        let start_sequence = if page_request.page_token.is_empty() {
+        let start_sequence = if page_request.offset == 0 {
             from_sequence
         } else {
-            page_request.page_token.parse::<u64>().unwrap_or(from_sequence)
+            from_sequence.max((page_request.offset.max(0)) as u64)
         };
 
         // Validate and clamp page_size (1-1000)
-        let page_size = page_request.page_size.max(1).min(1000) as i64;
+        let page_size = page_request.limit.max(1).min(1000) as i64;
 
         // Fetch page_size + 1 to check if there's more
         let rows = sqlx::query(
@@ -960,16 +960,11 @@ impl JournalStorage for SqliteJournalStorage {
             });
         }
 
-        // Generate next_page_token if there are more events
-        let next_page_token = if has_more && !events.is_empty() {
-            (events.last().unwrap().sequence + 1).to_string()
-        } else {
-            String::new()
-        };
-
         let page_response = PageResponse {
-            next_page_token,
             total_size: 0, // Total size not available without full scan (expensive)
+            offset: start_sequence as i32,
+            limit: page_size as i32,
+            has_next: has_more,
         };
 
         Ok((events, page_response))
@@ -1036,15 +1031,11 @@ impl JournalStorage for SqliteJournalStorage {
         actor_id: &str,
         page_request: &PageRequest,
     ) -> JournalResult<ActorHistory> {
-        // Decode page_token to get starting sequence
-        let start_sequence = if page_request.page_token.is_empty() {
-            0
-        } else {
-            page_request.page_token.parse::<u64>().unwrap_or(0)
-        };
+        // Use offset to get starting sequence
+        let start_sequence = page_request.offset.max(0) as u64;
 
-        // Validate and clamp page_size (1-1000)
-        let page_size = page_request.page_size.max(1).min(1000) as i64;
+        // Validate and clamp limit (1-1000)
+        let page_size = page_request.limit.max(1).min(1000) as i64;
 
         // Get latest sequence for history metadata
         let latest_row = sqlx::query(
@@ -1113,16 +1104,11 @@ impl JournalStorage for SqliteJournalStorage {
             });
         }
 
-        // Generate next_page_token if there are more events
-        let next_page_token = if has_more && !events.is_empty() {
-            (events.last().unwrap().sequence + 1).to_string()
-        } else {
-            String::new()
-        };
-
         let page_response = PageResponse {
-            next_page_token,
             total_size: 0, // Total size not available without full scan (expensive)
+            offset: start_sequence as i32,
+            limit: page_size as i32,
+            has_next: has_more,
         };
 
         Ok(ActorHistory {
@@ -2011,14 +1997,14 @@ impl JournalStorage for PostgresJournalStorage {
         page_request: &PageRequest,
     ) -> JournalResult<(Vec<ActorEvent>, PageResponse)> {
         // Decode page_token to get starting sequence
-        let start_sequence = if page_request.page_token.is_empty() {
+        let start_sequence = if page_request.offset == 0 {
             from_sequence
         } else {
-            page_request.page_token.parse::<u64>().unwrap_or(from_sequence)
+            from_sequence.max((page_request.offset.max(0)) as u64)
         };
 
         // Validate and clamp page_size (1-1000)
-        let page_size = page_request.page_size.max(1).min(1000) as i64;
+        let page_size = page_request.limit.max(1).min(1000) as i64;
 
         // Fetch page_size + 1 to check if there's more
         let rows = sqlx::query(
@@ -2065,16 +2051,11 @@ impl JournalStorage for PostgresJournalStorage {
             });
         }
 
-        // Generate next_page_token if there are more events
-        let next_page_token = if has_more && !events.is_empty() {
-            (events.last().unwrap().sequence + 1).to_string()
-        } else {
-            String::new()
-        };
-
         let page_response = PageResponse {
-            next_page_token,
             total_size: 0, // Total size not available without full scan (expensive)
+            offset: start_sequence as i32,
+            limit: page_size as i32,
+            has_next: has_more,
         };
 
         Ok((events, page_response))
@@ -2146,15 +2127,11 @@ impl JournalStorage for PostgresJournalStorage {
         actor_id: &str,
         page_request: &PageRequest,
     ) -> JournalResult<ActorHistory> {
-        // Decode page_token to get starting sequence
-        let start_sequence = if page_request.page_token.is_empty() {
-            0
-        } else {
-            page_request.page_token.parse::<u64>().unwrap_or(0)
-        };
+        // Use offset to get starting sequence
+        let start_sequence = page_request.offset.max(0) as u64;
 
-        // Validate and clamp page_size (1-1000)
-        let page_size = page_request.page_size.max(1).min(1000) as i64;
+        // Validate and clamp limit (1-1000)
+        let page_size = page_request.limit.max(1).min(1000) as i64;
 
         // Get latest sequence for history metadata
         let latest_row = sqlx::query(
@@ -2243,16 +2220,11 @@ impl JournalStorage for PostgresJournalStorage {
             });
         }
 
-        // Generate next_page_token if there are more events
-        let next_page_token = if has_more && !events.is_empty() {
-            (events.last().unwrap().sequence + 1).to_string()
-        } else {
-            String::new()
-        };
-
         let page_response = PageResponse {
-            next_page_token,
             total_size: 0, // Total size not available without full scan (expensive)
+            offset: start_sequence as i32,
+            limit: page_size as i32,
+            has_next: has_more,
         };
 
         Ok(ActorHistory {

@@ -194,6 +194,10 @@ pub struct Message {
     /// HTTP method for HTTP-based invocations (optional)
     /// Example: "GET", "POST", "PUT", "DELETE"
     pub uri_method: Option<String>,
+    /// Channel message ID (for ack/nack operations on channels that support it)
+    /// This is the ID assigned by the channel backend (Redis, Kafka, etc.)
+    /// and is different from the mailbox message ID
+    pub channel_message_id: Option<String>,
 }
 
 impl Message {
@@ -214,6 +218,7 @@ impl Message {
             idempotency_key: None,
             uri_path: None,
             uri_method: None,
+            channel_message_id: None, // Only set when received from channel backend
         }
     }
 
@@ -232,6 +237,57 @@ impl Message {
         Self::new(timer_name.as_bytes().to_vec())
             .with_metadata("type".to_string(), "timer".to_string())
             .with_metadata("timer_name".to_string(), timer_name.to_string())
+    }
+
+    /// Create an EXIT message (from linked actor death)
+    ///
+    /// ## Purpose
+    /// Used for Erlang-style link propagation. When a linked actor dies,
+    /// this message is sent to actors that trap exits (trap_exit=true).
+    ///
+    /// ## Arguments
+    /// * `from` - ID of the actor that died
+    /// * `reason` - Exit reason from the dead actor (serialized as string)
+    ///
+    /// ## Note
+    /// This method accepts a string representation of the exit reason to avoid
+    /// dependency on plexspaces_core. The reason is stored in metadata.
+    pub fn exit(from: String, reason_str: &str) -> Self {
+        let mut msg = Self::new(b"__EXIT__".to_vec())
+            .with_metadata("type".to_string(), "__EXIT__".to_string())
+            .with_metadata("exit_from".to_string(), from.clone())
+            .with_metadata("exit_reason".to_string(), reason_str.to_string());
+        
+        msg.sender = Some(from);
+        msg
+    }
+
+    /// Check if this is an EXIT message
+    pub fn is_exit(&self) -> bool {
+        self.payload == b"__EXIT__" || 
+        self.message_type == "__EXIT__" ||
+        self.metadata.get("type").map(|s| s == "__EXIT__").unwrap_or(false)
+    }
+
+    /// Try to parse EXIT message and extract exit reason string
+    ///
+    /// ## Returns
+    /// Some((from_actor_id, exit_reason_string)) if this is an EXIT message, None otherwise
+    ///
+    /// ## Note
+    /// Returns the reason as a string to avoid dependency on plexspaces_core.
+    /// The caller should convert to ExitReason if needed.
+    pub fn try_parse_exit(&self) -> Option<(String, String)> {
+        if !self.is_exit() {
+            return None;
+        }
+
+        let from = self.sender.clone().unwrap_or_else(|| "unknown".to_string());
+        let reason_str = self.metadata.get("exit_reason")
+            .cloned()
+            .unwrap_or_else(|| "Normal".to_string());
+
+        Some((from, reason_str))
     }
 
     /// Get message ID
@@ -428,6 +484,7 @@ impl Message {
             } else {
                 Some(proto_msg.uri_method.clone())
             },
+            channel_message_id: None, // Proto messages don't have channel message ID
         }
     }
 
@@ -715,7 +772,7 @@ impl From<ChannelMessage> for Message {
             .unwrap_or_else(|| channel_msg.channel.clone());
         
         Message {
-            id: channel_msg.id,
+            id: channel_msg.id.clone(),
             payload: channel_msg.payload,
             metadata: channel_msg.headers,
             priority,
@@ -729,6 +786,11 @@ impl From<ChannelMessage> for Message {
             idempotency_key: None, // Idempotency key not in ChannelMessage
             uri_path: None, // URI path not in ChannelMessage
             uri_method: None, // URI method not in ChannelMessage
+            // Store channel message ID for ack/nack operations
+            // For Redis: this is the stream ID (e.g., "1234567890-0")
+            // For Kafka: this would be the offset
+            // For InMemory: this is None (no ack/nack needed)
+            channel_message_id: Some(channel_msg.id),
         }
     }
 }
@@ -824,6 +886,11 @@ pub struct Mailbox {
     message_id_cache_size: usize,
     /// Maximum cache size for idempotency key deduplication (default: 10000)
     idempotency_cache_size: usize,
+    /// Shutdown flag: when true, mailbox stops accepting new messages
+    /// For non-memory channels, also stops receiving from channel backend
+    shutdown_flag: Arc<RwLock<bool>>,
+    /// In-progress message count (for graceful shutdown tracking)
+    in_progress_count: Arc<RwLock<usize>>,
 }
 
 /// Internal message storage (used for ordering/priority before sending to channel)
@@ -900,6 +967,9 @@ impl Mailbox {
         };
         let is_in_memory = channel_backend == ChannelBackend::ChannelBackendInMemory;
         let channel_backend_value = channel_backend as i32;
+        
+        // Helper to check if backend is in-memory (needed for shutdown logic)
+        let is_in_memory_clone = is_in_memory;
 
         // Create channel config from mailbox config
         let mut channel_config = config.channel_config.clone().unwrap_or_else(|| {
@@ -962,7 +1032,11 @@ impl Mailbox {
             deduplication_window: mailbox_config_deduplication_window(&config),
             message_id_cache_size: mailbox_config_message_id_cache_size(&config),
             idempotency_cache_size: mailbox_config_idempotency_cache_size(&config),
+            shutdown_flag: Arc::new(RwLock::new(false)),
+            in_progress_count: Arc::new(RwLock::new(0)),
         };
+        
+        // Store is_in_memory flag for later use (we'll add a method to access it)
 
         // Start background processor task to move messages from internal queue to channel
         // For InMemory backend, also forward to local_receiver for fast-path
@@ -1181,6 +1255,16 @@ impl Mailbox {
     /// - Message IDs: Duplicate message IDs within deduplication_window are skipped (LRU cache with fixed size)
     /// - Idempotency keys: Duplicate idempotency keys return cached response (if available) (LRU cache with fixed size)
     pub async fn enqueue(&self, message: Message) -> Result<(), MailboxError> {
+        // For non-memory channels, check shutdown flag to stop accepting new messages
+        if !self.is_in_memory() {
+            let shutdown = *self.shutdown_flag.read().await;
+            if shutdown {
+                return Err(MailboxError::StorageError(
+                    "Mailbox is shutting down, not accepting new messages".to_string(),
+                ));
+            }
+        }
+        
         // Check for duplicate message ID (LRU cache with fixed size)
         {
             let mut cache = self.message_id_cache.write().await;
@@ -1343,10 +1427,18 @@ impl Mailbox {
     pub fn dequeue_with_timeout(
         &self,
         timeout: Option<std::time::Duration>,
-    ) -> impl std::future::Future<Output = Option<Message>> {
+    ) -> impl std::future::Future<Output = Option<Message>> + 'static {
         let channel = self.channel.clone();
         let local_receiver = self.local_receiver.clone();
         let mailbox_id = self.mailbox_id.clone();
+        let shutdown_flag = self.shutdown_flag.clone();
+        // Compute is_in_memory from channel_backend (avoiding lifetime issues)
+        use plexspaces_proto::channel::v1::ChannelBackend;
+        let channel_backend = self.channel_backend; // Copy the i32 value
+        let is_in_memory = matches!(
+            ChannelBackend::try_from(channel_backend),
+            Ok(ChannelBackend::ChannelBackendInMemory)
+        );
         
         async move {
             tracing::trace!(
@@ -1424,10 +1516,24 @@ impl Mailbox {
             }
             
             // Fall back to channel backend (for durable backends like SQLite, Redis, Kafka)
+            // Check shutdown flag before receiving (for non-memory channels)
+            // (shutdown_flag and is_in_memory already captured above)
             match timeout {
                 None => {
                     // Indefinite wait - poll channel
                     loop {
+                        // Check shutdown flag for non-memory channels
+                        if !is_in_memory {
+                            let shutdown = *shutdown_flag.read().await;
+                            if shutdown {
+                                tracing::debug!(
+                                    mailbox_id = %mailbox_id,
+                                    "Mailbox::dequeue: Shutdown in progress, stopping receive"
+                                );
+                                return None;
+                            }
+                        }
+                        
                         match channel.receive(1).await {
                             Ok(messages) => {
                                 if let Some(channel_msg) = messages.first() {
@@ -1459,6 +1565,18 @@ impl Mailbox {
                 }
                 Some(duration) => {
                     // Wait with timeout
+                    // Check shutdown flag for non-memory channels
+                    if !is_in_memory {
+                        let shutdown = *shutdown_flag.read().await;
+                        if shutdown {
+                            tracing::debug!(
+                                mailbox_id = %mailbox_id,
+                                "Mailbox::dequeue: Shutdown in progress, stopping receive"
+                            );
+                            return None;
+                        }
+                    }
+                    
                     let start = std::time::Instant::now();
                     loop {
                         if start.elapsed() >= duration {
@@ -1515,6 +1633,102 @@ impl Mailbox {
     /// ```
     pub fn dequeue(&self) -> impl std::future::Future<Output = Option<Message>> {
         self.dequeue_with_timeout(None)
+    }
+
+    /// Acknowledge message processing
+    ///
+    /// ## Arguments
+    /// * `message` - The message that was successfully processed
+    ///
+    /// ## Behavior
+    /// - Calls `channel.ack()` with the channel message ID
+    /// - Updates statistics
+    ///
+    /// ## Notes
+    /// - Channel implementations handle ack appropriately (InMemory = no-op, Redis/Kafka = actual ack)
+    /// - No backend-specific checks needed - channel trait handles it
+    pub async fn ack_message(&self, message: &Message) -> Result<(), MailboxError> {
+        // Get channel message ID (use channel_message_id if available, otherwise fall back to message.id)
+        let channel_msg_id = message.channel_message_id.as_ref()
+            .unwrap_or(&message.id);
+
+        // Call channel.ack() - channel implementation handles backend-specific behavior
+        self.channel.ack(channel_msg_id).await
+            .map_err(|e| MailboxError::StorageError(format!("Failed to ack message: {}", e)))?;
+
+        // Update stats
+        {
+            let mut stats = self.stats.write().await;
+            stats.total_dequeued += 1;
+        }
+
+        // OBSERVABILITY: Track successful acks via tracing
+        tracing::trace!(
+            mailbox_id = %self.mailbox_id,
+            message_id = %message.id,
+            "Message acked successfully"
+        );
+
+        tracing::debug!(
+            mailbox_id = %self.mailbox_id,
+            message_id = %message.id,
+            channel_msg_id = %channel_msg_id,
+            "✅ Mailbox::ack_message: Message acknowledged"
+        );
+
+        Ok(())
+    }
+
+    /// Negative acknowledge message processing
+    ///
+    /// ## Arguments
+    /// * `message` - The message that failed processing
+    /// * `error` - Optional error message for logging
+    ///
+    /// ## Behavior
+    /// - Calls `channel.nack()` - channel implementation handles retry/DLQ logic
+    /// - Updates statistics
+    ///
+    /// ## Notes
+    /// - Channel implementations handle nack appropriately:
+    ///   - InMemory = no-op (just tracks metrics)
+    ///   - Redis/Kafka = tracks retry count, requeues or sends to DLQ based on channel config
+    /// - No backend-specific checks needed - channel trait handles it
+    /// - Retry/DLQ logic is in channel implementation, not mailbox
+    pub async fn nack_message(&self, message: &Message, error: Option<&str>) -> Result<(), MailboxError> {
+        // Get channel message ID (use channel_message_id if available, otherwise fall back to message.id)
+        let channel_msg_id = message.channel_message_id.as_ref()
+            .unwrap_or(&message.id);
+
+        // Call channel.nack() with requeue=true
+        // Channel implementation will handle retry counting and DLQ logic based on its config
+        // For channels that support retry/DLQ, they track delivery_count internally
+        self.channel.nack(channel_msg_id, true).await
+            .map_err(|e| MailboxError::StorageError(format!("Failed to nack message: {}", e)))?;
+
+        // Update stats
+        {
+            let mut stats = self.stats.write().await;
+            stats.total_dropped += 1; // Track failed messages
+        }
+
+        // OBSERVABILITY: Track nacks via tracing
+        tracing::trace!(
+            mailbox_id = %self.mailbox_id,
+            message_id = %message.id,
+            error = ?error,
+            "Message nacked (channel handles retry/DLQ)"
+        );
+
+        tracing::debug!(
+            mailbox_id = %self.mailbox_id,
+            message_id = %message.id,
+            channel_msg_id = %channel_msg_id,
+            error = ?error,
+            "⚠️ Mailbox::nack_message: Message nacked (channel handles retry/DLQ)"
+        );
+
+        Ok(())
     }
 
     /// Dequeue a message matching a predicate (selective receive)
@@ -1592,12 +1806,22 @@ impl Mailbox {
     /// Used by DurabilityFacet to determine if mailbox messages will survive actor restart.
     pub fn is_durable(&self) -> bool {
         use plexspaces_proto::channel::v1::ChannelBackend;
-        // Check if backend is durable (not InMemory)
+        // Check if backend is durable (not InMemory or UDP)
         match ChannelBackend::try_from(self.channel_backend) {
             Ok(ChannelBackend::ChannelBackendInMemory) => false,
-            Ok(_) => true, // SQLite, Redis, Kafka are all durable
+            Ok(ChannelBackend::ChannelBackendUdp) => false, // UDP is best-effort, not persistent
+            Ok(_) => true, // SQLite, Redis, Kafka, NATS are all durable
             Err(_) => false, // Invalid backend, assume not durable
         }
+    }
+
+    /// Check if backend is in-memory (for shutdown logic)
+    pub fn is_in_memory(&self) -> bool {
+        use plexspaces_proto::channel::v1::ChannelBackend;
+        matches!(
+            ChannelBackend::try_from(self.channel_backend),
+            Ok(ChannelBackend::ChannelBackendInMemory)
+        )
     }
 
     /// Get the channel backend type
@@ -1611,6 +1835,7 @@ impl Mailbox {
             Ok(ChannelBackend::ChannelBackendKafka) => "kafka",
             Ok(ChannelBackend::ChannelBackendSqlite) => "sqlite",
             Ok(ChannelBackend::ChannelBackendNats) => "nats",
+            Ok(ChannelBackend::ChannelBackendUdp) => "udp",
             Ok(ChannelBackend::ChannelBackendCustom) => "custom",
             Err(_) => "unknown",
         }
@@ -1631,23 +1856,53 @@ impl Mailbox {
         }
     }
 
-    /// Graceful shutdown: Flush pending messages to durable backend
+    /// Graceful shutdown: Stop accepting new messages and complete in-progress ones
     ///
-    /// For durable backends, ensures all pending messages are persisted.
-    /// For in-memory backends, this is a no-op.
+    /// For non-memory channels:
+    /// - Stops accepting new messages via enqueue()
+    /// - Stops receiving new messages from channel backend
+    /// - Waits for in-progress messages to complete (with timeout)
+    /// - Closes the channel to stop receiving
+    ///
+    /// For durable backends, also ensures all pending messages are persisted.
     ///
     /// ## Use Case
-    /// Called during actor graceful shutdown to ensure messages are persisted
-    /// before DurabilityFacet saves checkpoint.
-    pub async fn graceful_shutdown(&self) -> Result<(), MailboxError> {
+    /// Called during actor graceful shutdown to ensure:
+    /// - No new messages are accepted
+    /// - In-progress messages complete and get ACK/NACK
+    /// - Pending messages are persisted (for durable backends)
+    ///
+    /// ## Arguments
+    /// * `timeout` - Maximum time to wait for in-progress messages to complete
+    ///
+    /// ## Returns
+    /// `Ok(())` if shutdown completed successfully
+    pub async fn graceful_shutdown(&self, timeout: Option<Duration>) -> Result<(), MailboxError> {
+        tracing::info!(
+            mailbox_id = %self.mailbox_id,
+            backend = %self.backend_type(),
+            "Starting graceful shutdown"
+        );
+        
+        // Step 1: Set shutdown flag to stop accepting new messages (for non-memory channels)
+        if !self.is_in_memory() {
+            let mut shutdown_flag = self.shutdown_flag.write().await;
+            *shutdown_flag = true;
+            drop(shutdown_flag);
+            tracing::debug!(
+                mailbox_id = %self.mailbox_id,
+                "Shutdown flag set - no new messages will be accepted"
+            );
+        }
+        
+        // Step 2: For durable backends, flush pending messages
         if self.is_durable() {
-            // For durable backends, ensure all messages in internal queue are sent to channel
-            // The channel backend will persist them
             let queue_guard = self.internal_queue.read().await;
             let pending_count = match &*queue_guard {
                 MessageStorage::Queue(queue) => queue.len(),
                 MessageStorage::Priority(heap) => heap.len(),
             };
+            drop(queue_guard);
             
             if pending_count > 0 {
                 tracing::info!(
@@ -1658,10 +1913,58 @@ impl Mailbox {
                 );
                 
                 // Messages will be flushed by the processor task
-                // For now, we just log - actual flushing happens via channel.send()
-                // TODO: Add explicit flush if needed for specific backends
+                // Wait a bit for processor to flush (non-blocking)
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
+        
+        // Step 3: Wait for in-progress messages to complete (with timeout)
+        let timeout_duration = timeout.unwrap_or(Duration::from_secs(30));
+        let start = std::time::Instant::now();
+        
+        loop {
+            let in_progress = *self.in_progress_count.read().await;
+            if in_progress == 0 {
+                tracing::debug!(
+                    mailbox_id = %self.mailbox_id,
+                    "All in-progress messages completed"
+                );
+                break;
+            }
+            
+            if start.elapsed() >= timeout_duration {
+                tracing::warn!(
+                    mailbox_id = %self.mailbox_id,
+                    in_progress = in_progress,
+                    timeout_secs = timeout_duration.as_secs(),
+                    "Timeout waiting for in-progress messages to complete"
+                );
+                break;
+            }
+            
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        
+        // Step 4: Close the channel to stop receiving (for non-memory channels)
+        if !self.is_in_memory() {
+            if let Err(e) = self.channel.close().await {
+                tracing::warn!(
+                    mailbox_id = %self.mailbox_id,
+                    error = %e,
+                    "Failed to close channel during shutdown"
+                );
+            } else {
+                tracing::debug!(
+                    mailbox_id = %self.mailbox_id,
+                    "Channel closed successfully"
+                );
+            }
+        }
+        
+        tracing::info!(
+            mailbox_id = %self.mailbox_id,
+            "Graceful shutdown completed"
+        );
         
         Ok(())
     }

@@ -153,7 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("This example demonstrates JavaNOW-inspired pub/sub for actor lifecycle events.\n");
 
     // Create node using NodeBuilder
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     // Create Prometheus exporter
     let prometheus = Arc::new(PrometheusExporter::new());

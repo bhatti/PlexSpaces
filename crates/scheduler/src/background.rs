@@ -172,8 +172,8 @@ impl BackgroundScheduler {
         self.shutdown.notify_one();
     }
 
-    /// Acquire scheduler lease
-    async fn acquire_lease(&self) -> BackgroundSchedulerResult<plexspaces_locks::Lock> {
+    /// Acquire scheduler lease (public for re-acquisition after expiration)
+    pub(crate) async fn acquire_lease(&self) -> BackgroundSchedulerResult<plexspaces_locks::Lock> {
         let options = AcquireLockOptions {
             lock_key: self.lease_key.clone(),
             holder_id: self.node_id.clone(),
@@ -263,13 +263,35 @@ impl BackgroundScheduler {
         let interval_secs = self.heartbeat_interval_secs;
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(interval_secs as u64));
+            // Skip first tick (immediate renewal not needed, lease just acquired)
+            interval.tick().await;
+            
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        if let Err(e) = scheduler.renew_lease().await {
-                            error!("Heartbeat failed: {}", e);
-                            // If renewal fails, stop worker (lease may have expired)
-                            break;
+                        match scheduler.renew_lease().await {
+                            Ok(()) => {
+                                // Success - continue
+                            }
+                            Err(e) => {
+                                warn!("Failed to renew lease: {}", e);
+                                // Try to re-acquire lease (lease may have expired)
+                                match scheduler.acquire_lease().await {
+                                    Ok(new_lease) => {
+                                        info!("Re-acquired lease after expiration");
+                                        {
+                                            let mut current = scheduler.current_lease.write().await;
+                                            *current = Some(new_lease);
+                                        }
+                                        // Continue with renewed lease
+                                    }
+                                    Err(acquire_err) => {
+                                        error!("Failed to re-acquire lease: {}", acquire_err);
+                                        // Stop worker - cannot continue without lease
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
                     _ = scheduler.shutdown.notified() => {

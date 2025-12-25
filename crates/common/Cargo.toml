@@ -1,0 +1,22 @@
+[package]
+name = "plexspaces-common"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Common types shared across PlexSpaces crates"
+
+[dependencies]
+plexspaces-proto = { workspace = true }
+chrono = { workspace = true }
+ulid = { workspace = true }
+prost-types = "0.12"
+thiserror = { workspace = true }
+
+[lib]
+name = "plexspaces_common"
+path = "src/lib.rs"
+

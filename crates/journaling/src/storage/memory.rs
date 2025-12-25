@@ -469,16 +469,17 @@ impl JournalStorage for MemoryJournalStorage {
     ) -> JournalResult<(Vec<ActorEvent>, PageResponse)> {
         let events = self.events.read().await;
 
-        // Decode page_token to get starting sequence (cursor-based pagination)
-        // page_token format: sequence number as string (e.g., "123")
-        let start_sequence = if page_request.page_token.is_empty() {
-            from_sequence
+        // Use offset to get starting sequence
+        // If offset is provided in page_request, use it; otherwise use from_sequence
+        // offset takes precedence as it's the explicit pagination parameter
+        let start_sequence = if page_request.offset > 0 {
+            page_request.offset as u64
         } else {
-            page_request.page_token.parse::<u64>().unwrap_or(from_sequence)
+            from_sequence
         };
 
-        // Validate and clamp page_size (1-1000)
-        let page_size = page_request.page_size.max(1).min(1000) as usize;
+        // Validate and clamp limit (1-1000)
+        let page_size = page_request.limit.max(1).min(1000) as usize;
 
         if let Some(actor_events) = events.get(actor_id) {
             // Binary search for start position (O(log n))
@@ -502,19 +503,18 @@ impl JournalStorage for MemoryJournalStorage {
                 .cloned()
                 .collect();
 
-            // Generate next_page_token if there are more events
-            // page_token format: sequence number as string (e.g., "123")
-            let next_page_token = if has_more && !events_to_return.is_empty() {
-                // Use last sequence number + 1 as cursor (exclusive start for next page)
-                let last_sequence = events_to_return.last().unwrap().sequence;
-                (last_sequence + 1).to_string()
+            // Calculate offset for next page: last sequence returned + 1
+            let next_offset = if !events_to_return.is_empty() {
+                events_to_return.last().unwrap().sequence + 1
             } else {
-                String::new()
+                start_sequence
             };
-
+            
             let page_response = PageResponse {
-                next_page_token,
                 total_size: 0, // Total size not available without full scan (expensive)
+                offset: next_offset as i32,
+                limit: page_size as i32,
+                has_next: has_more,
             };
 
             Ok((events_to_return, page_response))
@@ -523,8 +523,10 @@ impl JournalStorage for MemoryJournalStorage {
             Ok((
                 Vec::new(),
                 PageResponse {
-                    next_page_token: String::new(),
                     total_size: 0,
+                    offset: page_request.offset,
+                    limit: page_size as i32,
+                    has_next: false,
                 },
             ))
         }
@@ -539,14 +541,14 @@ impl JournalStorage for MemoryJournalStorage {
 
         // Decode page_token to get starting sequence (cursor-based pagination)
         // page_token format: sequence number as string (e.g., "123")
-        let start_sequence = if page_request.page_token.is_empty() {
+        let start_sequence = if page_request.offset == 0 {
             0
         } else {
-            page_request.page_token.parse::<u64>().unwrap_or(0)
+            (page_request.offset.max(0)) as u64
         };
 
         // Validate and clamp page_size (1-1000)
-        let page_size = page_request.page_size.max(1).min(1000) as usize;
+        let page_size = page_request.limit.max(1).min(1000) as usize;
 
         if let Some(actor_events) = events.get(actor_id) {
             let latest_sequence = actor_events
@@ -584,19 +586,11 @@ impl JournalStorage for MemoryJournalStorage {
                 .cloned()
                 .collect();
 
-            // Generate next_page_token if there are more events
-            // page_token format: sequence number as string (e.g., "123")
-            let next_page_token = if has_more && !events_to_return.is_empty() {
-                // Use last sequence number + 1 as cursor (exclusive start for next page)
-                let last_sequence = events_to_return.last().unwrap().sequence;
-                (last_sequence + 1).to_string()
-            } else {
-                String::new()
-            };
-
             let page_response = PageResponse {
-                next_page_token,
                 total_size: 0, // Total size not available without full scan (expensive)
+                offset: start_sequence as i32,
+                limit: page_size as i32,
+                has_next: has_more,
             };
 
             Ok(ActorHistory {
@@ -618,8 +612,10 @@ impl JournalStorage for MemoryJournalStorage {
                 updated_at: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
                 metadata: HashMap::new(),
                 page_response: Some(PageResponse {
-                    next_page_token: String::new(),
                     total_size: 0,
+                    offset: start_sequence as i32,
+                    limit: page_size as i32,
+                    has_next: false,
                 }),
             })
         }
@@ -1048,8 +1044,8 @@ mod tests {
 
         // First page
         let page_request = PageRequest {
-            page_size: 3,
-            page_token: String::new(),
+            offset: 0,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -1061,33 +1057,36 @@ mod tests {
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].sequence, 1);
-        assert!(!page_response.next_page_token.is_empty());
+        assert!(page_response.has_next);
 
-        // Second page
+        // Second page: use offset from previous page (which is last sequence + 1)
         let page_request2 = PageRequest {
-            page_size: 3,
-            page_token: page_response.next_page_token,
+            offset: page_response.offset,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };
 
+        // Use offset as from_sequence (it's already the next sequence to start from)
         let (events2, page_response2) = storage
-            .replay_events_from_paginated("actor-1", 0, &page_request2)
+            .replay_events_from_paginated("actor-1", page_response.offset as u64, &page_request2)
             .await
             .unwrap();
 
         assert_eq!(events2.len(), 3);
         assert_eq!(events2[0].sequence, 4);
-        assert!(!page_response2.next_page_token.is_empty());
+        assert!(page_response2.has_next);
 
-        // Last page
+        // Last page: use offset from previous page (which is last sequence + 1)
         let page_request3 = PageRequest {
-            page_size: 3,
-            page_token: page_response2.next_page_token,
+            offset: page_response2.offset,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };
 
+        // Use offset from page_request (it's already the next sequence to start from)
+        // Pass 0 as from_sequence since offset in page_request takes precedence
         let (events3, page_response3) = storage
             .replay_events_from_paginated("actor-1", 0, &page_request3)
             .await
@@ -1096,7 +1095,7 @@ mod tests {
         assert_eq!(events3.len(), 3);
         assert_eq!(events3[0].sequence, 7);
         // Should have more pages
-        assert!(!page_response3.next_page_token.is_empty());
+        assert!(page_response3.has_next);
     }
 
     #[tokio::test]
@@ -1120,8 +1119,8 @@ mod tests {
 
         // First page
         let page_request = PageRequest {
-            page_size: 2,
-            page_token: String::new(),
+            offset: 0,
+            limit: 2,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -1134,12 +1133,13 @@ mod tests {
         assert_eq!(history.events.len(), 2);
         assert_eq!(history.latest_sequence, 5);
         assert!(history.page_response.is_some());
-        assert!(!history.page_response.as_ref().unwrap().next_page_token.is_empty());
+        assert!(history.page_response.as_ref().unwrap().has_next);
 
         // Second page
+        let page_response = history.page_response.as_ref().unwrap();
         let page_request2 = PageRequest {
-            page_size: 2,
-            page_token: history.page_response.as_ref().unwrap().next_page_token.clone(),
+            offset: page_response.offset + page_response.limit,
+            limit: 2,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -1158,8 +1158,8 @@ mod tests {
         let storage = MemoryJournalStorage::new();
 
         let page_request = PageRequest {
-            page_size: 10,
-            page_token: String::new(),
+            offset: 0,
+            limit: 10,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -1170,7 +1170,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(events.len(), 0);
-        assert!(page_response.next_page_token.is_empty());
+        assert!(!page_response.has_next);
     }
 
     #[tokio::test]
@@ -1192,10 +1192,10 @@ mod tests {
             storage.append_event(&event).await.unwrap();
         }
 
-        // Test page_size > max (should clamp to 1000)
+        // Test limit > max (should clamp to 1000)
         let page_request = PageRequest {
-            page_size: 2000, // Exceeds max
-            page_token: String::new(),
+            offset: 0,
+            limit: 2000, // Exceeds max
             filter: String::new(),
             order_by: String::new(),
         };
@@ -1229,8 +1229,8 @@ mod tests {
 
         // Replay from sequence 5 with pagination
         let page_request = PageRequest {
-            page_size: 3,
-            page_token: String::new(),
+            offset: 0,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };

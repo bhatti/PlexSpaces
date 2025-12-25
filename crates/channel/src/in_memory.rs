@@ -358,36 +358,59 @@ impl Channel for InMemoryChannel {
     }
 
     async fn ack(&self, message_id: &str) -> ChannelResult<()> {
+        use crate::observability::{backend_name, record_channel_ack, record_channel_error};
+        
+        let backend = backend_name(self.config.backend);
+        
         // Remove from pending acks
         let mut pending_acks = self.pending_acks.write().await;
         if pending_acks.remove(message_id).is_some() {
+            // Update stats
+            let mut stats = self.stats.write().await;
+            stats.messages_pending = stats.messages_pending.saturating_sub(1);
+            
+            record_channel_ack(&self.config.name, message_id, backend);
             Ok(())
         } else {
+            let error_msg = format!("Message not found: {}", message_id);
+            record_channel_error(&self.config.name, "ack", &error_msg, backend);
             Err(ChannelError::MessageNotFound(message_id.to_string()))
         }
     }
 
     async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+        use crate::observability::{backend_name, record_channel_nack, record_channel_error};
+        
+        let backend = backend_name(self.config.backend);
+        
+        // Get message from pending acks
         let mut pending_acks = self.pending_acks.write().await;
-
         if let Some(msg) = pending_acks.remove(message_id) {
+            // Update stats
+            let mut stats = self.stats.write().await;
+            stats.messages_pending = stats.messages_pending.saturating_sub(1);
+            stats.messages_failed += 1;
+            
+            // Requeue if requested
             if requeue {
-                // Requeue the message
                 drop(pending_acks); // Release lock before sending
-                self.send(msg).await?;
-            } else {
-                // Send to DLQ if configured
-                if !self.config.dead_letter_queue.is_empty() {
-                    tracing::warn!(
-                        "Message {} should go to DLQ {} (not implemented)",
-                        message_id,
-                        &self.config.dead_letter_queue
-                    );
-                    // TODO: Implement DLQ
+                drop(stats); // Release stats lock
+                // Re-send the message
+                if let Err(e) = self.sender.send(msg).await {
+                    let error_msg = format!("Failed to requeue message: {}", e);
+                    record_channel_error(&self.config.name, "nack", &error_msg, backend);
+                    return Err(ChannelError::BackendError(error_msg));
                 }
+                // Update stats after requeue
+                let mut stats = self.stats.write().await;
+                stats.messages_sent += 1;
             }
+            
+            record_channel_nack(&self.config.name, message_id, requeue, 0, backend);
             Ok(())
         } else {
+            let error_msg = format!("Message not found: {}", message_id);
+            record_channel_error(&self.config.name, "nack", &error_msg, backend);
             Err(ChannelError::MessageNotFound(message_id.to_string()))
         }
     }

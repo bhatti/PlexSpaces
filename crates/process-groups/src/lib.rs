@@ -69,7 +69,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-use plexspaces_core::{ActorId, RequestContext};
+use plexspaces_core::{ActorId, RequestContext, Service};
 use plexspaces_keyvalue::{KVError, KeyValueStore};
 use plexspaces_proto::processgroups::v1::{GroupMembership, ProcessGroup};
 use prost::Message as ProstMessage;
@@ -136,6 +136,8 @@ pub struct ProcessGroupRegistry {
     /// This node's identifier
     node_id: String,
 }
+
+impl Service for ProcessGroupRegistry {}
 
 impl ProcessGroupRegistry {
     /// Create a new process group registry

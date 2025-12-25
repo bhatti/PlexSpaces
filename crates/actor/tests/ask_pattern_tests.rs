@@ -111,7 +111,7 @@ async fn test_ask_pattern_basic() {
 
     // Create node
     let node = NodeBuilder::new("test-node-ask")
-        .build();
+        .build().await;
 
     // Create and spawn actor
     let actor_id = "test-server@test-node-ask".to_string();
@@ -171,7 +171,7 @@ async fn test_ask_pattern_multiple_requests() {
 
     // Create node
     let node = NodeBuilder::new("test-node-ask-multi")
-        .build();
+        .build().await;
 
     // Create and spawn actor
     let actor_id = "test-server-multi@test-node-ask-multi".to_string();

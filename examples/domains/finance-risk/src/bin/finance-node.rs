@@ -122,7 +122,7 @@ async fn main() -> Result<()> {
         .with_max_connections(100)
         .with_heartbeat_interval_ms(5000)
         .with_clustering_enabled(true)
-        .build());
+        .build().await);
 
     info!("Starting node: {}", node_id);
 

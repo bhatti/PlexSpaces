@@ -376,6 +376,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test release".to_string(),
             node: Some(NodeConfig {
+                cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_address: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],

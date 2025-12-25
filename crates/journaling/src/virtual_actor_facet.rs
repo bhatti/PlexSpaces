@@ -68,6 +68,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
+use metrics;
+use tracing;
 
 /// Virtual Actor Facet for automatic activation/deactivation
 ///
@@ -273,6 +275,76 @@ impl Facet for VirtualActorFacet {
         Ok(())
     }
 
+    /// Phase 4.3: Handle EXIT signal from linked actor
+    ///
+    /// ## Purpose
+    /// Triggers deactivation when actor receives EXIT signal from linked actor.
+    /// This ensures virtual actor is properly deactivated before termination.
+    ///
+    /// ## When Called
+    /// - Only if `ActorContext.trap_exit = true`
+    /// - After `Actor::handle_exit()` is called
+    /// - Before actor terminates (if ExitAction::Propagate)
+    async fn on_exit(
+        &mut self,
+        actor_id: &str,
+        _from: &str,
+        _reason: &plexspaces_facet::ExitReason,
+    ) -> Result<(), FacetError> {
+        // Mark for deactivation on EXIT
+        tracing::debug!(
+            actor_id = %actor_id,
+            "VirtualActorFacet handling EXIT signal - marking for deactivation"
+        );
+        
+        // Clear activation state
+        *self.last_activated.write().await = None;
+        *self.last_accessed.write().await = None;
+        *self.is_activating.write().await = false;
+        
+        metrics::counter!("plexspaces_virtual_actor_facet_exit_total",
+            "actor_id" => actor_id.to_string()
+        ).increment(1);
+        
+        tracing::info!(
+            actor_id = %actor_id,
+            "VirtualActorFacet marked for deactivation on EXIT signal"
+        );
+        
+        Ok(())
+    }
+
+    /// Phase 4.3: Handle DOWN notification from monitored actor
+    ///
+    /// ## Purpose
+    /// Logs DOWN notification for observability. VirtualActorFacet doesn't need to
+    /// take action on DOWN notifications (virtual actor lifecycle is actor-specific).
+    ///
+    /// ## When Called
+    /// - After actor receives DOWN notification
+    /// - Actor continues running (DOWN is informational, not fatal)
+    async fn on_down(
+        &mut self,
+        actor_id: &str,
+        monitored_id: &str,
+        reason: &plexspaces_facet::ExitReason,
+    ) -> Result<(), FacetError> {
+        // Log DOWN notification for observability
+        tracing::debug!(
+            actor_id = %actor_id,
+            monitored_id = %monitored_id,
+            reason = ?reason,
+            "VirtualActorFacet received DOWN notification (no action needed)"
+        );
+        
+        metrics::counter!("plexspaces_virtual_actor_facet_down_total",
+            "actor_id" => actor_id.to_string(),
+            "monitored_id" => monitored_id.to_string()
+        ).increment(1);
+        
+        Ok(())
+    }
+    
     async fn before_method(
         &self,
         _method: &str,

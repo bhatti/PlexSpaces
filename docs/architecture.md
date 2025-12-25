@@ -2,6 +2,8 @@
 
 This document provides a high-level overview of PlexSpaces architecture, abstractions, and design principles.
 
+> **📖 For comprehensive actor system documentation**, see [Actor System Guide](actor-system.md) which covers the unified actor system, supervision trees, applications, facets, behaviors, and observability in detail.
+
 ## Overview
 
 PlexSpaces is a unified distributed actor framework that combines the best patterns from Erlang/OTP, Orleans, Temporal, and modern serverless architectures into a single, powerful abstraction.
@@ -386,6 +388,41 @@ Linda-style coordination for decoupled communication:
 **Backends**: InMemory (testing), Redis (production), PostgreSQL (transactional)
 
 See [Detailed Design - TupleSpace](detailed-design.md#tuplespace) for comprehensive documentation.
+
+### Channels
+
+Queue and topic patterns for message passing between actors and services:
+
+- **Queue Pattern**: Load-balanced message delivery (one consumer per message)
+- **Topic Pattern**: Pub/sub messaging (all subscribers receive message)
+- **Durability**: Durable backends (Redis, Kafka, SQLite) persist messages
+- **ACK/NACK**: Acknowledge successful processing or requeue failed messages
+- **Dead Letter Queue**: Automatic handling of poisonous messages
+- **Graceful Shutdown**: Stop accepting new messages but complete in-progress work
+- **Message Recovery**: Unacked messages automatically recovered on restart
+
+**Backends**:
+- **InMemory**: Fast, non-persistent (testing)
+- **Redis**: Distributed, durable (Redis Streams)
+- **Kafka**: High-throughput, durable (production)
+- **SQLite**: File-based, durable (single-node)
+- **NATS**: Lightweight pub/sub (multi-node)
+- **UDP**: Low-latency multicast (best-effort, cluster-wide)
+
+**UDP Multicast Channels**:
+- Uses UDP multicast for efficient cluster-wide broadcasting
+- Requires `cluster_name` configuration (nodes with same cluster_name can communicate)
+- Best-effort delivery (no ACK/NACK, messages may be lost)
+- Non-durable (messages lost on restart)
+- Ideal for real-time, non-critical cluster messaging
+
+**Graceful Shutdown**:
+- Non-memory channels stop accepting new messages during shutdown
+- In-progress messages complete before channel closes
+- Configurable timeout for shutdown completion
+- ACK/NACK still works for in-progress messages
+
+See [Durability Documentation](durability.md) for comprehensive channel documentation.
 
 ## Communication Patterns
 

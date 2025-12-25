@@ -95,6 +95,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
                     nanos: 0,
                 }),
                 supervisor: None,
+                facets: vec![], // Phase 1: Unified Lifecycle - facets support
             },
             ChildSpec {
                 id: "worker-2".to_string(),
@@ -107,6 +108,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
                     nanos: 0,
                 }),
                 supervisor: None,
+                facets: vec![], // Phase 1: Unified Lifecycle - facets support
             },
         ],
     };

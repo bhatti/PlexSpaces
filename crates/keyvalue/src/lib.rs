@@ -70,7 +70,7 @@
 //! ### Basic Usage
 //! ```rust
 //! use plexspaces_keyvalue::{KeyValueStore, InMemoryKVStore};
-//! use plexspaces_core::RequestContext;
+//! use plexspaces_common::RequestContext;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let kv = InMemoryKVStore::new();
@@ -172,7 +172,7 @@
 #![warn(clippy::all)]
 
 use async_trait::async_trait;
-use plexspaces_core::RequestContext;
+use plexspaces_common::RequestContext;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 
@@ -606,7 +606,7 @@ pub trait KeyValueStore: Send + Sync {
     /// ## Examples
     /// ```rust
     /// # use plexspaces_keyvalue::{KeyValueStore, InMemoryKVStore};
-    /// # use plexspaces_core::RequestContext;
+    /// # use plexspaces_common::RequestContext;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let kv = InMemoryKVStore::new();
     /// let ctx = RequestContext::new("tenant".to_string()).with_namespace("default".to_string());

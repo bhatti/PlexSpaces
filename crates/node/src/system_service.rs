@@ -269,15 +269,8 @@ impl SystemService for SystemServiceImpl {
             readiness.missing_nodes = missing_nodes.clone();
             readiness.required_nodes_connected = missing_nodes.is_empty();
             
-            // Check TupleSpace backend health (basic check - try to count tuples)
-            readiness.tuplespace_healthy = {
-                use plexspaces_tuplespace::Pattern;
-                use plexspaces_tuplespace::PatternField;
-                // Try a simple operation to verify TupleSpace is accessible
-                let test_pattern = Pattern::new(vec![PatternField::Wildcard]);
-                // count() returns Result<usize, TupleSpaceError>, so check if it succeeds
-                node.tuplespace().count(test_pattern).await.is_ok()
-            };
+            // TupleSpace was removed per refactoring - set to true (no longer used)
+            readiness.tuplespace_healthy = true;
         }
 
         Ok(Response::new(GetNodeReadinessResponse {
@@ -418,14 +411,8 @@ impl SystemService for SystemServiceImpl {
             },
         };
         
-        // Get TupleSpace size if node is available
-        let tuplespace_size = if let Some(ref node) = self.node {
-            // Get TupleSpace stats to get size
-            let stats = node.tuplespace().stats().await;
-            stats.current_size() as u64
-        } else {
-            0
-        };
+        // TupleSpace was removed per refactoring - set to 0
+        let tuplespace_size = 0u64;
         
         // Get VM count (check if node has VM registry)
         let active_vms = if let Some(ref _node) = self.node {
@@ -740,7 +727,9 @@ impl SystemService for SystemServiceImpl {
         Ok(Response::new(ListBackupsResponse {
             backups: vec![],
             page_response: Some(PageResponse {
-                next_page_token: String::new(),
+                offset: 0,
+                limit: 0,
+                has_next: false,
                 total_size: 0,
             }),
         }))
@@ -885,7 +874,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (reporter, _) = PlexSpacesHealthReporter::with_config(config);
+        // Create HealthService without ServiceLocator for standalone tests
+        let (reporter, _) = PlexSpacesHealthReporter::with_config_and_service_locator(config, None);
         let reporter = Arc::new(reporter);
         let service = SystemServiceImpl::new(reporter.clone());
 
@@ -908,7 +898,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (reporter, _) = PlexSpacesHealthReporter::with_config(config);
+        // Create HealthService without ServiceLocator for standalone tests
+        let (reporter, _) = PlexSpacesHealthReporter::with_config_and_service_locator(config, None);
         let reporter = Arc::new(reporter);
         let service = SystemServiceImpl::new(reporter.clone());
 
@@ -932,7 +923,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (reporter, _) = PlexSpacesHealthReporter::with_config(config);
+        // Create HealthService without ServiceLocator for standalone tests
+        let (reporter, _) = PlexSpacesHealthReporter::with_config_and_service_locator(config, None);
         let reporter = Arc::new(reporter);
         
         // Mark startup complete
@@ -959,7 +951,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (reporter, _) = PlexSpacesHealthReporter::with_config(config);
+        // Create HealthService without ServiceLocator for standalone tests
+        let (reporter, _) = PlexSpacesHealthReporter::with_config_and_service_locator(config, None);
         let reporter = Arc::new(reporter);
         let service = SystemServiceImpl::new(reporter.clone());
 
@@ -993,7 +986,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (reporter, _) = PlexSpacesHealthReporter::with_config(config);
+        // Create HealthService without ServiceLocator for standalone tests
+        let (reporter, _) = PlexSpacesHealthReporter::with_config_and_service_locator(config, None);
         let reporter = Arc::new(reporter);
         let service = SystemServiceImpl::new(reporter.clone());
 

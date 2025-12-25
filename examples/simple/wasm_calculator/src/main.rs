@@ -84,7 +84,8 @@ async fn main() -> Result<()> {
 
     // Create node
     let node = NodeBuilder::new("wasm-calculator-node-1")
-        .build();
+        .build()
+        .await;
 
     let node_arc = Arc::new(node);
     info!("Node created: wasm-calculator-node-1");
@@ -134,9 +135,14 @@ async fn main() -> Result<()> {
         let wasm_module = ProtoWasmModule {
             name: app_name.to_string(),
             version: "1.0.0".to_string(),
-            module_bytes: wasm_bytes,
+            module_bytes: wasm_bytes.clone(),
             module_hash: String::new(), // Will be computed by server
             wit_interface: String::new(),
+            source_languages: vec!["python".to_string()],
+            metadata: None,
+            created_at: None,
+            size_bytes: wasm_bytes.len() as u64,
+            version_number: 1,
         };
         
         let app_config = ApplicationSpec {
@@ -262,7 +268,13 @@ async fn main() -> Result<()> {
         PatternField::Wildcard,  // any actor_id
     ]);
     
-    let results = node_arc.tuplespace().read_all(result_pattern).await?;
+    // Access tuplespace via service locator
+    let tuplespace_provider = node_arc.service_locator()
+        .get_tuplespace_provider()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("TupleSpaceProvider not found"))?;
+    
+    let results = tuplespace_provider.read(&result_pattern).await?;
     info!("  ✓ Found {} results in TupleSpace", results.len());
     
     if results.is_empty() {

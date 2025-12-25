@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create node
     let node = NodeBuilder::new("byzantine-node")
-        .build();
+        .build().await;
 
     // Create and start application
     let mut app = ByzantineApplication::from_config(config)?;

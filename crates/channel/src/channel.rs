@@ -297,6 +297,16 @@ pub async fn create_channel(config: ChannelConfig) -> ChannelResult<Box<dyn Chan
         ChannelBackend::ChannelBackendSqlite => Err(ChannelError::InvalidConfiguration(
             "SQLite backend not enabled. Enable 'sqlite-backend' feature.".to_string(),
         )),
+        #[cfg(feature = "udp-backend")]
+        ChannelBackend::ChannelBackendUdp => {
+            use crate::UdpChannel;
+            let channel = UdpChannel::new(config).await?;
+            Ok(Box::new(channel))
+        }
+        #[cfg(not(feature = "udp-backend"))]
+        ChannelBackend::ChannelBackendUdp => Err(ChannelError::InvalidConfiguration(
+            "UDP backend not enabled. Enable 'udp-backend' feature.".to_string(),
+        )),
         ChannelBackend::ChannelBackendCustom => Err(ChannelError::InvalidConfiguration(
             "Custom backend requires manual instantiation".to_string(),
         )),

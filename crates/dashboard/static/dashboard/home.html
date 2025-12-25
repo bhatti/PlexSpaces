@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlexSpaces Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.24/dist/uPlot.min.css">
+</head>
+<body>
+    <div class="dashboard-container" x-data="dashboard()">
+        <header class="dashboard-header">
+            <h1>PlexSpaces Dashboard</h1>
+        </header>
+
+        <!-- Search and Filter Section -->
+        <section class="search-section">
+            <div class="search-box">
+                <input 
+                    type="text" 
+                    placeholder="Filter by tenant-id, node-id, or cluster-id"
+                    x-model="filters.search"
+                    @input.debounce.500ms="loadData()"
+                >
+            </div>
+            <div class="datetime-filter">
+                <label>Show data since:</label>
+                <input 
+                    type="datetime-local" 
+                    x-model="filters.since"
+                    @change="loadData()"
+                >
+            </div>
+        </section>
+
+        <!-- Widgets Section -->
+        <section class="widgets-section" id="widgets-section" hx-get="/api/v1/dashboard/summary" hx-trigger="load, every 5s" hx-swap="none" hx-on::after-swap="updateWidgets(event)">
+            <div class="widget">
+                <div class="widget-header">Clusters</div>
+                <div class="widget-value" id="clusters-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Nodes</div>
+                <div class="widget-value" id="nodes-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Tenants</div>
+                <div class="widget-value" id="tenants-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Applications</div>
+                <div class="widget-value" id="applications-count">-</div>
+            </div>
+            <div class="widget widget-chart">
+                <div class="widget-header">Actors by Type</div>
+                <div id="actors-chart"></div>
+            </div>
+        </section>
+
+        <!-- Nodes Table -->
+        <section class="table-section">
+            <h2>Nodes</h2>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Node ID</th>
+                            <th>Cluster</th>
+                            <th>Capabilities</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nodes-table-body" hx-get="/api/v1/dashboard/nodes" hx-trigger="load, every 10s" hx-swap="none" hx-on::after-swap="renderNodesTable(event)">
+                        <tr><td colspan="5">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="nodes-pagination"></div>
+        </section>
+
+        <!-- Applications Table -->
+        <section class="table-section">
+            <h2>Applications</h2>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Application ID</th>
+                            <th>Name</th>
+                            <th>Version</th>
+                            <th>Status</th>
+                            <th>Namespace</th>
+                            <th>Tenant ID</th>
+                            <th>Created At</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="applications-table-body" hx-get="/api/v1/dashboard/applications" hx-trigger="load, every 10s" hx-swap="none" hx-on::after-swap="renderApplicationsTable(event)">
+                        <tr><td colspan="8">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="applications-pagination"></div>
+        </section>
+
+        <!-- Workflows Table -->
+        <section class="table-section">
+            <h2>Workflows</h2>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Workflow ID</th>
+                            <th>Definition ID</th>
+                            <th>Status</th>
+                            <th>Node ID</th>
+                            <th>Created At</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workflows-table-body" hx-get="/api/v1/dashboard/workflows?offset=0&limit=50" hx-trigger="load, every 10s" hx-swap="none" hx-on::after-swap="renderWorkflowsTable(event)">
+                        <tr><td colspan="6">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="workflows-pagination"></div>
+        </section>
+    </div>
+
+    <script src="/static/dashboard.js"></script>
+    <script>
+        function dashboard() {
+            return {
+                filters: {
+                    search: '',
+                    since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
+                },
+                loadData() {
+                    // HTMX will handle the updates
+                    htmx.trigger('#widgets-section', 'refresh');
+                    htmx.trigger('#nodes-table-body', 'refresh');
+                    htmx.trigger('#applications-table-body', 'refresh');
+                    htmx.trigger('#workflows-table-body', 'refresh');
+                }
+            }
+        }
+
+        // Update widget values from summary API response
+        function updateWidgets(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                
+                // Update widget values
+                const clustersCount = document.getElementById('clusters-count');
+                if (clustersCount) {
+                    clustersCount.textContent = response.total_clusters !== undefined ? response.total_clusters : 0;
+                }
+                
+                const nodesCount = document.getElementById('nodes-count');
+                if (nodesCount) {
+                    nodesCount.textContent = response.total_nodes !== undefined ? response.total_nodes : 0;
+                }
+                
+                const tenantsCount = document.getElementById('tenants-count');
+                if (tenantsCount) {
+                    tenantsCount.textContent = response.total_tenants !== undefined ? response.total_tenants : 0;
+                }
+                
+                const applicationsCount = document.getElementById('applications-count');
+                if (applicationsCount) {
+                    applicationsCount.textContent = response.total_applications !== undefined ? response.total_applications : 0;
+                }
+                
+                // Update actors chart
+                const chartContainer = document.getElementById('actors-chart');
+                if (chartContainer) {
+                    if (response.actors_by_type && Object.keys(response.actors_by_type).length > 0) {
+                        // Initialize chart with actual data
+                        if (typeof initActorsChart === 'function') {
+                            initActorsChart(response.actors_by_type);
+                        } else if (window.dashboardUtils && window.dashboardUtils.initActorsChart) {
+                            window.dashboardUtils.initActorsChart(response.actors_by_type);
+                        } else {
+                            // Fallback: display as text
+                            const types = Object.keys(response.actors_by_type);
+                            const counts = Object.values(response.actors_by_type);
+                            chartContainer.innerHTML = types.map((type, i) => 
+                                `<div style="padding: 5px;"><strong>${escapeHtml(type)}:</strong> ${counts[i]}</div>`
+                            ).join('');
+                        }
+                    } else {
+                        chartContainer.innerHTML = '<p class="loading">No actors</p>';
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to update widgets:', e);
+            }
+        }
+
+        // Also handle HTMX afterSwap event for compatibility
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            if (event.detail.target.id === 'widgets-section') {
+                updateWidgets(event);
+            }
+        });
+
+        // Render nodes table from JSON response
+        function renderNodesTable(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const tbody = document.getElementById('nodes-table-body');
+                if (!tbody) return;
+
+                if (!response.nodes || response.nodes.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5">No nodes found</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = response.nodes.map(node => {
+                    const statusText = node.status === 2 ? 'Active' : node.status === 1 ? 'Inactive' : 'Unknown';
+                    const statusClass = node.status === 2 ? 'status-active' : 'status-inactive';
+                    return `
+                        <tr>
+                            <td>${escapeHtml(node.id || '-')}</td>
+                            <td>${escapeHtml(node.cluster_name || '-')}</td>
+                            <td>-</td>
+                            <td><span class="${statusClass}">${statusText}</span></td>
+                            <td><a href="/dashboard/node/${encodeURIComponent(node.id || '')}">View</a></td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                // Update pagination
+                if (response.page) {
+                    updatePagination('nodes-pagination', response.page);
+                }
+            } catch (e) {
+                console.error('Failed to render nodes table:', e);
+                const tbody = document.getElementById('nodes-table-body');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="5">Error loading nodes</td></tr>';
+                }
+            }
+        }
+
+        // Render applications table from JSON response
+        function renderApplicationsTable(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const tbody = document.getElementById('applications-table-body');
+                if (!tbody) return;
+
+                if (!response.applications || response.applications.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8">No applications found</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = response.applications.map(app => {
+                    const statusText = app.status === 3 ? 'Active' : app.status === 2 ? 'Starting' : app.status === 1 ? 'Loading' : app.status === 4 ? 'Stopping' : app.status === 5 ? 'Stopped' : app.status === 6 ? 'Failed' : 'Unknown';
+                    const statusClass = app.status === 2 ? 'status-active' : 'status-inactive';
+                    const createdAt = app.created_at ? formatTimestamp(app.created_at) : '-';
+                    return `
+                        <tr>
+                            <td>${escapeHtml(app.application_id || '-')}</td>
+                            <td>${escapeHtml(app.name || '-')}</td>
+                            <td>${escapeHtml(app.version || '-')}</td>
+                            <td><span class="${statusClass}">${statusText}</span></td>
+                            <td>${escapeHtml(app.namespace || '-')}</td>
+                            <td>${escapeHtml(app.tenant_id || '-')}</td>
+                            <td>${createdAt}</td>
+                            <td><a href="#" onclick="showApplicationDetail('${escapeHtml(app.name || '')}'); return false;">View</a></td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                // Update pagination
+                if (response.page) {
+                    updatePagination('applications-pagination', response.page);
+                }
+            } catch (e) {
+                console.error('Failed to render applications table:', e);
+                const tbody = document.getElementById('applications-table-body');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="8">Error loading applications</td></tr>';
+                }
+            }
+        }
+
+        // Render workflows table from JSON response
+        function renderWorkflowsTable(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const tbody = document.getElementById('workflows-table-body');
+                if (!tbody) return;
+
+                if (!response.workflows || response.workflows.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No workflows found</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = response.workflows.map(wf => {
+                    const statusText = wf.status === 2 ? 'Running' : wf.status === 1 ? 'Completed' : wf.status === 3 ? 'Failed' : 'Unknown';
+                    const statusClass = wf.status === 2 ? 'status-active' : wf.status === 1 ? 'status-completed' : wf.status === 3 ? 'status-failed' : '';
+                    const createdAt = wf.created_at ? formatTimestamp(wf.created_at) : '-';
+                    return `
+                        <tr>
+                            <td>${escapeHtml(wf.workflow_id || wf.execution_id || '-')}</td>
+                            <td>${escapeHtml(wf.definition_id || '-')}</td>
+                            <td><span class="${statusClass}">${statusText}</span></td>
+                            <td>${escapeHtml(wf.node_id || '-')}</td>
+                            <td>${createdAt}</td>
+                            <td><a href="#" onclick="showWorkflowDetail('${escapeHtml(wf.definition_id || '-')}'); return false;">View</a></td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('Failed to render workflows table:', e);
+                const tbody = document.getElementById('workflows-table-body');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="6">Error loading workflows</td></tr>';
+                }
+            }
+        }
+
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '-';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Helper function to format timestamp (from dashboard.js)
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            if (typeof timestamp === 'object' && timestamp.seconds !== undefined) {
+                const date = new Date(timestamp.seconds * 1000 + (timestamp.nanos || 0) / 1000000);
+                return date.toLocaleString();
+            }
+            if (typeof timestamp === 'string') {
+                return new Date(timestamp).toLocaleString();
+            }
+            return '-';
+        }
+    </script>
+    
+    <footer class="dashboard-footer" style="margin-top: 2rem; padding: 1rem; border-top: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; color: #666;">
+        <div>PlexSpaces Dashboard</div>
+        <div id="system-info" style="text-align: right;" hx-get="/api/v1/dashboard/system-info" hx-trigger="load" hx-swap="none" hx-on::after-swap="updateSystemInfo(event)">
+            <span>Loading...</span>
+        </div>
+    </footer>
+    
+    <script>
+        function updateSystemInfo(event) {
+            try {
+                const response = JSON.parse(event.detail.xhr.response);
+                const infoEl = document.getElementById('system-info');
+                if (infoEl && response.version) {
+                    const commit = response.git_commit ? response.git_commit.substring(0, 7) : 'unknown';
+                    const date = response.build_date || 'unknown';
+                    infoEl.innerHTML = `v${response.version} | ${commit} | ${date}`;
+                }
+            } catch (e) {
+                console.error('Failed to update system info:', e);
+            }
+        }
+        // Show application detail modal
+        function showApplicationDetail(appName) {
+            fetch(`/api/v1/dashboard/application/${encodeURIComponent(appName)}`)
+                .then(response => response.json())
+                .then(data => {
+                    const modal = document.getElementById('detail-modal');
+                    const modalContent = document.getElementById('detail-modal-content');
+                    if (!modal || !modalContent) return;
+                    
+                    const app = data.application;
+                    const actors = data.actors || [];
+                    
+                    modalContent.innerHTML = `
+                        <div class="modal-header">
+                            <h2>Application: ${escapeHtml(app.name || '-')}</h2>
+                            <button onclick="closeModal()" class="modal-close">×</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="detail-section">
+                                <h3>Details</h3>
+                                <div class="detail-grid">
+                                    <div><strong>Version:</strong> ${escapeHtml(app.version || '-')}</div>
+                                    <div><strong>Status:</strong> <span class="status-${app.status === 3 ? 'active' : 'inactive'}">${app.status === 3 ? 'Active' : app.status === 2 ? 'Starting' : app.status === 1 ? 'Loading' : app.status === 4 ? 'Stopping' : app.status === 5 ? 'Stopped' : app.status === 6 ? 'Failed' : 'Unknown'}</span></div>
+                                    <div><strong>Nodes:</strong> ${app.node_count || 1}</div>
+                                    <div><strong>Deployed At:</strong> ${app.deployed_at ? formatTimestamp(app.deployed_at) : '-'}</div>
+                                </div>
+                            </div>
+                            <div class="detail-section">
+                                <h3>Actors (${actors.length})</h3>
+                                <div class="actors-list">
+                                    ${actors.length > 0 
+                                        ? actors.map(a => `<div class="actor-item"><a href="#" onclick="showActorDetail('${escapeHtml(a.actor_id)}'); return false;">${escapeHtml(a.actor_id)}</a> <span class="actor-type">${escapeHtml(a.actor_type || 'unknown')}</span></div>`).join('')
+                                        : '<p>No actors found</p>'}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    modal.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Failed to load application detail:', error);
+                    alert('Failed to load application details');
+                });
+        }
+        
+        // Show actor detail modal
+        function showActorDetail(actorId) {
+            fetch(`/api/v1/dashboard/actor/${encodeURIComponent(actorId)}`)
+                .then(response => response.json())
+                .then(data => {
+                    const modal = document.getElementById('detail-modal');
+                    const modalContent = document.getElementById('detail-modal-content');
+                    if (!modal || !modalContent) return;
+                    
+                    const actor = data.actor;
+                    const metrics = actor.metrics || {};
+                    
+                    modalContent.innerHTML = `
+                        <div class="modal-header">
+                            <h2>Actor: ${escapeHtml(actor.actor_id || '-')}</h2>
+                            <button onclick="closeModal()" class="modal-close">×</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="detail-section">
+                                <h3>Details</h3>
+                                <div class="detail-grid">
+                                    <div><strong>Type:</strong> ${escapeHtml(actor.actor_type || '-')}</div>
+                                    <div><strong>Group:</strong> ${escapeHtml(actor.actor_group || '-')}</div>
+                                    <div><strong>Status:</strong> ${escapeHtml(actor.status || '-')}</div>
+                                    <div><strong>Node:</strong> ${escapeHtml(actor.node_id || '-')}</div>
+                                    <div><strong>Namespace:</strong> ${escapeHtml(actor.namespace || '-')}</div>
+                                    <div><strong>Tenant:</strong> ${escapeHtml(actor.tenant_id || '-')}</div>
+                                </div>
+                            </div>
+                            <div class="detail-section">
+                                <h3>Metrics</h3>
+                                <div class="metrics-grid">
+                                    <div><strong>Messages Routed:</strong> ${metrics.messages_routed || 0}</div>
+                                    <div><strong>Local Deliveries:</strong> ${metrics.local_deliveries || 0}</div>
+                                    <div><strong>Remote Deliveries:</strong> ${metrics.remote_deliveries || 0}</div>
+                                    <div><strong>Failed Deliveries:</strong> ${metrics.failed_deliveries || 0}</div>
+                                    <div><strong>Errors:</strong> ${metrics.error_total || 0}</div>
+                                    <div><strong>Spawn Total:</strong> ${metrics.spawn_total || 0}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    modal.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Failed to load actor detail:', error);
+                    alert('Failed to load actor details');
+                });
+        }
+        
+        // Close modal
+        function closeModal() {
+            const modal = document.getElementById('detail-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        // Show workflow detail modal
+        function showWorkflowDetail(definitionId) {
+            fetch(`/api/v1/dashboard/workflow/${encodeURIComponent(definitionId)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const modal = document.getElementById('detail-modal');
+                    const modalContent = document.getElementById('detail-modal-content');
+                    if (!modal || !modalContent) {
+                        console.error('Modal elements not found');
+                        return;
+                    }
+                    
+                    const workflows = data.workflows || [];
+                    
+                    modalContent.innerHTML = `
+                        <div class="modal-header">
+                            <h2>Workflow: ${escapeHtml(data.definition_id || '-')}</h2>
+                            <button onclick="closeModal()" class="modal-close">×</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="modal-section">
+                                <h3>Details</h3>
+                                <p><span class="label">Definition ID:</span> ${escapeHtml(data.definition_id || '-')}</p>
+                                <p><span class="label">Nodes:</span> ${data.node_count || 1}</p>
+                            </div>
+                            <div class="modal-section">
+                                <h3>Executions (${workflows.length})</h3>
+                                <div class="actors-list">
+                                    ${workflows.length > 0
+                                        ? workflows.map(wf => {
+                                            const statusText = wf.status === 2 ? 'Running' : wf.status === 1 ? 'Completed' : wf.status === 3 ? 'Failed' : 'Unknown';
+                                            const statusClass = wf.status === 2 ? 'status-active' : wf.status === 1 ? 'status-completed' : wf.status === 3 ? 'status-failed' : '';
+                                            return `<div class="actor-item">
+                                                <span>${escapeHtml(wf.workflow_id || '-')}</span>
+                                                <span class="actor-type">${escapeHtml(wf.node_id || '-')}</span>
+                                                <span class="${statusClass}">${statusText}</span>
+                                            </div>`;
+                                        }).join('')
+                                        : '<p>No executions found</p>'
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    modal.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Failed to load workflow detail:', error);
+                    alert('Failed to load workflow details: ' + error.message);
+                });
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('detail-modal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+    </script>
+    
+    <!-- Detail Modal -->
+    <div id="detail-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div id="detail-modal-content"></div>
+        </div>
+    </div>
+</body>
+</html>

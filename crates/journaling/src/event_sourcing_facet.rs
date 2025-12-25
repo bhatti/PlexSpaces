@@ -713,8 +713,8 @@ mod tests {
 
         // Test paginated replay
         let page_request = PageRequest {
-            page_size: 3,
-            page_token: String::new(), // First page
+            offset: 0,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -725,12 +725,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(events.len(), 3);
-        assert!(!page_response.next_page_token.is_empty());
+        assert!(page_response.has_next);
 
         // Get next page
         let page_request2 = PageRequest {
-            page_size: 3,
-            page_token: page_response.next_page_token,
+            offset: page_response.offset + page_response.limit,
+            limit: 3,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -741,7 +741,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(events2.len(), 3);
-        assert!(!page_response2.next_page_token.is_empty());
+        assert!(page_response2.has_next);
     }
 
     #[tokio::test]
@@ -766,8 +766,8 @@ mod tests {
 
         // Get paginated history
         let page_request = PageRequest {
-            page_size: 2,
-            page_token: String::new(), // First page
+            offset: 0,
+            limit: 2,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -780,7 +780,7 @@ mod tests {
         assert_eq!(history.events.len(), 2);
         assert_eq!(history.latest_sequence, 5);
         assert!(history.page_response.is_some());
-        assert!(!history.page_response.as_ref().unwrap().next_page_token.is_empty());
+        assert!(history.page_response.as_ref().unwrap().has_next);
     }
 
     #[tokio::test]

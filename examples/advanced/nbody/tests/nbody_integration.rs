@@ -80,21 +80,11 @@ impl ActorTrait for BodyActor {
 #[tokio::test]
 async fn test_spawn_body_actors() {
     // Test that body actors can be spawned
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+        let node_arc = NodeBuilder::new("test-node").build().await;
+    let node = Arc::new(node_arc);
     
-    // Wait for services to be registered
+    // Services are already initialized by NodeBuilder::build().await
     let service_locator = node.service_locator();
-    for _ in 0..10 {
-        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
-            break;
-        }
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    }
-    
-    // Register ActorFactory for tests
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory_impl.clone()).await;
     
     let body = Body::new(
         "body-1".to_string(),
@@ -117,21 +107,11 @@ async fn test_spawn_body_actors() {
 #[tokio::test]
 async fn test_body_actor_responds_to_get_state() {
     // Test that actor responds to get_state message
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+        let node_arc = NodeBuilder::new("test-node").build().await;
+    let node = Arc::new(node_arc);
     
-    // Wait for services to be registered
+    // Services are already initialized by NodeBuilder::build().await
     let service_locator = node.service_locator();
-    for _ in 0..10 {
-        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
-            break;
-        }
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    }
-    
-    // Register ActorFactory for tests
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory_impl.clone()).await;
     
     let body = Body::new(
         "body-1".to_string(),
@@ -168,21 +148,11 @@ async fn test_body_actor_responds_to_get_state() {
 #[tokio::test]
 async fn test_multiple_body_actors() {
     // Test spawning multiple body actors
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+        let node_arc = NodeBuilder::new("test-node").build().await;
+    let node = Arc::new(node_arc);
     
-    // Wait for services to be registered
+    // Services are already initialized by NodeBuilder::build().await
     let service_locator = node.service_locator();
-    for _ in 0..10 {
-        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
-            break;
-        }
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    }
-    
-    // Register ActorFactory for tests
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory_impl.clone()).await;
     
     let bodies = vec![
         Body::new("body-1".to_string(), 1.0e24, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),

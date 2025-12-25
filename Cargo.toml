@@ -8,6 +8,7 @@ members = [
     "crates/journaling",
     "crates/tuplespace",
     "crates/tuplespace-service",
+    "crates/common",
     "crates/keyvalue",
     "crates/facet",
     "crates/core",
@@ -28,6 +29,7 @@ members = [
     "crates/locks",
     "crates/scheduler",
     "crates/cli",
+    "crates/dashboard",
 ]
 exclude = [
     "examples/*",  # Examples are standalone, not part of workspace
@@ -236,6 +238,7 @@ plexspaces-object-registry = { path = "crates/object-registry" }
 plexspaces-process-groups = { path = "crates/process-groups" }
 plexspaces-journaling = { path = "crates/journaling" }
 plexspaces-actor-service = { path = "crates/actor-service" }
+plexspaces-dashboard = { path = "crates/dashboard" }
 
 # Add more workspace dependencies
 pretty_assertions = "1.4"

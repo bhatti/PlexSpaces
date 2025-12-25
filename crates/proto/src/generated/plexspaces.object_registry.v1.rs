@@ -379,6 +379,23 @@ pub enum ObjectType {
     /// object_category: "firecracker", "qemu", etc.
     /// grpc_address: VM's API socket path or management endpoint
     ObjectTypeVm = 4,
+    /// Application: PlexSpaces application (Erlang-style)
+    /// Examples: calculator-app, order-processing-app
+    /// object_category: Application name (e.g., "calculator")
+    /// grpc_address: Node's ApplicationService endpoint
+    /// node_id: Node where application is deployed
+    ObjectTypeApplication = 5,
+    /// Workflow: Workflow execution instance
+    /// Examples: workflow-exec-123, order-workflow-456
+    /// object_category: Workflow definition ID
+    /// grpc_address: Node's WorkflowService endpoint
+    /// node_id: Node where workflow is running
+    ObjectTypeWorkflow = 6,
+    /// Node: PlexSpaces node instance
+    /// Examples: node-1, k8s-pod-abc123
+    /// object_category: "Node"
+    /// grpc_address: Node's gRPC endpoint
+    ObjectTypeNode = 7,
 }
 impl ObjectType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -392,6 +409,9 @@ impl ObjectType {
             ObjectType::ObjectTypeTuplespace => "OBJECT_TYPE_TUPLESPACE",
             ObjectType::ObjectTypeService => "OBJECT_TYPE_SERVICE",
             ObjectType::ObjectTypeVm => "OBJECT_TYPE_VM",
+            ObjectType::ObjectTypeApplication => "OBJECT_TYPE_APPLICATION",
+            ObjectType::ObjectTypeWorkflow => "OBJECT_TYPE_WORKFLOW",
+            ObjectType::ObjectTypeNode => "OBJECT_TYPE_NODE",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -402,6 +422,9 @@ impl ObjectType {
             "OBJECT_TYPE_TUPLESPACE" => Some(Self::ObjectTypeTuplespace),
             "OBJECT_TYPE_SERVICE" => Some(Self::ObjectTypeService),
             "OBJECT_TYPE_VM" => Some(Self::ObjectTypeVm),
+            "OBJECT_TYPE_APPLICATION" => Some(Self::ObjectTypeApplication),
+            "OBJECT_TYPE_WORKFLOW" => Some(Self::ObjectTypeWorkflow),
+            "OBJECT_TYPE_NODE" => Some(Self::ObjectTypeNode),
             _ => None,
         }
     }

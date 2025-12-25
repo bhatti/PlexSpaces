@@ -67,6 +67,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
+use chrono::Utc;
 
 /// SQLite channel implementation for durable messaging
 ///
@@ -478,6 +479,12 @@ impl Channel for SqliteChannel {
     }
 
     async fn ack(&self, message_id: &str) -> ChannelResult<()> {
+        use crate::observability::{backend_name, record_channel_ack, record_channel_error};
+        use std::time::Instant;
+        
+        let start = Instant::now();
+        let backend = backend_name(self.config.backend);
+        
         // Mark message as acked in database
         let update_sql = format!(
             r#"
@@ -494,10 +501,14 @@ impl Channel for SqliteChannel {
             .execute(&self.pool)
             .await
             .map_err(|e| {
-                ChannelError::BackendError(format!("Failed to ack message: {}", e))
+                let error_msg = format!("Failed to ack message: {}", e);
+                record_channel_error(&self.config.name, "ack", &error_msg, backend);
+                ChannelError::BackendError(error_msg)
             })?;
 
         if result.rows_affected() == 0 {
+            let error_msg = format!("Message not found: {}", message_id);
+            record_channel_error(&self.config.name, "ack", &error_msg, backend);
             return Err(ChannelError::MessageNotFound(message_id.to_string()));
         }
 
@@ -511,16 +522,46 @@ impl Channel for SqliteChannel {
         // Cleanup old messages if configured
         self.cleanup_acked_messages().await?;
 
+        record_channel_ack(&self.config.name, message_id, backend);
+        crate::observability::record_channel_latency_from_start(&self.config.name, "ack", start, backend);
+
         Ok(())
     }
 
     async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
-        if requeue {
-            // Reset acked flag to 0 (requeue)
+        // Get retry/DLQ config from channel config
+        let max_retries = if self.config.max_retries > 0 {
+            self.config.max_retries
+        } else {
+            3 // Default: 3 retries
+        };
+        let dlq_enabled = self.config.dlq_enabled;
+
+        // Get delivery count from database
+        let delivery_count_sql = format!(
+            r#"
+            SELECT delivery_count FROM {}
+            WHERE id = ? AND channel_name = ?
+            "#,
+            self.table_name
+        );
+
+        let delivery_count = sqlx::query_scalar::<_, u32>(&delivery_count_sql)
+            .bind(message_id)
+            .bind(&self.config.name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| {
+                ChannelError::BackendError(format!("Failed to get delivery count: {}", e))
+            })?
+            .unwrap_or(0);
+
+        if requeue && delivery_count < max_retries {
+            // Reset acked flag to 0 (requeue) and increment delivery_count
             let update_sql = format!(
                 r#"
                 UPDATE {}
-                SET acked = 0
+                SET acked = 0, delivery_count = delivery_count + 1
                 WHERE id = ? AND channel_name = ?
                 "#,
                 self.table_name
@@ -532,17 +573,95 @@ impl Channel for SqliteChannel {
                 .execute(&self.pool)
                 .await
                 .map_err(|e| {
-                    ChannelError::BackendError(format!("Failed to nack message: {}", e))
+                    ChannelError::BackendError(format!("Failed to nack/requeue message: {}", e))
                 })?;
 
             // Remove from pending acks (will be re-added on next receive)
             let mut pending_acks = self.pending_acks.write().await;
             pending_acks.remove(message_id);
+
+            crate::observability::record_channel_nack(
+                &self.config.name,
+                message_id,
+                true,
+                delivery_count + 1,
+                crate::observability::backend_name(self.config.backend),
+            );
         } else {
-            // Mark as acked but failed (could send to DLQ if configured)
-            self.ack(message_id).await?;
+            // Send to DLQ if enabled, otherwise mark as acked (drop)
+            if dlq_enabled && !self.config.dead_letter_queue.is_empty() {
+                // Read message from main table
+                let select_sql = format!(
+                    r#"
+                    SELECT id, channel_name, payload, sender_id, correlation_id, reply_to, partition_key, delivery_count
+                    FROM {}
+                    WHERE id = ? AND channel_name = ?
+                    "#,
+                    self.table_name
+                );
+
+                let row = sqlx::query(&select_sql)
+                    .bind(message_id)
+                    .bind(&self.config.name)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(|e| {
+                        ChannelError::BackendError(format!("Failed to read message for DLQ: {}", e))
+                    })?;
+
+                if let Some(row) = row {
+                    // Insert into DLQ table
+                    let dlq_table = format!("{}_dlq", self.config.dead_letter_queue);
+                    let insert_dlq_sql = format!(
+                        r#"
+                        INSERT INTO {} (id, channel_name, payload, sender_id, correlation_id, reply_to, partition_key, delivery_count, failed_at, error_reason)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        "#,
+                        dlq_table
+                    );
+
+                    let failed_at = chrono::Utc::now();
+                    sqlx::query(&insert_dlq_sql)
+                        .bind(row.get::<String, _>(0)) // id
+                        .bind(row.get::<String, _>(1)) // channel_name
+                        .bind(row.get::<Vec<u8>, _>(2)) // payload
+                        .bind(row.get::<String, _>(3)) // sender_id
+                        .bind(row.get::<String, _>(4)) // correlation_id
+                        .bind(row.get::<String, _>(5)) // reply_to
+                        .bind(row.get::<String, _>(6)) // partition_key
+                        .bind(row.get::<u32, _>(7)) // delivery_count
+                        .bind(failed_at.to_rfc3339())
+                        .bind(format!("Max retries exceeded: {}", max_retries))
+                        .execute(&self.pool)
+                        .await
+                        .map_err(|e| {
+                            ChannelError::BackendError(format!("Failed to insert into DLQ: {}", e))
+                        })?;
+
+                    // Mark original as acked (remove from main table)
+                    self.ack(message_id).await?;
+
+                    crate::observability::record_channel_dlq(
+                        &self.config.name,
+                        message_id,
+                        delivery_count,
+                        "max_retries_exceeded",
+                        crate::observability::backend_name(self.config.backend),
+                    );
+                }
+            } else {
+                // Mark as acked (drop message)
+                self.ack(message_id).await?;
+                tracing::debug!(
+                    channel = %self.config.name,
+                    message_id = %message_id,
+                    delivery_count = delivery_count,
+                    "SQLite message nacked (dropped, DLQ disabled)"
+                );
+            }
         }
 
+        self.stats.messages_failed.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -717,7 +836,7 @@ mod tests {
         // Create new channel instance (simulates restart)
         // Note: In-memory doesn't persist, but this tests the recovery query logic
         let config2 = create_test_config(":memory:".to_string());
-        let channel2 = SqliteChannel::new(config2).await.unwrap();
+        let _channel2 = SqliteChannel::new(config2).await.unwrap();
         
         // In in-memory, messages are lost, but recovery logic is tested
         // For file-based persistence, would recover 3 messages

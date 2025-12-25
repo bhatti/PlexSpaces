@@ -31,6 +31,91 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Exit reason for actor termination (minimal definition for Facet trait)
+///
+/// This is a minimal definition to avoid circular dependencies.
+/// The full ExitReason is defined in plexspaces-core, but facets only need
+/// this interface for the trait signature.
+///
+/// When facets are used in actors, they receive the full ExitReason from plexspaces-core.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExitReason {
+    /// Normal termination (not an error)
+    Normal,
+    /// Shutdown requested (graceful)
+    Shutdown,
+    /// Killed forcefully
+    Killed,
+    /// Error with message
+    Error(String),
+    /// Linked actor died
+    Linked {
+        /// ID of the linked actor that died
+        actor_id: String,
+        /// The exit reason from the linked actor
+        reason: Box<ExitReason>,
+    },
+}
+
+impl ExitReason {
+    /// Convert from core ExitReason (avoids circular dependency)
+    ///
+    /// ## Purpose
+    /// Converts core ExitReason to facet::ExitReason.
+    /// This is needed when calling facet lifecycle hooks from Actor.
+    ///
+    /// ## Note
+    /// This is a manual conversion to avoid circular dependencies.
+    /// The facet crate cannot depend on core crate.
+    /// Callers should convert core::ExitReason to facet::ExitReason manually.
+    pub fn from_core(core_reason: &impl std::fmt::Debug) -> Self {
+        // Use string representation to avoid direct dependency
+        // This is a workaround - in practice, we'd use a trait or shared enum
+        // For now, we'll match on the debug representation
+        let debug_str = format!("{:?}", core_reason);
+        
+        // Parse from debug string (not ideal, but avoids circular dependency)
+        if debug_str.contains("Normal") {
+            ExitReason::Normal
+        } else if debug_str.contains("Shutdown") {
+            ExitReason::Shutdown
+        } else if debug_str.contains("Killed") {
+            ExitReason::Killed
+        } else if debug_str.contains("Linked") {
+            // Extract actor_id and reason from debug string
+            // Format: "Linked { actor_id: \"...\", reason: ... }"
+            let actor_id = if let Some(start) = debug_str.find("actor_id: \"") {
+                let start = start + 11;
+                if let Some(end) = debug_str[start..].find("\"") {
+                    debug_str[start..start+end].to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            } else {
+                "unknown".to_string()
+            };
+            
+            // For linked reasons, we'll use a simplified representation
+            ExitReason::Linked {
+                actor_id,
+                reason: Box::new(ExitReason::Error("linked".to_string())),
+            }
+        } else {
+            // Extract error message if present
+            if let Some(start) = debug_str.find("Error(\"") {
+                let start = start + 7;
+                if let Some(end) = debug_str[start..].find("\"") {
+                    ExitReason::Error(debug_str[start..start+end].to_string())
+                } else {
+                    ExitReason::Error(debug_str)
+                }
+            } else {
+                ExitReason::Error(debug_str)
+            }
+        }
+    }
+}
+
 /// A facet that can be dynamically attached to actors
 #[async_trait]
 pub trait Facet: Send + Sync + Any {
@@ -88,6 +173,86 @@ pub trait Facet: Send + Sync + Any {
 
     /// Get facet priority
     fn get_priority(&self) -> i32;
+
+    /// Called when actor receives EXIT signal from linked actor
+    /// Only called if actor has trap_exit=true
+    ///
+    /// ## Purpose
+    /// Allows facets to handle EXIT signals from linked actors.
+    /// For example, TimerFacet may cancel timers, ReminderFacet may pause reminders.
+    ///
+    /// ## When Called
+    /// - Only if `ActorContext.trap_exit = true`
+    /// - After `Actor::handle_exit()` is called
+    /// - Before actor terminates (if ExitAction::Propagate)
+    ///
+    /// ## Default
+    /// Does nothing - most facets don't need to handle EXIT signals
+    async fn on_exit(
+        &mut self,
+        _actor_id: &str,
+        _from: &str,
+        _reason: &crate::ExitReason,
+    ) -> Result<(), FacetError> {
+        Ok(())
+    }
+
+    /// Called when actor receives DOWN notification from monitored actor
+    ///
+    /// ## Purpose
+    /// Allows facets to handle DOWN notifications from monitored actors.
+    /// For example, facets may update state or trigger cleanup.
+    ///
+    /// ## When Called
+    /// - After actor receives DOWN notification
+    /// - Actor continues running (DOWN is informational, not fatal)
+    ///
+    /// ## Default
+    /// Does nothing - most facets don't need to handle DOWN notifications
+    async fn on_down(
+        &mut self,
+        _actor_id: &str,
+        _monitored_id: &str,
+        _reason: &crate::ExitReason,
+    ) -> Result<(), FacetError> {
+        Ok(())
+    }
+
+    /// Called after actor.init() completes (for post-init setup)
+    ///
+    /// ## Purpose
+    /// Allows facets to perform setup that requires actor to be initialized.
+    /// For example, facets may need to access actor state after init().
+    ///
+    /// ## When Called
+    /// - After `Actor::init()` completes successfully
+    /// - Before actor enters message loop
+    ///
+    /// ## Default
+    /// Does nothing - most facets don't need post-init setup
+    async fn on_init_complete(&mut self, _actor_id: &str) -> Result<(), FacetError> {
+        Ok(())
+    }
+
+    /// Called before actor.terminate() (for pre-terminate cleanup)
+    ///
+    /// ## Purpose
+    /// Allows facets to perform cleanup before actor terminates.
+    /// For example, TimerFacet may cancel timers, DurabilityFacet may flush journal.
+    ///
+    /// ## When Called
+    /// - Before `Actor::terminate()` is called
+    /// - Actor is still active (can access state)
+    ///
+    /// ## Default
+    /// Does nothing - most facets clean up in on_detach()
+    async fn on_terminate_start(
+        &mut self,
+        _actor_id: &str,
+        _reason: &crate::ExitReason,
+    ) -> Result<(), FacetError> {
+        Ok(())
+    }
 }
 
 /// Result of intercepting a method
@@ -201,23 +366,77 @@ impl FacetContainer {
         let config = facet.get_config();
         let priority = facet.get_priority();
 
-        // Create locked facet
+        // Call on_attach BEFORE storing metadata (so facet can initialize)
         facet.on_attach(actor_id, config.clone()).await?;
 
+        // Store metadata FIRST (before creating Arc, so we can use it for sorting)
+        let facet_type_clone = facet_type.clone();
+        let priority_clone = priority;
+        
+        // Create locked facet
         let facet_arc = Arc::new(RwLock::new(facet));
 
+        // Store metadata
+        self.metadata.insert(
+            facet_type_clone.clone(),
+            FacetMetadata {
+                facet_type: facet_type_clone.clone(),
+                priority: priority_clone,
+                attached_at: std::time::Instant::now(),
+                config: config.clone(),
+            },
+        );
+
         // Insert based on priority (higher priority first)
+        // Use metadata to find insertion position
         let insert_pos = self
             .facets
             .iter()
             .position(|f| {
-                // We need to check priority, but facets are locked
-                // For now, insert at end and sort later if needed
-                false
+                // Get priority from metadata (faster than locking facet)
+                let facet_type = {
+                    // Try to read facet type (non-blocking)
+                    if let Ok(guard) = f.try_read() {
+                        guard.facet_type().to_string()
+                    } else {
+                        return false; // Skip if locked
+                    }
+                };
+                
+                // Check priority from metadata
+                if let Some(existing_metadata) = self.metadata.get(&facet_type) {
+                    existing_metadata.priority < priority_clone
+                } else {
+                    false
+                }
             })
             .unwrap_or(self.facets.len());
 
         self.facets.insert(insert_pos, facet_arc);
+        
+        // Sort facets by priority (descending) to ensure correct order
+        // This is a safety measure in case metadata is out of sync
+        self.facets.sort_by(|a, b| {
+            let priority_a = {
+                if let Ok(guard) = a.try_read() {
+                    self.metadata.get(guard.facet_type())
+                        .map(|m| m.priority)
+                        .unwrap_or(0)
+                } else {
+                    0
+                }
+            };
+            let priority_b = {
+                if let Ok(guard) = b.try_read() {
+                    self.metadata.get(guard.facet_type())
+                        .map(|m| m.priority)
+                        .unwrap_or(0)
+                } else {
+                    0
+                }
+            };
+            priority_b.cmp(&priority_a) // Descending order (high priority first)
+        });
 
         // Store metadata
         self.metadata.insert(
@@ -254,11 +473,19 @@ impl FacetContainer {
             return Err(FacetError::NotFound(facet_type.to_string()));
         }
 
-        // Find facet in list
+        // Find facet in list (use try_read to avoid blocking)
         let pos = self
             .facets
             .iter()
-            .position(|f| f.blocking_read().facet_type() == facet_type);
+            .position(|f| {
+                // Use try_read to avoid blocking the async runtime
+                if let Ok(guard) = f.try_read() {
+                    guard.facet_type() == facet_type
+                } else {
+                    // If locked, we can't check - this is rare and we'll handle it gracefully
+                    false
+                }
+            });
 
         if let Some(pos) = pos {
             let facet = self.facets.remove(pos);
@@ -369,6 +596,151 @@ impl FacetContainer {
         }
         None
     }
+
+    /// Get all facets (in priority order, high priority first)
+    ///
+    /// ## Returns
+    /// Reference to facets vector (sorted by priority, descending)
+    pub fn get_all_facets(&self) -> &[Arc<RwLock<Box<dyn Facet>>>] {
+        &self.facets
+    }
+
+    /// Detach all facets (for actor termination)
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID
+    ///
+    /// ## Returns
+    /// Result with any errors encountered (continues detaching even if one fails)
+    ///
+    /// ## Note
+    /// Detaches in reverse priority order (low priority first, reverse of attach)
+    pub async fn detach_all(&mut self, actor_id: &str) -> Vec<FacetError> {
+        let mut errors = Vec::new();
+        
+        // Detach in reverse priority order (ascending priority, reverse of attach)
+        // Sort by priority ascending for reverse order
+        let mut facets_to_detach: Vec<(String, i32)> = self.metadata
+            .iter()
+            .map(|(facet_type, metadata)| (facet_type.clone(), metadata.priority))
+            .collect();
+        facets_to_detach.sort_by_key(|(_, priority)| *priority); // Ascending order
+        
+        for (facet_type, _) in facets_to_detach {
+            if let Err(e) = self.detach(&facet_type, actor_id).await {
+                errors.push(e);
+            }
+        }
+        
+        errors
+    }
+
+    /// Call on_exit() on all facets (in priority order, descending)
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID
+    /// * `from` - ID of linked actor that exited
+    /// * `reason` - Exit reason
+    ///
+    /// ## Returns
+    /// Result with any errors encountered (continues calling even if one fails)
+    pub async fn call_on_exit(
+        &mut self,
+        actor_id: &str,
+        from: &str,
+        reason: &ExitReason,
+    ) -> Vec<FacetError> {
+        let mut errors = Vec::new();
+        
+        // Call on all facets in priority order (high priority first)
+        for facet_arc in &self.facets {
+            let mut facet = facet_arc.write().await;
+            if let Err(e) = facet.on_exit(actor_id, from, reason).await {
+                errors.push(e);
+                // Continue with other facets even if one fails
+            }
+        }
+        
+        errors
+    }
+
+    /// Call on_down() on all facets (in priority order, descending)
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID
+    /// * `monitored_id` - ID of monitored actor that terminated
+    /// * `reason` - Exit reason
+    ///
+    /// ## Returns
+    /// Result with any errors encountered (continues calling even if one fails)
+    pub async fn call_on_down(
+        &mut self,
+        actor_id: &str,
+        monitored_id: &str,
+        reason: &ExitReason,
+    ) -> Vec<FacetError> {
+        let mut errors = Vec::new();
+        
+        // Call on all facets in priority order (high priority first)
+        for facet_arc in &self.facets {
+            let mut facet = facet_arc.write().await;
+            if let Err(e) = facet.on_down(actor_id, monitored_id, reason).await {
+                errors.push(e);
+                // Continue with other facets even if one fails
+            }
+        }
+        
+        errors
+    }
+
+    /// Call on_init_complete() on all facets (in priority order, descending)
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID
+    ///
+    /// ## Returns
+    /// Result with any errors encountered (continues calling even if one fails)
+    pub async fn call_on_init_complete(&mut self, actor_id: &str) -> Vec<FacetError> {
+        let mut errors = Vec::new();
+        
+        // Call on all facets in priority order (high priority first)
+        for facet_arc in &self.facets {
+            let mut facet = facet_arc.write().await;
+            if let Err(e) = facet.on_init_complete(actor_id).await {
+                errors.push(e);
+                // Continue with other facets even if one fails
+            }
+        }
+        
+        errors
+    }
+
+    /// Call on_terminate_start() on all facets (in priority order, descending)
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID
+    /// * `reason` - Exit reason
+    ///
+    /// ## Returns
+    /// Result with any errors encountered (continues calling even if one fails)
+    pub async fn call_on_terminate_start(
+        &mut self,
+        actor_id: &str,
+        reason: &ExitReason,
+    ) -> Vec<FacetError> {
+        let mut errors = Vec::new();
+        
+        // Call on all facets in priority order (high priority first)
+        for facet_arc in &self.facets {
+            let mut facet = facet_arc.write().await;
+            if let Err(e) = facet.on_terminate_start(actor_id, reason).await {
+                errors.push(e);
+                // Continue with other facets even if one fails
+            }
+        }
+        
+        errors
+    }
 }
 
 /// Registry for available facet implementations
@@ -424,6 +796,9 @@ impl FacetRegistry {
         self.factories.keys().cloned().collect()
     }
 }
+
+// Note: Service trait implementation moved to core crate to break circular dependency
+// FacetRegistry doesn't implement Service here - core provides a wrapper if needed
 
 // Example facets demonstrating the pattern
 

@@ -46,13 +46,14 @@
 //! ## Usage
 //! ```rust
 //! use plexspaces_tuplespace::storage::*;
-//! use plexspaces_proto::v1::*;
+//! use plexspaces_tuplespace::TupleSpaceError;
+//! use plexspaces_proto::tuplespace::v1::*;
 //!
 //! # async fn example() -> Result<(), TupleSpaceError> {
 //! // Create storage from proto config
 //! let config = TupleSpaceStorageConfig {
 //!     provider: StorageProvider::StorageProviderMemory as i32,
-//!     config: Some(tuplespace_storage_config::Config::Memory(
+//!     config: Some(tuple_space_storage_config::Config::Memory(
 //!         MemoryStorageConfig {
 //!             initial_capacity: 1000,
 //!             cleanup_interval_ms: 60000,
@@ -65,12 +66,14 @@
 //! let storage = create_storage(config).await?;
 //!
 //! // Write tuple
-//! let tuple = Tuple { /* ... */ };
-//! let tuple_id = storage.write(tuple).await?;
+//! use plexspaces_tuplespace::Tuple;
+//! let tuple = Tuple::new(vec![]);
+//! storage.write(tuple).await?;
 //!
 //! // Read tuple
-//! let pattern = Pattern { /* ... */ };
-//! let tuples = storage.read(pattern, None).await?;
+//! use plexspaces_tuplespace::Pattern;
+//! let pattern = Pattern::new(vec![]);
+//! let _tuples = storage.read(pattern, None).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -310,14 +313,15 @@ pub trait TupleSpaceStorage: Send + Sync {
 /// - ConnectionError if backend can't connect (Redis, PostgreSQL)
 ///
 /// ## Example
-/// ```rust
+/// ```rust,no_run
 /// use plexspaces_tuplespace::storage::*;
-/// use plexspaces_proto::v1::*;
+/// use plexspaces_tuplespace::TupleSpaceError;
+/// use plexspaces_proto::tuplespace::v1::*;
 ///
 /// # async fn example() -> Result<(), TupleSpaceError> {
 /// let config = TupleSpaceStorageConfig {
 ///     provider: StorageProvider::StorageProviderMemory as i32,
-///     config: Some(tuplespace_storage_config::Config::Memory(
+///     config: Some(tuple_space_storage_config::Config::Memory(
 ///         MemoryStorageConfig {
 ///             initial_capacity: 1000,
 ///             cleanup_interval_ms: 60000,

@@ -34,6 +34,7 @@ async-stream = { workspace = true }
 
 # Optional: Redis backend (feature-gated)
 redis = { workspace = true, optional = true }
+base64 = { version = "0.21", optional = true }
 
 # Optional: Kafka backend (feature-gated)
 rdkafka = { version = "0.36", optional = true }
@@ -44,6 +45,9 @@ async-nats = { version = "0.45", optional = true }
 # Optional: SQLite backend (feature-gated, for testing durability)
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"], optional = true }
 
+# Optional: UDP backend (feature-gated, for multicast pub/sub)
+socket2 = { version = "0.5", optional = true }
+
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
@@ -51,10 +55,12 @@ tempfile = { workspace = true }
 
 [features]
 default = []
-redis-backend = ["redis"]
+redis-backend = ["redis", "base64"]
 kafka-backend = ["rdkafka"]
 nats-backend = ["async-nats"]
 sqlite-backend = ["sqlx"]
+udp-backend = ["socket2"]
+test-utils = []  # Enable mock_backend for integration tests
 
 [lib]
 name = "plexspaces_channel"

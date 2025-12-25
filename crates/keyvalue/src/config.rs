@@ -446,7 +446,7 @@ mod tests {
         let config = KVConfig::new(BackendType::InMemory);
         let kv = create_keyvalue_from_config(config).await.unwrap();
 
-        let ctx = plexspaces_core::RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+        let ctx = plexspaces_common::RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
         kv.put(&ctx, "test", b"value".to_vec()).await.unwrap();
         let value = kv.get(&ctx, "test").await.unwrap();
         assert_eq!(value, Some(b"value".to_vec()));
@@ -458,7 +458,7 @@ mod tests {
         std::env::remove_var("PLEXSPACES_KV_BACKEND");
 
         let kv = create_keyvalue_from_env().await.unwrap();
-        let ctx = plexspaces_core::RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+        let ctx = plexspaces_common::RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
         kv.put(&ctx, "test", b"value".to_vec()).await.unwrap();
         let value = kv.get(&ctx, "test").await.unwrap();
         assert_eq!(value, Some(b"value".to_vec()));

@@ -66,7 +66,7 @@
 
 use crate::{KVError, KVEvent, KVEventType, KVResult, KVStats, KeyValueStore};
 use async_trait::async_trait;
-use plexspaces_core::RequestContext;
+use plexspaces_common::RequestContext;
 use sqlx::{Pool, Postgres, Row, Sqlite};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1201,7 +1201,7 @@ mod tests {
     use super::*;
 
     fn test_ctx() -> RequestContext {
-        plexspaces_core::RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string())
+        plexspaces_common::RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string())
     }
 
     #[tokio::test]

@@ -10,6 +10,8 @@ categories.workspace = true
 description = "Core types and traits for PlexSpaces actor system"
 
 [dependencies]
+# Common types (RequestContext)
+plexspaces-common = { path = "../common" }
 # Core depends on mailbox, journal, and tuplespace
 plexspaces-proto = { workspace = true }
 plexspaces-mailbox = { workspace = true }
@@ -36,19 +38,22 @@ prost-types = "0.12"  # For proto Duration/Timestamp types
 tracing = { workspace = true }  # Always enabled, feature kept for compatibility
 futures = "0.3"  # For BoxStream in ChannelService
 tonic = { workspace = true }  # For gRPC client in ServiceLocator
+once_cell = "1.19"  # For lazy static initialization of discovery cache
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 plexspaces-channel = { workspace = true }  # For integration tests
 plexspaces-object-registry = { workspace = true }  # For ServiceLocator tests
-plexspaces-keyvalue = { workspace = true }  # For ServiceLocator tests
+plexspaces-keyvalue = { workspace = true, features = ["sql-backend"] }  # For ServiceLocator tests and SQLite integration tests
 chrono = { workspace = true }  # For timestamp in integration tests
 prost-types = "0.12"  # For proto types in integration tests
 async-trait = { workspace = true }  # For trait implementations in tests
 
 [features]
+default = []
 # Keep tracing feature for backward compatibility, but tracing is always enabled
 tracing = []
+sql-backend = ["plexspaces-keyvalue/sql-backend"]
 # service-adapters feature will be enabled when Node integration is complete
 # service-adapters = ["dep:plexspaces-actor-service", "dep:plexspaces-object-registry", "dep:plexspaces-node"]
 

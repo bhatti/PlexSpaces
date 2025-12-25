@@ -19,6 +19,7 @@ anyhow = "1.0"
 bytes = "1.5"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+reqwest = { version = "0.12", features = ["multipart", "json"] }
 
 [[bin]]
 name = "plexspaces"

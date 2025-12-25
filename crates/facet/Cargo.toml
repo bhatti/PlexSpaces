@@ -13,6 +13,9 @@ description = "Dynamic behavior composition via facets"
 # Facet has minimal dependencies
 plexspaces-proto = { workspace = true }
 
+# Note: plexspaces-core dependency removed to break circular dependency
+# Service trait implementation moved to core::facet_service_wrapper
+
 # Core dependencies
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -26,6 +29,10 @@ hex = "0.4"
 
 # Observability (CRITICAL - production-ready observability)
 metrics = "0.23"
+
+[features]
+default = []
+# service feature removed - Service trait implementation moved to core crate
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }

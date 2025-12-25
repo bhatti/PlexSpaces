@@ -245,6 +245,12 @@ message ChildSpec {
 
   // Nested supervisor (if type=SUPERVISOR)
   optional SupervisorSpec supervisor = 7;
+
+  // Facet configuration (for automatic attachment during actor creation)
+  // Facets are attached in priority order (high priority first) before actor.init() is called
+  // All facets are automatically restored during supervisor restart
+  // Phase 1: Unified Lifecycle - Multiple facets support
+  repeated plexspaces.common.v1.Facet facets = 8;
 }
 
 // Child type

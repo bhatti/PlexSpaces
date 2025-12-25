@@ -113,13 +113,14 @@ async fn test_event_sourcing_paginated_history() {
     }
 
     // Get paginated history
-    let mut page_token = String::new();
+    let mut offset = 0;
+    let limit = 5;
     let mut total_events = 0;
 
     loop {
         let page_request = PageRequest {
-            page_size: 5,
-            page_token: page_token.clone(),
+            offset,
+            limit,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -132,12 +133,12 @@ async fn test_event_sourcing_paginated_history() {
         total_events += history.events.len();
 
         if history.page_response.is_none()
-            || history.page_response.as_ref().unwrap().next_page_token.is_empty()
+            || !history.page_response.as_ref().unwrap().has_next
         {
             break;
         }
 
-        page_token = history.page_response.as_ref().unwrap().next_page_token.clone();
+        offset += limit;
     }
 
     assert_eq!(total_events, 20);
@@ -259,17 +260,17 @@ async fn test_event_sourcing_large_event_log() {
         .unwrap();
 
     assert_eq!(events.len(), 100);
-    assert!(!page_response.next_page_token.is_empty());
+    assert!(page_response.has_next);
 
     // Verify we can get all events through pagination
     let mut total = 100;
-    let mut next_token = page_response.next_page_token;
+    let mut current_offset = page_response.offset + page_response.limit;
 
     for _ in 0..9 {
         // 9 more pages to get all 1000 events
         let page_request = PageRequest {
-            page_size: 100,
-            page_token: next_token,
+            offset: current_offset,
+            limit: 100,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -280,10 +281,10 @@ async fn test_event_sourcing_large_event_log() {
             .unwrap();
 
         total += events.len();
-        if page_response.next_page_token.is_empty() {
+        if !page_response.has_next {
             break;
         }
-        next_token = page_response.next_page_token;
+        current_offset = page_response.offset + page_response.limit;
     }
 
     assert_eq!(total, 1000);

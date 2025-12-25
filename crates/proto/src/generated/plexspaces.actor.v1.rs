@@ -238,6 +238,20 @@ pub struct Actor {
     #[prost(string, tag="13")]
     pub error_message: ::prost::alloc::string::String,
 }
+/// Exit reason details (for EXIT_REASON_ERROR and EXIT_REASON_LINKED)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ExitReasonDetails {
+    /// Error message (for EXIT_REASON_ERROR)
+    #[prost(string, tag="1")]
+    pub error_message: ::prost::alloc::string::String,
+    /// Linked actor ID (for EXIT_REASON_LINKED)
+    #[prost(string, tag="2")]
+    pub linked_actor_id: ::prost::alloc::string::String,
+    /// Linked actor's exit reason (for EXIT_REASON_LINKED)
+    #[prost(enumeration="ExitReason", tag="3")]
+    pub linked_reason: i32,
+}
 /// Actor configuration
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1677,12 +1691,14 @@ pub enum ActorState {
     ActorStateActivating = 4,
     /// Actor is deactivating (saving state, running on_deactivate)
     ActorStateDeactivating = 5,
+    /// Actor is stopping (shutdown in progress)
+    ActorStateStopping = 6,
     /// Actor is migrating to another node
-    ActorStateMigrating = 6,
+    ActorStateMigrating = 7,
     /// Actor has crashed (error message in Actor.error_message field)
-    ActorStateFailed = 7,
+    ActorStateFailed = 8,
     /// Actor has permanently stopped (replaces "Stopped")
-    ActorStateTerminated = 8,
+    ActorStateTerminated = 9,
 }
 impl ActorState {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1697,6 +1713,7 @@ impl ActorState {
             ActorState::ActorStateInactive => "ACTOR_STATE_INACTIVE",
             ActorState::ActorStateActivating => "ACTOR_STATE_ACTIVATING",
             ActorState::ActorStateDeactivating => "ACTOR_STATE_DEACTIVATING",
+            ActorState::ActorStateStopping => "ACTOR_STATE_STOPPING",
             ActorState::ActorStateMigrating => "ACTOR_STATE_MIGRATING",
             ActorState::ActorStateFailed => "ACTOR_STATE_FAILED",
             ActorState::ActorStateTerminated => "ACTOR_STATE_TERMINATED",
@@ -1711,9 +1728,112 @@ impl ActorState {
             "ACTOR_STATE_INACTIVE" => Some(Self::ActorStateInactive),
             "ACTOR_STATE_ACTIVATING" => Some(Self::ActorStateActivating),
             "ACTOR_STATE_DEACTIVATING" => Some(Self::ActorStateDeactivating),
+            "ACTOR_STATE_STOPPING" => Some(Self::ActorStateStopping),
             "ACTOR_STATE_MIGRATING" => Some(Self::ActorStateMigrating),
             "ACTOR_STATE_FAILED" => Some(Self::ActorStateFailed),
             "ACTOR_STATE_TERMINATED" => Some(Self::ActorStateTerminated),
+            _ => None,
+        }
+    }
+}
+/// Exit reason for actor termination (Erlang/OTP-style)
+///
+/// ## Purpose
+/// Defines why an actor terminated, enabling proper supervision decisions
+/// and link/monitor propagation semantics.
+///
+/// ## Erlang Equivalent
+/// Maps to Erlang's exit reasons:
+/// - normal: Normal termination (not an error)
+/// - shutdown: Graceful shutdown requested
+/// - kill: Forcefully killed
+/// - {error, Reason}: Error with message
+/// - {linked, Pid, Reason}: Linked actor died
+///
+/// ## Usage
+/// - Used in Actor::terminate() and Actor::handle_exit() lifecycle hooks
+/// - Propagated to linked actors (if trap_exit=false, causes cascading crash)
+/// - Used by supervisors to decide restart policies
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ExitReason {
+    ExitReasonUnspecified = 0,
+    /// Normal termination (not an error)
+    ExitReasonNormal = 1,
+    /// Shutdown requested (graceful)
+    ExitReasonShutdown = 2,
+    /// Killed forcefully
+    ExitReasonKilled = 3,
+    /// Error with message (error_message field contains details)
+    ExitReasonError = 4,
+    /// Linked actor died (linked_actor_id and linked_reason fields)
+    ExitReasonLinked = 5,
+}
+impl ExitReason {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ExitReason::ExitReasonUnspecified => "EXIT_REASON_UNSPECIFIED",
+            ExitReason::ExitReasonNormal => "EXIT_REASON_NORMAL",
+            ExitReason::ExitReasonShutdown => "EXIT_REASON_SHUTDOWN",
+            ExitReason::ExitReasonKilled => "EXIT_REASON_KILLED",
+            ExitReason::ExitReasonError => "EXIT_REASON_ERROR",
+            ExitReason::ExitReasonLinked => "EXIT_REASON_LINKED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "EXIT_REASON_UNSPECIFIED" => Some(Self::ExitReasonUnspecified),
+            "EXIT_REASON_NORMAL" => Some(Self::ExitReasonNormal),
+            "EXIT_REASON_SHUTDOWN" => Some(Self::ExitReasonShutdown),
+            "EXIT_REASON_KILLED" => Some(Self::ExitReasonKilled),
+            "EXIT_REASON_ERROR" => Some(Self::ExitReasonError),
+            "EXIT_REASON_LINKED" => Some(Self::ExitReasonLinked),
+            _ => None,
+        }
+    }
+}
+/// Exit action when handling EXIT from linked actor
+///
+/// ## Purpose
+/// Determines how an actor responds to EXIT signal from a linked actor.
+/// Only relevant when ActorContext.trap_exit = true.
+///
+/// ## Erlang Equivalent
+/// Maps to Erlang's handle_exit behavior:
+/// - Propagate: Actor will also terminate (default link behavior)
+/// - Handle: Actor continues running (traps the exit)
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ExitAction {
+    ExitActionUnspecified = 0,
+    /// Propagate exit - this actor will also terminate
+    ExitActionPropagate = 1,
+    /// Handle exit - this actor continues running
+    ExitActionHandle = 2,
+}
+impl ExitAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ExitAction::ExitActionUnspecified => "EXIT_ACTION_UNSPECIFIED",
+            ExitAction::ExitActionPropagate => "EXIT_ACTION_PROPAGATE",
+            ExitAction::ExitActionHandle => "EXIT_ACTION_HANDLE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "EXIT_ACTION_UNSPECIFIED" => Some(Self::ExitActionUnspecified),
+            "EXIT_ACTION_PROPAGATE" => Some(Self::ExitActionPropagate),
+            "EXIT_ACTION_HANDLE" => Some(Self::ExitActionHandle),
             _ => None,
         }
     }

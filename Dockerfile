@@ -6,7 +6,8 @@
 # Ready to accept WASM modules and actors via gRPC
 
 # Stage 1: Builder
-FROM rust:1.75-slim-bookworm AS builder
+# Using rust:1-bookworm to get latest Rust 1.x (supports Cargo.lock v4)
+FROM rust:1-bookworm AS builder
 
 WORKDIR /app
 
@@ -35,12 +36,20 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/proto/Cargo.toml ./crates/proto/
 COPY crates/node/Cargo.toml ./crates/node/
 
+# Build arguments for features (dashboard is enabled by default via default features)
+# Can override with --build-arg FEATURES="firecracker" or --build-arg FEATURES="dashboard,firecracker"
+ARG FEATURES=""
+
 # Dummy build to cache dependencies
 RUN mkdir -p src crates/proto/src crates/node/src && \
     echo "fn main() {}" > src/main.rs && \
     echo "// dummy" > crates/proto/src/lib.rs && \
     echo "// dummy" > crates/node/src/lib.rs && \
-    cargo build --release -p plexspaces-node || true && \
+    if [ -z "${FEATURES}" ]; then \
+        cargo build --release -p plexspaces-node || true; \
+    else \
+        cargo build --release -p plexspaces-node --features "${FEATURES}" || true; \
+    fi && \
     rm -rf src crates/proto/src crates/node/src
 
 # Copy the rest of the application code
@@ -50,7 +59,12 @@ COPY . .
 RUN make proto || true
 
 # Build the plexspaces-node binary (framework runtime)
-RUN cargo build --release -p plexspaces-node
+# Dashboard is enabled by default, additional features can be specified via FEATURES
+RUN if [ -z "${FEATURES}" ]; then \
+        cargo build --release --bin plexspaces-node -p plexspaces-node; \
+    else \
+        cargo build --release --bin plexspaces-node -p plexspaces-node --features "${FEATURES}"; \
+    fi
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim

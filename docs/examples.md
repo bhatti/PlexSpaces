@@ -62,12 +62,15 @@ Learn WASM actor deployment with polyglot support (Python/JavaScript).
 - Python actors
 - JavaScript actors
 - WASM deployment
+- HTTP multipart upload for large files
 
 **Run**:
 ```bash
 cd examples/simple/wasm_calculator
 ./test.sh
 ```
+
+**Documentation**: For comprehensive WASM deployment guide with polyglot examples (Rust, Python, TypeScript, Go), see [WASM Deployment Guide](wasm-deployment.md).
 
 ### Actor Groups (Sharding)
 

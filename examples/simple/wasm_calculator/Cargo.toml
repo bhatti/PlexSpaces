@@ -33,3 +33,6 @@ wat = "1.242.0"
 name = "wasm_calculator"
 path = "src/main.rs"
 
+[dev-dependencies]
+tokio-test = "0.4"
+

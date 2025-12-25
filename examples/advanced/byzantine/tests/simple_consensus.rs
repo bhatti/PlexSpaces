@@ -32,12 +32,13 @@ use std::collections::HashMap;
 #[tokio::test]
 async fn test_simple_consensus() {
     // Create a node
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let service_locator = node.service_locator();
     
     // Wait for services to be registered
+    use plexspaces_core::service_locator::service_names;
     for _ in 0..10 {
-        if service_locator.get_service::<plexspaces_core::ActorRegistry>().await.is_some() {
+        if service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
             break;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -65,15 +66,13 @@ async fn test_simple_consensus() {
     service_locator.register_service(reply_waiter_registry).await;
     
     // Register ActorService
-    use plexspaces_node::service_wrappers::ActorServiceWrapper;
     use plexspaces_core::ActorService;
     use plexspaces_actor_service::ActorServiceImpl;
     let actor_service_impl = Arc::new(ActorServiceImpl::new(
         service_locator.clone(),
         node.id().as_str().to_string(),
     ));
-    let actor_service_wrapper = Arc::new(ActorServiceWrapper::new(actor_service_impl));
-    service_locator.register_actor_service(actor_service_wrapper).await;
+    service_locator.register_actor_service(actor_service_impl.clone() as Arc<dyn ActorService + Send + Sync>).await;
     
     // Create actor context
     let ctx = plexspaces_core::ActorContext::new(

@@ -32,7 +32,7 @@ pub async fn lookup_actor_ref(
     let actor_id = normalize_actor_id(node, actor_id);
     
     // Get ActorRegistry from ServiceLocator
-    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service().await
+    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string()))?;
     
     // Check if Actor trait object exists in registry
@@ -77,7 +77,7 @@ pub async fn activate_virtual_actor(
     let actor_id = normalize_actor_id(node, actor_id);
     
     // Get ActorFactory from ServiceLocator
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorFactory not found".to_string()))?;
     
     // Use ActorFactory to activate
@@ -105,9 +105,9 @@ where
     let actor_id = normalize_actor_id(node, &actor_id);
     
     // Get ActorRegistry and ActorFactory from ServiceLocator
-    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service().await
+    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string()))?;
-    let actor_factory_impl: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    let actor_factory_impl: Arc<ActorFactoryImpl> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorFactory not found".to_string()))?;
     
     // Check if actor already exists (activated or virtual)
@@ -245,7 +245,7 @@ pub async fn find_actor_helper(
     let actor_id = normalize_actor_id(node, actor_id);
     
     // Get ActorRegistry from ServiceLocator
-    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service().await
+    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string()))?;
     
     // Check routing info
@@ -281,7 +281,7 @@ pub async fn spawn_actor_helper(
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     
     // Get ActorFactory from ServiceLocator
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError(
             "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string()
         ))?;

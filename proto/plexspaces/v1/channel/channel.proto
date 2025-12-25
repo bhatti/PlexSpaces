@@ -80,6 +80,14 @@ enum ChannelBackend {
   // - Cross-node, cross-datacenter
   CHANNEL_BACKEND_NATS = 4;
 
+  // UDP multicast for lightweight pub/sub within a cluster
+  // - Very low latency, high throughput
+  // - Multicast pub/sub for cluster-wide messaging
+  // - Unicast point-to-point messaging
+  // - No persistence, best-effort delivery
+  // - Requires nodes to share same cluster_name
+  CHANNEL_BACKEND_UDP = 5;
+
   // Custom backend (user-provided implementation)
   CHANNEL_BACKEND_CUSTOM = 99;
 }
@@ -135,6 +143,7 @@ message ChannelConfig {
     KafkaConfig kafka = 12;
     SqliteConfig sqlite = 13;
     NatsConfig nats = 14;
+    UdpConfig udp = 15;
   }
 
   // Optional: TTL for messages
@@ -142,6 +151,20 @@ message ChannelConfig {
 
   // Optional: Dead-letter queue for failed messages
   string dead_letter_queue = 21;
+
+  // Maximum number of retries before sending to DLQ (default: 3)
+  // After N failures, message is sent to Dead Letter Queue instead of requeuing
+  // Set to 0 to disable retries (immediate DLQ on first failure)
+  // Only applies to channels that support ack/nack/dlq (Redis, Kafka, etc.)
+  // InMemory channels ignore this (no retry/DLQ support)
+  uint32 max_retries = 22;
+
+  // Enable Dead Letter Queue (DLQ) for failed messages (default: true)
+  // When enabled, messages that fail max_retries times are sent to DLQ
+  // When disabled, messages are dropped after max_retries failures
+  // Only applies to channels that support DLQ (Redis, Kafka, etc.)
+  // InMemory channels ignore this (no retry/DLQ support)
+  bool dlq_enabled = 23;
 }
 
 // In-memory channel configuration
@@ -303,6 +326,48 @@ message NatsConfig {
 
   // TLS CA certificate path (optional)
   string tls_ca_path = 12;
+}
+
+// UDP configuration (for multicast pub/sub within a cluster)
+message UdpConfig {
+  // Multicast address for pub/sub (default: "239.255.0.1")
+  // - Must be in multicast range (224.0.0.0 to 239.255.255.255)
+  // - All nodes in cluster must use same multicast address
+  string multicast_address = 1;
+
+  // Multicast port (default: 9999)
+  // - All nodes in cluster must use same port
+  uint32 multicast_port = 2;
+
+  // Local bind address (default: "0.0.0.0")
+  // - "0.0.0.0" binds to all interfaces
+  // - Specific IP binds to that interface only
+  string bind_address = 3;
+
+  // Time-to-live (TTL) for multicast packets (default: 1)
+  // - 1 = local network only
+  // - Higher values allow routing across subnets
+  uint32 ttl = 4;
+
+  // Maximum message size in bytes (default: 65507, max UDP packet size)
+  // - Messages larger than this will be fragmented
+  // - Recommended: 1400 bytes for Ethernet MTU
+  uint32 max_message_size = 5;
+
+  // Enable unicast mode for point-to-point messaging (default: false)
+  // - If true, uses unicast instead of multicast
+  // - Requires target address for each send
+  bool unicast_mode = 6;
+
+  // Cluster name (required for multicast)
+  // - Nodes with same cluster_name can communicate
+  // - Must match node's cluster_name
+  string cluster_name = 7;
+
+  // Interface name to bind to (optional)
+  // - If set, binds to specific network interface
+  // - If empty, uses bind_address
+  string interface_name = 8;
 }
 
 // Channel message envelope

@@ -222,13 +222,16 @@ impl SchedulingService for SchedulingServiceImpl {
         // TODO: Apply pagination (for now, return all results)
         // In the future, we should paginate based on req.page
 
+        let total_count = entries.len();
         Ok(Response::new(ListNodeCapacitiesResponse {
             capacities: entries,
             page: req.page.map(|_pr| {
                 // Create a simple page response (no next page for now)
                 plexspaces_proto::common::v1::PageResponse {
-                    next_page_token: String::new(),
-                    total_size: 0, // TODO: Calculate total size
+                    total_size: total_count as i32,
+                    offset: 0,
+                    limit: total_count as i32,
+                    has_next: false,
                 }
             }),
         }))

@@ -280,27 +280,33 @@ impl BlobServiceTrait for BlobServiceImpl {
         };
 
         // Get pagination params
-        let page_size = req
+        let offset = req
             .page
             .as_ref()
-            .map(|p| p.page_size)
-            .unwrap_or(100)
-            .max(1)
-            .min(1000) as i64;
-        let page = 1; // TODO: Parse from page_token
+            .map(|p| p.offset.max(0))
+            .unwrap_or(0) as i64;
+        let limit = req
+            .page
+            .as_ref()
+            .map(|p| p.limit.max(1).min(1000))
+            .unwrap_or(100) as i64;
+        let page = (offset / limit) as i64 + 1;
 
         // List blobs (tenant_id and namespace from RequestContext)
         let (blobs, total_count) = self
             .blob_service
-            .list_blobs(&ctx, &filters, page_size, page)
+            .list_blobs(&ctx, &filters, limit, page)
             .await
             .map_err(|e| Status::internal(format!("Failed to list blobs: {}", e)))?;
 
         // Build page response
         use plexspaces_proto::common::v1::PageResponse;
+        let has_next = (offset + limit) < total_count;
         let page_response = PageResponse {
-            next_page_token: String::new(), // TODO: Generate page token
             total_size: total_count as i32,
+            offset: offset as i32,
+            limit: limit as i32,
+            has_next,
         };
 
         Ok(Response::new(ListBlobsResponse {

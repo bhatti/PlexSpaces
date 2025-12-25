@@ -399,6 +399,41 @@ message ActorMetrics {
 
   // Total errors
   uint64 error_total = 7;
+
+  // ============================================================================
+  // LIFECYCLE METRICS (Phase 1-3)
+  // ============================================================================
+  
+  // Total init() calls (success + failure)
+  uint64 init_total = 8;
+  
+  // Total init() failures
+  uint64 init_errors_total = 9;
+  
+  // Total terminate() calls
+  uint64 terminate_total = 10;
+  
+  // Total terminate() errors
+  uint64 terminate_errors_total = 11;
+  
+  // Total exit messages handled (when trap_exit=true)
+  uint64 exit_handled_total = 12;
+  
+  // Total exit messages propagated (when trap_exit=false or handle_exit returns Propagate)
+  uint64 exit_propagated_total = 13;
+  
+  // Total exit handle errors
+  uint64 exit_handle_errors_total = 14;
+  
+  // ============================================================================
+  // PARENT-CHILD METRICS (Phase 3)
+  // ============================================================================
+  
+  // Total parent-child relationships registered
+  uint64 parent_child_registered_total = 15;
+  
+  // Total parent-child relationships unregistered
+  uint64 parent_child_unregistered_total = 16;
 }
 
 // ============================================================================

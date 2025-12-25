@@ -86,6 +86,8 @@ pub mod system_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        /** Get system information
+*/
         pub async fn get_system_info(
             &mut self,
             request: impl tonic::IntoRequest<super::GetSystemInfoRequest>,
@@ -714,6 +716,8 @@ pub mod system_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with SystemServiceServer.
     #[async_trait]
     pub trait SystemService: Send + Sync + 'static {
+        /** Get system information
+*/
         async fn get_system_info(
             &self,
             request: tonic::Request<super::GetSystemInfoRequest>,

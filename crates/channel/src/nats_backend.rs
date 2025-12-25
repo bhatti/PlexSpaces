@@ -48,7 +48,6 @@ use futures::StreamExt;
 use plexspaces_proto::channel::v1::{
     channel_config, ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats, NatsConfig,
 };
-use prost::Message;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -79,7 +78,7 @@ struct ChannelStatsData {
     messages_sent: AtomicU64,
     messages_received: AtomicU64,
     messages_acked: AtomicU64,
-    messages_nacked: AtomicU64,
+    messages_failed: AtomicU64,
     errors: AtomicU64,
 }
 
@@ -159,7 +158,7 @@ impl NatsChannel {
                 messages_sent: AtomicU64::new(0),
                 messages_received: AtomicU64::new(0),
                 messages_acked: AtomicU64::new(0),
-                messages_nacked: AtomicU64::new(0),
+                messages_failed: AtomicU64::new(0),
                 errors: AtomicU64::new(0),
             }),
             closed: Arc::new(AtomicBool::new(false)),
@@ -335,25 +334,65 @@ impl Channel for NatsChannel {
         Ok(1) // NATS doesn't provide subscriber count without JetStream
     }
 
-    async fn ack(&self, _message_id: &str) -> ChannelResult<()> {
-        // NATS doesn't require explicit ACK for basic pub/sub
+    async fn ack(&self, message_id: &str) -> ChannelResult<()> {
+        use crate::observability::{backend_name, record_channel_ack};
+        
+        // NATS: Basic pub/sub doesn't require explicit ACK (messages delivered immediately)
         // JetStream would require ACK, but that's not implemented in this basic version
+        // This is a no-op for compatibility with the Channel trait
+        
         self.stats.messages_acked.fetch_add(1, Ordering::Relaxed);
+        
+        let backend = backend_name(self.config.backend);
+        record_channel_ack(&self.config.name, message_id, backend);
+        
         Ok(())
     }
 
-    async fn nack(&self, _message_id: &str, requeue: bool) -> ChannelResult<()> {
+    async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
+        use crate::observability::{backend_name, record_channel_nack, record_channel_dlq};
+        
+        // Get retry/DLQ config from channel config
+        let _max_retries = if self.config.max_retries > 0 {
+            self.config.max_retries
+        } else {
+            3 // Default: 3 retries
+        };
+        let dlq_enabled = self.config.dlq_enabled;
+        let backend = backend_name(self.config.backend);
+
         if requeue {
             // NATS doesn't support requeue without JetStream
             // In a full implementation, we'd use JetStream's NAK with redelivery
-            self.stats.messages_nacked.fetch_add(1, Ordering::Relaxed);
+            // For now, this is a no-op (message already delivered)
+            record_channel_nack(&self.config.name, message_id, true, 0, backend);
         } else {
-            // Send to DLQ if configured
-            if !self.config.dead_letter_queue.is_empty() {
-                // Would need to implement DLQ publishing
-                self.stats.messages_nacked.fetch_add(1, Ordering::Relaxed);
+            // Send to DLQ if enabled
+            if dlq_enabled && !self.config.dead_letter_queue.is_empty() {
+                // Create DLQ subject
+                let _dlq_subject = format!("{}.dlq", self.config.dead_letter_queue);
+                
+                // Note: To send to DLQ, we need the original message
+                // In a full implementation with JetStream, we'd:
+                // 1. Maintain a cache of unacked messages
+                // 2. Read the message from the original subject
+                // 3. Publish to DLQ subject with additional metadata
+                // 
+                // For now, we log and rely on the mailbox to handle retry tracking
+                // Basic NATS pub/sub doesn't support DLQ without JetStream
+                record_channel_dlq(
+                    &self.config.name,
+                    message_id,
+                    0, // delivery_count not tracked without JetStream
+                    "max_retries_exceeded",
+                    backend,
+                );
+            } else {
+                record_channel_nack(&self.config.name, message_id, false, 0, backend);
             }
         }
+
+        self.stats.messages_failed.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 

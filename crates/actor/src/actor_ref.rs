@@ -466,7 +466,7 @@ impl ActorRef {
             ActorRefInner::Local { service_locator, .. } |
             ActorRefInner::Remote { service_locator, .. } => {
                 use plexspaces_core::ActorRegistry;
-                let registry: Arc<ActorRegistry> = service_locator.get_service().await
+                let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
                     .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
                 Ok(registry.local_node_id().to_string())
             }
@@ -482,7 +482,7 @@ impl ActorRef {
         }
         
         // Also remove from ActorRegistry
-        if let Some(registry) = self.service_locator().get_service::<plexspaces_core::ActorRegistry>().await {
+        if let Some(registry) = self.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
             registry.remove_temporary_sender(temporary_sender_id).await;
         }
     }
@@ -807,7 +807,7 @@ impl ActorRef {
                 // This happens for virtual actors that aren't activated yet
                 let local_node_id = {
                     use plexspaces_core::ActorRegistry;
-                    if let Some(registry) = service_locator.get_service::<ActorRegistry>().await {
+                    if let Some(registry) = service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
                         Some(registry.local_node_id().to_string())
                     } else {
                         None
@@ -829,7 +829,7 @@ impl ActorRef {
                             // Look up ReplyWaiter from ReplyWaiterRegistry (global registry)
                             // This works even when ActorRef instances are different
                             use plexspaces_core::ReplyWaiterRegistry;
-                            if let Some(waiter_registry) = service_locator.get_service::<ReplyWaiterRegistry>().await {
+                            if let Some(waiter_registry) = service_locator.get_service_by_name::<ReplyWaiterRegistry>(plexspaces_core::service_locator::service_names::REPLY_WAITER_REGISTRY).await {
                                 let message_clone = message.clone();
                                 if waiter_registry.notify(&corr_id, message_clone).await {
                                     tracing::debug!(
@@ -880,7 +880,7 @@ impl ActorRef {
                             drop(waiters);
                             let result = async {
                                 use plexspaces_core::ActorRegistry;
-                                let registry: Arc<ActorRegistry> = service_locator.get_service().await
+                                let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
                                     .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
                                 
                                 let sender = registry.lookup_actor(&self.id).await
@@ -897,7 +897,7 @@ impl ActorRef {
                         // No correlation_id - use MessageSender as normal
                         let result = async {
                             use plexspaces_core::ActorRegistry;
-                            let registry: Arc<ActorRegistry> = service_locator.get_service().await
+                            let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
                                 .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
                             
                             let sender = registry.lookup_actor(&self.id).await
@@ -951,13 +951,13 @@ impl ActorRef {
         let success = result.is_ok();
         let error_type = result.as_ref().err().map(|e| format!("{:?}", e));
         
-        // Get NodeMetricsUpdater from ServiceLocator (if available)
+        // Get NodeMetricsAccessor from ServiceLocator (if available)
         let service_locator = match &self.inner {
             ActorRefInner::Local { service_locator, .. } | ActorRefInner::Remote { service_locator, .. } => {
                 service_locator.clone()
             }
         };
-        let metrics_updater = service_locator.get_node_metrics_updater().await;
+        let metrics_accessor = service_locator.get_node_metrics_accessor().await;
         
         // Get ActorMetrics from ActorRegistry (preferred - ActorRegistry tracks metrics directly)
         let actor_metrics = {
@@ -979,7 +979,7 @@ impl ActorRef {
             duration,
             success,
             error_type.as_deref(),
-            metrics_updater,
+            metrics_accessor,
             actor_metrics,
         ).await;
         
@@ -1202,7 +1202,7 @@ impl ActorRef {
                     
                     // Also register in ActorRegistry for centralized routing
                     // This allows send_reply() to route replies back to this ActorRef's ReplyWaiter
-                    if let Some(registry) = self.service_locator().get_service::<plexspaces_core::ActorRegistry>().await {
+                    if let Some(registry) = self.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
                         registry.register_temporary_sender(
                             temp_sender_id.clone(),
                             actor_id.clone(),
@@ -1213,7 +1213,7 @@ impl ActorRef {
                     
                     // Also register ReplyWaiter in ReplyWaiterRegistry for global routing
                     // This allows routing replies even when ActorRef instances are different
-                    if let Some(waiter_registry) = self.service_locator().get_service::<plexspaces_core::ReplyWaiterRegistry>().await {
+                    if let Some(waiter_registry) = self.service_locator().get_service_by_name::<plexspaces_core::ReplyWaiterRegistry>(plexspaces_core::service_locator::service_names::REPLY_WAITER_REGISTRY).await {
                         waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
                     }
                     
@@ -1322,7 +1322,7 @@ impl ActorRef {
                 // Check if this is actually a local actor (remote ActorRef pointing to local node)
                 let local_node_id = {
                     use plexspaces_core::ActorRegistry;
-                    if let Some(registry) = service_locator.get_service::<ActorRegistry>().await {
+                    if let Some(registry) = service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
                         Some(registry.local_node_id().to_string())
                     } else {
                         None
@@ -1406,7 +1406,7 @@ impl ActorRef {
                         
                         // Also register ReplyWaiter in ReplyWaiterRegistry for global routing
                         // This allows routing replies even when ActorRef instances are different
-                        if let Some(waiter_registry) = service_locator.get_service::<plexspaces_core::ReplyWaiterRegistry>().await {
+                        if let Some(waiter_registry) = service_locator.get_service_by_name::<plexspaces_core::ReplyWaiterRegistry>(plexspaces_core::service_locator::service_names::REPLY_WAITER_REGISTRY).await {
                             waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
                         }
                         
@@ -1426,7 +1426,7 @@ impl ActorRef {
                     
                     // Use MessageSender from ActorRegistry
                     use plexspaces_core::ActorRegistry;
-                    let registry: Arc<ActorRegistry> = service_locator.get_service().await
+                    let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
                         .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
                     
                     let sender = registry.lookup_actor(&self.id).await

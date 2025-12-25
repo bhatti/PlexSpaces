@@ -125,3 +125,20 @@ def snapshot_state() -> tuple[bytes, str | None]:
     return json.dumps(state).encode('utf-8'), None
 
 
+# componentize-py expects an Actor class
+class Actor:
+    """Actor class for componentize-py compatibility."""
+    
+    @staticmethod
+    def handle_request(from_actor: str, message_type: str, payload: bytes) -> tuple[bytes, str | None]:
+        return handle_request(from_actor, message_type, payload)
+    
+    @staticmethod
+    def handle_message(from_actor: str, message_type: str, payload: bytes) -> tuple[bytes, str | None]:
+        return handle_message(from_actor, message_type, payload)
+    
+    @staticmethod
+    def snapshot_state() -> tuple[bytes, str | None]:
+        return snapshot_state()
+
+

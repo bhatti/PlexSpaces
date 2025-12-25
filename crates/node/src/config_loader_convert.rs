@@ -26,9 +26,10 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             cluster_seed_nodes: yaml.node.cluster_seed_nodes,
             default_tenant_id: "internal".to_string(), // Default for local development
             default_namespace: "system".to_string(), // Default for local development
+            cluster_name: String::new(), // Will be set from config if available
         }),
         runtime: Some({
-            let mut runtime_config = RuntimeConfig {
+            let runtime_config = RuntimeConfig {
                 grpc: Some(convert_grpc_config(yaml.runtime.grpc)),
                 health: Some(convert_health_config(yaml.runtime.health)),
                 security: Some(convert_security_config(yaml.runtime.security)?),

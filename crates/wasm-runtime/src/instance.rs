@@ -109,15 +109,68 @@ impl WasmInstance {
         let mut linker = Linker::new(engine);
         Self::add_host_functions(&mut linker)?;
 
-        // Instantiate module (async because runtime has async_support enabled)
+        // Instantiate module or component (async because runtime has async_support enabled)
         let instantiate_start = std::time::Instant::now();
-        let instance = linker
-            .instantiate_async(&mut store, &module.module)
-            .await
-            .map_err(|e| {
-                metrics::counter!("plexspaces_wasm_instance_creation_errors_total").increment(1);
-                WasmError::InstantiationError(e.to_string())
-            })?;
+        let instance = {
+            #[cfg(feature = "component-model")]
+            {
+                use crate::runtime::WasmModuleInner;
+                match &module.module {
+                    WasmModuleInner::Module(m) => {
+                        linker
+                            .instantiate_async(&mut store, m)
+                            .await
+                            .map_err(|e| {
+                                metrics::counter!("plexspaces_wasm_instance_creation_errors_total").increment(1);
+                                WasmError::InstantiationError(e.to_string())
+                            })?
+                    }
+                    WasmModuleInner::Component(c) => {
+                        // For components, use ComponentLinker
+                        use wasmtime::component::Linker as ComponentLinker;
+                        let mut component_linker = ComponentLinker::new(engine);
+                        
+                        // Note: Components from componentize-py typically need WIT bindings
+                        // For now, try to instantiate without bindings (may work for simple components)
+                        // This is a basic implementation - full support requires WIT interface generation
+                        let _component_instance = component_linker
+                            .instantiate_async(&mut store, c)
+                            .await
+                            .map_err(|e| {
+                                metrics::counter!("plexspaces_wasm_component_instantiation_errors_total").increment(1);
+                                WasmError::InstantiationError(format!(
+                                    "Component instantiation failed: {}. \
+                                    Components from componentize-py may require WIT interface bindings. \
+                                    Error details: {}",
+                                    e, e
+                                ))
+                            })?;
+                        
+                        // Components use a different instance type - we need to adapt it
+                        // For now, return an error explaining the limitation
+                        // TODO: Implement full component instance wrapper that works with WasmInstance
+                        return Err(WasmError::InstantiationError(
+                            "WASM component instantiation is partially implemented. \
+                            Components can be loaded but full instantiation requires WIT interface bindings and \
+                            a component-specific instance wrapper. Components from componentize-py need the \
+                            component's WIT interfaces to be bound. For now, use traditional WASM modules \
+                            (Rust, Go, JavaScript) or wait for full component support."
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            #[cfg(not(feature = "component-model"))]
+            {
+                linker
+                    .instantiate_async(&mut store, &module.module)
+                    .await
+                    .map_err(|e| {
+                        metrics::counter!("plexspaces_wasm_instance_creation_errors_total").increment(1);
+                        WasmError::InstantiationError(e.to_string())
+                    })?
+            }
+        };
         let instantiate_duration = instantiate_start.elapsed();
 
         // Call init() function with initial state if provided

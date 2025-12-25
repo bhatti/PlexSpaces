@@ -111,8 +111,9 @@ impl MetricsService for MetricsServiceImpl {
         &self,
         _request: Request<ListMetricDefinitionsRequest>,
     ) -> Result<Response<ListMetricDefinitionsResponse>, Status> {
-        // Return standard metric definitions
+        // Return standard metric definitions including all actor system metrics (Phase 8)
         let definitions = vec![
+            // Node metrics
             MetricDefinition {
                 name: "plexspaces_node_health_requests_total".to_string(),
                 r#type: MetricType::MetricTypeCounter as i32,
@@ -139,6 +140,150 @@ impl MetricsService for MetricsServiceImpl {
                 r#type: MetricType::MetricTypeCounter as i32,
                 help: "Total application deployment attempts".to_string(),
                 labels: vec![],
+                buckets: vec![],
+            },
+            // Actor lifecycle metrics (Phase 8)
+            MetricDefinition {
+                name: "plexspaces_actor_init_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total actor initializations".to_string(),
+                labels: vec!["actor_type".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_actor_init_duration_seconds".to_string(),
+                r#type: MetricType::MetricTypeHistogram as i32,
+                help: "Actor initialization duration in seconds".to_string(),
+                labels: vec!["actor_type".to_string()],
+                buckets: vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+            },
+            MetricDefinition {
+                name: "plexspaces_actor_terminate_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total actor terminations".to_string(),
+                labels: vec!["actor_type".to_string(), "reason".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_actor_terminate_duration_seconds".to_string(),
+                r#type: MetricType::MetricTypeHistogram as i32,
+                help: "Actor termination duration in seconds".to_string(),
+                labels: vec!["actor_type".to_string()],
+                buckets: vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+            },
+            MetricDefinition {
+                name: "plexspaces_actor_exit_handled_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total exit signals handled by actors".to_string(),
+                labels: vec!["actor_type".to_string(), "exit_reason".to_string()],
+                buckets: vec![],
+            },
+            // Supervisor metrics (Phase 8)
+            MetricDefinition {
+                name: "plexspaces_supervisor_child_started_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total supervisor child starts".to_string(),
+                labels: vec!["supervisor_id".to_string(), "child_type".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_supervisor_child_stopped_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total supervisor child stops".to_string(),
+                labels: vec!["supervisor_id".to_string(), "child_type".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_supervisor_child_restarted_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total supervisor child restarts".to_string(),
+                labels: vec!["supervisor_id".to_string(), "child_type".to_string(), "restart_policy".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_supervisor_startup_duration_seconds".to_string(),
+                r#type: MetricType::MetricTypeHistogram as i32,
+                help: "Supervisor startup duration in seconds".to_string(),
+                labels: vec!["supervisor_id".to_string()],
+                buckets: vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+            },
+            MetricDefinition {
+                name: "plexspaces_supervisor_shutdown_duration_seconds".to_string(),
+                r#type: MetricType::MetricTypeHistogram as i32,
+                help: "Supervisor shutdown duration in seconds".to_string(),
+                labels: vec!["supervisor_id".to_string()],
+                buckets: vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+            },
+            // Parent-child relationship metrics (Phase 8)
+            MetricDefinition {
+                name: "plexspaces_actor_children_count".to_string(),
+                r#type: MetricType::MetricTypeGauge as i32,
+                help: "Number of children for an actor/supervisor".to_string(),
+                labels: vec!["actor_id".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_actor_subtree_size".to_string(),
+                r#type: MetricType::MetricTypeGauge as i32,
+                help: "Total size of actor subtree (including self and all descendants)".to_string(),
+                labels: vec!["actor_id".to_string()],
+                buckets: vec![],
+            },
+            // Application lifecycle metrics (Phase 8)
+            MetricDefinition {
+                name: "plexspaces_application_startup_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total application startup attempts".to_string(),
+                labels: vec!["application".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_application_startup_duration_seconds".to_string(),
+                r#type: MetricType::MetricTypeHistogram as i32,
+                help: "Application startup duration in seconds".to_string(),
+                labels: vec!["application".to_string()],
+                buckets: vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0],
+            },
+            MetricDefinition {
+                name: "plexspaces_application_startup_success_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total successful application startups".to_string(),
+                labels: vec!["application".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_application_startup_errors_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total failed application startup attempts".to_string(),
+                labels: vec!["application".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_application_shutdown_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total application shutdown attempts".to_string(),
+                labels: vec!["application".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_application_shutdown_duration_seconds".to_string(),
+                r#type: MetricType::MetricTypeHistogram as i32,
+                help: "Application shutdown duration in seconds".to_string(),
+                labels: vec!["application".to_string()],
+                buckets: vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0],
+            },
+            MetricDefinition {
+                name: "plexspaces_application_shutdown_success_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total successful application shutdowns".to_string(),
+                labels: vec!["application".to_string()],
+                buckets: vec![],
+            },
+            MetricDefinition {
+                name: "plexspaces_application_shutdown_errors_total".to_string(),
+                r#type: MetricType::MetricTypeCounter as i32,
+                help: "Total failed application shutdown attempts".to_string(),
+                labels: vec!["application".to_string(), "error_type".to_string()],
                 buckets: vec![],
             },
         ];

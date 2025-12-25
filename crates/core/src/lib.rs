@@ -33,6 +33,8 @@ pub use plexspaces_mailbox::{Mailbox, Message};
 
 // Public modules
 pub mod application;
+pub mod application_manager;
+pub use application_manager::ApplicationManager;
 pub mod behavior_factory;
 pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegistry};
 // registry module removed - replaced by object-registry
@@ -42,37 +44,42 @@ pub mod actor_registry;
 // Only TupleSpaceProviderWrapper remains here since TupleSpace is in core
 pub mod service_wrappers;
 pub mod service_locator;
+pub mod object_registry_helpers;
 pub mod patterns;
 pub mod actor_trait;
+pub mod exit_reason;
 pub mod virtual_actor_manager;
-pub mod facet_manager;
+// FacetManager moved to plexspaces-facet crate to break circular dependency
+pub mod facet_service_wrapper;
+pub use facet_service_wrapper::{FacetRegistryServiceWrapper, FacetManagerServiceWrapper};
 pub mod monitoring;
 pub mod message_metrics;
 pub mod reply_waiter;
-pub mod request_context;
-pub use monitoring::NodeMetricsUpdater;
+pub use monitoring::NodeMetricsAccessor;
 pub use message_metrics::{ActorMetrics, ActorMetricsHandle, ActorMetricsExt, new_actor_metrics};
 
 // Re-export enhanced ActorContext
 pub use actor_context::{
     ActorContext, ActorService, ChannelService, FacetService, ObjectRegistry, ProcessGroupService, TupleSpaceProvider,
 };
+// Re-export ExitReason and ExitAction
+pub use exit_reason::{ExitAction, ExitReason};
 // ObjectRegistration is re-exported from proto via actor_context module
 pub use actor_context::ObjectRegistration;
 // Re-export ActorRegistry and related types
 pub use actor_registry::{ActorRegistry, ActorRegistryError, ActorRoutingInfo, MonitorLink, VirtualActorMetadata, TemporarySenderEntry};
 // Re-export VirtualActorManager
 pub use virtual_actor_manager::{VirtualActorManager, VirtualActorError};
-// Re-export FacetManager
-pub use facet_manager::FacetManager;
+// FacetManager re-exported from plexspaces-facet crate (for backward compatibility)
+pub use plexspaces_facet::FacetManager;
 // Re-export ServiceLocator
-pub use service_locator::{Service, ServiceLocator};
+pub use service_locator::{Service, ServiceLocator, request_context_from_grpc_request};
 // Re-export MessageSender trait (for sending messages to actors)
 pub use actor_trait::MessageSender;
 // Re-export ReplyWaiter and related types
 pub use reply_waiter::{ReplyWaiter, ReplyWaiterRegistry, ReplyWaiterError};
-// Re-export RequestContext
-pub use request_context::{RequestContext, RequestContextError};
+// Re-export RequestContext from common crate
+pub use plexspaces_common::{RequestContext, RequestContextError};
 
 /// Actor ID type (String for simplicity and flexibility)
 pub type ActorId = String;
@@ -295,6 +302,27 @@ pub struct BehaviorContext {
 /// This was previously called `ActorBehavior` but renamed to `Actor` for clarity.
 #[async_trait]
 pub trait Actor: Send + Sync {
+    /// Initialize actor before entering message loop
+    ///
+    /// ## Purpose
+    /// Called ONCE before any messages are processed. Supervisor waits for init() to complete
+    /// before starting next child. If init() fails, actor is not registered and supervisor
+    /// handles error.
+    ///
+    /// ## Erlang Equivalent
+    /// Maps to gen_server:init/1
+    ///
+    /// ## Guarantees
+    /// - Called ONCE before any messages are processed
+    /// - Supervisor waits for init() to complete before starting next child
+    /// - If init() fails, actor is not registered and supervisor handles error
+    ///
+    /// ## Default
+    /// Returns Ok(()) - most actors don't need custom init
+    async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
+        Ok(())
+    }
+
     /// Handle an incoming message
     ///
     /// ## Go-Style Signature
@@ -320,6 +348,98 @@ pub trait Actor: Send + Sync {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError>;
+
+    /// Handle EXIT from linked actor (only if trap_exit = true)
+    ///
+    /// ## Purpose
+    /// Called when a linked actor exits. Only called if ActorContext.trap_exit == true.
+    /// Otherwise, linked actor death causes this actor to die too (default Erlang behavior).
+    ///
+    /// ## Erlang Equivalent
+    /// Receiving {'EXIT', Pid, Reason} when process_flag(trap_exit, true)
+    ///
+    /// ## When Called
+    /// Only called if ActorContext.trap_exit == true. Otherwise, linked
+    /// actor death causes this actor to die too (default Erlang behavior).
+    ///
+    /// ## Returns
+    /// - ExitAction::Propagate: crash this actor too (default link behavior)
+    /// - ExitAction::Handle: absorb the exit, continue running
+    ///
+    /// ## Default
+    /// Propagates the exit (actor will terminate)
+    async fn handle_exit(
+        &mut self,
+        _ctx: &ActorContext,
+        _from: &ActorId,
+        _reason: &ExitReason,
+    ) -> Result<ExitAction, ActorError> {
+        Ok(ExitAction::Propagate)
+    }
+
+    /// Cleanup before actor stops
+    ///
+    /// ## Purpose
+    /// Called when actor is stopping (graceful or crash). No new messages will be delivered
+    /// after terminate() starts. In-flight message completes before terminate() is called.
+    ///
+    /// ## Erlang Equivalent
+    /// Maps to gen_server:terminate/2
+    ///
+    /// ## Guarantees
+    /// - Called ONCE when actor is stopping (graceful or crash)
+    /// - No new messages will be delivered after terminate() starts
+    /// - In-flight message completes before terminate() is called
+    ///
+    /// ## Default
+    /// Returns Ok(()) - most actors don't need custom cleanup
+    async fn terminate(
+        &mut self,
+        _ctx: &ActorContext,
+        _reason: &ExitReason,
+    ) -> Result<(), ActorError> {
+        Ok(())
+    }
+
+    /// Called after all facets are attached and initialized (for behavior-specific initialization)
+    ///
+    /// ## Purpose
+    /// This allows behaviors to initialize after facets are ready.
+    /// Called after:
+    /// 1. All facets are attached (facet.on_attach() called for all)
+    /// 2. Actor.init() completes
+    /// 3. All facets receive on_init_complete()
+    ///
+    /// ## When Called
+    /// - After all facets are attached and initialized
+    /// - Before actor enters message loop
+    /// - Only if facets are present (otherwise not called)
+    ///
+    /// ## Default
+    /// Returns Ok(()) - most behaviors don't need post-facet initialization
+    async fn on_facets_ready(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
+        Ok(())
+    }
+
+    /// Called before facets are detached (for behavior-specific cleanup)
+    ///
+    /// ## Purpose
+    /// This allows behaviors to clean up before facets are detached.
+    /// Called before:
+    /// 1. Facets receive on_terminate_start()
+    /// 2. Actor.terminate() is called
+    /// 3. Facets are detached (facet.on_detach() called for all)
+    ///
+    /// ## When Called
+    /// - Before facets are detached
+    /// - After actor receives stop signal
+    /// - Only if facets are present (otherwise not called)
+    ///
+    /// ## Default
+    /// Returns Ok(()) - most behaviors don't need pre-facet-detachment cleanup
+    async fn on_facets_detaching(&mut self, _ctx: &ActorContext, _reason: &ExitReason) -> Result<(), ActorError> {
+        Ok(())
+    }
 
     /// Get the behavior type
     fn behavior_type(&self) -> BehaviorType;

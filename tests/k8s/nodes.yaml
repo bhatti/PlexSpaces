@@ -1,0 +1,140 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Test deployment: 2 PlexSpaces nodes for dashboard testing
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plexspaces-node-1
+  namespace: plexspaces-test
+  labels:
+    app: plexspaces
+    component: node
+    instance: node-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: plexspaces
+      component: node
+      instance: node-1
+  template:
+    metadata:
+      labels:
+        app: plexspaces
+        component: node
+        instance: node-1
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: plexspaces
+        image: plexspaces:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: grpc
+          containerPort: 9001
+        - name: http
+          containerPort: 9002
+        env:
+        - name: PLEXSPACES_NODE_ID
+          value: "node-1"
+        - name: PLEXSPACES_LISTEN_ADDR
+          value: "0.0.0.0:9001"
+        - name: PLEXSPACES_CLUSTER_NAME
+          value: "test-cluster"
+        - name: PLEXSPACES_CLUSTER_SEED_NODES
+          value: "plexspaces-node-1.plexspaces-test:9001,plexspaces-node-2.plexspaces-test:9001"
+        - name: RUST_LOG
+          value: "info"
+        - name: PLEXSPACES_FEATURES
+          value: "dashboard"
+        - name: PLEXSPACES_BLOB_ENDPOINT
+          value: "http://minio.plexspaces-test:9000"
+        - name: PLEXSPACES_BLOB_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: access-key
+        - name: PLEXSPACES_BLOB_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: secret-key
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plexspaces-node-2
+  namespace: plexspaces-test
+  labels:
+    app: plexspaces
+    component: node
+    instance: node-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: plexspaces
+      component: node
+      instance: node-2
+  template:
+    metadata:
+      labels:
+        app: plexspaces
+        component: node
+        instance: node-2
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: plexspaces
+        image: plexspaces:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: grpc
+          containerPort: 9001
+        - name: http
+          containerPort: 9002
+        env:
+        - name: PLEXSPACES_NODE_ID
+          value: "node-2"
+        - name: PLEXSPACES_LISTEN_ADDR
+          value: "0.0.0.0:9001"
+        - name: PLEXSPACES_CLUSTER_NAME
+          value: "test-cluster"
+        - name: PLEXSPACES_CLUSTER_SEED_NODES
+          value: "plexspaces-node-1.plexspaces-test:9001,plexspaces-node-2.plexspaces-test:9001"
+        - name: RUST_LOG
+          value: "info"
+        - name: PLEXSPACES_FEATURES
+          value: "dashboard"
+        - name: PLEXSPACES_BLOB_ENDPOINT
+          value: "http://minio.plexspaces-test:9000"
+        - name: PLEXSPACES_BLOB_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: access-key
+        - name: PLEXSPACES_BLOB_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: secret-key
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+
+
+
+

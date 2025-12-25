@@ -47,136 +47,6 @@ use crate::{ActorLocation, Node};
 use plexspaces_actor_service::ActorServiceImpl;
 use futures::StreamExt;
 
-/// Wrapper that adapts Node's ActorServiceImpl to ActorService trait
-///
-/// ## Purpose
-/// Allows Node's ActorServiceImpl to be used as Arc<dyn ActorService> in ActorContext.
-pub struct ActorServiceWrapper {
-    inner: Arc<ActorServiceImpl>,
-}
-
-impl Service for ActorServiceWrapper {}
-
-impl ActorServiceWrapper {
-    /// Create a new wrapper from ActorServiceImpl
-    pub fn new(inner: Arc<ActorServiceImpl>) -> Self {
-        Self { inner }
-    }
-
-    /// Create a new wrapper from Node (creates ActorServiceImpl internally)
-    /// Note: This method is deprecated - use Node's actor_registry directly
-    pub fn from_node(_node: Arc<Node>, _object_registry: Arc<plexspaces_object_registry::ObjectRegistry>) -> Self {
-        // This method signature is kept for backward compatibility but should not be used
-        // ActorServiceImpl now requires ActorRegistry, not ObjectRegistry
-        // Use Node's create_actor_context or access actor_registry directly
-        panic!("from_node is deprecated - ActorServiceImpl requires ActorRegistry, not ObjectRegistry")
-    }
-
-    /// Get a reference to the inner ActorServiceImpl
-    pub fn inner(&self) -> &Arc<ActorServiceImpl> {
-        &self.inner
-    }
-}
-
-#[async_trait]
-impl ActorService for ActorServiceWrapper {
-    async fn spawn_actor(
-        &self,
-        actor_id: &str,
-        actor_type: &str,
-        _initial_state: Vec<u8>,
-    ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
-        // Delegate to Node's spawn_actor via ActorServiceImpl
-        // For now, this is a placeholder - will be implemented when Node has spawn_actor helper
-        Err(format!(
-            "Actor spawning via ActorService not yet implemented. Use Node::spawn_actor() directly. actor_id={}, actor_type={}",
-            actor_id, actor_type
-        ).into())
-    }
-
-    async fn send(
-        &self,
-        actor_id: &str,
-        message: Message,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        // Delegate to ActorServiceImpl's send_message
-        self.inner.send_message(actor_id, message).await
-    }
-
-    async fn send_reply(
-        &self,
-        correlation_id: Option<&str>,
-        sender_id: &plexspaces_core::ActorId,
-        target_actor_id: plexspaces_core::ActorId,
-        reply_message: Message,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Delegate to ActorServiceImpl's send_reply
-        self.inner.send_reply(
-            correlation_id,
-            sender_id,
-            target_actor_id,
-            reply_message,
-        ).await
-    }
-
-}
-
-/// Wrapper that adapts ObjectRegistry to ObjectRegistry trait
-///
-/// ## Purpose
-/// Allows ObjectRegistry to be used as Arc<dyn ObjectRegistry> in ActorContext.
-pub struct ObjectRegistryWrapper {
-    inner: Arc<plexspaces_object_registry::ObjectRegistry>,
-}
-
-impl ObjectRegistryWrapper {
-    /// Create a new wrapper from ObjectRegistry
-    pub fn new(registry: Arc<plexspaces_object_registry::ObjectRegistry>) -> Self {
-        Self { inner: registry }
-    }
-}
-
-impl Service for ObjectRegistryWrapper {}
-
-#[async_trait]
-impl ObjectRegistry for ObjectRegistryWrapper {
-    async fn lookup(
-        &self,
-        tenant_id: &str,
-        object_id: &str,
-        namespace: &str,
-        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-    ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
-        self.inner
-            .lookup(&ctx, obj_type, object_id)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
-    }
-
-    async fn lookup_full(
-        &self,
-        ctx: &RequestContext,
-        object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        object_id: &str,
-    ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .lookup_full(ctx, object_type, object_id)
-            .await
-    }
-
-    async fn register(
-        &self,
-        ctx: &RequestContext,
-        registration: ObjectRegistration,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .register(ctx, registration)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
-    }
-}
 
 // NodeOperationsWrapper removed - ActorFactory uses ActorRegistry and VirtualActorManager directly
 
@@ -586,7 +456,8 @@ impl FacetService for FacetServiceWrapper {
         facet_type: &str,
     ) -> Result<std::sync::Arc<tokio::sync::RwLock<Box<dyn Facet>>>, Box<dyn std::error::Error + Send + Sync>> {
         // Get facets from FacetManager
-        if let Some(facets) = self.node.facet_manager().get_facets(actor_id).await {
+        let facet_manager = self.node.facet_manager().await?;
+        if let Some(facets) = facet_manager.get_facets(actor_id).await {
             // Get facet from facets container
             let facets_guard = facets.read().await;
             if let Some(facet) = facets_guard.get_facet(facet_type) {
@@ -612,22 +483,40 @@ pub struct FirecrackerVmServiceWrapper {
 #[cfg(feature = "firecracker")]
 impl Service for FirecrackerVmServiceWrapper {}
 
-/// NodeMetricsUpdater wrapper - updates NodeMetrics from monitoring helpers
-pub struct NodeMetricsUpdaterWrapper {
+/// NodeMetricsAccessor wrapper - provides read and write access to NodeMetrics
+///
+/// ## Purpose
+/// Allows components to read and update NodeMetrics without depending on Node type.
+/// Combines reading and updating capabilities into a single wrapper.
+pub struct NodeMetricsAccessorWrapper {
     node: Arc<crate::Node>,
 }
 
-impl NodeMetricsUpdaterWrapper {
+impl NodeMetricsAccessorWrapper {
     /// Create a new wrapper
     pub fn new(node: Arc<crate::Node>) -> Self {
         Self { node }
     }
 }
 
-impl plexspaces_core::Service for NodeMetricsUpdaterWrapper {}
+impl plexspaces_core::Service for NodeMetricsAccessorWrapper {}
 
 #[async_trait::async_trait]
-impl plexspaces_core::NodeMetricsUpdater for NodeMetricsUpdaterWrapper {
+impl plexspaces_core::NodeMetricsAccessor for NodeMetricsAccessorWrapper {
+    async fn get_metrics(&self) -> plexspaces_proto::node::v1::NodeMetrics {
+        // Update metrics with current system info before returning
+        self.node.update_metrics_with_system_info().await;
+        
+        let metrics = self.node.metrics().await;
+        // Ensure node_id is set (it should be set in Node::start(), but ensure here)
+        let mut metrics_clone = metrics.clone();
+        if metrics_clone.node_id.is_empty() {
+            metrics_clone.node_id = self.node.id().as_str().to_string();
+        }
+        // cluster_name is set in Node::start() from NodeConfig
+        metrics_clone
+    }
+    
     async fn increment_messages_routed(&self) {
         self.node.increment_messages_routed().await;
     }

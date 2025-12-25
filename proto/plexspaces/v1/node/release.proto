@@ -115,6 +115,13 @@ message NodeConfig {
   // Used when namespace is not specified in requests.
   // Defaults to "default" if not set.
   string default_namespace = 5;
+
+  // Cluster name for grouping nodes that share UDP/ZeroMQ channels
+  //
+  // Nodes with the same cluster_name can communicate via UDP multicast
+  // or ZeroMQ channels. Used for service discovery and channel configuration.
+  // If empty, node is not part of any cluster.
+  string cluster_name = 6;
 }
 
 // Runtime configuration

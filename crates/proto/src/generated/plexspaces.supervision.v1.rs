@@ -54,6 +54,12 @@ pub struct ChildSpec {
     /// - "supervisor_strategy": For CHILD_TYPE_SUPERVISOR, its strategy
     #[prost(map="string, string", tag="6")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Facet configuration (for automatic attachment during actor creation)
+    /// Facets are attached in priority order (high priority first) before actor.init() is called
+    /// All facets are automatically restored during supervisor restart
+    /// Phase 1: Unified Lifecycle - Multiple facets support
+    #[prost(message, repeated, tag="7")]
+    pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
 }
 /// Supervisor configuration
 #[allow(clippy::derive_partial_eq_without_eq)]

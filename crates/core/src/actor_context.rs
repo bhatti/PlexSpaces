@@ -233,21 +233,19 @@ pub trait ObjectRegistry: Send + Sync {
     /// Lookup an object by ID (uses actor's context automatically)
     ///
     /// ## Arguments
-    /// * `tenant_id` - Tenant identifier
+    /// * `ctx` - RequestContext for tenant isolation (tenant_id and namespace come from here)
     /// * `object_id` - Object ID to lookup
-    /// * `namespace` - Namespace (from actor's context)
     /// * `object_type` - Type of object (defaults to Actor if None)
     ///
     /// ## Returns
     /// Object registration with gRPC address and metadata
     ///
     /// ## Design
-    /// Uses actor's namespace automatically. For advanced cases, use `lookup_full()`.
+    /// Uses RequestContext for tenant and namespace. For advanced cases, use `lookup_full()`.
     async fn lookup(
         &self,
-        tenant_id: &str,
+        ctx: &RequestContext,
         object_id: &str,
-        namespace: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -283,6 +281,34 @@ pub trait ObjectRegistry: Send + Sync {
         ctx: &RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Discover objects by type and filters
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `object_type` - Optional object type filter
+    /// * `object_category` - Optional category filter (e.g., application name, workflow definition ID)
+    /// * `capabilities` - Optional capabilities filter
+    /// * `labels` - Optional labels filter
+    /// * `health_status` - Optional health status filter
+    /// * `limit` - Maximum number of results to return
+    ///
+    /// ## Returns
+    /// Vector of ObjectRegistration matching the filters
+    ///
+    /// ## Note
+    /// If ctx.is_admin() is true, tenant filtering is bypassed for admin operations.
+    async fn discover(
+        &self,
+        ctx: &RequestContext,
+        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        object_category: Option<String>,
+        capabilities: Option<Vec<String>>,
+        labels: Option<Vec<String>>,
+        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 // ObjectRegistration is re-exported from proto (see use statement above)
@@ -459,6 +485,34 @@ pub struct ActorContext {
     /// Service locator for accessing system services (Akka-style)
     /// Actors can get services on-demand via service_locator.get_service::<T>().await
     pub service_locator: Arc<ServiceLocator>,
+
+    /// Trap exit flag (Erlang process_flag(trap_exit, true))
+    ///
+    /// ## Purpose
+    /// When true, EXIT signals from linked actors are delivered as messages
+    /// to handle_exit() instead of causing this actor to die.
+    ///
+    /// ## Default
+    /// false - linked actor death causes this actor to die (Erlang default)
+    pub trap_exit: bool,
+
+    /// Self reference (set after actor is spawned)
+    ///
+    /// ## Purpose
+    /// Provides actors with a reference to themselves for:
+    /// - Sending messages to self
+    /// - Linking/monitoring other actors
+    /// - Getting actor ID
+    pub self_ref: Option<ActorRef>,
+
+    /// Parent reference (set by supervisor)
+    ///
+    /// ## Purpose
+    /// Reference to the supervisor that manages this actor.
+    /// Used for:
+    /// - Understanding supervision hierarchy
+    /// - Reporting to parent supervisor
+    pub parent_ref: Option<ActorRef>,
 }
 
 impl ActorContext {
@@ -492,7 +546,37 @@ impl ActorContext {
             metadata: HashMap::new(),
             config,
             service_locator,
+            trap_exit: false, // Default: linked actor death causes this actor to die
+            self_ref: None,   // Set after actor is spawned
+            parent_ref: None, // Set by supervisor when starting child
         }
+    }
+
+    /// Set trap_exit flag
+    ///
+    /// ## Erlang Equivalent
+    /// process_flag(trap_exit, true)
+    ///
+    /// ## Effect
+    /// When true, EXIT signals from linked actors are delivered as
+    /// messages to handle_exit() instead of causing this actor to die.
+    pub fn set_trap_exit(&mut self, trap: bool) {
+        self.trap_exit = trap;
+    }
+
+    /// Check if trapping exits
+    pub fn is_trapping_exits(&self) -> bool {
+        self.trap_exit
+    }
+
+    /// Get self ActorRef
+    pub fn self_ref(&self) -> Option<&ActorRef> {
+        self.self_ref.as_ref()
+    }
+
+    /// Get parent ActorRef (supervisor)
+    pub fn parent_ref(&self) -> Option<&ActorRef> {
+        self.parent_ref.as_ref()
     }
 
     /// Create a minimal ActorContext (for testing/backward compatibility)
@@ -558,7 +642,7 @@ impl ActorContext {
     ///
     /// ## Implementation
     /// Uses ServiceLocator's trait-based storage to retrieve ActorService.
-    /// Node registers ActorServiceWrapper both as concrete type and as trait object,
+    /// Node registers ActorServiceImpl both as concrete type and as trait object,
     /// allowing this method to work without circular dependencies.
     pub async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>> {
         // ServiceLocator stores it as Arc<dyn ActorService + Send + Sync>
@@ -688,9 +772,8 @@ struct StubObjectRegistry;
 impl ObjectRegistry for StubObjectRegistry {
     async fn lookup(
         &self,
-        _tenant_id: &str,
+        _ctx: &RequestContext,
         _object_id: &str,
-        _namespace: &str,
         _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         Err("StubObjectRegistry: lookup not implemented".into())
@@ -711,6 +794,20 @@ impl ObjectRegistry for StubObjectRegistry {
         _registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err("StubObjectRegistry: register not implemented".into())
+    }
+
+    async fn discover(
+        &self,
+        _ctx: &RequestContext,
+        _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        _object_category: Option<String>,
+        _capabilities: Option<Vec<String>>,
+        _labels: Option<Vec<String>>,
+        _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        _offset: usize,
+        _limit: usize,
+    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubObjectRegistry: discover not implemented".into())
     }
 }
 

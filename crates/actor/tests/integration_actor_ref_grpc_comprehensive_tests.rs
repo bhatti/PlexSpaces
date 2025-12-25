@@ -19,16 +19,13 @@ struct ObjectRegistryAdapter {
 impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        tenant_id: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_id: &str,
-        namespace: &str,
         object_type: Option<ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::RequestContext;
         let obj_type = object_type.unwrap_or(ObjectType::ObjectTypeUnspecified);
-        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(&ctx, obj_type, object_id)
+            .lookup(ctx, object_id, Some(obj_type))
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -47,10 +44,11 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn register(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .register(registration)
+            .register(ctx, registration)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -100,8 +98,9 @@ async fn test_remote_actor_ref_connection_failure() {
     // Register node with unreachable address
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let node_registration = ObjectRegistration {
-        object_id: "_node@remote-node".to_string(),
-        object_type: ObjectType::ObjectTypeService as i32,
+            object_id: "remote-node".to_string(),
+            object_type: ObjectType::ObjectTypeNode as i32,
+        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:99999".to_string(), // Unreachable port
         ..Default::default()
@@ -143,15 +142,17 @@ async fn test_remote_actor_ref_ask_timeout() {
     
     // Register node with unreachable address
     let node_registration = ObjectRegistration {
-        object_id: "_node@remote-node".to_string(),
-        object_type: ObjectType::ObjectTypeService as i32,
+            object_id: "remote-node".to_string(),
+            object_type: ObjectType::ObjectTypeNode as i32,
+        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:99999".to_string(),
         tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         ..Default::default()
     };
-    object_registry_impl.register(node_registration).await.unwrap();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    object_registry_impl.register(&ctx, node_registration).await.unwrap();
     
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
         Arc::new(ObjectRegistryAdapter { inner: object_registry_impl });
@@ -187,8 +188,9 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
     // Register node
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let node_registration = ObjectRegistration {
-        object_id: "_node@remote-node".to_string(),
-        object_type: ObjectType::ObjectTypeService as i32,
+            object_id: "remote-node".to_string(),
+            object_type: ObjectType::ObjectTypeNode as i32,
+        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:99999".to_string(),
         ..Default::default()

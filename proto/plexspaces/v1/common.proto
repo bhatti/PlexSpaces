@@ -236,13 +236,17 @@ message PageRequest {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
       title: "Page Request"
-      description: "Standard pagination parameters"
+      description: "Standard pagination parameters with offset and limit"
     }
   };
 
-  int32 page_size = 1 [(buf.validate.field).int32 = {gte: 1, lte: 1000}];
-  string page_token = 2 [(buf.validate.field).string.max_len = 1024];
+  // Offset for pagination (0-based, default: 0)
+  int32 offset = 1 [(buf.validate.field).int32 = {gte: 0}];
+  // Limit/Page size (default: 50, max: 1000)
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 1000}];
+  // Filter string (optional)
   string filter = 3 [(buf.validate.field).string.max_len = 2048];
+  // Order by field (optional)
   string order_by = 4 [(buf.validate.field).string.max_len = 256];
 }
 
@@ -255,8 +259,14 @@ message PageResponse {
     }
   };
 
-  string next_page_token = 1;
-  int32 total_size = 2;
+  // Total number of items (across all pages)
+  int32 total_size = 1;
+  // Current offset
+  int32 offset = 2;
+  // Current limit/page size
+  int32 limit = 3;
+  // Whether there are more pages (has_next = offset + limit < total_size)
+  bool has_next = 4;
 }
 
 // ============================================================================

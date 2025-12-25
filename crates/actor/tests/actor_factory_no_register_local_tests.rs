@@ -40,12 +40,10 @@ struct ObjectRegistryAdapter {
 impl ObjectRegistry for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        tenant_id: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_id: &str,
-        namespace: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::RequestContext;
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
@@ -68,10 +66,11 @@ impl ObjectRegistry for ObjectRegistryAdapter {
 
     async fn register(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .register(registration)
+            .register(ctx, registration)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -127,7 +126,7 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
     let factory = ActorFactoryImpl::new(service_locator.clone());
     
     // Get ActorRegistry to verify registration
-    let registry: Arc<ActorRegistry> = service_locator.get_service().await.unwrap();
+    let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await.unwrap();
     
     // Spawn actor using spawn_actor
     let actor_id: ActorId = "test-actor@test-node".to_string();
@@ -162,11 +161,13 @@ async fn test_spawn_actor_registers_message_sender_only() {
     let factory = ActorFactoryImpl::new(service_locator.clone());
     
     // Get ActorRegistry to verify registration
-    let registry: Arc<ActorRegistry> = service_locator.get_service().await.unwrap();
+    let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await.unwrap();
     
     // Spawn actor
     let actor_id: ActorId = "test-actor@test-node".to_string();
+    let ctx = plexspaces_core::RequestContext::internal();
     let message_sender = factory.spawn_actor(
+        &ctx,
         &actor_id,
         "test",
         vec![],
@@ -188,7 +189,7 @@ async fn test_spawn_actor_registers_message_sender_only() {
 async fn test_multiple_actors_spawned_via_factory() {
     let service_locator = create_test_service_locator().await;
     let factory = ActorFactoryImpl::new(service_locator.clone());
-    let registry: Arc<ActorRegistry> = service_locator.get_service().await.unwrap();
+    let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await.unwrap();
     
     // Spawn multiple actors using spawn_actor
     let ctx = plexspaces_core::RequestContext::internal();
@@ -201,6 +202,7 @@ async fn test_multiple_actors_spawned_via_factory() {
             vec![], // initial_state
             None, // config
             std::collections::HashMap::new(), // labels
+            vec![], // facets
         ).await.unwrap();
         
         // Verify each is registered

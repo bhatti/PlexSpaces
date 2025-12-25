@@ -1,0 +1,439 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Dashboard API
+//
+// ## Purpose
+// Provides aggregated metrics and metadata for dashboard visualization.
+// Supports filtering by tenant, node, cluster with pagination.
+//
+// ## Design
+// Proto-first design: All dashboard data structures defined in proto for:
+// - Wire compatibility (gRPC + HTTP via gRPC-Gateway)
+// - Language-agnostic dashboard clients
+// - Consistent data semantics
+
+syntax = "proto3";
+
+package plexspaces.dashboard.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
+import "plexspaces/v1/node/node.proto";
+import "plexspaces/v1/application/application.proto";
+import "plexspaces/v1/actors/actor_runtime.proto";
+import "plexspaces/v1/workflow/workflow.proto";
+import "plexspaces/v1/metrics/metrics.proto";
+import "plexspaces/v1/system/system.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/dashboard/v1;dashboardv1";
+option java_package = "com.bhatti.plexspaces.dashboard.v1";
+option java_multiple_files = true;
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpaces Dashboard API";
+    version: "1.0";
+    description: "Dashboard metrics and metadata aggregation API";
+  };
+  schemes: HTTPS;
+  schemes: HTTP;
+  consumes: "application/json";
+  produces: "application/json";
+};
+
+// ============================================================================
+// DASHBOARD SERVICE
+// ============================================================================
+
+service DashboardService {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Dashboard metrics and metadata service"
+  };
+
+  // Get dashboard summary (aggregated metrics)
+  rpc GetSummary(GetSummaryRequest) returns (GetSummaryResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/dashboard/summary"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Dashboard Summary"
+      description: "Returns aggregated metrics across all nodes"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get nodes list (for home page table)
+  rpc GetNodes(GetNodesRequest) returns (GetNodesResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/dashboard/nodes"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Nodes List"
+      description: "Returns paginated list of nodes"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get node dashboard data (for node detail page)
+  rpc GetNodeDashboard(GetNodeDashboardRequest) returns (GetNodeDashboardResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/dashboard/node/{node_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Node Dashboard"
+      description: "Returns detailed metrics and data for a specific node"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get applications list (for node page)
+  rpc GetApplications(GetApplicationsRequest) returns (GetApplicationsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/dashboard/applications"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Applications List"
+      description: "Returns paginated list of applications"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get actors list (for node page)
+  rpc GetActors(GetActorsRequest) returns (GetActorsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/dashboard/actors"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Actors List"
+      description: "Returns paginated list of actors"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get workflows list (for home and node pages)
+  rpc GetWorkflows(GetWorkflowsRequest) returns (GetWorkflowsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/dashboard/workflows"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Workflows List"
+      description: "Returns paginated list of workflows"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get dependency health status (for monitoring external dependencies)
+  rpc GetDependencyHealth(GetDependencyHealthRequest) returns (GetDependencyHealthResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/dashboard/dependencies"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Dependency Health"
+      description: "Returns health status of external dependencies (database, redis, minio, etc.)"
+      tags: "Dashboard"
+    };
+  }
+}
+
+// ============================================================================
+// REQUEST/RESPONSE MESSAGES
+// ============================================================================
+
+// Dashboard summary request
+message GetSummaryRequest {
+  // Filter by tenant ID (optional, from auth context if not provided)
+  string tenant_id = 1;
+
+  // Filter by node ID (optional)
+  string node_id = 2;
+
+  // Filter by cluster ID (optional)
+  string cluster_id = 3;
+
+  // Show data since this timestamp (default: now - 24 hours)
+  google.protobuf.Timestamp since = 4;
+}
+
+// Dashboard summary response
+message GetSummaryResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Dashboard Summary"
+      description: "Aggregated metrics across all nodes"
+    }
+  };
+
+  // Total number of clusters
+  uint32 total_clusters = 1;
+
+  // Total number of nodes
+  uint32 total_nodes = 2;
+
+  // Total number of tenants (admin only, or filtered by tenant_id)
+  uint32 total_tenants = 3;
+
+  // Total number of applications (filtered by tenant if auth enabled)
+  uint32 total_applications = 4;
+
+  // Actors by type (aggregated across all nodes)
+  map<string, uint32> actors_by_type = 5;
+
+  // Timestamp range for this summary
+  google.protobuf.Timestamp since = 6;
+  google.protobuf.Timestamp until = 7;
+}
+
+// Get nodes request
+message GetNodesRequest {
+  // Filter by tenant ID (optional)
+  string tenant_id = 1;
+
+  // Filter by cluster ID (optional)
+  string cluster_id = 2;
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page = 3;
+}
+
+// Get nodes response
+message GetNodesResponse {
+  repeated plexspaces.node.v1.Node nodes = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// Get node dashboard request
+message GetNodeDashboardRequest {
+  // Node ID (required)
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Show data since this timestamp (default: now - 24 hours)
+  google.protobuf.Timestamp since = 2;
+}
+
+// Get node dashboard response
+message GetNodeDashboardResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Node Dashboard Data"
+      description: "Detailed metrics and data for a specific node"
+    }
+  };
+
+  // Node information
+  plexspaces.node.v1.Node node = 1;
+
+  // Node metrics
+  plexspaces.node.v1.NodeMetrics node_metrics = 2;
+
+  // System metrics (if available)
+  plexspaces.metrics.v1.SystemMetrics system_metrics = 3;
+
+  // Summary metrics for this node
+  NodeSummaryMetrics summary = 4;
+
+  // Dependency health status (external dependencies)
+  plexspaces.system.v1.DetailedHealthCheck dependency_health = 5;
+}
+
+// Node summary metrics
+message NodeSummaryMetrics {
+  // Number of tenants on this node (admin or filtered)
+  uint32 total_tenants = 1;
+
+  // Number of applications (filtered by tenant if auth)
+  uint32 total_applications = 2;
+
+  // Actors by type on this node
+  map<string, uint32> actors_by_type = 3;
+}
+
+// Get applications request
+message GetApplicationsRequest {
+  // Filter by node ID (optional)
+  string node_id = 1;
+
+  // Filter by tenant ID (optional, from auth context if not provided)
+  string tenant_id = 2;
+
+  // Filter by namespace (optional)
+  string namespace = 3;
+
+  // Filter by application name/ID pattern (optional)
+  string name_pattern = 4;
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page = 5;
+}
+
+// Get applications response
+message GetApplicationsResponse {
+  repeated plexspaces.application.v1.ApplicationInfo applications = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// Get actors request
+message GetActorsRequest {
+  // Filter by node ID (optional)
+  string node_id = 1;
+
+  // Filter by tenant ID (optional, from auth context if not provided)
+  string tenant_id = 2;
+
+  // Filter by namespace (optional)
+  string namespace = 3;
+
+  // Filter by actor ID pattern (optional)
+  string actor_id_pattern = 4;
+
+  // Filter by actor group (optional)
+  string actor_group = 5;
+
+  // Filter by actor type (optional)
+  string actor_type = 6;
+
+  // Filter by status: "running" or "terminated" (optional)
+  string status = 7;
+
+  // Show data since this timestamp (default: now - 24 hours)
+  google.protobuf.Timestamp since = 8;
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page = 9;
+}
+
+// Actor info with metrics
+message ActorInfo {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Actor Info"
+      description: "Actor information with metrics"
+    }
+  };
+
+  // Actor ID
+  string actor_id = 1;
+
+  // Actor type
+  string actor_type = 2;
+
+  // Actor group
+  string actor_group = 3;
+
+  // Namespace
+  string namespace = 4;
+
+  // Tenant ID
+  string tenant_id = 5;
+
+  // Node ID
+  string node_id = 6;
+
+  // Status: "running" or "terminated"
+  string status = 7;
+
+  // Actor metrics
+  plexspaces.metrics.v1.ActorMetrics metrics = 8;
+
+  // For durable actors: journal size
+  uint64 journal_size_bytes = 9;
+
+  // For durable actors: last checkpoint timestamp
+  google.protobuf.Timestamp last_checkpoint = 10;
+
+  // Created timestamp
+  google.protobuf.Timestamp created_at = 11;
+}
+
+// Get actors response
+message GetActorsResponse {
+  repeated ActorInfo actors = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// Get workflows request
+message GetWorkflowsRequest {
+  // Filter by node ID (optional, empty = all nodes)
+  string node_id = 1;
+
+  // Filter by tenant ID (optional, from auth context if not provided)
+  string tenant_id = 2;
+
+  // Filter by definition ID (optional)
+  string definition_id = 3;
+
+  // Filter by status (optional)
+  plexspaces.workflow.v1.ExecutionStatus status = 4;
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page = 5;
+}
+
+// Workflow info with view definition
+message WorkflowInfo {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Workflow Info"
+      description: "Workflow execution information"
+    }
+  };
+
+  // Workflow execution
+  plexspaces.workflow.v1.WorkflowExecution execution = 1;
+
+  // Workflow definition (for view definition)
+  plexspaces.workflow.v1.WorkflowDefinition definition = 2;
+}
+
+// Get workflows response
+message GetWorkflowsResponse {
+  repeated WorkflowInfo workflows = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// Get dependency health request
+message GetDependencyHealthRequest {
+  // Filter by node ID (optional, empty = all nodes)
+  string node_id = 1;
+
+  // Include non-critical dependencies (default: true)
+  bool include_non_critical = 2;
+}
+
+// Get dependency health response
+message GetDependencyHealthResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Dependency Health"
+      description: "Health status of external dependencies"
+    }
+  };
+
+  // Detailed health check with dependency breakdown
+  plexspaces.system.v1.DetailedHealthCheck health_check = 1;
+
+  // Node ID this health check is for (empty if aggregated)
+  string node_id = 2;
+}
+
+
+
+

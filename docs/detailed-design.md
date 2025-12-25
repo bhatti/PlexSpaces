@@ -2,6 +2,8 @@
 
 This document provides detailed information about PlexSpaces abstractions, components, and implementation details.
 
+> **📖 For comprehensive actor system documentation**, see [Actor System Guide](actor-system.md) which covers the unified actor system, supervision trees, applications, facets, behaviors, lifecycle, linking/monitoring, and observability in detail.
+
 ## Table of Contents
 
 1. [Actors](#actors)
@@ -2206,7 +2208,7 @@ pub trait Supervisor: Send + Sync {
 
 ### Channel Service API
 
-Queue and topic patterns:
+Queue and topic patterns with support for multiple backends:
 
 ```rust
 pub trait ChannelService: Send + Sync {
@@ -2238,6 +2240,108 @@ pub trait ChannelService: Send + Sync {
     ) -> Result<Option<Message>, Error>;
 }
 ```
+
+### Channel Backends
+
+PlexSpaces supports multiple channel backends, each optimized for different use cases:
+
+#### InMemory Channel
+- **Use Case**: Testing and development
+- **Durability**: Non-durable (messages lost on restart)
+- **Performance**: Fastest (in-process)
+- **ACK/NACK**: Supported
+- **Graceful Shutdown**: Continues accepting messages (no persistence needed)
+
+#### Redis Channel
+- **Use Case**: Production distributed messaging
+- **Durability**: Durable (Redis Streams with persistence)
+- **Performance**: Low latency (< 1ms local)
+- **ACK/NACK**: Supported (consumer groups)
+- **Graceful Shutdown**: Stops accepting new, completes in-progress
+- **Features**: Consumer groups, message recovery, DLQ support
+
+#### Kafka Channel
+- **Use Case**: High-throughput production messaging
+- **Durability**: Durable (Kafka persistence)
+- **Performance**: High throughput (> 100K msg/sec)
+- **ACK/NACK**: Supported (consumer groups)
+- **Graceful Shutdown**: Stops accepting new, completes in-progress
+- **Features**: Partitions, consumer groups, message recovery
+
+#### SQLite Channel
+- **Use Case**: Single-node persistence, testing
+- **Durability**: Durable (file-based)
+- **Performance**: Moderate (disk I/O)
+- **ACK/NACK**: Supported
+- **Graceful Shutdown**: Stops accepting new, completes in-progress
+- **Features**: Message recovery, WAL mode, file-based persistence
+
+#### NATS Channel
+- **Use Case**: Lightweight pub/sub
+- **Durability**: Configurable (JetStream for durability)
+- **Performance**: Low latency
+- **ACK/NACK**: Supported (with JetStream)
+- **Graceful Shutdown**: Stops accepting new, completes in-progress
+
+#### UDP Channel
+- **Use Case**: Low-latency cluster-wide messaging
+- **Durability**: Non-durable (best-effort delivery)
+- **Performance**: Sub-millisecond latency
+- **ACK/NACK**: Not supported (best-effort)
+- **Graceful Shutdown**: Closes socket, stops receiving
+- **Features**: 
+  - Multicast pub/sub for cluster-wide broadcasting
+  - Requires `cluster_name` configuration
+  - Nodes with same `cluster_name` can communicate
+  - TTL configuration for network scope
+  - Maximum message size enforcement
+
+**UDP Channel Configuration**:
+```rust
+let udp_config = UdpConfig {
+    multicast_address: "239.255.0.1".to_string(), // Multicast IP (224.0.0.0-239.255.255.255)
+    multicast_port: 9999,
+    bind_address: "0.0.0.0".to_string(), // Bind to all interfaces
+    ttl: 1, // Local network only (increase for routing)
+    max_message_size: 1400, // Ethernet MTU (recommended)
+    unicast_mode: false, // Use multicast (true for point-to-point)
+    cluster_name: "my-cluster".to_string(), // Required: nodes with same name can communicate
+    interface_name: String::new(), // Optional: specific network interface
+};
+```
+
+### Channel as Mailbox
+
+Channels can serve as actor mailboxes, providing durable message processing:
+
+```rust
+use plexspaces_mailbox::MailboxBuilder;
+
+// Create mailbox with Redis channel backend
+let mailbox = MailboxBuilder::new()
+    .with_redis("redis://localhost:6379".to_string())
+    .build("actor-mailbox".to_string())
+    .await?;
+
+// Messages are automatically ACKed on successful processing
+// NACKed messages are requeued or sent to DLQ based on retry count
+```
+
+**Mailbox Graceful Shutdown**:
+```rust
+// Stop accepting new messages (for non-memory channels)
+// Complete in-progress messages
+// Close channel
+mailbox.graceful_shutdown(Some(Duration::from_secs(30))).await?;
+```
+
+**Actor Integration**:
+- `Actor::stop()` automatically calls `mailbox.graceful_shutdown()` for non-memory channels
+- In-progress messages complete before actor terminates
+- Replies are sent for completed messages
+- ACK/NACK handled in actor message processing loop
+
+See [Durability Documentation](durability.md) for comprehensive channel and mailbox documentation.
 
 ### Process Group Service API
 

@@ -92,6 +92,13 @@ message Node {
   //
   // Security: Only for local development. Production should use proper cert management.
   bool auto_generate_certs = 24;
+
+  // Cluster name for grouping nodes that share UDP/ZeroMQ channels
+  //
+  // Nodes with the same cluster_name can communicate via UDP multicast
+  // or ZeroMQ channels. Used for service discovery and channel configuration.
+  // If empty, node is not part of any cluster.
+  string cluster_name = 25;
 }
 
 // Node type enumeration
@@ -231,6 +238,12 @@ message NodeMetrics {
   uint32 actor_count = 11;
   // Connected nodes in cluster
   uint32 connected_nodes = 12;
+  
+  // Node identity (for components that need node info without depending on Node type)
+  // Node ID for this metrics instance
+  string node_id = 13;
+  // Cluster name for this node (from node config)
+  string cluster_name = 14;
 }
 
 // Request to register a node

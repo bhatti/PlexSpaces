@@ -40,7 +40,7 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use crate::{ActorLocation, Node};
-use plexspaces_core::{ActorRegistry, ServiceLocator};
+use plexspaces_core::{ActorRegistry, ServiceLocator, service_locator::service_names, ExitReason};
 use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
 
 /// ActorService gRPC implementation
@@ -71,12 +71,27 @@ impl ActorServiceImpl {
     }
     
     /// Check if service should accept requests (not shutting down)
+    ///
+    /// ## Purpose
+    /// Verifies that the node is not shutting down before processing requests.
+    /// This ensures graceful shutdown: stop accepting new requests but complete in-progress ones.
+    ///
+    /// ## Returns
+    /// `Ok(())` if service is accepting requests, `Err(Status::unavailable)` if shutting down
     async fn check_accepting_requests(&self) -> Result<(), Status> {
+        // Check HealthService shutdown flag (primary source of truth)
         if let Some(ref reporter) = self.health_reporter {
             if reporter.is_shutting_down().await {
                 return Err(Status::unavailable("Service is shutting down and not accepting new requests"));
             }
         }
+        
+        // Fallback: Check ServiceLocator shutdown flag if HealthService not available
+        // This ensures shutdown checks work even if health_reporter is None
+        if self.node.service_locator().is_shutting_down().await {
+            return Err(Status::unavailable("Service is shutting down and not accepting new requests"));
+        }
+        
         Ok(())
     }
 }
@@ -94,7 +109,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let labels_for_ctx = request.get_ref().labels.clone();
         
         // Create RequestContext from gRPC request (before consuming request)
-        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
             request.metadata(),
             &labels_for_ctx,
             &self.node.service_locator(),
@@ -125,7 +140,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let labels = req.labels.clone();
         
         // Spawn actor using ActorFactory::spawn_actor
-        let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
+        let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
           let _message_sender = actor_factory.spawn_actor(
@@ -193,7 +208,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let labels_for_ctx = request.get_ref().labels.clone();
         
         // Create RequestContext from gRPC request (before consuming request)
-        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
             request.metadata(),
             &labels_for_ctx,
             &self.node.service_locator(),
@@ -234,7 +249,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         use plexspaces_core::Actor as ActorTrait;
         
         // Spawn actor using ActorFactory::spawn_actor
-        let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
+        let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
         let _message_sender = actor_factory.spawn_actor(
@@ -285,7 +300,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_id = req.actor_id;
         
         // Use ActorRegistry directly to lookup routing info
-        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
+        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
         // Create RequestContext for routing lookup (use internal context for system operations)
@@ -319,7 +334,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         match location {
             ActorLocation::Local(_) => {
                 // Check if virtual actor using VirtualActorManager
-                let virtual_actor_manager: Arc<plexspaces_core::VirtualActorManager> = self.node.service_locator().get_service().await
+                let virtual_actor_manager: Arc<plexspaces_core::VirtualActorManager> = self.node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::VIRTUAL_ACTOR_MANAGER).await
                     .ok_or_else(|| Status::internal("VirtualActorManager not found"))?;
                 let is_virtual = virtual_actor_manager.is_virtual(&actor_id).await;
                 let actor_type = if is_virtual { "virtual" } else { "standard" }.to_string();
@@ -402,7 +417,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let message = convert_proto_to_internal(&proto_msg)?;
 
         // Use ActorRegistry to get ActorRef - ActorRef::tell() handles routing and metrics
-        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
+        use plexspaces_core::service_locator::service_names;
+        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
         // Check if actor exists in registry
@@ -503,7 +519,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let supervisor_callback = req.supervisor_callback;
 
         // Verify actor exists locally using ActorRegistry
-        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
+        use plexspaces_core::service_locator::service_names;
+        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
         // Create RequestContext for routing lookup (use internal context for system operations)
@@ -575,12 +592,13 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // - supervisor_id: The supervisor on THIS node that was monitoring
         // - reason: Why the actor terminated
 
-        // Forward this to the local Node's notify_actor_down
-        // which will trigger any local monitoring callbacks
-        self.node
-            .notify_actor_down(&notif.actor_id, &notif.reason)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to notify: {}", e)))?;
+        // Forward this to ActorRegistry.handle_actor_termination for comprehensive termination handling
+        let actor_registry = self.node.actor_registry().await
+            .map_err(|e| Status::internal(format!("Failed to get actor registry: {}", e)))?;
+        
+        // Convert String reason to ExitReason
+        let exit_reason = ExitReason::from_str(&notif.reason);
+        actor_registry.handle_actor_termination(&notif.actor_id, exit_reason).await;
 
         Ok(Response::new(Empty {}))
     }
@@ -599,7 +617,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let req = request.into_inner();
 
         // Verify both actors exist locally using ActorRegistry
-        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
+        use plexspaces_core::service_locator::service_names;
+        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
         // Check first actor
@@ -679,7 +698,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_id = req.actor_id;
 
         // Activate virtual actor using ActorFactory
-        let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
+        let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
             .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
         
         actor_factory.activate_virtual_actor(&actor_id).await
@@ -771,7 +790,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let force = req.force;
 
         // Deactivate virtual actor using VirtualActorManager
-        let manager: Arc<plexspaces_core::VirtualActorManager> = self.node.service_locator().get_service().await
+        let manager: Arc<plexspaces_core::VirtualActorManager> = self.node.service_locator().get_service_by_name::<plexspaces_core::VirtualActorManager>(service_names::VIRTUAL_ACTOR_MANAGER).await
             .ok_or_else(|| Status::internal("VirtualActorManager not found"))?;
         
         let facet_arc = manager.get_facet(&actor_id).await
@@ -784,7 +803,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         drop(facet_guard);
         
         // Unregister actor using ActorRegistry directly
-        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
+        use plexspaces_core::service_locator::service_names;
+        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
         actor_registry.unregister_with_cleanup(&actor_id).await
@@ -801,7 +821,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_id = req.actor_id;
 
         // Check virtual actor existence using VirtualActorManager
-        let manager: Arc<plexspaces_core::VirtualActorManager> = self.node.service_locator().get_service().await
+        use plexspaces_core::service_locator::service_names;
+        let manager: Arc<plexspaces_core::VirtualActorManager> = self.node.service_locator().get_service_by_name::<plexspaces_core::VirtualActorManager>(service_names::VIRTUAL_ACTOR_MANAGER).await
             .ok_or_else(|| Status::internal("VirtualActorManager not found"))?;
         
         let is_virtual = manager.is_virtual(&actor_id).await;
@@ -829,7 +850,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Create RequestContext from gRPC request (before consuming request)
         // GetOrActivateActorRequest doesn't have labels field, use empty map
         let labels_for_ctx = std::collections::HashMap::new();
-        let ctx = plexspaces_core::RequestContext::from_grpc_request(
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
             request.metadata(),
             &labels_for_ctx,
             &self.node.service_locator(),
@@ -843,7 +864,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_id: plexspaces_core::ActorId = req.actor_id.clone();
 
         // Check if actor exists and is active using ActorRegistry
-        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service().await
+        use plexspaces_core::service_locator::service_names;
+        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
         // Create RequestContext for routing lookup (use internal context for system operations)
@@ -861,7 +883,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                     // Actor registered but not active - need to activate
                     // Use ActorFactory to activate
                     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-                    let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service().await
+                    let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
                         .ok_or_else(|| Status::internal("ActorFactory not found"))?;
                     
                     actor_factory.activate_virtual_actor(&actor_id).await

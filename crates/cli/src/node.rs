@@ -74,7 +74,8 @@ pub async fn start(node_id: &str, listen_addr: &str) -> Result<()> {
     // Create node using NodeBuilder
     let node = NodeBuilder::new(node_id.to_string())
         .with_listen_address(listen_addr.to_string())
-        .build();
+        .build()
+        .await;
 
     let node = Arc::new(node);
 

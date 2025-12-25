@@ -55,12 +55,34 @@ use crate::Node;
 pub struct TuplePlexSpaceServiceImpl {
     /// Node that owns the TupleSpace
     pub node: Arc<Node>,
+    /// Operation counters for stats
+    stats: Arc<tokio::sync::RwLock<TupleSpaceOperationStats>>,
+}
+
+/// Internal stats tracking for TupleSpace operations
+struct TupleSpaceOperationStats {
+    write_operations: u64,
+    read_operations: u64,
+    take_operations: u64,
+}
+
+impl Default for TupleSpaceOperationStats {
+    fn default() -> Self {
+        Self {
+            write_operations: 0,
+            read_operations: 0,
+            take_operations: 0,
+        }
+    }
 }
 
 impl TuplePlexSpaceServiceImpl {
     /// Create new TupleSpace service
     pub fn new(node: Arc<Node>) -> Self {
-        Self { node }
+        Self {
+            node,
+            stats: Arc::new(tokio::sync::RwLock::new(TupleSpaceOperationStats::default())),
+        }
     }
 
     /// Convert proto TupleField to internal TupleField
@@ -277,6 +299,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         &self,
         request: Request<WriteRequest>,
     ) -> Result<Response<WriteResponse>, Status> {
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let start = std::time::Instant::now();
         
@@ -289,29 +313,47 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
             return Err(Status::invalid_argument("At least one tuple required"));
         }
 
+        // Get RequestContext from gRPC request metadata
+        use plexspaces_core::RequestContext;
+        let labels = &std::collections::HashMap::new();
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(&metadata, labels, &self.node.service_locator()).await
+            .unwrap_or_else(|_| RequestContext::internal());
+        
+        // Get TupleSpaceProvider from ServiceLocator
+        let tuplespace_provider = self.node.service_locator().get_tuplespace_provider().await
+            .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
+
+        // Convert and write tuples
         let mut tuple_ids = Vec::new();
-
-        // Write each tuple
-        for proto_tuple in req.tuples {
-            let tuple = Self::convert_proto_tuple_to_internal(&proto_tuple)?;
-
-            // Write to local TupleSpace
-            self.node
-                .tuplespace()
-                .write(tuple.clone())
-                .await
-                .map_err(Self::tuplespace_error_to_status)?;
-
-            // Generate ULID for tuple
-            let tuple_id = ulid::Ulid::new().to_string();
+        for proto_tuple in &req.tuples {
+            let tuple = Self::convert_proto_tuple_to_internal(proto_tuple)?;
+            tuplespace_provider.write(tuple).await
+                .map_err(|e| Self::tuplespace_error_to_status(e))?;
+            // Use ID from proto tuple if provided, otherwise generate new one
+            let tuple_id = if !proto_tuple.id.is_empty() {
+                proto_tuple.id.clone()
+            } else {
+                ulid::Ulid::new().to_string()
+            };
             tuple_ids.push(tuple_id);
         }
 
+        // Update stats
+        {
+            let mut stats = self.stats.write().await;
+            stats.write_operations += req.tuples.len() as u64;
+        }
+
+        let elapsed = start.elapsed();
+        metrics::histogram!("plexspaces_node_tuplespace_write_duration_seconds").record(elapsed.as_secs_f64());
+        
         Ok(Response::new(WriteResponse { tuple_ids }))
     }
 
     /// Read tuples from the TupleSpace (non-destructive)
     async fn read(&self, request: Request<ReadRequest>) -> Result<Response<ReadResponse>, Status> {
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
         // Validate template
@@ -322,49 +364,41 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // Convert template to pattern
         let pattern = Self::convert_proto_template_to_pattern(&proto_template)?;
 
-        // Read from TupleSpace
-        let max_results = req.max_results.max(1) as usize; // At least 1
+        // Get RequestContext from gRPC request metadata
+        use plexspaces_core::RequestContext;
+        let labels = &std::collections::HashMap::new();
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(&metadata, labels, &self.node.service_locator()).await
+            .unwrap_or_else(|_| RequestContext::internal());
+        
+        // Get TupleSpaceProvider from ServiceLocator
+        let tuplespace_provider = self.node.service_locator().get_tuplespace_provider().await
+            .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
-        let all_tuples = if max_results == 1 {
-            // Single result
-            if let Some(tuple) = self
-                .node
-                .tuplespace()
-                .read(pattern)
-                .await
-                .map_err(Self::tuplespace_error_to_status)?
-            {
-                vec![tuple]
-            } else {
-                vec![]
-            }
-        } else {
-            // Multiple results - read all matching tuples
-            self.node
-                .tuplespace()
-                .read_all(pattern)
-                .await
-                .map_err(Self::tuplespace_error_to_status)?
-        };
+        // Read tuples
+        let tuples = tuplespace_provider.read(&pattern).await
+            .map_err(|e| Self::tuplespace_error_to_status(e))?;
 
-        // Implement pagination: take only max_results, check if more exist
-        let tuples: Vec<_> = all_tuples.iter().take(max_results).collect();
-        let has_more = all_tuples.len() > max_results;
+        // Update stats
+        {
+            let mut stats = self.stats.write().await;
+            stats.read_operations += 1;
+        }
 
         // Convert to proto
-        let proto_tuples: Vec<ProtoTuple> = tuples
-            .iter()
+        let proto_tuples: Vec<ProtoTuple> = tuples.iter()
             .map(|t| Self::convert_internal_tuple_to_proto(t))
             .collect();
 
         Ok(Response::new(ReadResponse {
             tuples: proto_tuples,
-            has_more,
+            has_more: false,
         }))
     }
 
     /// Take tuples from the TupleSpace (destructive)
     async fn take(&self, request: Request<ReadRequest>) -> Result<Response<ReadResponse>, Status> {
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
         // Validate template
@@ -375,39 +409,32 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // Convert template to pattern
         let pattern = Self::convert_proto_template_to_pattern(&proto_template)?;
 
-        // Take from TupleSpace
-        let max_results = req.max_results.max(1) as usize;
+        // Get RequestContext from gRPC request metadata
+        use plexspaces_core::RequestContext;
+        let labels = &std::collections::HashMap::new();
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(&metadata, labels, &self.node.service_locator()).await
+            .unwrap_or_else(|_| RequestContext::internal());
+        
+        // Get TupleSpaceProvider from ServiceLocator
+        let tuplespace_provider = self.node.service_locator().get_tuplespace_provider().await
+            .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
-        let tuples = if max_results == 1 {
-            // Single result
-            if let Some(tuple) = self
-                .node
-                .tuplespace()
-                .take(pattern)
-                .await
-                .map_err(Self::tuplespace_error_to_status)?
-            {
-                vec![tuple]
-            } else {
-                vec![]
-            }
-        } else {
-            // Multiple results
-            self.node
-                .tuplespace()
-                .take_all(pattern)
-                .await
-                .map_err(Self::tuplespace_error_to_status)?
-                .into_iter()
-                .take(max_results)
-                .collect()
-        };
+        // Take tuple
+        let tuple = tuplespace_provider.take(&pattern).await
+            .map_err(|e| Self::tuplespace_error_to_status(e))?;
+
+        // Update stats
+        {
+            let mut stats = self.stats.write().await;
+            stats.take_operations += 1;
+        }
 
         // Convert to proto
-        let proto_tuples: Vec<ProtoTuple> = tuples
-            .iter()
-            .map(Self::convert_internal_tuple_to_proto)
-            .collect();
+        let proto_tuples = if let Some(t) = tuple {
+            vec![Self::convert_internal_tuple_to_proto(&t)]
+        } else {
+            vec![]
+        };
 
         Ok(Response::new(ReadResponse {
             tuples: proto_tuples,
@@ -420,6 +447,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         &self,
         request: Request<CountRequest>,
     ) -> Result<Response<CountResponse>, Status> {
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
         // Validate template
@@ -430,13 +459,19 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // Convert template to pattern
         let pattern = Self::convert_proto_template_to_pattern(&proto_template)?;
 
-        // Count matching tuples
-        let count = self
-            .node
-            .tuplespace()
-            .count(pattern)
-            .await
-            .map_err(Self::tuplespace_error_to_status)?;
+        // Get RequestContext from gRPC request metadata
+        use plexspaces_core::RequestContext;
+        let labels = &std::collections::HashMap::new();
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(&metadata, labels, &self.node.service_locator()).await
+            .unwrap_or_else(|_| RequestContext::internal());
+        
+        // Get TupleSpaceProvider from ServiceLocator
+        let tuplespace_provider = self.node.service_locator().get_tuplespace_provider().await
+            .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
+
+        // Count tuples
+        let count = tuplespace_provider.count(&pattern).await
+            .map_err(|e| Self::tuplespace_error_to_status(e))?;
 
         Ok(Response::new(CountResponse {
             count: count as i64,
@@ -448,6 +483,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         &self,
         request: Request<ExistsRequest>,
     ) -> Result<Response<ExistsResponse>, Status> {
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
         // Validate template
@@ -458,15 +495,23 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // Convert template to pattern
         let pattern = Self::convert_proto_template_to_pattern(&proto_template)?;
 
-        // Check existence
-        let exists = self
-            .node
-            .tuplespace()
-            .exists(pattern)
-            .await
-            .map_err(Self::tuplespace_error_to_status)?;
+        // Get RequestContext from gRPC request metadata
+        use plexspaces_core::RequestContext;
+        let labels = &std::collections::HashMap::new();
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(&metadata, labels, &self.node.service_locator()).await
+            .unwrap_or_else(|_| RequestContext::internal());
+        
+        // Get TupleSpaceProvider from ServiceLocator
+        let tuplespace_provider = self.node.service_locator().get_tuplespace_provider().await
+            .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
-        Ok(Response::new(ExistsResponse { exists }))
+        // Check if tuples exist
+        let count = tuplespace_provider.count(&pattern).await
+            .map_err(|e| Self::tuplespace_error_to_status(e))?;
+
+        Ok(Response::new(ExistsResponse {
+            exists: count > 0,
+        }))
     }
 
     // See docs/BARRIER_REFACTORING_PLAN.md for migration guide and examples.
@@ -519,8 +564,37 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
     }
 
     /// Clear all tuples
-    async fn clear(&self, _request: Request<Empty>) -> Result<Response<Empty>, Status> {
-        self.node.tuplespace().clear().await;
+    async fn clear(&self, request: Request<Empty>) -> Result<Response<Empty>, Status> {
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
+        let _req = request.into_inner();
+
+        // Get RequestContext from gRPC request metadata
+        use plexspaces_core::RequestContext;
+        let labels = &std::collections::HashMap::new();
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(&metadata, labels, &self.node.service_locator()).await
+            .unwrap_or_else(|_| RequestContext::internal());
+        
+        // Get TupleSpaceProvider from ServiceLocator
+        let tuplespace_provider = self.node.service_locator().get_tuplespace_provider().await
+            .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
+
+        // Clear all tuples using wildcard pattern
+        use plexspaces_tuplespace::{Pattern, PatternField};
+        let wildcard_pattern = Pattern::new(vec![PatternField::Wildcard]);
+        loop {
+            match tuplespace_provider.take(&wildcard_pattern).await
+                .map_err(|e| Self::tuplespace_error_to_status(e))? {
+                Some(_) => {
+                    // Continue taking until no more tuples
+                }
+                None => {
+                    // No more tuples
+                    break;
+                }
+            }
+        }
+
         Ok(Response::new(Empty {}))
     }
 
@@ -545,31 +619,44 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
     /// - This method does not return errors (stats are always available)
     async fn get_stats(
         &self,
-        _request: Request<Empty>,
+        request: Request<Empty>,
     ) -> Result<Response<plexspaces_proto::tuplespace::v1::GetStatsResponse>, Status> {
-        // Get stats from TupleSpace (returns TupleSpaceStats directly, not Result)
-        let ts_stats = self.node.tuplespace().stats().await;
+        // Extract metadata before consuming request
+        let metadata = request.metadata().clone();
+        let _req = request.into_inner();
 
-        // Convert TupleSpaceStats to proto StorageStats
-        // TupleSpaceStats fields: total_writes, total_reads, total_takes, current_size
-        let total_ops = ts_stats.total_writes() + ts_stats.total_reads() + ts_stats.total_takes();
+        // Get RequestContext from gRPC request metadata
+        use plexspaces_core::RequestContext;
+        let labels = &std::collections::HashMap::new();
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(&metadata, labels, &self.node.service_locator()).await
+            .unwrap_or_else(|_| RequestContext::internal());
+        
+        // Get TupleSpaceProvider from ServiceLocator
+        let tuplespace_provider = self.node.service_locator().get_tuplespace_provider().await
+            .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
-        let storage_stats = plexspaces_proto::tuplespace::v1::StorageStats {
-            tuple_count: ts_stats.current_size() as u64,
-            memory_bytes: 0, // Not tracked by in-memory TupleSpace
-            total_operations: total_ops,
-            read_operations: ts_stats.total_reads(),
-            write_operations: ts_stats.total_writes(),
-            take_operations: ts_stats.total_takes(),
-            avg_latency_ms: 0.0, // Not tracked yet
-        };
+        // Get tuple count using wildcard pattern
+        use plexspaces_tuplespace::{Pattern, PatternField};
+        let wildcard_pattern = Pattern::new(vec![PatternField::Wildcard]);
+        let tuple_count = tuplespace_provider.count(&wildcard_pattern).await
+            .map_err(|e| Self::tuplespace_error_to_status(e))? as u64;
 
-        // Create response
-        let response = plexspaces_proto::tuplespace::v1::GetStatsResponse {
-            stats: Some(storage_stats),
-        };
-
-        Ok(Response::new(response))
+        // Get operation stats from service
+        let op_stats = self.stats.read().await;
+        let total_operations = op_stats.write_operations + op_stats.read_operations + op_stats.take_operations;
+        use plexspaces_proto::tuplespace::v1::{StorageStats, GetStatsResponse};
+        Ok(Response::new(GetStatsResponse {
+            stats: Some(StorageStats {
+                tuple_count,
+                memory_bytes: 0,
+                write_operations: op_stats.write_operations,
+                read_operations: op_stats.read_operations,
+                take_operations: op_stats.take_operations,
+                total_operations,
+                avg_latency_ms: 0.0,
+                ..Default::default()
+            }),
+        }))
     }
 }
 
@@ -961,7 +1048,7 @@ mod tests {
     #[tokio::test]
     async fn test_write_and_read_single_tuple() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-write-read").build());
+        let node = Arc::new(NodeBuilder::new("test-write-read").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write a tuple
@@ -1017,7 +1104,7 @@ mod tests {
     #[tokio::test]
     async fn test_write_multiple_tuples() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-write-multiple").build());
+        let node = Arc::new(NodeBuilder::new("test-write-multiple").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write multiple tuples
@@ -1060,7 +1147,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_with_pattern_matching() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-pattern-match").build());
+        let node = Arc::new(NodeBuilder::new("test-pattern-match").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write tuples
@@ -1122,7 +1209,7 @@ mod tests {
     #[tokio::test]
     async fn test_take_removes_tuple() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-take").build());
+        let node = Arc::new(NodeBuilder::new("test-take").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write a tuple
@@ -1189,7 +1276,7 @@ mod tests {
     #[tokio::test]
     async fn test_count_matching_tuples() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-count").build());
+        let node = Arc::new(NodeBuilder::new("test-count").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write tuples
@@ -1247,7 +1334,7 @@ mod tests {
     #[tokio::test]
     async fn test_exists_check() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-exists").build());
+        let node = Arc::new(NodeBuilder::new("test-exists").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Check exists before write - should be false
@@ -1302,7 +1389,7 @@ mod tests {
     #[tokio::test]
     async fn test_clear_all_tuples() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-clear").build());
+        let node = Arc::new(NodeBuilder::new("test-clear").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Write tuples
@@ -1356,7 +1443,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_stats() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-stats").build());
+        let node = Arc::new(NodeBuilder::new("test-stats").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Get initial stats
@@ -1432,7 +1519,7 @@ mod tests {
     #[tokio::test]
     async fn test_write_validation_empty_tuples() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-validation").build());
+        let node = Arc::new(NodeBuilder::new("test-validation").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Try to write empty tuples array
@@ -1449,7 +1536,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_validation_missing_template() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-validation-read").build());
+        let node = Arc::new(NodeBuilder::new("test-validation-read").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Try to read without template
@@ -1471,7 +1558,7 @@ mod tests {
     #[tokio::test]
     async fn test_unimplemented_methods() {
         use crate::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-unimplemented").build());
+        let node = Arc::new(NodeBuilder::new("test-unimplemented").build().await);
         let service = TuplePlexSpaceServiceImpl::new(node);
 
         // Test subscribe (unimplemented)

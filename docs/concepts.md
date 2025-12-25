@@ -2,6 +2,8 @@
 
 This document explains the fundamental concepts you need to understand to use PlexSpaces effectively.
 
+> **📖 For comprehensive actor system documentation**, see [Actor System Guide](actor-system.md) which covers actors, supervisors, applications, facets, behaviors, lifecycle, linking/monitoring, and observability in detail.
+
 ## Table of Contents
 
 1. [Actors](#actors)
@@ -14,7 +16,8 @@ This document explains the fundamental concepts you need to understand to use Pl
 8. [Location Transparency](#location-transparency)
 9. [Message Passing](#message-passing)
 10. [Durability](#durability)
-11. [FaaS-Style Invocation](#faas-style-invocation)
+11. [Channels](#channels)
+12. [FaaS-Style Invocation](#faas-style-invocation)
 
 ## Actors
 
@@ -293,8 +296,9 @@ let reply = actor_ref.ask(
 - **Deterministic Replay**: Replay from any point in history
 - **Exactly-Once Semantics**: Guaranteed message processing
 - **Time-Travel Debugging**: Replay past executions
-- **Channel-Based Mailbox**: Durable channels (Kafka, Redis) as actor mailboxes with ACK/NACK
+- **Channel-Based Mailbox**: Durable channels (Kafka, Redis, SQLite, NATS) as actor mailboxes with ACK/NACK
 - **Dead Letter Queue (DLQ)**: Automatic handling of poisonous messages
+- **Graceful Shutdown**: Actors using non-memory channels stop accepting new messages but complete in-progress work
 
 ### Example
 
@@ -324,6 +328,93 @@ let _message_sender = actor_factory.spawn_actor(
 ```
 
 For comprehensive documentation on durability, including recovery scenarios, edge cases, channel-based mailboxes, and DLQ patterns, see [Durability Documentation](durability.md).
+
+## Channels
+
+**Channels** provide queue and topic patterns for message passing between actors and services. Channels can serve as actor mailboxes, enabling durable message processing with ACK/NACK semantics.
+
+### Channel Backends
+
+PlexSpaces supports multiple channel backends:
+
+- **InMemory**: Fast, non-persistent (testing only)
+- **Redis**: Distributed, durable (Redis Streams with consumer groups)
+- **Kafka**: High-throughput, durable (production-grade)
+- **SQLite**: File-based, durable (single-node persistence)
+- **NATS**: Lightweight pub/sub (multi-node)
+- **UDP**: Low-latency multicast (best-effort, cluster-wide messaging)
+
+### Channel Features
+
+- **Durability**: Durable backends (Redis, Kafka, SQLite) persist messages across restarts
+- **ACK/NACK**: Acknowledge successful processing or requeue failed messages
+- **Dead Letter Queue (DLQ)**: Automatic handling of messages that fail repeatedly
+- **Graceful Shutdown**: Stop accepting new messages but complete in-progress work
+- **Message Recovery**: Unacked messages are automatically recovered on restart
+- **Pub/Sub**: Publish/subscribe patterns for topic-based messaging
+- **Observability**: Comprehensive metrics and logging for all operations
+
+### UDP Multicast Channels
+
+UDP channels provide low-latency, high-throughput pub/sub messaging within a cluster:
+
+- **Multicast Support**: Uses UDP multicast for efficient cluster-wide broadcasting
+- **Cluster Name**: Nodes with the same `cluster_name` can communicate via UDP
+- **Best-Effort Delivery**: No ACK/NACK (messages may be lost)
+- **Non-Durable**: Messages lost on restart (use for real-time, non-critical messaging)
+- **Low Latency**: Sub-millisecond message delivery within cluster
+- **High Throughput**: Supports high message rates
+
+**Configuration**:
+```rust
+let udp_config = UdpConfig {
+    multicast_address: "239.255.0.1".to_string(),
+    multicast_port: 9999,
+    bind_address: "0.0.0.0".to_string(),
+    ttl: 1, // Local network only
+    max_message_size: 1400, // Ethernet MTU
+    cluster_name: "my-cluster".to_string(), // Required
+    ..Default::default()
+};
+```
+
+### Graceful Shutdown
+
+Actors using non-memory channels support graceful shutdown:
+
+- **Stop Accepting New Messages**: `enqueue()` rejects new messages during shutdown
+- **Complete In-Progress**: Waits for all in-progress messages to complete (with timeout)
+- **Stop Receiving**: `dequeue()` stops receiving from channel backend
+- **Close Channel**: Underlying channel is explicitly closed
+- **ACK/NACK**: In-progress messages can still be ACKed/NACKed
+
+**Example**:
+```rust
+// Actor shutdown automatically calls mailbox.graceful_shutdown()
+actor.stop().await?;
+
+// Or manually shutdown mailbox
+mailbox.graceful_shutdown(Some(Duration::from_secs(30))).await?;
+```
+
+### Channel as Mailbox
+
+Channels can serve as actor mailboxes, providing durable message processing:
+
+```rust
+use plexspaces_mailbox::MailboxBuilder;
+
+// Create mailbox with Redis channel backend
+let mailbox = MailboxBuilder::new()
+    .with_redis("redis://localhost:6379".to_string())
+    .build("actor-mailbox".to_string())
+    .await?;
+
+// Messages are automatically ACKed on successful processing
+// NACKed messages are requeued or sent to DLQ
+```
+
+For comprehensive channel documentation, including ACK/NACK patterns, DLQ configuration, and graceful shutdown, see [Durability Documentation](durability.md).
 
 ## Key Design Principles
 

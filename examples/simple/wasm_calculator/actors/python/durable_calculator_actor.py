@@ -96,6 +96,34 @@ def shutdown() -> tuple[None, str | None]:
     return None, None
 
 
+# componentize-py expects an Actor class
+class Actor:
+    """Actor class for componentize-py compatibility."""
+    
+    @staticmethod
+    def init(initial_state: bytes) -> tuple[None, str | None]:
+        return init(initial_state)
+    
+    @staticmethod
+    def handle_request(from_actor: str, message_type: str, payload: bytes) -> tuple[bytes, str | None]:
+        return handle_request(from_actor, message_type, payload)
+    
+    @staticmethod
+    def snapshot_state() -> tuple[bytes, str | None]:
+        return snapshot_state()
+    
+    @staticmethod
+    def shutdown() -> tuple[None, str | None]:
+        return shutdown()
+
+
+
+
+
+
+
+
+
 
 
 

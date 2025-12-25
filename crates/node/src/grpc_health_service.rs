@@ -103,6 +103,8 @@ mod tests {
             }),
             ..Default::default()
         };
+        // Use helper for consistent HealthService creation
+        // Note: This is for tests, ServiceLocator may not be available
         let (reporter, _) = PlexSpacesHealthReporter::with_config(config);
         let reporter = Arc::new(reporter);
 

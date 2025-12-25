@@ -18,15 +18,13 @@ struct ObjectRegistryAdapter {
 impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        tenant_id: &str,
+        ctx: &plexspaces_core::RequestContext,
         object_id: &str,
-        namespace: &str,
         object_type: Option<ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(ObjectType::ObjectTypeUnspecified);
-        let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(&ctx, obj_type, object_id)
+            .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -45,10 +43,11 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn register(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .register(registration)
+            .register(ctx, registration)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -95,8 +94,9 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
     // Register node address in ObjectRegistry
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let node_registration = ObjectRegistration {
-        object_id: "_node@remote-node".to_string(),
-        object_type: ObjectType::ObjectTypeService as i32,
+        object_id: "remote-node".to_string(),
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:9999".to_string(),
         ..Default::default()
@@ -144,8 +144,9 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     // Register node address in ObjectRegistry
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let node_registration = ObjectRegistration {
-        object_id: "_node@remote-node".to_string(),
-        object_type: ObjectType::ObjectTypeService as i32,
+        object_id: "remote-node".to_string(),
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:9999".to_string(),
         ..Default::default()

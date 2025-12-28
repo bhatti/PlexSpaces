@@ -86,6 +86,12 @@ pub mod redis;
 #[cfg(feature = "sql-backend")]
 pub mod sql;
 
+#[cfg(feature = "ddb-backend")]
+pub mod ddb;
+
+#[cfg(feature = "ddb-backend")]
+pub use ddb::DynamoDBStorage;
+
 use async_trait::async_trait;
 use plexspaces_proto::tuplespace::v1::{
     MemoryStorageConfig, StorageProvider, StorageStats, TupleSpaceStorageConfig,

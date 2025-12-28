@@ -177,3 +177,5 @@ impl Default for FacetManager {
 // Note: Service trait implementation moved to core crate to break circular dependency
 // FacetManager doesn't implement Service here - core provides a wrapper if needed
 
+
+

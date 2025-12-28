@@ -1,0 +1,182 @@
+// PlexSpaces Actor Interface - Messaging
+//
+// Core actor-to-actor communication primitives.
+// Supports fire-and-forget (tell/cast) and request-reply (ask/call) patterns.
+
+interface messaging {
+    use types.{actor-id, payload, message-id, correlation-id, duration-ms, spawn-options, actor-error};
+
+    /// Send message to actor (fire-and-forget)
+    ///
+    /// Message is delivered asynchronously. No guarantee of delivery
+    /// unless durability is enabled on the target actor.
+    ///
+    /// # Arguments
+    /// - `to`: Target actor ID
+    /// - `msg-type`: Message type for behavior routing
+    /// - `payload`: Message payload bytes
+    ///
+    /// # Returns
+    /// - `ok(message-id)`: Message accepted for delivery
+    /// - `err`: Delivery failed (actor not found, mailbox full)
+    ///
+    /// # Example (Rust)
+    /// ```rust
+    /// // Fire-and-forget notification
+    /// messaging::tell("logger@node-1", "log", b"User logged in")?;
+    /// ```
+    tell: func(to: actor-id, msg-type: string, payload: payload) -> result<message-id, actor-error>;
+
+    /// Send message and wait for reply (request-reply)
+    ///
+    /// Blocks until response received or timeout expires.
+    /// Target actor's `handle-request` or `handle-message` must return response.
+    ///
+    /// # Arguments
+    /// - `to`: Target actor ID
+    /// - `msg-type`: Message type for behavior routing
+    /// - `payload`: Request payload bytes
+    /// - `timeout-ms`: Maximum time to wait (0 = default timeout)
+    ///
+    /// # Returns
+    /// - `ok(payload)`: Response from target actor
+    /// - `err`: Request failed (timeout, actor error, etc.)
+    ///
+    /// # Example (Rust)
+    /// ```rust
+    /// // Request current count from counter actor
+    /// let response = messaging::ask("counter@node-1", "get", &[], 5000)?;
+    /// let count = i64::from_le_bytes(response.try_into().unwrap());
+    /// ```
+    ask: func(to: actor-id, msg-type: string, payload: payload, timeout-ms: duration-ms) -> result<payload, actor-error>;
+
+    /// Reply to a request (used inside handle-request)
+    ///
+    /// Sends response back to the actor that called `ask`.
+    /// Only valid when processing a "call" message.
+    ///
+    /// # Arguments
+    /// - `correlation-id`: From the incoming message
+    /// - `payload`: Response payload bytes
+    ///
+    /// # Returns
+    /// - `ok`: Reply sent
+    /// - `err`: Reply failed (invalid correlation, requester gone)
+    reply: func(correlation-id: correlation-id, payload: payload) -> result<_, actor-error>;
+
+    /// Forward message to another actor
+    ///
+    /// Preserves original sender and correlation ID.
+    /// Useful for router/proxy actors.
+    ///
+    /// # Arguments
+    /// - `to`: Target actor ID
+    /// - `msg-type`: Message type (can be changed)
+    /// - `payload`: Message payload
+    /// - `original-sender`: Original sender to preserve
+    /// - `correlation-id`: Original correlation ID to preserve
+    forward: func(
+        to: actor-id,
+        msg-type: string,
+        payload: payload,
+        original-sender: actor-id,
+        correlation-id: option<correlation-id>
+    ) -> result<message-id, actor-error>;
+
+    /// Spawn a new actor
+    ///
+    /// Creates new actor instance from WASM module.
+    /// Module must be deployed to the node.
+    ///
+    /// # Arguments
+    /// - `module-ref`: Module reference (name@version or hash)
+    /// - `initial-state`: State bytes passed to actor's init()
+    /// - `options`: Spawn configuration
+    ///
+    /// # Returns
+    /// - `ok(actor-id)`: New actor's ID
+    /// - `err`: Spawn failed (module not found, resource limit)
+    ///
+    /// # Example (Rust)
+    /// ```rust
+    /// let opts = SpawnOptions {
+    ///     actor_id: Some("worker-1".into()),
+    ///     labels: vec![("role".into(), "worker".into())],
+    ///     durable: true,
+    ///     ..Default::default()
+    /// };
+    /// let worker = messaging::spawn("worker@1.0.0", &[], opts)?;
+    /// ```
+    spawn: func(module-ref: string, initial-state: payload, options: spawn-options) -> result<actor-id, actor-error>;
+
+    /// Stop an actor gracefully
+    ///
+    /// Sends shutdown signal to actor. Actor's `shutdown` function is called.
+    /// Waits for actor to terminate up to timeout.
+    ///
+    /// # Arguments
+    /// - `actor-id`: Actor to stop
+    /// - `timeout-ms`: Maximum time to wait for graceful shutdown
+    ///
+    /// # Returns
+    /// - `ok`: Actor stopped
+    /// - `err`: Stop failed (actor not found, timeout)
+    stop: func(actor-id: actor-id, timeout-ms: duration-ms) -> result<_, actor-error>;
+
+    /// Link to another actor (Erlang-style)
+    ///
+    /// When linked actor terminates, this actor receives EXIT message.
+    /// Links are bidirectional.
+    ///
+    /// # Arguments
+    /// - `actor-id`: Actor to link with
+    link: func(actor-id: actor-id) -> result<_, actor-error>;
+
+    /// Unlink from another actor
+    unlink: func(actor-id: actor-id) -> result<_, actor-error>;
+
+    /// Monitor another actor (one-way)
+    ///
+    /// When monitored actor terminates, this actor receives DOWN message.
+    /// Monitors are unidirectional (unlike links).
+    ///
+    /// # Arguments
+    /// - `actor-id`: Actor to monitor
+    ///
+    /// # Returns
+    /// - `ok(monitor-ref)`: Reference to cancel monitor
+    /// - `err`: Monitor failed
+    monitor: func(actor-id: actor-id) -> result<u64, actor-error>;
+
+    /// Cancel a monitor
+    demonitor: func(monitor-ref: u64) -> result<_, actor-error>;
+
+    /// Get current actor's ID
+    self-id: func() -> actor-id;
+
+    /// Get parent/supervisor actor ID (if any)
+    parent-id: func() -> option<actor-id>;
+
+    /// Get current timestamp (milliseconds since epoch)
+    now: func() -> u64;
+
+    /// Sleep for duration
+    ///
+    /// Yields control to runtime. Actor will be resumed after duration.
+    /// Other messages may be processed during sleep.
+    sleep: func(duration-ms: duration-ms);
+
+    /// Schedule message to self after delay
+    ///
+    /// # Arguments
+    /// - `delay-ms`: Delay before message is delivered
+    /// - `msg-type`: Message type
+    /// - `payload`: Message payload
+    ///
+    /// # Returns
+    /// Timer ID that can be used to cancel
+    send-after: func(delay-ms: duration-ms, msg-type: string, payload: payload) -> result<u64, actor-error>;
+
+    /// Cancel a scheduled message
+    cancel-timer: func(timer-id: u64) -> result<_, actor-error>;
+}

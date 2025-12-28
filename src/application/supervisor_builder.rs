@@ -79,7 +79,7 @@ impl SupervisorBuilder {
     /// - `ApplicationError::InvalidConfig` if spec is invalid
     ///
     /// ## Design Notes
-    /// - Uses application.proto's SupervisorSpec (has start_module)
+    /// - Uses application.proto's SupervisorSpec
     /// - Not supervision.proto's SupervisorSpec (has actor_id)
     /// - Local supervision only (no remote actor spawning yet)
     pub async fn from_proto_spec(
@@ -151,9 +151,9 @@ impl SupervisorBuilder {
             .map(|d| Duration::from_secs(d.seconds as u64))
             .unwrap_or(Duration::from_secs(30));
 
-        // TODO: Actually spawn the actor based on start_module
+        // TODO: Actually spawn the actor
         // For now, we just validate the spec
-        // Future: Use ActorFactory to spawn from start_module string
+        // Future: Use ActorFactory to spawn actors
 
         // Validate child spec
         if child_spec.id.is_empty() {
@@ -162,17 +162,11 @@ impl SupervisorBuilder {
             ));
         }
 
-        if child_spec.start_module.is_empty() {
-            return Err(ApplicationError::InvalidConfig(format!(
-                "Child '{}' must have start_module",
-                child_spec.id
-            )));
-        }
+        // Note: start_module removed - actor_type is derived from child.id
 
         // Log child spec for now (actual spawning in next phase)
         tracing::debug!(
             child_id = %child_spec.id,
-            start_module = %child_spec.start_module,
             restart_policy = ?restart,
             child_type = ?child_type,
             "Validated child spec (spawning not yet implemented)"
@@ -236,7 +230,6 @@ mod tests {
                 ChildSpec {
                     id: "worker1".to_string(),
                     r#type: ProtoChildType::ChildTypeWorker as i32,
-                    start_module: "test::Worker".to_string(),
                     args: Default::default(),
                     restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
                     shutdown_timeout: Some(ProtoDuration {
@@ -249,7 +242,6 @@ mod tests {
                 ChildSpec {
                     id: "worker2".to_string(),
                     r#type: ProtoChildType::ChildTypeWorker as i32,
-                    start_module: "test::Worker".to_string(),
                     args: Default::default(),
                     restart: ProtoRestartPolicy::RestartPolicyTransient as i32,
                     shutdown_timeout: Some(ProtoDuration {
@@ -365,7 +357,6 @@ mod tests {
         let child_spec = ChildSpec {
             id: "test".to_string(),
             r#type: ProtoChildType::ChildTypeWorker as i32,
-            start_module: "test::Worker".to_string(),
             args: Default::default(),
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
@@ -387,7 +378,6 @@ mod tests {
         let child_spec = ChildSpec {
             id: "test".to_string(),
             r#type: ProtoChildType::ChildTypeWorker as i32,
-            start_module: "test::Worker".to_string(),
             args: Default::default(),
             restart: ProtoRestartPolicy::RestartPolicyTransient as i32,
             shutdown_timeout: None,
@@ -409,7 +399,6 @@ mod tests {
         let child_spec = ChildSpec {
             id: "test".to_string(),
             r#type: ProtoChildType::ChildTypeWorker as i32,
-            start_module: "test::Worker".to_string(),
             args: Default::default(),
             restart: ProtoRestartPolicy::RestartPolicyTemporary as i32,
             shutdown_timeout: None,
@@ -431,7 +420,6 @@ mod tests {
         let child_spec = ChildSpec {
             id: "test".to_string(),
             r#type: ProtoChildType::ChildTypeWorker as i32,
-            start_module: "test::Worker".to_string(),
             args: Default::default(),
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
@@ -453,7 +441,6 @@ mod tests {
         let child_spec = ChildSpec {
             id: "test".to_string(),
             r#type: ProtoChildType::ChildTypeSupervisor as i32,
-            start_module: "test::Supervisor".to_string(),
             args: Default::default(),
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
@@ -483,7 +470,6 @@ mod tests {
         let child_spec = ChildSpec {
             id: "".to_string(), // Empty ID
             r#type: ProtoChildType::ChildTypeWorker as i32,
-            start_module: "test::Worker".to_string(),
             args: Default::default(),
             restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: None,
@@ -499,33 +485,4 @@ mod tests {
         ));
     }
 
-    /// Test: Validate child spec with empty start_module fails
-    #[tokio::test]
-    async fn test_validate_child_spec_empty_start_module() {
-        let (supervisor, _event_rx) = Supervisor::new(
-            "test-supervisor".to_string(),
-            plexspaces_supervisor::SupervisionStrategy::OneForOne {
-                max_restarts: 3,
-                within_seconds: 5,
-            },
-        );
-
-        let child_spec = ChildSpec {
-            id: "worker1".to_string(),
-            r#type: ProtoChildType::ChildTypeWorker as i32,
-            start_module: "".to_string(), // Empty module
-            args: Default::default(),
-            restart: ProtoRestartPolicy::RestartPolicyPermanent as i32,
-            shutdown_timeout: None,
-            supervisor: None,
-            facets: vec![], // Phase 1: Unified Lifecycle - facets support
-        };
-
-        let result = SupervisorBuilder::add_child_to_supervisor(&supervisor, &child_spec).await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            ApplicationError::InvalidConfig(_)
-        ));
-    }
 }

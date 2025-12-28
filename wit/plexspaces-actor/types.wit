@@ -1,0 +1,141 @@
+// PlexSpaces Actor Interface - Core Types
+//
+// Shared types used across all interfaces.
+// These provide the foundation for type-safe actor communication.
+
+interface types {
+    /// Actor identifier - format: "name@node" or ULID
+    /// Examples: "counter@node-1", "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    type actor-id = string;
+
+    /// Message payload - opaque bytes for maximum flexibility
+    /// Actors choose their own serialization (JSON, protobuf, msgpack, etc.)
+    type payload = list<u8>;
+
+    /// Correlation ID for request-reply patterns
+    type correlation-id = string;
+
+    /// Message ID for tracking and deduplication
+    type message-id = string;
+
+    /// Timestamp in milliseconds since Unix epoch
+    type timestamp = u64;
+
+    /// Duration in milliseconds
+    type duration-ms = u64;
+
+    /// Tuple field - heterogeneous value type for tuplespace
+    variant tuple-field {
+        /// String value
+        string-val(string),
+        /// 64-bit signed integer
+        int-val(s64),
+        /// 64-bit floating point
+        float-val(f64),
+        /// Raw bytes
+        bytes-val(list<u8>),
+        /// Boolean
+        bool-val(bool),
+        /// Null/None value
+        null-val,
+    }
+
+    /// Tuple - ordered collection of fields
+    type tuple-data = list<tuple-field>;
+
+    /// Pattern field for tuple matching
+    variant pattern-field {
+        /// Match exact value
+        exact(tuple-field),
+        /// Match any value (wildcard)
+        any,
+        /// Match by type constraint
+        typed(field-type),
+        /// Match with predicate (encoded as string, e.g., ">10", "startsWith:foo")
+        predicate(string),
+    }
+
+    /// Field type enumeration for type-based matching
+    enum field-type {
+        string-type,
+        int-type,
+        float-type,
+        bytes-type,
+        bool-type,
+        null-type,
+        tuple-type,
+    }
+
+    /// Pattern for tuple matching
+    type pattern = list<pattern-field>;
+
+    /// Generic result with payload
+    variant actor-result {
+        ok(payload),
+        err(actor-error),
+    }
+
+    /// Structured error type
+    record actor-error {
+        /// Error code for programmatic handling
+        code: error-code,
+        /// Human-readable message
+        message: string,
+        /// Optional details (JSON-encoded)
+        details: option<string>,
+    }
+
+    /// Standard error codes
+    enum error-code {
+        /// Unknown/unspecified error
+        unknown,
+        /// Actor not found
+        actor-not-found,
+        /// Message delivery failed
+        delivery-failed,
+        /// Timeout waiting for response
+        timeout,
+        /// Invalid message format
+        invalid-message,
+        /// Operation not permitted
+        not-permitted,
+        /// Resource exhausted (mailbox full, memory limit, etc.)
+        resource-exhausted,
+        /// Internal error
+        internal,
+        /// Not implemented
+        not-implemented,
+    }
+
+    /// Message envelope with metadata
+    record message {
+        /// Unique message ID
+        id: message-id,
+        /// Sender actor ID
+        from-actor: actor-id,
+        /// Message type for routing
+        msg-type: string,
+        /// Message payload
+        payload: payload,
+        /// Correlation ID for request-reply
+        correlation-id: option<correlation-id>,
+        /// Timestamp when message was created
+        timestamp: timestamp,
+        /// Optional headers/metadata
+        headers: list<tuple<string, string>>,
+    }
+
+    /// Actor spawn options
+    record spawn-options {
+        /// Custom actor ID (optional, will be generated if not provided)
+        actor-id: option<actor-id>,
+        /// Labels for actor discovery
+        labels: list<tuple<string, string>>,
+        /// Maximum mailbox size
+        mailbox-size: option<u32>,
+        /// Enable durability (journaling)
+        durable: bool,
+        /// Supervisor ID (for supervision tree)
+        supervisor: option<actor-id>,
+    }
+}

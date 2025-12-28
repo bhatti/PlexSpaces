@@ -297,6 +297,16 @@ pub async fn create_channel(config: ChannelConfig) -> ChannelResult<Box<dyn Chan
         ChannelBackend::ChannelBackendSqlite => Err(ChannelError::InvalidConfiguration(
             "SQLite backend not enabled. Enable 'sqlite-backend' feature.".to_string(),
         )),
+        #[cfg(feature = "sqs-backend")]
+        ChannelBackend::ChannelBackendSqs => {
+            use crate::SQSChannel;
+            let channel = SQSChannel::new(config).await?;
+            Ok(Box::new(channel))
+        }
+        #[cfg(not(feature = "sqs-backend"))]
+        ChannelBackend::ChannelBackendSqs => Err(ChannelError::InvalidConfiguration(
+            "SQS backend not enabled. Enable 'sqs-backend' feature.".to_string(),
+        )),
         #[cfg(feature = "udp-backend")]
         ChannelBackend::ChannelBackendUdp => {
             use crate::UdpChannel;

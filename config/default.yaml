@@ -38,4 +38,75 @@ blob:
   use_ssl: false
   prefix: "/plexspaces"
 
+# AWS Configuration
+# Used for DynamoDB (locks, scheduler, keyvalue, workflow, journaling, tuplespace, blob metadata)
+# and SQS (channel) backends
+aws:
+  # AWS region (e.g., "us-east-1")
+  # Can be overridden by AWS_REGION environment variable
+  region: "us-east-1"
+  
+  # DynamoDB configuration
+  dynamodb:
+    # Table name prefix (default: "plexspaces-")
+    # Actual table names will be: {prefix}{component_name}
+    # Examples: plexspaces-locks, plexspaces-scheduler, etc.
+    table_prefix: "plexspaces-"
+    
+    # Endpoint URL for local testing with DynamoDB Local
+    # Leave empty for production (uses AWS service)
+    # For local testing: "http://localhost:8000"
+    endpoint_url: ""
+    
+    # AWS credentials (should be from environment variables in production)
+    # Environment variables take precedence:
+    # - AWS_ACCESS_KEY_ID
+    # - AWS_SECRET_ACCESS_KEY
+    # - AWS_SESSION_TOKEN (for temporary credentials)
+    access_key_id: ""
+    secret_access_key: ""
+  
+  # SQS configuration (for channel backend)
+  sqs:
+    # Queue name prefix (default: "plexspaces-")
+    # Actual queue names will be: {prefix}{channel_name}
+    queue_prefix: "plexspaces-"
+    
+    # Endpoint URL for local testing with SQS Local
+    # Leave empty for production (uses AWS service)
+    # For local testing: "http://localhost:9324"
+    endpoint_url: ""
+    
+    # Visibility timeout in seconds (default: 30)
+    # How long a message is invisible after being received
+    visibility_timeout_seconds: 30
+    
+    # Message retention period in seconds (default: 345600 = 4 days)
+    message_retention_period_seconds: 345600
+    
+    # Dead Letter Queue configuration
+    dlq:
+      # Enable DLQ (default: true)
+      enabled: true
+      
+      # Max receive count before sending to DLQ (default: 3)
+      max_receive_count: 3
+  
+  # S3 configuration (for blob storage)
+  s3:
+    # Bucket name (default: "plexspaces")
+    bucket: "plexspaces"
+    
+    # Endpoint URL for local testing with MinIO or S3 Local
+    # Leave empty for production (uses AWS service)
+    # For local testing: "http://localhost:9000"
+    endpoint_url: ""
+    
+    # Region for S3 (defaults to AWS region if not specified)
+    region: ""
+    
+    # Use path-style addressing (default: false)
+    # Set to true for MinIO and S3 Local
+    use_path_style: false
+
 

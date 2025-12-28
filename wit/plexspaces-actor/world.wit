@@ -1,0 +1,58 @@
+// PlexSpaces Actor Interface - World Definition
+//
+// This is the main entry point for the WIT package.
+// All interfaces in the same directory are automatically included.
+
+package plexspaces:actor@0.1.0;
+
+/// Full-featured actor world with all capabilities
+world plexspaces-actor {
+    // Host-provided interfaces (imports)
+    import logging;
+    import messaging;
+    import tuplespace;
+    import channels;
+    import durability;
+    
+    // Actor-implemented interfaces (exports)
+    export actor;
+}
+
+/// Lightweight actor world for simple use cases
+/// Only includes messaging and logging - smaller WASM size
+world simple-actor {
+    import logging;
+    import messaging;
+    
+    export actor;
+}
+
+/// Stateful actor world with durability support
+/// For actors that need persistence and crash recovery
+world durable-actor {
+    import logging;
+    import messaging;
+    import durability;
+    
+    export actor;
+}
+
+/// Coordination actor world with tuplespace
+/// For actors that coordinate via shared tuple space
+world coordination-actor {
+    import logging;
+    import messaging;
+    import tuplespace;
+    
+    export actor;
+}
+
+/// Event-driven actor world with pub/sub
+/// For actors that use queues and topics
+world event-actor {
+    import logging;
+    import messaging;
+    import channels;
+    
+    export actor;
+}

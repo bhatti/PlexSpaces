@@ -148,3 +148,10 @@ pub struct ListFilters {
 #[cfg(feature = "sql-backend")]
 #[path = "repository/sql.rs"]
 pub mod sql;
+
+#[cfg(feature = "ddb-backend")]
+#[path = "repository/ddb.rs"]
+pub mod ddb;
+
+#[cfg(feature = "ddb-backend")]
+pub use ddb::DynamoDBBlobRepository;

@@ -22,24 +22,32 @@
 -- - idx_locks_holder: Find locks by holder (for cleanup on node failure)
 
 CREATE TABLE IF NOT EXISTS locks (
-    lock_key TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    namespace TEXT NOT NULL DEFAULT 'default',
+    lock_key TEXT NOT NULL,
     holder_id TEXT NOT NULL,
     version TEXT NOT NULL,
     expires_at INTEGER NOT NULL,
     lease_duration_secs INTEGER NOT NULL,
     last_heartbeat INTEGER NOT NULL,
     locked INTEGER NOT NULL DEFAULT 0,
-    metadata TEXT
+    metadata TEXT,
+    PRIMARY KEY (tenant_id, namespace, lock_key)
 );
 
--- Index for finding expired locks
+-- Index for finding expired locks (with tenant/namespace for efficient filtering)
 CREATE INDEX IF NOT EXISTS idx_locks_expires_at
-    ON locks(expires_at)
+    ON locks(tenant_id, namespace, expires_at)
     WHERE locked = 1;
 
--- Index for finding locks by holder
+-- Index for finding locks by holder (with tenant/namespace for isolation)
 CREATE INDEX IF NOT EXISTS idx_locks_holder
-    ON locks(holder_id)
+    ON locks(tenant_id, namespace, holder_id)
+    WHERE locked = 1;
+
+-- Index for tenant/namespace queries
+CREATE INDEX IF NOT EXISTS idx_locks_tenant_namespace
+    ON locks(tenant_id, namespace, lock_key)
     WHERE locked = 1;
 
 

@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create node using NodeBuilder
     let node = NodeBuilder::new(node_id)
         .with_listen_address(listen_addr.clone())
-        .build();
+        .build().await;
 
     let node = Arc::new(node);
 

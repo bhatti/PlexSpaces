@@ -1353,9 +1353,63 @@ impl ActorServiceTrait for ActorServiceImpl {
 
     async fn get_or_activate_actor(
         &self,
-        _request: Request<GetOrActivateActorRequest>,
+        request: Request<GetOrActivateActorRequest>,
     ) -> Result<Response<GetOrActivateActorResponse>, Status> {
-        Err(Status::unimplemented("get_or_activate_actor not yet implemented"))
+        // Create RequestContext from gRPC request (before consuming request)
+        // GetOrActivateActorRequest doesn't have labels field, use empty map
+        let labels_for_ctx = std::collections::HashMap::new();
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
+            request.metadata(),
+            &labels_for_ctx,
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+
+        // Now consume request
+        let req = request.into_inner();
+        
+        // Use unified implementation
+        let (was_activated, final_actor_id) = get_or_activate_actor_impl(
+            &self.service_locator,
+            &self.local_node_id,
+            &ctx,
+            &req,
+        ).await?;
+
+        // Build response
+        use plexspaces_proto::v1::actor::{Actor as ProtoActor, ActorState};
+        let proto_actor = ProtoActor {
+            actor_id: final_actor_id.clone(),
+            actor_type: if req.actor_type.is_empty() {
+                "unknown".to_string()
+            } else {
+                req.actor_type.clone()
+            },
+            state: ActorState::ActorStateActive as i32,
+            node_id: self.local_node_id.clone(),
+            vm_id: String::new(),
+            actor_state: req.initial_state.clone(),
+            metadata: None,
+            config: req.config,
+            metrics: None,
+            facets: vec![],
+            isolation: None,
+            actor_state_schema_version: 0,
+            error_message: String::new(),
+        };
+
+        // Build actor_ref (format: "actor_id@node_id")
+        // Use final_actor_id from unified implementation
+        let actor_ref = final_actor_id;
+
+        Ok(Response::new(GetOrActivateActorResponse {
+            actor_ref,
+            actor: Some(proto_actor),
+            was_activated,
+        }))
     }
 
     async fn invoke_actor(
@@ -1876,6 +1930,9 @@ impl ActorServiceTrait for ActorServiceWrapper {
         self.0.invoke_actor(request).await
     }
 }
+
+pub mod get_or_activate_impl;
+pub use get_or_activate_impl::get_or_activate_actor_impl;
 
 #[cfg(test)]
 mod tests {

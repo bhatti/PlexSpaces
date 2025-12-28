@@ -76,6 +76,8 @@ pub use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 pub use config_ext::BlobConfigExt;
 pub use error::{BlobError, BlobResult};
 pub use repository::BlobRepository;
+#[cfg(feature = "ddb-backend")]
+pub use repository::{DynamoDBBlobRepository, ListFilters};
 pub use service::BlobService;
 pub use helpers::{get_storage_path, is_expired, validate_metadata};
 

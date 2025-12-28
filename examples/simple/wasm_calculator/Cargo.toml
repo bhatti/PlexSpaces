@@ -28,6 +28,7 @@ clap = { version = "4.4", features = ["derive"] }
 tonic = "0.10"
 tonic-build = "0.10"
 wat = "1.242.0"
+reqwest = { version = "0.11", features = ["multipart", "json"] }
 
 [[bin]]
 name = "wasm_calculator"

@@ -89,8 +89,8 @@ impl SpecApplication {
     /// Create new application with behavior factory
     ///
     /// ## Purpose
-    /// Allows applications to dynamically spawn actors from `start_module` strings
-    /// in supervisor tree specifications.
+    /// Allows applications to dynamically spawn actors using behavior factory
+    /// (actor_type is derived from child.id).
     ///
     /// ## Arguments
     /// * `spec` - Application specification
@@ -141,12 +141,11 @@ impl SpecApplication {
     ///
     /// ## Purpose
     /// Spawns all actors defined in the supervisor tree specification.
-    /// For native Rust applications, this validates the spec but cannot
-    /// dynamically instantiate behaviors from start_module strings.
+    /// Actor type is derived from child.id for both native Rust and WASM applications.
     ///
     /// ## Design Notes
-    /// - Native Rust applications need a behavior factory/registry to map
-    ///   start_module strings to behavior constructors
+    /// - Native Rust applications need a behavior factory/registry to create behaviors
+    ///   (future enhancement - currently not fully implemented)
     /// - For now, we validate the spec and log that spawning is not yet
     ///   implemented for native applications
     /// - WASM applications use WasmApplication which has full spawning support
@@ -179,7 +178,6 @@ impl SpecApplication {
         for child in &supervisor_spec.children {
             debug!(
                 child_id = %child.id,
-                start_module = %child.start_module,
                 child_type = ?child.r#type(),
                 "Processing child spec"
             );
@@ -192,12 +190,7 @@ impl SpecApplication {
                 )));
             }
 
-            if child.start_module.is_empty() {
-                return Err(ApplicationError::ConfigError(format!(
-                    "Child '{}' has empty start_module in application '{}'",
-                    child.id, self.spec.name
-                )));
-            }
+            // Note: start_module removed - actor_type is derived from child.id
 
             // Log deployment progress: processing child
             debug!(
@@ -208,135 +201,95 @@ impl SpecApplication {
                 "Processing child spec"
             );
 
-            // Try to create behavior using behavior factory if available
-            if let Some(ref factory) = self.behavior_factory {
-                // Serialize args HashMap to bytes
-                // Note: ChildSpec.args is HashMap<String, String>, but factory expects &[u8]
-                // We serialize to JSON for now. In production, you might want protobuf encoding.
-                let args_bytes = if child.args.is_empty() {
-                    vec![]
+            // Use child.id as actor_type (start_module removed - was confusing)
+            let actor_type = child.id.clone();
+            let actor_id = format!("{}@{}", child.id, node.id());
+            
+            // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
+            // Use ActorFactory::spawn_actor() which supports facets directly
+            use plexspaces_core::RequestContext;
+            use plexspaces_actor::get_actor_factory;
+            let ctx = RequestContext::new_without_auth("internal".to_string(), self.spec.name.clone());
+            
+            // Get ActorFactory from ServiceLocator
+            let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = get_actor_factory(service_locator.as_ref()).await
+                .ok_or_else(|| {
+                    ApplicationError::StartupFailed(
+                        "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string()
+                    )
+                })?;
+            
+            // Phase 1: Unified Lifecycle - Convert proto facets to facet instances
+            // Use FacetRegistry to create facets from proto configurations
+            let facets: Vec<Box<dyn plexspaces_facet::Facet>> = if !child.facets.is_empty() {
+                // Get FacetRegistry from ServiceLocator
+                use plexspaces_core::service_locator::service_names;
+                if let Some(facet_registry_wrapper) = service_locator.get_service_by_name::<plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper>(service_names::FACET_REGISTRY).await {
+                    let facet_registry = facet_registry_wrapper.inner_clone();
+                    // Use facet_helpers to create facets from proto
+                    use plexspaces_supervisor::create_facets_from_proto;
+                    let facets = create_facets_from_proto(&child.facets, &facet_registry).await;
+                    
+                    debug!(
+                        application = %self.spec.name,
+                        child_id = %child.id,
+                        facet_count = child.facets.len(),
+                        created_count = facets.len(),
+                        "Created facets from ChildSpec for actor"
+                    );
+                    
+                    facets
                 } else {
-                    // Convert HashMap to JSON bytes
-                    // Note: This requires serde_json, but we can also just use empty vec for now
-                    // and let the factory handle default args
-                    vec![] // TODO: Serialize args properly when needed
-                };
-                
-                match factory.create(&child.start_module, &args_bytes).await {
-                    Ok(behavior) => {
-                        let actor_id = format!("{}@{}", child.id, node.id());
-                        
-                        // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
-                        // Use ActorFactory::spawn_actor() which supports facets directly
-                        use plexspaces_core::RequestContext;
-                        use plexspaces_actor::get_actor_factory;
-                        let ctx = RequestContext::new_without_auth("internal".to_string(), self.spec.name.clone());
-                        
-                        // Get ActorFactory from ServiceLocator
-                        let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = get_actor_factory(service_locator.as_ref()).await
-                            .ok_or_else(|| {
-                                ApplicationError::StartupFailed(
-                                    "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string()
-                                )
-                            })?;
-                        
-                        // Phase 1: Unified Lifecycle - Convert proto facets to facet instances
-                        // Use FacetRegistry to create facets from proto configurations
-                        let facets: Vec<Box<dyn plexspaces_facet::Facet>> = if !child.facets.is_empty() {
-                            // Get FacetRegistry from ServiceLocator
-                            use plexspaces_core::service_locator::service_names;
-                            if let Some(facet_registry_wrapper) = service_locator.get_service_by_name::<plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper>(service_names::FACET_REGISTRY).await {
-                                let facet_registry = facet_registry_wrapper.inner_clone();
-                                // Use facet_helpers to create facets from proto
-                                use plexspaces_supervisor::create_facets_from_proto;
-                                let facets = create_facets_from_proto(&child.facets, &facet_registry).await;
-                                
-                                debug!(
-                                    application = %self.spec.name,
-                                    child_id = %child.id,
-                                    facet_count = child.facets.len(),
-                                    created_count = facets.len(),
-                                    "Created facets from ChildSpec for actor"
-                                );
-                                
-                                facets
-                            } else {
-                                // FacetRegistry not available - log and skip facets (graceful degradation)
-                                debug!(
-                                    application = %self.spec.name,
-                                    child_id = %child.id,
-                                    facet_count = child.facets.len(),
-                                    "FacetRegistry not available - skipping facet attachment (graceful degradation)"
-                                );
-                                Vec::new()
-                            }
-                        } else {
-                            Vec::new()
-                        };
-                        
-                        // Spawn actor with facets using ActorFactory
-                        let actor_id_parsed = actor_id.parse()
-                            .map_err(|e| ApplicationError::StartupFailed(format!("Invalid actor ID '{}': {}", actor_id, e)))?;
-                        
-                        match actor_factory.spawn_actor(
-                            &ctx,
-                            &actor_id_parsed,
-                            &child.start_module, // Use start_module as actor_type
-                            vec![], // initial_state
-                            None, // config
-                            child.args.clone(), // labels (using args as labels for now)
-                            facets, // facets from ChildSpec
-                        ).await {
-                            Ok(_message_sender) => {
-                                debug!(
-                                    application = %self.spec.name,
-                                    child_id = %child.id,
-                                    start_module = %child.start_module,
-                                    actor_id = %actor_id,
-                                    facet_count = child.facets.len(),
-                                    "Spawned actor from behavior factory with facets"
-                                );
-                                actor_ids.push(actor_id);
-                            }
-                            Err(e) => {
-                                error!(
-                                    application = %self.spec.name,
-                                    child_id = %child.id,
-                                    start_module = %child.start_module,
-                                    error = %e,
-                                    "Failed to spawn actor from behavior factory"
-                                );
-                                return Err(ApplicationError::StartupFailed(format!(
-                                    "Failed to spawn actor '{}': {}",
-                                    child.id, e
-                                )));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!(
-                            application = %self.spec.name,
-                            child_id = %child.id,
-                            start_module = %child.start_module,
-                            error = %e,
-                            "Failed to create behavior from factory"
-                        );
-                        return Err(ApplicationError::StartupFailed(format!(
-                            "Failed to create behavior for '{}' from module '{}': {}",
-                            child.id, child.start_module, e
-                        )));
-                    }
+                    // FacetRegistry not available - log and skip facets (graceful degradation)
+                    debug!(
+                        application = %self.spec.name,
+                        child_id = %child.id,
+                        facet_count = child.facets.len(),
+                        "FacetRegistry not available - skipping facet attachment (graceful degradation)"
+                    );
+                    Vec::new()
                 }
             } else {
-                // No behavior factory - log warning and skip
-                warn!(
-                    application = %self.spec.name,
-                    child_id = %child.id,
-                    start_module = %child.start_module,
-                    "No behavior factory available. Cannot spawn actor from start_module. \
-                     Use SpecApplication::with_behavior_factory() or use WASM applications. \
-                     This child will not be spawned."
-                );
+                Vec::new()
+            };
+            
+            // Spawn actor with facets using ActorFactory
+            let actor_id_parsed = actor_id.parse()
+                .map_err(|e| ApplicationError::StartupFailed(format!("Invalid actor ID '{}': {}", actor_id, e)))?;
+            
+            match actor_factory.spawn_actor(
+                &ctx,
+                &actor_id_parsed,
+                &actor_type, // Use child.id as actor_type
+                vec![], // initial_state
+                None, // config
+                child.args.clone(), // labels (using args as labels for now)
+                facets, // facets from ChildSpec
+            ).await {
+                Ok(_message_sender) => {
+                    debug!(
+                        application = %self.spec.name,
+                        child_id = %child.id,
+                        actor_type = %actor_type,
+                        actor_id = %actor_id,
+                        facet_count = child.facets.len(),
+                        "Spawned actor with facets"
+                    );
+                    actor_ids.push(actor_id);
+                }
+                Err(e) => {
+                    error!(
+                        application = %self.spec.name,
+                        child_id = %child.id,
+                        actor_type = %actor_type,
+                        error = %e,
+                        "Failed to spawn actor"
+                    );
+                    return Err(ApplicationError::StartupFailed(format!(
+                        "Failed to spawn actor '{}': {}",
+                        child.id, e
+                    )));
+                }
             }
         }
 
@@ -724,13 +677,7 @@ impl SpecApplication {
                 )));
             }
             
-            // Validate start_module (required for native applications)
-            if child.start_module.is_empty() && !has_behavior_factory {
-                return Err(ApplicationError::ConfigError(format!(
-                    "Child '{}' at index {} has empty start_module in application '{}' (behavior factory not available)",
-                    child.id, idx, app_name
-                )));
-            }
+            // Note: start_module removed - actor_type is derived from child.id
             
             // Validate restart policy
             use plexspaces_proto::application::v1::RestartPolicy as ProtoRestartPolicy;
@@ -959,7 +906,6 @@ mod tests {
                     ChildSpec {
                         id: "worker1".to_string(),
                         r#type: ChildType::ChildTypeWorker as i32,
-                        start_module: "test::Worker1".to_string(),
                         args: Default::default(),
                         restart: RestartPolicy::RestartPolicyPermanent as i32,
                         shutdown_timeout: Some(ProtoDuration {
@@ -972,7 +918,6 @@ mod tests {
                     ChildSpec {
                         id: "worker2".to_string(),
                         r#type: ChildType::ChildTypeWorker as i32,
-                        start_module: "test::Worker2".to_string(),
                         args: Default::default(),
                         restart: RestartPolicy::RestartPolicyTransient as i32,
                         shutdown_timeout: Some(ProtoDuration {
@@ -1132,23 +1077,6 @@ mod tests {
             .contains("empty ID"));
     }
 
-    /// Test: Supervisor tree validation with empty start_module fails
-    #[tokio::test]
-    async fn test_supervisor_tree_empty_start_module_fails() {
-        let mut spec = create_test_spec_with_supervisor();
-        if let Some(ref mut supervisor) = spec.supervisor {
-            supervisor.children[0].start_module = String::new();
-        }
-
-        let mut app = SpecApplication::new(spec);
-        let node = Arc::new(MockNode::new("test-node").await);
-
-        let result = app.start(node).await;
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("empty start_module"));
-    }
+    // Note: start_module validation removed - actor_type is derived from child.id
 }
 

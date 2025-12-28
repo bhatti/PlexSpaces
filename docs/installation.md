@@ -232,10 +232,16 @@ PlexSpaces provides comprehensive security features including:
 | `PLEXSPACES_NODE_ID` | Unique node identifier | `node1` |
 | `PLEXSPACES_LISTEN_ADDR` | gRPC listen address | `0.0.0.0:9001` |
 | `PLEXSPACES_CLUSTER_SEED_NODES` | Cluster seed nodes | - |
-| `PLEXSPACES_JOURNALING_BACKEND` | Journaling backend | `sqlite` |
-| `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` |
-| `PLEXSPACES_CHANNEL_BACKEND` | Channel backend | `inmemory` |
+| `PLEXSPACES_JOURNALING_BACKEND` | Journaling backend | `sqlite` (or `ddb` if `AWS_REGION` set) |
+| `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` (or `ddb` if `AWS_REGION` set) |
+| `PLEXSPACES_CHANNEL_BACKEND` | Channel backend | `inmemory` (or `sqs` if `AWS_REGION` set) |
 | `PLEXSPACES_CLUSTER_NAME` | Cluster name for UDP channels | - |
+| `AWS_REGION` | AWS region (enables AWS backends) | - |
+| `AWS_ACCESS_KEY_ID` | AWS access key (use IAM roles in production) | - |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key (use IAM roles in production) | - |
+| `DYNAMODB_ENDPOINT_URL` | DynamoDB endpoint (for local testing) | - |
+| `SQS_ENDPOINT_URL` | SQS endpoint (for local testing) | - |
+| `S3_ENDPOINT_URL` | S3 endpoint (for local testing) | - |
 
 ### HTTP Endpoints
 
@@ -282,16 +288,26 @@ node:
       - "node3:9001"
 
 journaling:
-  backend: sqlite
+  backend: sqlite  # or "ddb" for DynamoDB (requires AWS_REGION)
   path: /var/lib/plexspaces/journal.db
 
 tuplespace:
-  backend: redis
+  backend: redis  # or "ddb" for DynamoDB (requires AWS_REGION)
   url: "redis://localhost:6379"
 
 channel:
-  backend: redis
+  backend: redis  # or "sqs" for SQS (requires AWS_REGION)
   url: "redis://localhost:6379"
+
+# AWS configuration (optional - enables AWS backends when AWS_REGION is set)
+aws:
+  region: "us-east-1"  # Set this to enable AWS backends
+  dynamodb:
+    table_prefix: "plexspaces-"
+  sqs:
+    queue_prefix: "plexspaces-"
+  s3:
+    bucket: "plexspaces"
 
 # UDP channel configuration (for cluster-wide multicast)
 udp:
@@ -306,6 +322,7 @@ udp:
 
 - **SQLite**: File-based, single-node (default)
 - **PostgreSQL**: Multi-node, production-ready
+- **DynamoDB**: AWS-managed, auto-scaling, serverless (requires `AWS_REGION`)
 - **InMemory**: Testing only
 
 ### TupleSpace Backends
@@ -313,6 +330,7 @@ udp:
 - **InMemory**: Single-node, testing
 - **Redis**: Multi-node, production-ready
 - **PostgreSQL**: Multi-node, transactional
+- **DynamoDB**: AWS-managed, auto-scaling, serverless (requires `AWS_REGION`)
 
 ### Channel Backends
 
@@ -322,17 +340,256 @@ udp:
 - **SQLite**: Single-node, durable, file-based persistence
 - **NATS**: Multi-node, lightweight, pub/sub
 - **UDP**: Multi-node, low-latency multicast pub/sub (best-effort, non-durable)
+- **SQS**: AWS-managed, auto-scaling, serverless with DLQ support (requires `AWS_REGION`)
+
+### KeyValue Backends
+
+- **InMemory**: Single-node, testing
+- **Redis**: Multi-node, production-ready
+- **DynamoDB**: AWS-managed, auto-scaling, serverless (requires `AWS_REGION`)
+
+### Blob Storage Backends
+
+- **FileSystem**: Local file storage, single-node
+- **S3**: AWS object storage with DynamoDB metadata (requires `AWS_REGION`)
 
 **Channel Selection Guide**:
 - **Development/Testing**: InMemory or SQLite
-- **Production (Durable)**: Redis, Kafka, or SQLite
+- **Production (Durable)**: Redis, Kafka, SQLite, or SQS
+- **AWS Production**: SQS (auto-scaling, DLQ support, serverless)
 - **Low-Latency Cluster Messaging**: UDP multicast (requires `cluster_name` configuration)
 - **High-Throughput**: Kafka
 - **Lightweight Pub/Sub**: NATS or Redis
 
+**AWS Backend Selection**:
+- **Full AWS Stack**: Set `AWS_REGION` environment variable - all components automatically use AWS backends
+- **Hybrid**: Mix AWS and other backends by configuring individual components
+- **Cost-Effective**: DynamoDB On-Demand, SQS Standard, S3 Standard
+
+**AWS Backend Selection**:
+- **Full AWS Stack**: Set `AWS_REGION` environment variable - all components automatically use AWS backends
+- **Hybrid**: Mix AWS and other backends by configuring individual components
+- **Cost-Effective**: DynamoDB On-Demand, SQS Standard, S3 Standard
+
 ## Production Deployment
 
-### AWS EKS
+### AWS Deployment
+
+PlexSpaces supports full AWS deployment using DynamoDB, SQS, and S3 as backends. All tables, queues, and buckets are automatically created on first use.
+
+#### Prerequisites
+
+1. **AWS Account**: Active AWS account with appropriate permissions
+2. **AWS CLI**: Installed and configured (`aws configure`)
+3. **IAM Permissions**: The following permissions are required:
+   - DynamoDB: `CreateTable`, `DescribeTable`, `PutItem`, `GetItem`, `UpdateItem`, `DeleteItem`, `Query`, `Scan`, `BatchWriteItem`
+   - SQS: `CreateQueue`, `GetQueueUrl`, `SendMessage`, `ReceiveMessage`, `DeleteMessage`, `GetQueueAttributes`
+   - S3: `CreateBucket`, `PutObject`, `GetObject`, `DeleteObject`, `ListBucket`
+
+#### Configuration
+
+Set environment variables or configure in `config/default.yaml`:
+
+```bash
+# AWS Region (required)
+export AWS_REGION=us-east-1
+
+# AWS Credentials (use IAM roles in production, not hardcoded keys)
+export AWS_ACCESS_KEY_ID=your-access-key-id
+export AWS_SECRET_ACCESS_KEY=your-secret-access-key
+
+# Optional: Override endpoints for local testing
+# export DYNAMODB_ENDPOINT_URL=http://localhost:8000
+# export SQS_ENDPOINT_URL=http://localhost:4566
+# export S3_ENDPOINT_URL=http://localhost:4566
+```
+
+Or configure in `config/default.yaml`:
+
+```yaml
+aws:
+  region: "us-east-1"
+  dynamodb:
+    table_prefix: "plexspaces-"
+    endpoint_url: ""  # Leave empty for production
+  sqs:
+    queue_prefix: "plexspaces-"
+    endpoint_url: ""  # Leave empty for production
+  s3:
+    bucket: "plexspaces"
+    endpoint_url: ""  # Leave empty for production
+```
+
+#### Enable AWS Backends
+
+When `AWS_REGION` is set, PlexSpaces automatically uses AWS backends:
+
+- **Locks**: DynamoDB
+- **Scheduler**: DynamoDB
+- **KeyValue**: DynamoDB
+- **Channel**: SQS (with DLQ support)
+- **Workflow**: DynamoDB
+- **Journaling**: DynamoDB
+- **Blob Storage**: DynamoDB (metadata) + S3 (object storage)
+- **TupleSpace**: DynamoDB
+
+#### Deployment Steps
+
+1. **Configure AWS Credentials**:
+   ```bash
+   # Option 1: Environment variables
+   export AWS_REGION=us-east-1
+   export AWS_ACCESS_KEY_ID=your-key
+   export AWS_SECRET_ACCESS_KEY=your-secret
+   
+   # Option 2: AWS CLI configuration
+   aws configure
+   
+   # Option 3: IAM Role (recommended for EC2/ECS)
+   # Attach IAM role to EC2 instance or ECS task
+   ```
+
+2. **Start PlexSpaces Node**:
+   ```bash
+   # With AWS backends (automatic when AWS_REGION is set)
+   export AWS_REGION=us-east-1
+   ./target/release/plexspaces start --node-id node1
+   ```
+
+3. **Verify AWS Resources**:
+   ```bash
+   # List DynamoDB tables
+   aws dynamodb list-tables --region us-east-1 | grep plexspaces
+   
+   # List SQS queues
+   aws sqs list-queues --region us-east-1 | grep plexspaces
+   
+   # List S3 buckets
+   aws s3 ls | grep plexspaces
+   ```
+
+#### AWS EKS Deployment
+
+```bash
+# Create EKS cluster
+eksctl create cluster --name plexspaces-cluster --region us-east-1
+
+# Create IAM OIDC provider
+eksctl utils associate-iam-oidc-provider --cluster plexspaces-cluster --approve
+
+# Create IAM service account with DynamoDB, SQS, S3 permissions
+eksctl create iamserviceaccount \
+  --name plexspaces-sa \
+  --namespace default \
+  --cluster plexspaces-cluster \
+  --attach-policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess \
+  --attach-policy-arn arn:aws:iam::aws:policy/AmazonSQSFullAccess \
+  --attach-policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess \
+  --approve
+
+# Deploy with IAM role
+kubectl apply -f k8s/deployment.yaml
+
+# Expose via LoadBalancer
+kubectl expose deployment plexspaces --type=LoadBalancer
+```
+
+#### Kubernetes Deployment with AWS
+
+```yaml
+# k8s/deployment-aws.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plexspaces
+  labels:
+    app: plexspaces
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: plexspaces
+  template:
+    metadata:
+      labels:
+        app: plexspaces
+    spec:
+      serviceAccountName: plexspaces-sa  # IAM role via service account
+      containers:
+      - name: plexspaces-node
+        image: plexspaces/node:latest
+        ports:
+        - containerPort: 9001
+          name: grpc
+        env:
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: PLEXSPACES_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PLEXSPACES_LISTEN_ADDR
+          value: "0.0.0.0:9001"
+        # AWS credentials via IAM role (no need to set AWS_ACCESS_KEY_ID)
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+```
+
+#### Cost Optimization
+
+- **DynamoDB**: Use On-Demand billing mode (auto-scaling, pay per request)
+- **SQS**: Standard queues are cost-effective for most workloads
+- **S3**: Use S3 Standard for active data, S3 Intelligent-Tiering for variable access patterns
+- **Auto-created Resources**: All tables/queues/buckets are created with optimal settings
+
+#### Monitoring
+
+```bash
+# CloudWatch metrics are automatically exported
+# View in AWS Console:
+# - DynamoDB: Tables > Metrics
+# - SQS: Queues > Monitoring
+# - S3: Buckets > Metrics
+
+# Or use AWS CLI
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/DynamoDB \
+  --metric-name ConsumedReadCapacityUnits \
+  --dimensions Name=TableName,Value=plexspaces-locks \
+  --start-time 2025-01-01T00:00:00Z \
+  --end-time 2025-01-01T23:59:59Z \
+  --period 3600 \
+  --statistics Sum
+```
+
+#### Local Testing with AWS Services
+
+For local development, use Docker Compose to run DynamoDB Local and LocalStack:
+
+```bash
+# Start local AWS services
+docker-compose -f docker-compose.aws-local.yml up -d
+
+# Set local endpoints
+export DYNAMODB_ENDPOINT_URL=http://localhost:8000
+export SQS_ENDPOINT_URL=http://localhost:4566
+export S3_ENDPOINT_URL=http://localhost:4566
+export AWS_REGION=us-east-1
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+
+# Run tests
+./scripts/test-aws-integration.sh
+```
+
+See [docker-compose.aws-local.README.md](../docker-compose.aws-local.README.md) for details.
+
+### AWS EKS (Legacy)
 
 ```bash
 # Create EKS cluster

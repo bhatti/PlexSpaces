@@ -82,7 +82,6 @@ fn create_simple_supervisor_tree() -> SupervisorSpec {
             ChildSpec {
                 id: "worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -93,7 +92,6 @@ fn create_simple_supervisor_tree() -> SupervisorSpec {
             ChildSpec {
                 id: "worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -104,7 +102,6 @@ fn create_simple_supervisor_tree() -> SupervisorSpec {
             ChildSpec {
                 id: "worker-3".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -127,7 +124,6 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
             ChildSpec {
                 id: "nested-worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -137,7 +133,6 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
             ChildSpec {
                 id: "nested-worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -156,7 +151,6 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
             ChildSpec {
                 id: "root-worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -166,7 +160,6 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
             ChildSpec {
                 id: "child-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -413,7 +406,6 @@ async fn test_deeply_nested_supervisor_tree() {
             ChildSpec {
                 id: "deep-worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -432,7 +424,6 @@ async fn test_deeply_nested_supervisor_tree() {
             ChildSpec {
                 id: "level2-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -441,7 +432,6 @@ async fn test_deeply_nested_supervisor_tree() {
             ChildSpec {
                 id: "level2-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -460,7 +450,6 @@ async fn test_deeply_nested_supervisor_tree() {
             ChildSpec {
                 id: "root-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -470,7 +459,6 @@ async fn test_deeply_nested_supervisor_tree() {
             ChildSpec {
                 id: "level1-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -656,7 +644,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "level4-worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -666,7 +653,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "level4-worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -685,7 +671,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "level3-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -694,7 +679,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "level3-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -713,7 +697,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "level2-worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -723,7 +706,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "level2-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -732,7 +714,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "level2-worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -751,7 +732,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "root-worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -761,7 +741,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "level1-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -770,7 +749,6 @@ async fn test_complex_supervisor_hierarchy() {
             ChildSpec {
                 id: "root-worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -948,7 +926,6 @@ async fn test_multiple_sibling_supervisors() {
             ChildSpec {
                 id: "supervisor-a-worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -958,7 +935,6 @@ async fn test_multiple_sibling_supervisors() {
             ChildSpec {
                 id: "supervisor-a-worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -977,7 +953,6 @@ async fn test_multiple_sibling_supervisors() {
             ChildSpec {
                 id: "supervisor-b-worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -996,7 +971,6 @@ async fn test_multiple_sibling_supervisors() {
             ChildSpec {
                 id: "supervisor-a".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1005,7 +979,6 @@ async fn test_multiple_sibling_supervisors() {
             ChildSpec {
                 id: "supervisor-b".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1014,7 +987,6 @@ async fn test_multiple_sibling_supervisors() {
             ChildSpec {
                 id: "root-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1389,7 +1361,6 @@ async fn test_erlang_style_supervision_structure() {
             ChildSpec {
                 id: "worker_b".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1399,7 +1370,6 @@ async fn test_erlang_style_supervision_structure() {
             ChildSpec {
                 id: "worker_c".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1418,7 +1388,6 @@ async fn test_erlang_style_supervision_structure() {
             ChildSpec {
                 id: "worker_a".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1428,7 +1397,6 @@ async fn test_erlang_style_supervision_structure() {
             ChildSpec {
                 id: "sub_sup".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1587,7 +1555,6 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             ChildSpec {
                 id: "level3-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1606,7 +1573,6 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             ChildSpec {
                 id: "level2-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1615,7 +1581,6 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             ChildSpec {
                 id: "level2-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1634,7 +1599,6 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             ChildSpec {
                 id: "root-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,
@@ -1644,7 +1608,6 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             ChildSpec {
                 id: "level1-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
-                start_module: String::new(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: None,

@@ -30,9 +30,14 @@ mod tests {
     use plexspaces_locks::{
         sql::SqliteLockManager, AcquireLockOptions, LockManager, ReleaseLockOptions, RenewLockOptions,
     };
+    use plexspaces_common::RequestContext;
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::time::{sleep, Duration};
+
+    fn test_ctx() -> RequestContext {
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string())
+    }
 
     /// Create a new SQLite lock manager with in-memory database
     async fn create_manager() -> SqliteLockManager {
@@ -44,7 +49,7 @@ mod tests {
         let manager = create_manager().await;
 
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -61,7 +66,7 @@ mod tests {
         assert!(!lock.version.is_empty());
 
         // Verify lock exists in database
-        let retrieved = manager.get_lock("test-lock").await.unwrap();
+        let retrieved = manager.get_lock(&test_ctx(), "test-lock").await.unwrap();
         assert!(retrieved.is_some());
         let retrieved_lock = retrieved.unwrap();
         assert_eq!(retrieved_lock.holder_id, "node-1");
@@ -73,7 +78,7 @@ mod tests {
         let manager = create_manager().await;
 
         manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -86,7 +91,7 @@ mod tests {
 
         // Try to acquire with different holder
         let result = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-2".to_string(),
                 lease_duration_secs: 30,
@@ -107,7 +112,7 @@ mod tests {
         let manager = create_manager().await;
 
         let lock1 = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -120,7 +125,7 @@ mod tests {
 
         // Same holder acquiring again should refresh the lock
         let lock2 = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -141,7 +146,7 @@ mod tests {
         let manager = create_manager().await;
 
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -153,7 +158,7 @@ mod tests {
             .unwrap();
 
         let renewed = manager
-            .renew_lock(RenewLockOptions {
+            .renew_lock(&test_ctx(), RenewLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 version: lock.version.clone(),
@@ -168,7 +173,7 @@ mod tests {
         assert_eq!(renewed.holder_id, "node-1");
 
         // Verify in database
-        let retrieved = manager.get_lock("test-lock").await.unwrap().unwrap();
+        let retrieved = manager.get_lock(&test_ctx(), "test-lock").await.unwrap().unwrap();
         assert_eq!(retrieved.version, renewed.version);
         assert_eq!(retrieved.lease_duration_secs, 60);
     }
@@ -178,7 +183,7 @@ mod tests {
         let manager = create_manager().await;
 
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -191,7 +196,7 @@ mod tests {
 
         // Try to renew with wrong version
         let result = manager
-            .renew_lock(RenewLockOptions {
+            .renew_lock(&test_ctx(), RenewLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 version: "wrong-version".to_string(),
@@ -211,7 +216,7 @@ mod tests {
         let manager = create_manager().await;
 
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -224,7 +229,7 @@ mod tests {
 
         // Try to renew with wrong holder
         let result = manager
-            .renew_lock(RenewLockOptions {
+            .renew_lock(&test_ctx(), RenewLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-2".to_string(),
                 version: lock.version,
@@ -244,7 +249,7 @@ mod tests {
         let manager = create_manager().await;
 
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -256,7 +261,7 @@ mod tests {
             .unwrap();
 
         manager
-            .release_lock(ReleaseLockOptions {
+            .release_lock(&test_ctx(), ReleaseLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 version: lock.version,
@@ -266,7 +271,7 @@ mod tests {
             .unwrap();
 
         // Verify lock is deleted
-        let result = manager.get_lock("test-lock").await.unwrap();
+        let result = manager.get_lock(&test_ctx(), "test-lock").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -275,7 +280,7 @@ mod tests {
         let manager = create_manager().await;
 
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -288,7 +293,7 @@ mod tests {
 
         // Release without deleting
         manager
-            .release_lock(ReleaseLockOptions {
+            .release_lock(&test_ctx(), ReleaseLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 version: lock.version,
@@ -298,7 +303,7 @@ mod tests {
             .unwrap();
 
         // Lock should still exist but be unlocked
-        let result = manager.get_lock("test-lock").await.unwrap();
+        let result = manager.get_lock(&test_ctx(), "test-lock").await.unwrap();
         assert!(result.is_some());
         let released_lock = result.unwrap();
         assert!(!released_lock.locked);
@@ -310,7 +315,7 @@ mod tests {
 
         // Acquire lock with very short duration
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 1, // 1 second
@@ -326,7 +331,7 @@ mod tests {
 
         // Different holder should be able to acquire expired lock
         let new_lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-2".to_string(),
                 lease_duration_secs: 30,
@@ -341,7 +346,7 @@ mod tests {
         assert_ne!(new_lock.version, lock.version);
 
         // Verify in database
-        let retrieved = manager.get_lock("test-lock").await.unwrap().unwrap();
+        let retrieved = manager.get_lock(&test_ctx(), "test-lock").await.unwrap().unwrap();
         assert_eq!(retrieved.holder_id, "node-2");
     }
 
@@ -354,7 +359,7 @@ mod tests {
         metadata.insert("key2".to_string(), "value2".to_string());
 
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -368,7 +373,7 @@ mod tests {
         assert_eq!(lock.metadata, metadata);
 
         // Verify in database
-        let retrieved = manager.get_lock("test-lock").await.unwrap().unwrap();
+        let retrieved = manager.get_lock(&test_ctx(), "test-lock").await.unwrap().unwrap();
         assert_eq!(retrieved.metadata, metadata);
     }
 
@@ -382,7 +387,7 @@ mod tests {
             let manager_clone = manager.clone();
             let handle = tokio::spawn(async move {
                 manager_clone
-                    .acquire_lock(AcquireLockOptions {
+                    .acquire_lock(&test_ctx(), AcquireLockOptions {
                         lock_key: "concurrent-lock".to_string(),
                         holder_id: format!("node-{}", i),
                         lease_duration_secs: 30,
@@ -412,7 +417,7 @@ mod tests {
         let winner_holder_id = successes[0].holder_id.clone();
 
         // Verify in database
-        let retrieved = manager.get_lock("concurrent-lock").await.unwrap().unwrap();
+        let retrieved = manager.get_lock(&test_ctx(), "concurrent-lock").await.unwrap().unwrap();
         assert_eq!(retrieved.holder_id, winner_holder_id);
     }
 
@@ -424,7 +429,7 @@ mod tests {
 
         // Acquire lock
         let lock = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "query-test-lock".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -436,7 +441,7 @@ mod tests {
             .unwrap();
 
         // Query via get_lock (which queries the database)
-        let retrieved = manager.get_lock("query-test-lock").await.unwrap().unwrap();
+        let retrieved = manager.get_lock(&test_ctx(), "query-test-lock").await.unwrap().unwrap();
 
         // Verify holder_id matches
         assert_eq!(retrieved.holder_id, "node-1");
@@ -451,7 +456,7 @@ mod tests {
 
         // Acquire multiple different locks
         let lock1 = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "lock-1".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -463,7 +468,7 @@ mod tests {
             .unwrap();
 
         let lock2 = manager
-            .acquire_lock(AcquireLockOptions {
+            .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "lock-2".to_string(),
                 holder_id: "node-1".to_string(),
                 lease_duration_secs: 30,
@@ -478,8 +483,8 @@ mod tests {
         assert_eq!(lock1.holder_id, lock2.holder_id);
 
         // Both locks should be retrievable
-        let retrieved1 = manager.get_lock("lock-1").await.unwrap();
-        let retrieved2 = manager.get_lock("lock-2").await.unwrap();
+        let retrieved1 = manager.get_lock(&test_ctx(), "lock-1").await.unwrap();
+        let retrieved2 = manager.get_lock(&test_ctx(), "lock-2").await.unwrap();
 
         assert!(retrieved1.is_some());
         assert!(retrieved2.is_some());

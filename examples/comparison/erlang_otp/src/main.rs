@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a node
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Spawn counter actor (equivalent to Erlang gen_server:start_link)
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
@@ -200,7 +200,7 @@ mod tests {
     #[tokio::test]
     async fn test_counter_increment() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         // Spawn using ActorFactory with facets
         use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
@@ -248,7 +248,7 @@ mod tests {
     #[tokio::test]
     async fn test_counter_decrement() {
         let node = NodeBuilder::new("test-node-2")
-            .build();
+            .build().await;
 
         let behavior = Box::new(CounterActor::new());
         let actor = ActorBuilder::new(behavior)

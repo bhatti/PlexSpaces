@@ -80,6 +80,11 @@ help:
 	@echo "  make docker-compose-down - Stop docker-compose"
 	@echo "  make docker-compose-logs - View docker-compose logs"
 	@echo "  make docker-compose-restart - Restart docker-compose"
+	@echo "  make docker-compose-aws-local-up - Start AWS Local services (DynamoDB + LocalStack)"
+	@echo "  make docker-compose-aws-local-down - Stop AWS Local services"
+	@echo "  make docker-compose-aws-local-logs - View AWS Local services logs"
+	@echo "  make docker-compose-aws-local-restart - Restart AWS Local services"
+	@echo "  make test-aws-local - Run tests with AWS Local services"
 	@echo ""
 	@echo "☸️  Kubernetes:"
 	@echo "  make k8s-deploy       - Deploy to Kubernetes"
@@ -829,6 +834,63 @@ docker-compose-logs:
 
 # Restart docker-compose
 docker-compose-restart: docker-compose-down docker-compose-up
+
+# Start AWS Local services (DynamoDB Local + LocalStack)
+docker-compose-aws-local-up:
+	@echo "Starting AWS Local services (DynamoDB Local + LocalStack)..."
+	@if command -v docker-compose >/dev/null 2>&1; then \
+		docker-compose -f docker-compose.aws-local.yml up -d; \
+	elif docker compose version >/dev/null 2>&1; then \
+		docker compose -f docker-compose.aws-local.yml up -d; \
+	else \
+		echo "❌ docker-compose not found. Please install docker-compose or Docker with compose plugin."; \
+		exit 1; \
+	fi
+	@echo "Waiting for services to be healthy..."
+	@sleep 5
+	@echo "AWS Local services started:"
+	@echo "  - DynamoDB Local: http://localhost:8000"
+	@echo "  - LocalStack (SQS/S3): http://localhost:4566"
+	@echo ""
+	@echo "Set environment variables:"
+	@echo "  export DYNAMODB_ENDPOINT_URL=http://localhost:8000"
+	@echo "  export SQS_ENDPOINT_URL=http://localhost:4566"
+	@echo "  export S3_ENDPOINT_URL=http://localhost:4566"
+	@echo "  export AWS_REGION=us-east-1"
+	@echo "  export AWS_ACCESS_KEY_ID=test"
+	@echo "  export AWS_SECRET_ACCESS_KEY=test"
+
+# Stop AWS Local services
+docker-compose-aws-local-down:
+	@echo "Stopping AWS Local services..."
+	@if command -v docker-compose >/dev/null 2>&1; then \
+		docker-compose -f docker-compose.aws-local.yml down; \
+	elif docker compose version >/dev/null 2>&1; then \
+		docker compose -f docker-compose.aws-local.yml down; \
+	else \
+		echo "❌ docker-compose not found."; \
+		exit 1; \
+	fi
+	@echo "AWS Local services stopped."
+
+# View AWS Local services logs
+docker-compose-aws-local-logs:
+	@if command -v docker-compose >/dev/null 2>&1; then \
+		docker-compose -f docker-compose.aws-local.yml logs -f; \
+	elif docker compose version >/dev/null 2>&1; then \
+		docker compose -f docker-compose.aws-local.yml logs -f; \
+	else \
+		echo "❌ docker-compose not found."; \
+		exit 1; \
+	fi
+
+# Restart AWS Local services
+docker-compose-aws-local-restart: docker-compose-aws-local-down docker-compose-aws-local-up
+
+# Run tests with AWS Local services
+test-aws-local:
+	@echo "Running AWS integration tests with Docker services..."
+	@./scripts/test-aws-integration.sh
 
 # ============================================================================
 # Kubernetes Targets

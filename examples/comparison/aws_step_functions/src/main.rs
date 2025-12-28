@@ -262,7 +262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a node
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Create order
     let order = OrderRequest {
@@ -373,7 +373,7 @@ mod tests {
     #[tokio::test]
     async fn test_order_state_machine() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let order = OrderRequest {
             order_id: "TEST-001".to_string(),

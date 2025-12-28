@@ -2063,7 +2063,6 @@ impl Node {
                                 ChildSpec {
                                     id: name.clone(), // Use application name as actor ID
                                     r#type: ChildType::ChildTypeWorker.into(),
-                                    start_module: String::new(), // Not needed for WASM apps
                                     args: std::collections::HashMap::new(),
                                     restart: RestartPolicy::RestartPolicyPermanent.into(),
                                     shutdown_timeout: None,

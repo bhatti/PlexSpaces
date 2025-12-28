@@ -230,27 +230,23 @@ message ChildSpec {
   // Child type (worker or supervisor)
   ChildType type = 2;
 
-  // Module to start (fully qualified name)
-  // e.g., "byzantine::General" or "byzantine::GeneralSupervisor"
-  string start_module = 3;
-
   // Arguments to pass to start function
-  map<string, string> args = 4;
+  map<string, string> args = 3;
 
   // Restart policy
-  RestartPolicy restart = 5;
+  RestartPolicy restart = 4;
 
   // Shutdown timeout
-  google.protobuf.Duration shutdown_timeout = 6;
+  google.protobuf.Duration shutdown_timeout = 5;
 
   // Nested supervisor (if type=SUPERVISOR)
-  optional SupervisorSpec supervisor = 7;
+  optional SupervisorSpec supervisor = 6;
 
   // Facet configuration (for automatic attachment during actor creation)
   // Facets are attached in priority order (high priority first) before actor.init() is called
   // All facets are automatically restored during supervisor restart
   // Phase 1: Unified Lifecycle - Multiple facets support
-  repeated plexspaces.common.v1.Facet facets = 8;
+  repeated plexspaces.common.v1.Facet facets = 7;
 }
 
 // Child type

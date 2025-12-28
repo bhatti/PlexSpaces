@@ -26,9 +26,13 @@ tokio-util = { version = "0.7", features = ["io"] }
 # Object store for S3-compatible backends
 object_store = { version = "0.10", features = ["aws", "gcp", "azure"] }
 
-# AWS SDK for presigned URLs (optional, for presigned URL support)
+# AWS SDK for presigned URLs and DDB metadata (optional)
 aws-sdk-s3 = { version = "1.0", optional = true }
+aws-sdk-dynamodb = { version = "1", optional = true }
 aws-config = { version = "1.0", optional = true }
+
+# Observability
+metrics = "0.23"
 
 # SQL backend support
 # Note: AnyPool requires "any" feature, and sqlite driver must be enabled
@@ -65,7 +69,9 @@ sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
 [features]
 default = []
 sql-backend = ["sqlx"]
-all-backends = ["sql-backend"]
+ddb-backend = ["aws-sdk-dynamodb", "aws-config"]
+s3-backend = ["aws-sdk-s3", "aws-config"]
+all-backends = ["sql-backend", "ddb-backend", "s3-backend"]
 server = ["tonic", "hyper", "tower", "tower-http", "multer", "http-body-util", "axum"]
 presigned-urls = ["aws-sdk-s3", "aws-config"]
 

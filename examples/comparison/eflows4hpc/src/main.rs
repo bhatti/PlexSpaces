@@ -212,7 +212,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating Unified Workflow Platform (HPC + Big Data + ML Integration)");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // eFlows4HPC integrates HPC simulation, big data analytics, and ML training
     let actor_id: ActorId = "unified-workflow/eflows4hpc-1@comparison-node-1".to_string();
@@ -313,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn test_unified_workflow() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "unified-workflow/test-1@test-node".to_string();
         // Create DurabilityFacet

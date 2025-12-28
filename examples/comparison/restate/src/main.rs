@@ -159,7 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a node
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Create DurabilityFacet (Restate-style journaling and deterministic replay)
     let storage = MemoryJournalStorage::new();
@@ -290,7 +290,7 @@ mod tests {
     #[tokio::test]
     async fn test_payment_processing_with_journaling() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         // Create DurabilityFacet
         let storage = MemoryJournalStorage::new();

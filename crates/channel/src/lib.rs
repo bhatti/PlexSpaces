@@ -205,6 +205,9 @@ mod sqlite_backend;
 #[cfg(feature = "udp-backend")]
 mod udp_backend;
 
+#[cfg(feature = "sqs-backend")]
+mod sqs_backend;
+
 // Mock backend for testing
 #[cfg(any(test, feature = "test-utils"))]
 pub mod mock_backend;
@@ -231,3 +234,6 @@ pub use sqlite_backend::*;
 
 #[cfg(feature = "udp-backend")]
 pub use udp_backend::*;
+
+#[cfg(feature = "sqs-backend")]
+pub use sqs_backend::*;

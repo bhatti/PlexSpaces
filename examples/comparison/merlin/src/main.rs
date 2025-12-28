@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating HPC Workflow Orchestration (Scientific Simulation Ensembles)");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Merlin orchestrates HPC workflows for scientific simulations
     let actor_id: ActorId = "ensemble-workflow/merlin-1@comparison-node-1".to_string();
@@ -263,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn test_ensemble_workflow() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "ensemble-workflow/test-1@test-node".to_string();
         let behavior = Box::new(EnsembleWorkflowActor::new());

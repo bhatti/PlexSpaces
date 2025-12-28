@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating Linda + Event-Driven Programming (TupleSpace + GenEventBehavior)");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // LuaTS combines Linda (TupleSpace) with event-driven programming
     let coordinator_id: ActorId = "event-coordinator/luats-1@comparison-node-1".to_string();
@@ -301,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn test_event_coordinator() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "event-coordinator/test-1@test-node".to_string();
         

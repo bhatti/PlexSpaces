@@ -1,0 +1,138 @@
+// PlexSpaces Actor Interface - Channels (Queues & Topics)
+//
+// Message channels for pub/sub and work distribution patterns.
+// Queues provide load-balanced delivery, Topics provide broadcast.
+
+interface channels {
+    use types.{payload, message-id, duration-ms, actor-error};
+
+    /// Queue message with metadata
+    record queue-message {
+        /// Unique message ID
+        id: message-id,
+        /// Message type for routing
+        msg-type: string,
+        /// Message payload
+        payload: payload,
+        /// Timestamp when enqueued
+        timestamp: u64,
+        /// Delivery attempt count
+        delivery-count: u32,
+        /// Custom headers
+        headers: list<tuple<string, string>>,
+    }
+
+    /// Send message to queue
+    ///
+    /// Message is delivered to ONE consumer (load-balanced).
+    /// If no consumers are available, message is queued.
+    ///
+    /// # Arguments
+    /// - `queue-name`: Name of the queue
+    /// - `msg-type`: Message type for routing/filtering
+    /// - `payload`: Message payload
+    ///
+    /// # Returns
+    /// - `ok(message-id)`: Message enqueued
+    /// - `err`: Send failed
+    ///
+    /// # Example
+    /// ```rust
+    /// channels::send_to_queue("orders", "order.created", order_bytes)?;
+    /// ```
+    send-to-queue: func(queue-name: string, msg-type: string, payload: payload) -> result<message-id, actor-error>;
+
+    /// Send with options
+    ///
+    /// # Arguments
+    /// - `queue-name`: Queue name
+    /// - `msg-type`: Message type
+    /// - `payload`: Message payload
+    /// - `delay-ms`: Delay before message becomes visible
+    /// - `ttl-ms`: Time-to-live (0 = infinite)
+    /// - `headers`: Custom headers
+    send-to-queue-with-options: func(
+        queue-name: string,
+        msg-type: string,
+        payload: payload,
+        delay-ms: duration-ms,
+        ttl-ms: duration-ms,
+        headers: list<tuple<string, string>>
+    ) -> result<message-id, actor-error>;
+
+    /// Receive message from queue
+    ///
+    /// Blocks until message available or timeout expires.
+    /// Message is "leased" - must be acked or nacked.
+    ///
+    /// # Arguments
+    /// - `queue-name`: Queue name
+    /// - `timeout-ms`: Maximum time to wait (0 = poll, return immediately)
+    ///
+    /// # Returns
+    /// - `ok(some(message))`: Message received
+    /// - `ok(none)`: No message available (timeout)
+    /// - `err`: Receive failed
+    receive-from-queue: func(queue-name: string, timeout-ms: duration-ms) -> result<option<queue-message>, actor-error>;
+
+    /// Acknowledge message processing
+    ///
+    /// Removes message from queue permanently.
+    /// Must be called after successful processing.
+    ack: func(queue-name: string, message-id: message-id) -> result<_, actor-error>;
+
+    /// Negative acknowledge (reject message)
+    ///
+    /// Returns message to queue for redelivery.
+    /// Use when processing fails but message should be retried.
+    ///
+    /// # Arguments
+    /// - `queue-name`: Queue name
+    /// - `message-id`: Message to reject
+    /// - `requeue`: If true, message goes back to queue. If false, goes to DLQ.
+    nack: func(queue-name: string, message-id: message-id, requeue: bool) -> result<_, actor-error>;
+
+    /// Publish message to topic
+    ///
+    /// Message is delivered to ALL subscribers (broadcast).
+    ///
+    /// # Arguments
+    /// - `topic-name`: Topic name
+    /// - `msg-type`: Message type for filtering
+    /// - `payload`: Message payload
+    ///
+    /// # Returns
+    /// - `ok(message-id)`: Message published
+    /// - `err`: Publish failed
+    publish-to-topic: func(topic-name: string, msg-type: string, payload: payload) -> result<message-id, actor-error>;
+
+    /// Subscribe to topic
+    ///
+    /// Creates subscription that receives all messages published to topic.
+    /// Each subscriber gets its own copy of messages.
+    ///
+    /// # Arguments
+    /// - `topic-name`: Topic to subscribe to
+    /// - `filter`: Optional message type filter (e.g., "order.*")
+    ///
+    /// # Returns
+    /// Subscription ID for unsubscribe
+    subscribe-to-topic: func(topic-name: string, filter: option<string>) -> result<u64, actor-error>;
+
+    /// Unsubscribe from topic
+    unsubscribe-from-topic: func(subscription-id: u64) -> result<_, actor-error>;
+
+    /// Create queue (if not exists)
+    ///
+    /// # Arguments
+    /// - `queue-name`: Queue name
+    /// - `max-size`: Maximum queue size (0 = unlimited)
+    /// - `message-ttl-ms`: Default TTL for messages (0 = infinite)
+    create-queue: func(queue-name: string, max-size: u32, message-ttl-ms: duration-ms) -> result<_, actor-error>;
+
+    /// Delete queue
+    delete-queue: func(queue-name: string) -> result<_, actor-error>;
+
+    /// Get queue depth (number of messages)
+    queue-depth: func(queue-name: string) -> result<u64, actor-error>;
+}

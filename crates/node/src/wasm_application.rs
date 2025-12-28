@@ -1087,7 +1087,6 @@ mod tests {
                 ChildSpec {
                     id: "worker-1".to_string(),
                     r#type: ChildType::ChildTypeWorker.into(),
-                    start_module: "test::Worker".to_string(),
                     args: std::collections::HashMap::new(),
                     restart: RestartPolicy::RestartPolicyPermanent.into(),
                     shutdown_timeout: Some(Duration { seconds: 5, nanos: 0 }),

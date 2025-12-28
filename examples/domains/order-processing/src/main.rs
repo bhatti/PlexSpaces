@@ -69,7 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create node using NodeBuilder
     info!("🏗️  Creating node...");
     let node = NodeBuilder::new(node_id.clone())
-        .build();
+        .build()
+        .await;
     info!("✅ Node created: {}", node_id);
     println!();
 

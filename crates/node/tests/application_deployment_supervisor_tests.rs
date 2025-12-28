@@ -78,7 +78,7 @@ async fn test_application_spec_validation() {
 #[tokio::test]
 async fn test_child_spec_validation() {
     // Test validation of:
-    // - Required fields (id, type, start_module)
+    // - Required fields (id, type)
     // - Valid ChildType
     // - Valid RestartPolicy
     // - Valid ShutdownSpec
@@ -141,9 +141,11 @@ async fn test_invalid_supervisor_spec_fails() {
 #[tokio::test]
 async fn test_invalid_child_spec_fails() {
     // Test that invalid child specs are rejected:
-    // - Empty start_module
+    // - Empty id
     // - Invalid child types
     // - Invalid shutdown specs
 }
+
+
 
 

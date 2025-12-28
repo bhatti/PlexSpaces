@@ -1263,20 +1263,44 @@ mod tests {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
         let ctx = test_ctx();
 
-        kv.put_with_ttl(&ctx, "key", b"value".to_vec(), Duration::from_secs(1))
+        // Use a longer TTL to avoid timing issues (now_timestamp uses seconds precision)
+        let ttl_duration = Duration::from_secs(1);
+        kv.put_with_ttl(&ctx, "key", b"value".to_vec(), ttl_duration)
             .await
             .unwrap();
 
-        // Should exist immediately
-        assert!(kv.exists(&ctx, "key").await.unwrap());
+        // Should exist immediately - use get() to verify it was actually stored
+        let value = kv.get(&ctx, "key").await.unwrap();
+        assert!(value.is_some(), "Key should exist immediately after put_with_ttl");
+        assert_eq!(value.unwrap(), b"value".to_vec());
+        
+        // Also verify exists() works
+        assert!(kv.exists(&ctx, "key").await.unwrap(), "exists() should return true for key with TTL");
 
-        // Check TTL
+        // Check TTL - should be approximately the duration we set (within 100ms tolerance for timing)
         let ttl = kv.get_ttl(&ctx, "key").await.unwrap();
-        assert!(ttl.is_some());
+        assert!(ttl.is_some(), "TTL should be set");
+        let ttl_value = ttl.unwrap();
+        // TTL should be close to what we set (within 100ms tolerance for timing variations)
+        assert!(ttl_value <= ttl_duration + Duration::from_millis(100), 
+            "TTL should be <= set duration + tolerance, got {:?} but expected <= {:?}", 
+            ttl_value, ttl_duration + Duration::from_millis(100));
+        assert!(ttl_value >= ttl_duration - Duration::from_millis(100), 
+            "TTL should be >= set duration - tolerance, got {:?} but expected >= {:?}", 
+            ttl_value, ttl_duration - Duration::from_millis(100));
 
-        // Wait for expiry
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(!kv.exists(&ctx, "key").await.unwrap());
+        // Poll until expiry instead of fixed sleep
+        // This is more reliable than fixed timing
+        let start = std::time::Instant::now();
+        let mut expired = false;
+        while start.elapsed() < Duration::from_secs(5) {
+            if !kv.exists(&ctx, "key").await.unwrap() {
+                expired = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(expired, "Key should expire within 5 seconds");
     }
 
     #[tokio::test]

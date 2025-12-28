@@ -346,7 +346,6 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
     let child_spec = ChildSpec {
         id: format!("{}-worker", name),
         r#type: ChildType::ChildTypeWorker.into(),
-        start_module: "test_behavior".to_string(), // Will need behavior factory
         args: HashMap::new(),
         restart: RestartPolicy::RestartPolicyPermanent.into(),
         shutdown_timeout: None,
@@ -373,5 +372,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
         dependencies: vec![],
     }
 }
+
+
 
 

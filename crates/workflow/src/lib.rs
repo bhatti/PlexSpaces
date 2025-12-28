@@ -202,6 +202,9 @@
 pub mod executor;
 pub mod service;
 pub mod storage;
+
+#[cfg(feature = "ddb-backend")]
+pub use storage::ddb::{DynamoDBWorkflowStorage, WorkflowStorageTrait};
 pub mod types;
 pub mod workflow_actor;
 

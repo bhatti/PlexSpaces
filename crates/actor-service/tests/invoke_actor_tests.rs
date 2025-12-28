@@ -133,15 +133,13 @@ async fn create_test_registry_with_actors(
     impl ObjectRegistryTrait for ObjectRegistryAdapter {
         async fn lookup(
             &self,
-            tenant_id: &str,
+            ctx: &plexspaces_core::RequestContext,
             object_id: &str,
-            namespace: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-            let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
             self.inner
-                .lookup(&ctx, obj_type, object_id)
+                .lookup(ctx, obj_type, object_id)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -160,12 +158,27 @@ async fn create_test_registry_with_actors(
 
         async fn register(
             &self,
+            ctx: &plexspaces_core::RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.inner
-                .register(registration)
+                .register(ctx, registration)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        }
+
+        async fn discover(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+            _name: Option<String>,
+            _labels: Option<Vec<String>>,
+            _exclude_labels: Option<Vec<String>>,
+            _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+            _limit: usize,
+            _offset: usize,
+        ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec![])
         }
     }
     
@@ -180,7 +193,8 @@ async fn create_test_registry_with_actors(
     
     // Create ActorFactory and required services
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
-    let facet_manager = Arc::new(FacetManager::new());
+    use plexspaces_core::FacetManagerServiceWrapper;
+    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(FacetManager::new())));
     service_locator.register_service(virtual_actor_manager).await;
     service_locator.register_service(facet_manager).await;
     

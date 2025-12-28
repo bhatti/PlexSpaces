@@ -22,13 +22,15 @@
 
 use heat_diffusion::config::GridConfig;
 use heat_diffusion::coordinator::Coordinator;
+use plexspaces_node::NodeBuilder;
+use std::sync::Arc;
 
 /// Helper to print detailed metrics
 fn print_detailed_metrics(config: &GridConfig, result: &heat_diffusion::coordinator::SimulationResult) {
     println!("\n========== E2E TEST RESULTS ==========");
     println!("Grid: {:?}, Region: {:?}", config.grid_size, config.region_size);
     println!("Actors: {} ({} rows × {} cols)",
-        result.metrics.len(),
+        result.metrics.step_metrics.len(),
         config.actor_grid_dimensions().0,
         config.actor_grid_dimensions().1);
     println!("Cells per actor: {}", config.cells_per_actor());
@@ -40,11 +42,9 @@ fn print_detailed_metrics(config: &GridConfig, result: &heat_diffusion::coordina
     println!();
 
     println!("Performance Metrics:");
-    let total_compute: f64 = result.metrics.iter().map(|m| m.total_compute_ms).sum();
-    let total_coord: f64 = result.metrics.iter().map(|m| m.total_coordinate_ms).sum();
-    let avg_ratio: f64 = result.metrics.iter()
-        .map(|m| m.granularity_ratio)
-        .sum::<f64>() / result.metrics.len() as f64;
+    let total_compute: f64 = result.metrics.compute_duration_ms as f64;
+    let total_coord: f64 = result.metrics.coordinate_duration_ms as f64;
+    let avg_ratio: f64 = result.metrics.granularity_ratio;
 
     println!("  Total Compute Time:   {:.2} ms", total_compute);
     println!("  Total Coordinate Time: {:.2} ms", total_coord);
@@ -58,12 +58,14 @@ fn print_detailed_metrics(config: &GridConfig, result: &heat_diffusion::coordina
     }
     println!();
 
-    println!("Per-Actor Breakdown:");
-    for (i, metric) in result.metrics.iter().enumerate() {
-        println!("  Actor {}: compute={:.2}ms, coord={:.2}ms, ratio={:.4}, iters={}",
-            i, metric.total_compute_ms, metric.total_coordinate_ms,
-            metric.granularity_ratio, metric.iterations);
+    println!("Per-Step Breakdown:");
+    for (i, metric) in result.metrics.step_metrics.iter().enumerate() {
+        println!("  Step {}: compute={}ms, coord={}ms, messages={}",
+            i, metric.compute_ms, metric.coordinate_ms, metric.message_count);
     }
+    println!("Overall: compute={}ms, coord={}ms, ratio={:.4}",
+        result.metrics.compute_duration_ms, result.metrics.coordinate_duration_ms,
+        result.metrics.granularity_ratio);
     println!("======================================\n");
 }
 
@@ -78,8 +80,11 @@ async fn e2e_small_grid_with_metrics() {
     let config = GridConfig::new((10, 10), (5, 5))
         .expect("Valid configuration");
 
+    let node = Arc::new(NodeBuilder::new("test-node")
+        .build()
+        .await);
     let mut coordinator = Coordinator::new(config.clone());
-    coordinator.initialize();
+    coordinator.initialize(node).await.expect("Should initialize");
 
     let result = coordinator.run().await.expect("Should succeed");
 
@@ -87,10 +92,8 @@ async fn e2e_small_grid_with_metrics() {
     print_detailed_metrics(&config, &result);
 
     // Verify metrics make sense
-    for metric in &result.metrics {
-        assert!(metric.total_compute_ms > 0.0, "Should have compute time");
-        assert!(metric.iterations == result.iterations, "All actors should have same iterations");
-    }
+    assert!(result.metrics.compute_duration_ms > 0, "Should have compute time");
+    assert!(result.metrics.coordinate_duration_ms > 0, "Should have coordinate time");
 }
 
 #[tokio::test]
@@ -104,8 +107,11 @@ async fn e2e_medium_grid_with_metrics() {
     let config = GridConfig::new((30, 30), (10, 10))
         .expect("Valid configuration");
 
+    let node = Arc::new(NodeBuilder::new("test-node")
+        .build()
+        .await);
     let mut coordinator = Coordinator::new(config.clone());
-    coordinator.initialize();
+    coordinator.initialize(node).await.expect("Should initialize");
 
     let result = coordinator.run().await.expect("Should succeed");
 
@@ -113,9 +119,7 @@ async fn e2e_medium_grid_with_metrics() {
     print_detailed_metrics(&config, &result);
 
     // Verify granularity calculations
-    let avg_ratio: f64 = result.metrics.iter()
-        .map(|m| m.granularity_ratio)
-        .sum::<f64>() / result.metrics.len() as f64;
+    let avg_ratio: f64 = result.metrics.granularity_ratio;
 
     assert!(avg_ratio > 0.0, "Granularity ratio should be positive");
 }
@@ -131,8 +135,11 @@ async fn e2e_large_grid_stress_test() {
     let config = GridConfig::new((40, 40), (10, 10))
         .expect("Valid configuration");
 
+    let node = Arc::new(NodeBuilder::new("test-node")
+        .build()
+        .await);
     let mut coordinator = Coordinator::new(config.clone());
-    coordinator.initialize();
+    coordinator.initialize(node).await.expect("Should initialize");
 
     let start = std::time::Instant::now();
     let result = coordinator.run().await.expect("Should succeed");
@@ -160,16 +167,22 @@ async fn e2e_granularity_comparison() {
     let config_fine = GridConfig::new((40, 40), (10, 10))
         .expect("Valid configuration");
 
+    let node_fine = Arc::new(NodeBuilder::new("test-node-fine")
+        .build()
+        .await);
     let mut coord_fine = Coordinator::new(config_fine.clone());
-    coord_fine.initialize();
+    coord_fine.initialize(node_fine).await.expect("Should initialize");
     let result_fine = coord_fine.run().await.expect("Should succeed");
 
     // Coarse-grained: 4 actors (larger regions)
     let config_coarse = GridConfig::new((40, 40), (20, 20))
         .expect("Valid configuration");
 
+    let node_coarse = Arc::new(NodeBuilder::new("test-node-coarse")
+        .build()
+        .await);
     let mut coord_coarse = Coordinator::new(config_coarse.clone());
-    coord_coarse.initialize();
+    coord_coarse.initialize(node_coarse).await.expect("Should initialize");
     let result_coarse = coord_coarse.run().await.expect("Should succeed");
 
     println!("\n📊 Granularity Comparison:");
@@ -180,13 +193,8 @@ async fn e2e_granularity_comparison() {
     print_detailed_metrics(&config_coarse, &result_coarse);
 
     // Coarse should have better granularity ratio
-    let fine_ratio: f64 = result_fine.metrics.iter()
-        .map(|m| m.granularity_ratio)
-        .sum::<f64>() / result_fine.metrics.len() as f64;
-
-    let coarse_ratio: f64 = result_coarse.metrics.iter()
-        .map(|m| m.granularity_ratio)
-        .sum::<f64>() / result_coarse.metrics.len() as f64;
+    let fine_ratio: f64 = result_fine.metrics.granularity_ratio;
+    let coarse_ratio: f64 = result_coarse.metrics.granularity_ratio;
 
     println!("📈 Analysis:");
     println!("  Fine-grained ratio:   {:.4}", fine_ratio);
@@ -212,14 +220,20 @@ async fn e2e_convergence_behavior() {
 
     // Loose threshold
     config.convergence_threshold = 0.1;
+    let node_loose = Arc::new(NodeBuilder::new("test-node-loose")
+        .build()
+        .await);
     let mut coord_loose = Coordinator::new(config.clone());
-    coord_loose.initialize();
+    coord_loose.initialize(node_loose).await.expect("Should initialize");
     let result_loose = coord_loose.run().await.expect("Should succeed");
 
     // Tight threshold
     config.convergence_threshold = 0.001;
+    let node_tight = Arc::new(NodeBuilder::new("test-node-tight")
+        .build()
+        .await);
     let mut coord_tight = Coordinator::new(config.clone());
-    coord_tight.initialize();
+    coord_tight.initialize(node_tight).await.expect("Should initialize");
     let result_tight = coord_tight.run().await.expect("Should succeed");
 
     println!("\n📊 Convergence Threshold Analysis:");

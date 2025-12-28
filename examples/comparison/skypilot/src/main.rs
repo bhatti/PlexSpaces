@@ -226,7 +226,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating Multi-Cloud AI Workload Orchestration with Cost Optimization");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // SkyPilot schedules AI workloads across multiple clouds
     let actor_id: ActorId = "skypilot-scheduler/scheduler-1@comparison-node-1".to_string();
@@ -357,7 +357,7 @@ mod tests {
     #[tokio::test]
     async fn test_skypilot_scheduler() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "skypilot-scheduler/test-1@test-node".to_string();
         // Spawn using ActorFactory with facets

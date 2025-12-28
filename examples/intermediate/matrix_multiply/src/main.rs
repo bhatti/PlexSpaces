@@ -71,7 +71,8 @@ async fn main() -> Result<()> {
 
     // Create node using NodeBuilder
     let node = NodeBuilder::new("matrix-node")
-        .build();
+        .build()
+        .await;
 
     // Create TupleSpace for coordination
     let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));

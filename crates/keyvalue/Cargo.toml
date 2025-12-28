@@ -30,6 +30,11 @@ futures = { workspace = true, optional = true }
 bytes = { version = "1.5", optional = true }
 chrono = { workspace = true, optional = true }
 
+# Optional DynamoDB backend support
+aws-sdk-dynamodb = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
+metrics = { version = "0.23", optional = true }
+
 [dev-dependencies]
 tokio-test = "0.4"
 anyhow = "1.0"
@@ -39,6 +44,7 @@ serial_test = "3.0"
 tempfile = "3.10"
 reqwest = { version = "0.12", features = ["json"] }
 object_store = "0.10"
+ulid = "1.2"
 # Ensure sqlx with sqlite and "any" feature is available in tests (for blob backend tests)
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
 
@@ -48,7 +54,8 @@ sql-backend = ["sqlx"]
 redis-backend = ["redis"]
 # blob-backend requires sql-backend (for repository) and ensures sqlx has "any" feature
 blob-backend = ["object_store", "futures", "bytes", "chrono"]
-all-backends = ["sql-backend", "redis-backend", "blob-backend"]
+ddb-backend = ["aws-sdk-dynamodb", "aws-config", "metrics", "chrono"]
+all-backends = ["sql-backend", "redis-backend", "blob-backend", "ddb-backend"]
 
 [lib]
 doctest = false

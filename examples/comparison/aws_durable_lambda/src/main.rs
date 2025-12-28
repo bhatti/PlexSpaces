@@ -136,7 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a node
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Create DurabilityFacet (AWS Durable Lambda-style durable execution)
     let storage = MemoryJournalStorage::new();
@@ -276,7 +276,7 @@ mod tests {
     #[tokio::test]
     async fn test_payment_processing() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let behavior = Box::new(PaymentProcessor::new());
         let mut actor = ActorBuilder::new(behavior)

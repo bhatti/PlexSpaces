@@ -252,7 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Use Case: Real-time Event Stream Processing (Sensor Data → Filtering → Aggregation → Alerting)");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Dirigo uses virtual actors for stream processing operators
     // Create multiple operators for a stream processing pipeline
@@ -530,7 +530,7 @@ mod tests {
     #[tokio::test]
     async fn test_stream_processing() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let operator_id = "stream-operator/test-1@test-node".to_string();
         let operator = StreamOperator {

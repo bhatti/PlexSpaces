@@ -94,6 +94,9 @@ pub mod sql;
 #[cfg(feature = "redis-backend")]
 pub mod redis;
 
+#[cfg(feature = "ddb-backend")]
+pub mod ddb;
+
 pub use error::{LockError, LockResult};
 pub use manager::LockManager;
 

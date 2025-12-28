@@ -222,6 +222,8 @@
 
 // Module declarations
 pub mod capabilities;
+#[cfg(feature = "component-model")]
+pub mod component_host;
 pub mod deployment_service;
 pub mod error;
 pub mod grpc_service;
@@ -232,6 +234,7 @@ pub mod memory;
 pub mod module_cache;
 pub mod resource_limits;
 pub mod runtime;
+
 
 // Re-export ModuleCache for external use
 pub use module_cache::ModuleCache;

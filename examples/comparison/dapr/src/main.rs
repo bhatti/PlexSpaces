@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating Dapr Unified Durable Workflows (Actor + Workflow model)");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Dapr combines actors with durable workflows
     let actor_id: ActorId = "order-workflow/dapr-1@comparison-node-1".to_string();
@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn test_order_workflow() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "order-workflow/test-1@test-node".to_string();
         // Create DurabilityFacet

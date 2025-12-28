@@ -266,7 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a node
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Orleans-style virtual actor: Use get_or_activate pattern
     // This is the key Orleans pattern - actors are activated on-demand
@@ -561,7 +561,7 @@ mod tests {
     #[tokio::test]
     async fn test_batch_prediction() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         // Create facets
         let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 100));

@@ -24,7 +24,6 @@ mod integration_tests {
     use crate::actor::{Actor as ActorStruct, ActorState};
     use crate::behavior::{GenServer, MessageType, MessageTypeExt, MockBehavior};
     use crate::core::{Actor, ActorContext, BehaviorError, BehaviorType};
-    // use crate::journal::MemoryJournal; // Removed - not used in tests
     use crate::mailbox::{mailbox_config_default, Mailbox, MailboxConfig, Message, MessagePriority, OrderingStrategy};
     use std::sync::Arc;
 

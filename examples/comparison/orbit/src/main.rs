@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating Orbit Virtual Actors (JVM-based virtual actor framework)");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Orbit actors are virtual actors with lifecycle management
     let actor_id: ActorId = "user/alice@comparison-node-1".to_string();
@@ -203,7 +203,7 @@ mod tests {
     #[tokio::test]
     async fn test_user_profile() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "user/test-1@test-node".to_string();
         

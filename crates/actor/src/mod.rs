@@ -1601,12 +1601,19 @@ impl Actor {
                 self.context.service_locator.clone(),
             );
 
-            // Get actor_type from context metadata or config
-            // Note: ActorConfig doesn't have actor_type field, so we use None for now
-            // Actor type can be passed separately when spawning via ActorFactory
-            let actor_type: Option<String> = None;
+            // Extract actor_type from behavior for dashboard visibility
+            let behavior_guard = self.behavior.read().await;
+            let behavior_type = behavior_guard.behavior_type();
+            drop(behavior_guard);
+            let actor_type = match behavior_type {
+                plexspaces_core::BehaviorType::GenServer => Some("GenServer".to_string()),
+                plexspaces_core::BehaviorType::GenEvent => Some("GenEvent".to_string()),
+                plexspaces_core::BehaviorType::GenStateMachine => Some("GenStateMachine".to_string()),
+                plexspaces_core::BehaviorType::Workflow => Some("Workflow".to_string()),
+                plexspaces_core::BehaviorType::Custom(s) => Some(s),
+            };
 
-            // Register actor in registry
+            // Register actor in registry with type information for dashboard
             registry.register_actor(
                 &ctx,
                 self.id.clone(),

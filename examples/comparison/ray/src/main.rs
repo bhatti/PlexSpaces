@@ -287,7 +287,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a node
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Create Parameter Server (centralized model weights)
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -507,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn test_parameter_server() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let behavior = Box::new(ParameterServerActor::new(0.01));
         let actor = ActorBuilder::new(behavior)

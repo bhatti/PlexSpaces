@@ -18,18 +18,11 @@ use anyhow::Result;
 use clap::Parser;
 use plexspaces_node::{ConfigBootstrap, NodeBuilder};
 use plexspaces_tuplespace::{Pattern, PatternField, TupleField};
-use plexspaces_proto::v1::actor::actor_service_client::ActorServiceClient;
-use plexspaces_proto::application::v1::{
-    application_service_client::ApplicationServiceClient, DeployApplicationRequest,
-    ApplicationSpec, ApplicationType,
-};
-use plexspaces_proto::wasm::v1::WasmModule as ProtoWasmModule;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tonic::transport::Channel;
 use tracing::{info, Level};
 use tracing_subscriber;
 
@@ -92,38 +85,62 @@ async fn main() -> Result<()> {
 
     // Start node in background task
     let node_for_start = node_arc.clone();
-    tokio::spawn(async move {
+    let start_handle = tokio::spawn(async move {
         if let Err(e) = node_for_start.start().await {
             eprintln!("Node start error: {}", e);
         }
     });
     
-    // Wait for node to be ready
-    sleep(Duration::from_millis(500)).await;
-    info!("Node started");
+    // Wait for node to be ready using health reporter instead of fixed timing
+    info!("Waiting for node to be ready...");
+    let mut attempts = 0;
+    let max_attempts = 50; // 5 seconds max wait (50 * 100ms)
+    while attempts < max_attempts {
+        if let Some(health_reporter) = node_arc.health_reporter().await {
+            if health_reporter.is_ready().await {
+                info!("Node is ready");
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        attempts += 1;
+    }
+    
+    if attempts >= max_attempts {
+        return Err(anyhow::anyhow!("Node failed to become ready within timeout"));
+    }
+    
+    // Ensure start task completed successfully
+    if let Err(e) = start_handle.await {
+        return Err(anyhow::anyhow!("Node start task failed: {:?}", e));
+    }
 
     // Deploy Python WASM applications via ApplicationService
     info!("Step 1: Deploying Python WASM applications to PlexSpaces node...");
     
-    // Connect to node's ApplicationService
-    let node_address = format!("http://{}", node_arc.config().listen_addr);
-    info!("  Connecting to ApplicationService at {}...", node_address);
-    let channel = Channel::from_shared(node_address)?
-        .connect()
-        .await?;
-    let mut client = ApplicationServiceClient::new(channel);
-    info!("  ✓ Connected to ApplicationService");
+    // Connect to node's ApplicationService via HTTP (for large WASM files)
+    // Use HTTP API instead of gRPC to avoid message size limits
+    // HTTP port is typically gRPC port + 1
+    let grpc_addr = node_arc.config().listen_addr.clone();
+    let grpc_port: u16 = grpc_addr.split(':').last()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(9000);
+    let http_port = grpc_port + 1;
+    let http_url = format!("http://127.0.0.1:{}", http_port);
+    info!("  Using HTTP API at {} for deployment (supports large WASM files)...", http_url);
     
     let wasm_dir = PathBuf::from("wasm-modules");
     
-    // Helper to deploy a Python WASM application
+    // Helper to deploy a Python WASM application via HTTP
     async fn deploy_python_app(
-        client: &mut ApplicationServiceClient<Channel>,
+        http_url: &str,
         app_id: &str,
         app_name: &str,
         wasm_path: &PathBuf,
         description: &str,
     ) -> Result<String> {
+        use reqwest::multipart;
+        
         let wasm_bytes = if wasm_path.exists() {
             fs::read(wasm_path)?
         } else {
@@ -132,46 +149,44 @@ async fn main() -> Result<()> {
             vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]
         };
         
-        let wasm_module = ProtoWasmModule {
-            name: app_name.to_string(),
-            version: "1.0.0".to_string(),
-            module_bytes: wasm_bytes.clone(),
-            module_hash: String::new(), // Will be computed by server
-            wit_interface: String::new(),
-            source_languages: vec!["python".to_string()],
-            metadata: None,
-            created_at: None,
-            size_bytes: wasm_bytes.len() as u64,
-            version_number: 1,
-        };
+        info!("    📦 Deploying {} ({} bytes) via HTTP...", app_name, wasm_bytes.len());
         
-        let app_config = ApplicationSpec {
-            name: app_name.to_string(),
-            version: "1.0.0".to_string(),
-            description: description.to_string(),
-            r#type: ApplicationType::ApplicationTypeActive.into(),
-            dependencies: vec![],
-            env: std::collections::HashMap::new(),
-            supervisor: None,
-        };
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(300)) // 5 minute timeout for large uploads
+            .build()?;
         
-        let deploy_request = DeployApplicationRequest {
-            application_id: app_id.to_string(),
-            name: app_name.to_string(),
-            version: "1.0.0".to_string(),
-            wasm_module: Some(wasm_module),
-            config: Some(app_config),
-            release_config: None,
-            initial_state: vec![],
-        };
+        let form = multipart::Form::new()
+            .text("application_id", app_id.to_string())
+            .text("name", app_name.to_string())
+            .text("version", "1.0.0")
+            .part("wasm_file",
+                multipart::Part::bytes(wasm_bytes)
+                    .file_name(wasm_path.file_name().unwrap_or_default().to_string_lossy().to_string())
+                    .mime_str("application/wasm")?
+            );
         
-        let deploy_response = client.deploy_application(tonic::Request::new(deploy_request)).await?;
-        let deploy = deploy_response.into_inner();
-        if deploy.success {
-            info!("  ✓ {} deployed: {}", app_name, deploy.application_id);
-            Ok(deploy.application_id)
+        let response = client
+            .post(&format!("{}/api/v1/applications/deploy", http_url))
+            .multipart(form)
+            .send()
+            .await?;
+        
+        let status = response.status();
+        let response_text = response.text().await?;
+        
+        if status.is_success() {
+            let json: serde_json::Value = serde_json::from_str(&response_text)
+                .unwrap_or_else(|_| serde_json::json!({"success": true, "application_id": app_id}));
+            
+            let deployed_id = json["application_id"]
+                .as_str()
+                .unwrap_or(app_id)
+                .to_string();
+            
+            info!("  ✓ {} deployed: {}", app_name, deployed_id);
+            Ok(deployed_id)
         } else {
-            Err(anyhow::anyhow!("Deployment failed: {:?}", deploy.error))
+            Err(anyhow::anyhow!("Deployment failed with status {}: {}", status, response_text))
         }
     }
     
@@ -179,7 +194,7 @@ async fn main() -> Result<()> {
     info!("  Deploying durable calculator actor (state persistence)...");
     let durable_calc_wasm = wasm_dir.join("durable_calculator_actor.wasm");
     let _durable_app_id = deploy_python_app(
-        &mut client,
+        &http_url,
         "durable-calc-app-1",
         "durable-calculator-app",
         &durable_calc_wasm,
@@ -190,26 +205,14 @@ async fn main() -> Result<()> {
     info!("  Deploying tuplespace calculator actor (coordination)...");
     let tuplespace_calc_wasm = wasm_dir.join("tuplespace_calculator_actor.wasm");
     let _tuplespace_app_id = deploy_python_app(
-        &mut client,
+        &http_url,
         "tuplespace-calc-app-1",
         "tuplespace-calculator-app",
         &tuplespace_calc_wasm,
         "Python calculator with tuplespace coordination",
     ).await?;
     
-    // List deployed applications
-    info!("  Listing deployed applications...");
-    let list_request = tonic::Request::new(
-        plexspaces_proto::application::v1::ListApplicationsRequest {
-            status_filter: None,
-        }
-    );
-    let list_response = client.list_applications(list_request).await?;
-    let apps = list_response.into_inner();
-    info!("  ✓ Total applications deployed: {}", apps.applications.len());
-    for (i, app) in apps.applications.iter().enumerate() {
-        info!("    {}. {} v{} (ID: {})", i + 1, app.name, app.version, app.application_id);
-    }
+    info!("  ✓ Applications deployed successfully");
     println!();
 
     // Demonstrate durable actor features
@@ -240,13 +243,8 @@ async fn main() -> Result<()> {
     info!("  ");
     info!("  See: actors/python/tuplespace_calculator_actor.py for Python implementation");
     
-    // Connect to ActorService to send messages to Python WASM actors
-    info!("  Connecting to ActorService to interact with Python WASM actors...");
-    let actor_channel = Channel::from_shared(format!("http://{}", node_arc.config().listen_addr))?
-        .connect()
-        .await?;
-    let mut _actor_client = ActorServiceClient::new(actor_channel);
-    info!("  ✓ Connected to ActorService");
+    // Note: In a real scenario, we would connect to ActorService to send messages to Python WASM actors
+    // For this example, we demonstrate the deployment and tuplespace coordination patterns
     
     // Note: In a real scenario, we would:
     // 1. Get actor IDs from the deployed applications

@@ -56,10 +56,13 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 rand = "0.8"
+metrics = "0.23"
 
 # Database backends (all optional)
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "migrate", "sqlite"], optional = true }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], optional = true }
+aws-sdk-dynamodb = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
 
 [features]
 default = ["memory-backend", "sqlite-backend"]
@@ -69,9 +72,10 @@ memory-backend = []
 postgres-backend = ["sqlx", "sqlx/postgres"]
 redis-backend = ["redis"]
 sqlite-backend = ["sqlx", "sqlx/sqlite"]
+ddb-backend = ["aws-sdk-dynamodb", "aws-config"]
 
 # All backends
-all-backends = ["postgres-backend", "redis-backend", "sqlite-backend"]
+all-backends = ["postgres-backend", "redis-backend", "sqlite-backend", "ddb-backend"]
 
 [dev-dependencies]
 tokio-test = "0.4"

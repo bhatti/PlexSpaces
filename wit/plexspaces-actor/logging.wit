@@ -1,0 +1,94 @@
+// PlexSpaces Actor Interface - Logging
+//
+// Structured logging interface for observability.
+// Logs are automatically enriched with actor context (ID, node, etc.)
+
+interface logging {
+    /// Log levels following standard severity
+    enum log-level {
+        /// Finest-grained information
+        trace,
+        /// Debugging information
+        debug,
+        /// Informational messages
+        info,
+        /// Warning conditions
+        warn,
+        /// Error conditions
+        error,
+    }
+
+    /// Log a message at specified level
+    ///
+    /// # Arguments
+    /// - `level`: Severity level
+    /// - `message`: Log message (may contain structured data)
+    ///
+    /// # Example
+    /// ```
+    /// logging::log(LogLevel::Info, "Processing order");
+    /// logging::log(LogLevel::Error, &format!("Failed: {}", err));
+    /// ```
+    log: func(level: log-level, message: string);
+
+    /// Log with structured fields
+    ///
+    /// # Arguments
+    /// - `level`: Severity level
+    /// - `message`: Log message
+    /// - `fields`: Key-value pairs for structured logging
+    ///
+    /// # Example
+    /// ```
+    /// logging::log_with_fields(
+    ///     LogLevel::Info,
+    ///     "Order processed",
+    ///     vec![("order_id", "12345"), ("amount", "99.99")]
+    /// );
+    /// ```
+    log-with-fields: func(level: log-level, message: string, fields: list<tuple<string, string>>);
+
+    /// Convenience: Log at TRACE level
+    trace: func(message: string);
+
+    /// Convenience: Log at DEBUG level
+    debug: func(message: string);
+
+    /// Convenience: Log at INFO level
+    info: func(message: string);
+
+    /// Convenience: Log at WARN level
+    warn: func(message: string);
+
+    /// Convenience: Log at ERROR level
+    error: func(message: string);
+
+    /// Create a span for distributed tracing
+    ///
+    /// # Arguments
+    /// - `name`: Span name
+    ///
+    /// # Returns
+    /// Span ID that should be passed to `end-span`
+    ///
+    /// # Example
+    /// ```
+    /// let span = logging::start_span("process_payment");
+    /// // ... do work ...
+    /// logging::end_span(span);
+    /// ```
+    start-span: func(name: string) -> u64;
+
+    /// End a tracing span
+    ///
+    /// # Arguments
+    /// - `span-id`: ID returned from `start-span`
+    end-span: func(span-id: u64);
+
+    /// Add event to current span
+    ///
+    /// # Arguments
+    /// - `name`: Event name
+    /// - `attributes`: Event attributes
+    add-span-event: func(name: string, attributes: list<tuple<string, string>>);
+}

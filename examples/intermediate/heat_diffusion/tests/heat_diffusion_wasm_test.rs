@@ -71,6 +71,7 @@ async fn test_create_cell_instance() -> Result<()> {
         &[],
         WasmCapabilities::default(),
         limits,
+        None, // ChannelService not available in tests
     )
     .await?;
 
@@ -95,6 +96,7 @@ async fn test_initialize_cell() -> Result<()> {
         &[],
         WasmCapabilities::default(),
         limits,
+        None, // ChannelService not available in tests
     )
     .await?;
 
@@ -137,6 +139,7 @@ async fn test_set_neighbors() -> Result<()> {
         &[],
         WasmCapabilities::default(),
         limits,
+        None, // ChannelService not available in tests
     )
     .await?;
 
@@ -187,6 +190,7 @@ async fn test_jacobi_update() -> Result<()> {
         &[],
         WasmCapabilities::default(),
         limits,
+        None, // ChannelService not available in tests
     )
     .await?;
 
@@ -238,6 +242,7 @@ async fn test_multiple_iterations() -> Result<()> {
         &[],
         WasmCapabilities::default(),
         limits,
+        None, // ChannelService not available in tests
     )
     .await?;
 

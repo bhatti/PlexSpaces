@@ -116,12 +116,8 @@ impl UdpChannel {
             }
         };
 
-        // Validate cluster name
-        if udp_config.cluster_name.is_empty() {
-            return Err(ChannelError::InvalidConfiguration(
-                "UDP channel requires cluster_name".to_string(),
-            ));
-        }
+        // Note: UDP config no longer has cluster_name field
+        // Cluster membership is determined by multicast_address and multicast_port
 
         // Parse multicast address
         let multicast_ip: Ipv4Addr = if udp_config.multicast_address.is_empty() {
@@ -175,7 +171,9 @@ impl UdpChannel {
         // We need to do this in a blocking context, then convert to async
         let multicast_ip_clone = multicast_ip;
         let bind_addr_clone = bind_addr;
-        let ttl = if udp_config.ttl == 0 { 1 } else { udp_config.ttl };
+        // Use default multicast TTL of 1 (local network only)
+        // Note: message_ttl_seconds is for message expiration, not multicast TTL
+        let ttl = 1;
         let std_socket = tokio::task::spawn_blocking(move || -> Result<std::net::UdpSocket, std::io::Error> {
             let socket = socket2::Socket::new(
                 socket2::Domain::IPV4,
@@ -220,11 +218,8 @@ impl UdpChannel {
             errors: AtomicU64::new(0),
         });
         let closed_clone = Arc::new(AtomicBool::new(false));
-        let max_message_size = if udp_config.max_message_size == 0 {
-            65507
-        } else {
-            udp_config.max_message_size as usize
-        };
+        // Use default max UDP packet size (65507 bytes)
+        let max_message_size = 65507;
 
         // Spawn receive loop
         let channel_name = config.name.clone();
@@ -240,7 +235,6 @@ impl UdpChannel {
         info!(
             channel = %config.name,
             multicast = %multicast_addr,
-            cluster = %udp_config.cluster_name,
             "UDP channel created"
         );
 
@@ -345,11 +339,8 @@ impl Channel for UdpChannel {
         let payload = Self::serialize_message(&message)?;
         
         // Check message size
-        let max_size = if self.udp_config.max_message_size == 0 {
-            65507 // Max UDP packet size
-        } else {
-            self.udp_config.max_message_size as usize
-        };
+        // Use default max UDP packet size (65507 bytes)
+        let max_size = 65507;
 
         if payload.len() > max_size {
             return Err(ChannelError::BackendError(format!(
@@ -507,7 +498,8 @@ impl Channel for UdpChannel {
                     "multicast_address".to_string(),
                     self.multicast_addr.to_string(),
                 );
-                stats.insert("cluster_name".to_string(), self.udp_config.cluster_name.clone());
+                // Note: cluster_name field removed from UdpConfig
+                // Cluster membership determined by multicast_address and multicast_port
                 stats.insert(
                     "errors".to_string(),
                     self.stats.errors.load(Ordering::Relaxed).to_string(),

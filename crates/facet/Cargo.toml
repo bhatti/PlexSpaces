@@ -30,9 +30,17 @@ hex = "0.4"
 # Observability (CRITICAL - production-ready observability)
 metrics = "0.23"
 
+# RequestContext is required for KeyValueStore trait
+plexspaces-common = { path = "../common" }
+
+# AWS DynamoDB backend for KeyValueStore (optional)
+aws-sdk-dynamodb = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
+
 [features]
 default = []
 # service feature removed - Service trait implementation moved to core crate
+ddb-backend = ["aws-sdk-dynamodb", "aws-config"]
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }

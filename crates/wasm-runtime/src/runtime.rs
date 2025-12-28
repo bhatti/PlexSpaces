@@ -223,7 +223,43 @@ impl WasmRuntime {
         // Try to parse as standard module first
         // If that fails and component-model is enabled, try as component
         let module = match Module::new(&self.engine, bytes) {
-            Ok(m) => m,
+            Ok(m) => {
+                // Successfully parsed as traditional module
+                // Use it as a module (not a component)
+                let compile_duration = compile_start.elapsed();
+                let wasm_module = WasmModule {
+                    name: name.to_string(),
+                    version: version.to_string(),
+                    hash: hash.clone(),
+                    #[cfg(not(feature = "component-model"))]
+                    module: Arc::new(m),
+                    #[cfg(feature = "component-model")]
+                    module: WasmModuleInner::Module(Arc::new(m)),
+                    size_bytes: bytes.len() as u64,
+                };
+
+                // Cache module
+                {
+                    let mut cache = self.module_cache.write().await;
+                    cache.insert(hash.clone(), Arc::new(wasm_module.clone()));
+                }
+
+                let total_duration = start_time.elapsed();
+                metrics::histogram!("plexspaces_wasm_module_load_duration_seconds").record(total_duration.as_secs_f64());
+                metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds").record(compile_duration.as_secs_f64());
+                metrics::counter!("plexspaces_wasm_modules_loaded_total").increment(1);
+
+                tracing::info!(
+                    module_name = name,
+                    module_version = version,
+                    module_hash = %hash,
+                    module_size = bytes.len(),
+                    load_duration_ms = total_duration.as_millis(),
+                    "WASM module loaded successfully"
+                );
+
+                return Ok(wasm_module);
+            }
             Err(module_err) => {
                 // If component-model is enabled, try parsing as component
                 #[cfg(feature = "component-model")]

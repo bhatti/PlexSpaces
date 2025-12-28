@@ -38,6 +38,7 @@ mod sqlite_tests {
     use plexspaces_locks::memory::MemoryLockManager;
     use plexspaces_keyvalue::InMemoryKVStore;
     use plexspaces_object_registry::ObjectRegistry;
+    use plexspaces_core::RequestContext;
     use plexspaces_proto::{
         actor::v1::ActorResourceRequirements,
         channel::v1::ChannelConfig,
@@ -53,6 +54,11 @@ mod sqlite_tests {
     /// Helper to create in-memory SQLite state store
     async fn create_sqlite_state_store() -> SqliteSchedulingStateStore {
         SqliteSchedulingStateStore::new_in_memory().await.unwrap()
+    }
+
+    /// Helper to create test RequestContext
+    fn create_test_context() -> RequestContext {
+        RequestContext::new_without_auth("default".to_string(), "default".to_string())
     }
 
     /// Helper to create test scheduling request
@@ -89,10 +95,11 @@ mod sqlite_tests {
         let request = create_test_request("test-request-1");
 
         // Store request
-        SchedulingStateStore::store_request(&store, request.clone()).await.unwrap();
+        let ctx = create_test_context();
+        SchedulingStateStore::store_request(&store, &ctx, request.clone()).await.unwrap();
 
         // Get request
-        let retrieved = SchedulingStateStore::get_request(&store, "test-request-1").await.unwrap();
+        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "test-request-1").await.unwrap();
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.request_id, "test-request-1");
@@ -109,7 +116,8 @@ mod sqlite_tests {
         let mut request = create_test_request("test-request-1");
 
         // Store request
-        SchedulingStateStore::store_request(&store, request.clone()).await.unwrap();
+        let ctx = create_test_context();
+        SchedulingStateStore::store_request(&store, &ctx, request.clone()).await.unwrap();
 
         // Update request to SCHEDULED
         request.status = SchedulingStatus::SchedulingStatusScheduled as i32;
@@ -117,10 +125,10 @@ mod sqlite_tests {
         request.scheduled_at = Some(prost_types::Timestamp::from(SystemTime::now()));
         request.completed_at = Some(prost_types::Timestamp::from(SystemTime::now()));
 
-        SchedulingStateStore::update_request(&store, request.clone()).await.unwrap();
+        SchedulingStateStore::update_request(&store, &ctx, request.clone()).await.unwrap();
 
         // Verify update
-        let retrieved = SchedulingStateStore::get_request(&store, "test-request-1").await.unwrap().unwrap();
+        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "test-request-1").await.unwrap().unwrap();
         assert_eq!(
             retrieved.status,
             SchedulingStatus::SchedulingStatusScheduled as i32
@@ -134,18 +142,19 @@ mod sqlite_tests {
         let store = create_sqlite_state_store().await;
 
         // Store multiple requests with different statuses
+        let ctx = create_test_context();
         let mut request1 = create_test_request("request-1");
-        SchedulingStateStore::store_request(&store, request1.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&store, &ctx, request1.clone()).await.unwrap();
 
         let mut request2 = create_test_request("request-2");
         request2.status = SchedulingStatus::SchedulingStatusScheduled as i32;
-        SchedulingStateStore::store_request(&store, request2.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&store, &ctx, request2.clone()).await.unwrap();
 
         let request3 = create_test_request("request-3");
-        SchedulingStateStore::store_request(&store, request3.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&store, &ctx, request3.clone()).await.unwrap();
 
         // Query pending requests
-        let pending = SchedulingStateStore::query_pending_requests(&store).await.unwrap();
+        let pending = SchedulingStateStore::query_pending_requests(&store, &ctx).await.unwrap();
         assert_eq!(pending.len(), 2);
         let pending_ids: Vec<String> = pending.iter().map(|r| r.request_id.clone()).collect();
         assert!(pending_ids.contains(&"request-1".to_string()));
@@ -157,7 +166,8 @@ mod sqlite_tests {
     async fn test_sqlite_get_nonexistent_request() {
         let store = create_sqlite_state_store().await;
 
-        let retrieved = SchedulingStateStore::get_request(&store, "non-existent").await.unwrap();
+        let ctx = create_test_context();
+        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "non-existent").await.unwrap();
         assert!(retrieved.is_none());
     }
 
@@ -168,7 +178,8 @@ mod sqlite_tests {
 
         // Update should fail or create (depending on implementation)
         // For now, we expect it to work (upsert behavior)
-        let result = SchedulingStateStore::update_request(&store, request).await;
+        let ctx = create_test_context();
+        let result = SchedulingStateStore::update_request(&store, &ctx, request).await;
         // SQLite will insert if not exists (depending on SQL implementation)
         // Let's check if it works
         assert!(result.is_ok());
@@ -207,11 +218,12 @@ mod sqlite_tests {
         // We can't access private fields, so we just verify it was created
 
         // Store a request
+        let ctx = create_test_context();
         let request = create_test_request("test-request-1");
-        SchedulingStateStore::store_request(&*state_store, request.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request.clone()).await.unwrap();
 
         // Verify request is stored
-        let retrieved = SchedulingStateStore::get_request(&*state_store, "test-request-1").await.unwrap();
+        let retrieved = SchedulingStateStore::get_request(&*state_store, &ctx, "test-request-1").await.unwrap();
         assert!(retrieved.is_some());
     }
 
@@ -267,7 +279,8 @@ mod sqlite_tests {
         assert!(!response.request_id.is_empty());
 
         // Verify request was stored in SQLite
-        let stored = SchedulingStateStore::get_request(&*state_store, &response.request_id).await.unwrap();
+        let ctx = create_test_context();
+        let stored = SchedulingStateStore::get_request(&*state_store, &ctx, &response.request_id).await.unwrap();
         assert!(stored.is_some());
         assert_eq!(
             stored.unwrap().status,
@@ -285,12 +298,14 @@ mod sqlite_tests {
         let mut request3 = create_test_request("recovery-request-3");
         request3.status = SchedulingStatus::SchedulingStatusScheduled as i32; // Already processed
 
-        SchedulingStateStore::store_request(&*state_store, request1.clone()).await.unwrap();
-        SchedulingStateStore::store_request(&*state_store, request2.clone()).await.unwrap();
-        SchedulingStateStore::store_request(&*state_store, request3.clone()).await.unwrap();
+        let ctx = create_test_context();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request1.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request2.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request3.clone()).await.unwrap();
 
         // Simulate recovery: query pending requests
-        let pending = SchedulingStateStore::query_pending_requests(&*state_store).await.unwrap();
+        // Note: For recovery, we might need to query all tenants, but for this test we use the test context
+        let pending = SchedulingStateStore::query_pending_requests(&*state_store, &ctx).await.unwrap();
         assert_eq!(pending.len(), 2);
         let pending_ids: Vec<String> = pending.iter().map(|r| r.request_id.clone()).collect();
         assert!(pending_ids.contains(&"recovery-request-1".to_string()));
@@ -304,7 +319,8 @@ mod sqlite_tests {
         let request = create_test_request("concurrent-request");
 
         // Store request
-        SchedulingStateStore::store_request(&*state_store, request.clone()).await.unwrap();
+        let ctx = create_test_context();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request.clone()).await.unwrap();
 
         // Simulate concurrent updates (different statuses)
         let mut request1 = request.clone();
@@ -316,11 +332,11 @@ mod sqlite_tests {
         request2.error_message = "test error".to_string();
 
         // Both updates should succeed (last write wins)
-        SchedulingStateStore::update_request(&*state_store, request1.clone()).await.unwrap();
-        SchedulingStateStore::update_request(&*state_store, request2.clone()).await.unwrap();
+        SchedulingStateStore::update_request(&*state_store, &ctx, request1.clone()).await.unwrap();
+        SchedulingStateStore::update_request(&*state_store, &ctx, request2.clone()).await.unwrap();
 
         // Verify last update
-        let retrieved = SchedulingStateStore::get_request(&*state_store, "concurrent-request").await.unwrap().unwrap();
+        let retrieved = SchedulingStateStore::get_request(&*state_store, &ctx, "concurrent-request").await.unwrap().unwrap();
         assert_eq!(
             retrieved.status,
             SchedulingStatus::SchedulingStatusFailed as i32
@@ -333,13 +349,14 @@ mod sqlite_tests {
         let store = create_sqlite_state_store().await;
 
         // Store multiple requests
+        let ctx = create_test_context();
         for i in 1..=10 {
             let request = create_test_request(&format!("request-{}", i));
-            SchedulingStateStore::store_request(&store, request).await.unwrap();
+            SchedulingStateStore::store_request(&store, &ctx, request).await.unwrap();
         }
 
         // Query pending (should return all 10)
-        let pending = SchedulingStateStore::query_pending_requests(&store).await.unwrap();
+        let pending = SchedulingStateStore::query_pending_requests(&store, &ctx).await.unwrap();
         assert_eq!(pending.len(), 10);
 
         // Verify all request IDs are present

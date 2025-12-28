@@ -293,7 +293,8 @@ impl TimerFacet {
             #[cfg(feature = "locks")]
             let mut lock_held = if let (Some(ref lock_mgr), Some(node_id_val)) = (lock_manager.as_ref(), node_id.as_ref()) {
                 // Use actor_id as lock key since lock_key was removed from proto
-                match lock_mgr.acquire_lock(AcquireLockOptions {
+                let ctx = plexspaces_core::RequestContext::internal();
+                match lock_mgr.acquire_lock(&ctx, AcquireLockOptions {
                     lock_key: format!("timer:{}", actor_id_for_lock),
                     holder_id: node_id_val.clone(),
                     lease_duration_secs: if periodic { interval.as_secs() as u32 * 2 } else { 60 }, // 2x interval for periodic, 60s for one-time
@@ -335,7 +336,8 @@ impl TimerFacet {
                     // Note: TimerRegistration no longer has lock_key field, so locking is disabled
                     #[cfg(feature = "locks")]
                     if false { // Disabled - no lock_key in proto
-                        match lock_manager.as_ref().unwrap().renew_lock(plexspaces_locks::RenewLockOptions {
+                        let ctx = plexspaces_core::RequestContext::internal();
+                        match lock_manager.as_ref().unwrap().renew_lock(&ctx, plexspaces_locks::RenewLockOptions {
                             lock_key: "".to_string(),
                             holder_id: node_id.as_ref().unwrap().clone(),
                             version: "".to_string(),
@@ -364,7 +366,8 @@ impl TimerFacet {
             // Note: TimerRegistration no longer has lock_key field, so locking is disabled
             #[cfg(feature = "locks")]
             if false { // Disabled - no lock_key in proto
-                let _ = lock_manager.as_ref().unwrap().release_lock(ReleaseLockOptions {
+                let ctx = plexspaces_core::RequestContext::internal();
+                let _ = lock_manager.as_ref().unwrap().release_lock(&ctx, ReleaseLockOptions {
                     lock_key: "".to_string(),
                     holder_id: node_id.as_ref().unwrap().clone(),
                     version: "".to_string(),
@@ -407,21 +410,6 @@ impl TimerFacet {
     /// * `interval` - Interval for periodic timers, or delay for one-time timers
     /// * `periodic` - Whether timer is periodic
     /// Note: lock_key removed from TimerRegistration proto - locking disabled
-    ///
-    /// ## Returns
-    /// Timer name (for unregistration) or error
-    #[cfg(feature = "locks")]
-    #[deprecated(note = "lock_key removed from TimerRegistration proto - use register_simple instead")]
-    pub async fn register_with_lock(
-        &self,
-        name: &str,
-        interval: std::time::Duration,
-        periodic: bool,
-        _lock_key: Option<String>, // Ignored - lock_key removed from proto
-    ) -> Result<String, TimerError> {
-        // Delegate to register_simple since locking is no longer supported
-        self.register_simple(name, interval, periodic).await
-    }
     
     /// Unregister a timer
     ///

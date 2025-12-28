@@ -1854,10 +1854,7 @@ impl JournalStorage for PostgresJournalStorage {
         }
 
         let sequence = event.sequence;
-        let timestamp = event.timestamp.as_ref().map(|ts| {
-            chrono::DateTime::<chrono::Utc>::from_timestamp(ts.seconds, ts.nanos as u32)
-                .unwrap_or_else(|| chrono::Utc::now())
-        }).unwrap_or_else(|| chrono::Utc::now());
+        let timestamp = proto_timestamp_to_unix_ms(&event.timestamp);
 
         // Serialize metadata to JSONB
         let metadata_json = serde_json::to_value(&event.metadata)
@@ -1910,10 +1907,7 @@ impl JournalStorage for PostgresJournalStorage {
             }
             last_sequence = event.sequence;
 
-            let timestamp = event.timestamp.as_ref().map(|ts| {
-                chrono::DateTime::<chrono::Utc>::from_timestamp(ts.seconds, ts.nanos as u32)
-                    .unwrap_or_else(|| chrono::Utc::now())
-            }).unwrap_or_else(|| chrono::Utc::now());
+            let timestamp = proto_timestamp_to_unix_ms(&event.timestamp);
 
             let metadata_json = serde_json::to_value(&event.metadata)
                 .map_err(|e| JournalError::Serialization(e.to_string()))?;

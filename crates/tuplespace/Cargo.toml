@@ -32,6 +32,14 @@ rand = "0.8"
 redis = { workspace = true, optional = true }
 sqlx = { workspace = true, features = ["migrate"], optional = true }
 futures = { workspace = true, optional = true }
+aws-sdk-dynamodb = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
+
+# Observability
+metrics = "0.23"
+
+# Proto support (for StorageStats)
+prost = "0.12"
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }
@@ -42,6 +50,7 @@ tempfile = { workspace = true }
 default = []
 redis-backend = ["redis", "futures"]
 sql-backend = ["sqlx"]
+ddb-backend = ["aws-sdk-dynamodb", "aws-config"]
 
 [lib]
 name = "plexspaces_tuplespace"

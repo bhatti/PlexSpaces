@@ -211,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create node
     let node = NodeBuilder::new("timer-node")
-        .build();
+        .build().await;
 
     // Create TimerFacet with config and priority
     let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
@@ -281,7 +281,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  • Config bootstrap (Erlang/OTP-style)");
     info!("  • Timers are non-durable (in-memory only)");
     info!("  • Use ReminderFacet for durable, persistent reminders");
-    info!("  • Use register_with_lock() for multi-node protection");
+    info!("  • Use ReminderFacet for multi-node protection with durability");
     info!("");
     info!("See: examples/simple/reminders_example for durable reminders");
     info!("");

@@ -335,7 +335,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Use Case: Loan Approval Workflow (Application → Credit Check → Risk Assessment → Approval → Disbursement)");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Zeebe is a BPMN workflow engine with event sourcing
     let actor_id: ActorId = "zeebe-workflow/zeebe-1@comparison-node-1".to_string();
@@ -456,7 +456,7 @@ mod tests {
     #[tokio::test]
     async fn test_zeebe_workflow() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "zeebe-workflow/test-1@test-node".to_string();
         

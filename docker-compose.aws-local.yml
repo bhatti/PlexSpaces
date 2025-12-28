@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Docker Compose configuration for local AWS service testing
+#
+# This file provides local instances of AWS services for development and testing:
+# - DynamoDB Local (for locks, scheduler, keyvalue, workflow, journaling, tuplespace, blob metadata)
+# - LocalStack (for SQS, S3, and other AWS services)
+#
+# Usage:
+#   docker-compose -f docker-compose.aws-local.yml up -d
+#
+# Environment Variables:
+#   - DYNAMODB_ENDPOINT_URL=http://localhost:8000
+#   - SQS_ENDPOINT_URL=http://localhost:4566
+#   - S3_ENDPOINT_URL=http://localhost:4566
+#
+# Services:
+#   - dynamodb-local: DynamoDB Local on port 8000
+#   - localstack: LocalStack (SQS, S3, etc.) on port 4566
+
+version: '3.8'
+
+services:
+  # DynamoDB Local - Standalone DynamoDB emulator
+  # Used for: locks, scheduler, keyvalue, workflow, journaling, tuplespace, blob metadata
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: plexspaces-dynamodb-local
+    ports:
+      - "8000:8000"
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s --max-time 2 http://localhost:8000 | grep -q 'MissingAuthenticationToken' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - plexspaces-aws
+
+  # LocalStack - AWS service emulator
+  # Provides: SQS, S3, and other AWS services
+  localstack:
+    image: localstack/localstack:latest
+    container_name: plexspaces-localstack
+    ports:
+      - "4566:4566"  # LocalStack edge port
+      - "4510-4559:4510-4559"  # External services port range
+    environment:
+      - SERVICES=sqs,s3
+      - DEBUG=0
+      - DATA_DIR=/var/lib/localstack/data
+      - PERSISTENCE=0
+      # Credentials for local testing (not used in production)
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - "localstack-data:/var/lib/localstack"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - plexspaces-aws
+
+networks:
+  plexspaces-aws:
+    driver: bridge
+
+volumes:
+  localstack-data:
+    driver: local
+

@@ -662,7 +662,6 @@ fn create_application_spec_with_multiple_facets(name: &str, version: &str) -> Ap
     let child_spec = ChildSpec {
         id: format!("{}-worker", name),
         r#type: ChildType::ChildTypeWorker.into(),
-        start_module: "test_behavior".to_string(),
         args: HashMap::new(),
         restart: RestartPolicy::RestartPolicyPermanent.into(),
         shutdown_timeout: None,
@@ -706,7 +705,6 @@ fn create_application_spec_with_single_facet(name: &str, version: &str, facet_ty
     let child_spec = ChildSpec {
         id: format!("{}-worker", name),
         r#type: ChildType::ChildTypeWorker.into(),
-        start_module: "test_behavior".to_string(),
         args: HashMap::new(),
         restart: RestartPolicy::RestartPolicyPermanent.into(),
         shutdown_timeout: None,
@@ -913,4 +911,6 @@ async fn test_application_metrics_for_deploy_undeploy() {
     // Metrics are recorded by ApplicationManager and facets during lifecycle
     // For now, we verify the application lifecycle works correctly
 }
+
+
 

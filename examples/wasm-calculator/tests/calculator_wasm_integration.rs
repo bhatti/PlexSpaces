@@ -126,7 +126,7 @@ async fn test_create_wasm_instance_without_initial_state() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024) // 16MB
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),
@@ -160,7 +160,7 @@ async fn test_create_wasm_instance_with_initial_state() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),
@@ -200,7 +200,7 @@ async fn test_calculator_addition() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),
@@ -245,7 +245,7 @@ async fn test_calculator_subtraction() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),
@@ -288,7 +288,7 @@ async fn test_calculator_multiplication() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),
@@ -331,7 +331,7 @@ async fn test_calculator_division() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),
@@ -378,7 +378,7 @@ async fn test_calculator_multiple_operations() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),
@@ -425,7 +425,7 @@ async fn test_calculator_snapshot_and_restore() -> Result<()> {
     let module1 = runtime.load_module("calculator", "1.0.0", &wasm_bytes).await?;
     let limits1 = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance1 = WasmInstance::new(
         runtime.engine(),
@@ -458,7 +458,7 @@ async fn test_calculator_snapshot_and_restore() -> Result<()> {
     let module2 = runtime.load_module("calculator", "1.0.0", &wasm_bytes).await?;
     let limits2 = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance2 = WasmInstance::new(
         runtime.engine(),
@@ -497,7 +497,7 @@ async fn test_memory_limit_enforcement() -> Result<()> {
     // Set very low memory limit (1 page = 64KB)
     let limits = StoreLimitsBuilder::new()
         .memory_size(64 * 1024) // 64KB (might be too low, but tests enforcement)
-        .build();
+        .build().await;
 
     let result = WasmInstance::new(
         runtime.engine(),
@@ -538,7 +538,7 @@ async fn test_wasm_instance_actor_id() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),
@@ -565,7 +565,7 @@ async fn test_wasm_instance_module_info() -> Result<()> {
 
     let limits = StoreLimitsBuilder::new()
         .memory_size(16 * 1024 * 1024)
-        .build();
+        .build().await;
 
     let instance = WasmInstance::new(
         runtime.engine(),

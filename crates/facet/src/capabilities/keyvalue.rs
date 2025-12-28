@@ -21,6 +21,10 @@
 //! Provides key-value storage capabilities to actors as a runtime-attachable facet.
 //! This replaces the need for a separate capability provider system.
 
+#[cfg(feature = "ddb-backend")]
+#[path = "keyvalue_ddb.rs"]
+pub mod keyvalue_ddb;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -29,6 +33,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::{Facet, FacetError, InterceptResult};
+
+#[cfg(feature = "ddb-backend")]
+pub use keyvalue_ddb::DynamoDBStore;
 
 /// Key-value store facet
 pub struct KeyValueFacet {
@@ -87,15 +94,15 @@ struct KeyValueMetrics {
 #[async_trait]
 pub trait KeyValueStore: Send + Sync {
     /// Get value for key
-    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, String>;
+    async fn get(&self, ctx: &plexspaces_common::RequestContext, key: &str) -> Result<Option<Vec<u8>>, String>;
     /// Set value for key with optional TTL
-    async fn set(&self, key: &str, value: Vec<u8>, ttl: Option<u64>) -> Result<(), String>;
+    async fn set(&self, ctx: &plexspaces_common::RequestContext, key: &str, value: Vec<u8>, ttl: Option<u64>) -> Result<(), String>;
     /// Delete key, returns true if key existed
-    async fn delete(&self, key: &str) -> Result<bool, String>;
+    async fn delete(&self, ctx: &plexspaces_common::RequestContext, key: &str) -> Result<bool, String>;
     /// Check if key exists
-    async fn exists(&self, key: &str) -> Result<bool, String>;
+    async fn exists(&self, ctx: &plexspaces_common::RequestContext, key: &str) -> Result<bool, String>;
     /// List all keys matching prefix
-    async fn list_keys(&self, prefix: &str) -> Result<Vec<String>, String>;
+    async fn list_keys(&self, ctx: &plexspaces_common::RequestContext, prefix: &str) -> Result<Vec<String>, String>;
 }
 
 /// In-memory key-value store
@@ -105,24 +112,24 @@ struct MemoryStore {
 
 #[async_trait]
 impl KeyValueStore for MemoryStore {
-    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+    async fn get(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> Result<Option<Vec<u8>>, String> {
         Ok(self.data.read().await.get(key).cloned())
     }
 
-    async fn set(&self, key: &str, value: Vec<u8>, _ttl: Option<u64>) -> Result<(), String> {
+    async fn set(&self, _ctx: &plexspaces_common::RequestContext, key: &str, value: Vec<u8>, _ttl: Option<u64>) -> Result<(), String> {
         self.data.write().await.insert(key.to_string(), value);
         Ok(())
     }
 
-    async fn delete(&self, key: &str) -> Result<bool, String> {
+    async fn delete(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> Result<bool, String> {
         Ok(self.data.write().await.remove(key).is_some())
     }
 
-    async fn exists(&self, key: &str) -> Result<bool, String> {
+    async fn exists(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> Result<bool, String> {
         Ok(self.data.read().await.contains_key(key))
     }
 
-    async fn list_keys(&self, prefix: &str) -> Result<Vec<String>, String> {
+    async fn list_keys(&self, _ctx: &plexspaces_common::RequestContext, prefix: &str) -> Result<Vec<String>, String> {
         Ok(self
             .data
             .read()
@@ -167,8 +174,15 @@ impl KeyValueFacet {
             "memory" => Box::new(MemoryStore {
                 data: Arc::new(RwLock::new(HashMap::new())),
             }),
-            // "redis" => Box::new(RedisStore::new(&config)?),
-            // "dynamodb" => Box::new(DynamoStore::new(&config)?),
+            #[cfg(feature = "ddb-backend")]
+            "dynamodb" => {
+                // DynamoDB store requires async initialization
+                // For now, we'll create it synchronously with default config
+                // In production, this should be initialized properly
+                return Err(FacetError::InvalidConfig(
+                    "DynamoDB store requires async initialization. Use DynamoDBStore::new() directly.".to_string()
+                ));
+            }
             _ => {
                 return Err(FacetError::InvalidConfig(format!(
                     "Unknown store type: {}",
@@ -203,7 +217,8 @@ impl KeyValueFacet {
                 metrics.gets += 1;
 
                 let store = self.store.read().await;
-                match store.get(&key).await {
+                let ctx = plexspaces_common::RequestContext::internal();
+                match store.get(&ctx, &key).await {
                     Ok(Some(value)) => {
                         metrics.hits += 1;
                         Ok(value)
@@ -229,8 +244,9 @@ impl KeyValueFacet {
                 self.metrics.write().await.sets += 1;
 
                 let store = self.store.read().await;
+                let ctx = plexspaces_common::RequestContext::internal();
                 store
-                    .set(&args.key, args.value, args.ttl.or(self.config.default_ttl))
+                    .set(&ctx, &args.key, args.value, args.ttl.or(self.config.default_ttl))
                     .await
                     .map_err(FacetError::InterceptionFailed)?;
 
@@ -243,8 +259,9 @@ impl KeyValueFacet {
                 self.metrics.write().await.deletes += 1;
 
                 let store = self.store.read().await;
+                let ctx = plexspaces_common::RequestContext::internal();
                 let deleted = store
-                    .delete(&key)
+                    .delete(&ctx, &key)
                     .await
                     .map_err(FacetError::InterceptionFailed)?;
 
@@ -255,8 +272,9 @@ impl KeyValueFacet {
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
                 let store = self.store.read().await;
+                let ctx = plexspaces_common::RequestContext::internal();
                 let exists = store
-                    .exists(&key)
+                    .exists(&ctx, &key)
                     .await
                     .map_err(FacetError::InterceptionFailed)?;
 
@@ -267,8 +285,9 @@ impl KeyValueFacet {
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
                 let store = self.store.read().await;
+                let ctx = plexspaces_common::RequestContext::internal();
                 let keys = store
-                    .list_keys(&prefix)
+                    .list_keys(&ctx, &prefix)
                     .await
                     .map_err(FacetError::InterceptionFailed)?;
 

@@ -25,6 +25,11 @@
 #![warn(clippy::all)]
 
 pub mod request_context;
+pub mod aws_config;
+
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers;
 
 pub use request_context::{RequestContext, RequestContextError};
+pub use aws_config::{AWSConfig, DynamoDBConfig, SQSConfig, S3Config, DLQConfig};
 

@@ -209,7 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating XVSM (eXtended Virtual Shared Memory) with Coordinator Objects");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // MozartSpaces uses coordinator objects to define tuple storage/retrieval patterns
     let actor_id: ActorId = "xvsm-coordinator/mozartspaces-1@comparison-node-1".to_string();
@@ -363,7 +363,7 @@ mod tests {
     #[tokio::test]
     async fn test_xvsm_coordinator() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "xvsm-coordinator/test-1@test-node".to_string();
         let behavior = Box::new(XVSMCoordinatorActor::new());

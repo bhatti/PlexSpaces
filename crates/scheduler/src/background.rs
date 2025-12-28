@@ -39,6 +39,7 @@ use plexspaces_proto::{
     prost_types::Timestamp,
     scheduling::v1::{SchedulingRequest, SchedulingStatus},
 };
+use plexspaces_core::RequestContext;
 use prost::Message;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -135,8 +136,9 @@ impl BackgroundScheduler {
                 refresh_period_ms: 100,
                 metadata: std::collections::HashMap::new(),
             };
+            let ctx = RequestContext::internal();
             self.lock_manager
-                .acquire_lock(options)
+                .acquire_lock(&ctx, options)
                 .await
                 .map_err(|e| BackgroundSchedulerError::LockError(e.to_string()))?
         };
@@ -183,8 +185,9 @@ impl BackgroundScheduler {
             metadata: std::collections::HashMap::new(),
         };
 
+        let ctx = RequestContext::internal();
         self.lock_manager
-            .acquire_lock(options)
+            .acquire_lock(&ctx, options)
             .await
             .map_err(|e| BackgroundSchedulerError::LockError(e.to_string()))
     }
@@ -205,7 +208,8 @@ impl BackgroundScheduler {
                 metadata: std::collections::HashMap::new(),
             };
 
-            match self.lock_manager.renew_lock(options).await {
+            let ctx = RequestContext::internal();
+            match self.lock_manager.renew_lock(&ctx, options).await {
                 Ok(renewed) => {
                     let mut current = self.current_lease.write().await;
                     *current = Some(renewed);
@@ -236,8 +240,9 @@ impl BackgroundScheduler {
                 delete_lock: false, // Keep for audit
             };
 
+            let ctx = RequestContext::internal();
             self.lock_manager
-                .release_lock(options)
+                .release_lock(&ctx, options)
                 .await
                 .map_err(|e| BackgroundSchedulerError::LockError(e.to_string()))?;
 
@@ -345,9 +350,14 @@ impl BackgroundScheduler {
 
         info!("Processing scheduling request: {}", request.request_id);
 
-        // Get node capacities (use internal context for system operations)
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::internal();
+        // Create RequestContext from request's tenant/namespace for proper isolation
+        // Use this context for all operations related to this request
+        let ctx = RequestContext::new_without_auth(
+            request.tenant_id.clone(),
+            request.namespace.clone(),
+        );
+
+        // Get node capacities (use request context - capacity tracking may filter by tenant)
         let node_capacities = self
             .capacity_tracker
             .list_node_capacities(&ctx, None, None)
@@ -369,8 +379,9 @@ impl BackgroundScheduler {
                 updated_request.scheduled_at = Some(Timestamp::from(SystemTime::now()));
                 updated_request.completed_at = Some(Timestamp::from(SystemTime::now()));
 
+                // Use the context we created earlier from the request
                 self.state_store
-                    .update_request(updated_request)
+                    .update_request(&ctx, updated_request)
                     .await
                     .map_err(|e| BackgroundSchedulerError::StateStoreError(e.to_string()))?;
 
@@ -383,8 +394,9 @@ impl BackgroundScheduler {
                 updated_request.error_message = e.to_string();
                 updated_request.completed_at = Some(Timestamp::from(SystemTime::now()));
 
+                // Use the context we created earlier from the request
                 self.state_store
-                    .update_request(updated_request)
+                    .update_request(&ctx, updated_request)
                     .await
                     .map_err(|e| BackgroundSchedulerError::StateStoreError(e.to_string()))?;
 
@@ -529,7 +541,8 @@ mod tests {
         assert!(current.is_none());
         
         // Verify lease is no longer held in lock manager
-        let lock = scheduler.lock_manager.get_lock(&scheduler.lease_key).await.unwrap();
+        let ctx = RequestContext::internal();
+        let lock = scheduler.lock_manager.get_lock(&ctx, &scheduler.lease_key).await.unwrap();
         assert!(lock.is_none() || !lock.unwrap().locked);
     }
 
@@ -564,7 +577,8 @@ mod tests {
         };
 
         // Store request
-        state_store.store_request(request.clone()).await.unwrap();
+        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        state_store.store_request(&ctx, request.clone()).await.unwrap();
 
         // Create channel message
         let mut payload = Vec::new();

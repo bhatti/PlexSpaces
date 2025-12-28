@@ -862,96 +862,21 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Now consume request
         let req = request.into_inner();
         let actor_id: plexspaces_core::ActorId = req.actor_id.clone();
-
-        // Check if actor exists and is active using ActorRegistry
-        use plexspaces_core::service_locator::service_names;
-        let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
-            .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
-        // Create RequestContext for routing lookup (use internal context for system operations)
-        let internal_ctx = plexspaces_core::RequestContext::internal();
-        let routing = actor_registry.lookup_routing(&internal_ctx, &actor_id).await
-            .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
-        
-        let was_activated = match routing {
-            Some(routing_info) if routing_info.is_local => {
-                // Actor exists locally - check if it's active
-                if actor_registry.lookup_actor(&actor_id).await.is_some() {
-                    tracing::debug!(actor_id = %actor_id, "Actor already exists and is active");
-                    false
-                } else {
-                    // Actor registered but not active - need to activate
-                    // Use ActorFactory to activate
-                    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-                    let actor_factory: Arc<ActorFactoryImpl> = self.node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
-                        .ok_or_else(|| Status::internal("ActorFactory not found"))?;
-                    
-                    actor_factory.activate_virtual_actor(&actor_id).await
-                        .map_err(|e| Status::internal(format!("Failed to activate actor: {}", e)))?;
-                    true
-                }
-            }
-            Some(_) => {
-                // Actor exists on remote node - return remote ActorRef
-                tracing::debug!(actor_id = %actor_id, "Actor exists on remote node");
-                false
-            }
-            None => {
-                // Actor doesn't exist - need to create it
-                // Check if actor_type is provided for creation
-                if req.actor_type.is_empty() {
-                    return Err(Status::invalid_argument(
-                        "actor_type is required when creating new actor"
-                    ));
-                }
-
-                // Create actor using factory pattern
-                // For now, create a simple actor - in production, use actor registry to look up factory
-                use plexspaces_actor::{Actor, ActorBuilder};
-                use plexspaces_core::Actor as ActorTrait;
-                use plexspaces_mailbox::mailbox_config_default;
-
-                // Simple behavior for demonstration
-                struct SimpleBehavior;
-
-                #[async_trait::async_trait]
-                impl ActorTrait for SimpleBehavior {
-                    async fn handle_message(
-                        &mut self,
-                        _ctx: &plexspaces_core::ActorContext,
-                        _msg: plexspaces_mailbox::Message,
-                    ) -> Result<(), plexspaces_core::BehaviorError> {
-                        Ok(())
-                    }
-
-                    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-                        plexspaces_core::BehaviorType::GenServer
-                    }
-                }
-
-                let behavior = Box::new(SimpleBehavior);
-                
-                // Use ActorBuilder.spawn() which handles spawning properly
-                use plexspaces_core::RequestContext;
-                let ctx = RequestContext::internal();
-                let service_locator = self.node.service_locator();
-                
-                // spawn() will extract tenant_id and namespace from RequestContext
-                let _actor_ref = ActorBuilder::new(behavior)
-                    .with_id(actor_id.clone())
-                    .spawn(&ctx, service_locator)
-                    .await
-                    .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
-
-                tracing::debug!(actor_id = %actor_id, "Actor created and activated");
-                true
-            }
-        };
+        // Use unified implementation from actor-service crate
+        use plexspaces_actor_service::get_or_activate_actor_impl;
+        let (was_activated, final_actor_id) = get_or_activate_actor_impl(
+            &self.node.service_locator(),
+            self.node.id().as_str(),
+            &ctx,
+            &req,
+        ).await
+        .map_err(|e| Status::internal(format!("Failed to get or activate actor: {}", e)))?;
 
         // Build response
         use plexspaces_proto::v1::actor::{Actor as ProtoActor, ActorState};
         let proto_actor = ProtoActor {
-            actor_id: req.actor_id.clone(),
+            actor_id: final_actor_id.clone(),
             actor_type: if req.actor_type.is_empty() {
                 "unknown".to_string()
             } else {
@@ -971,11 +896,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         };
 
         // Build actor_ref (format: "actor_id@node_id")
-        let actor_ref = if req.actor_id.contains('@') {
-            req.actor_id.clone()
-        } else {
-            format!("{}@{}", req.actor_id, self.node.id().as_str())
-        };
+        // Use final_actor_id from unified implementation
+        let actor_ref = final_actor_id;
 
         Ok(Response::new(GetOrActivateActorResponse {
             actor_ref,

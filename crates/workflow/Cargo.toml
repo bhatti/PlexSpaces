@@ -23,6 +23,7 @@ plexspaces-proto = { path = "../proto" }
 # Async runtime
 tokio = { workspace = true }
 futures = { workspace = true }
+async-trait = "0.1"
 
 # Serialization
 serde = { workspace = true }
@@ -38,11 +39,18 @@ tracing = { workspace = true }
 # Database (for workflow metadata)
 sqlx = { workspace = true }
 
+# AWS DynamoDB backend (optional)
+aws-sdk-dynamodb = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
+
 # IDs
 ulid = { workspace = true }
 
 # Time
 chrono = { workspace = true }
+
+# Observability
+metrics = { version = "0.23", optional = true }
 
 # gRPC
 tonic = { workspace = true }
@@ -58,3 +66,4 @@ tempfile = { workspace = true }
 default = []
 sqlite = ["sqlx/sqlite"]
 postgres = ["sqlx/postgres"]
+ddb-backend = ["aws-sdk-dynamodb", "aws-config", "metrics"]

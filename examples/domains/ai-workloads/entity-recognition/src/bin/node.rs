@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
     let node = NodeBuilder::new(node_id.clone())
         .with_listen_address(listen_addr)
         .with_clustering_enabled(true)
-        .build();
+        .build().await;
 
     let node = std::sync::Arc::new(node);
 

@@ -43,7 +43,7 @@ pub struct ChannelConfig {
     #[prost(bool, tag="23")]
     pub dlq_enabled: bool,
     /// Backend-specific configuration
-    #[prost(oneof="channel_config::BackendConfig", tags="10, 11, 12, 13, 14, 15")]
+    #[prost(oneof="channel_config::BackendConfig", tags="10, 11, 12, 13, 14, 15, 16")]
     pub backend_config: ::core::option::Option<channel_config::BackendConfig>,
 }
 /// Nested message and enum types in `ChannelConfig`.
@@ -64,6 +64,8 @@ pub mod channel_config {
         Nats(super::NatsConfig),
         #[prost(message, tag="15")]
         Udp(super::UdpConfig),
+        #[prost(message, tag="16")]
+        Sqs(super::SqsConfig),
     }
 }
 /// In-memory channel configuration
@@ -327,35 +329,44 @@ pub struct UdpConfig {
     #[prost(uint32, tag="2")]
     pub multicast_port: u32,
     /// Local bind address (default: "0.0.0.0")
-    /// - "0.0.0.0" binds to all interfaces
-    /// - Specific IP binds to that interface only
     #[prost(string, tag="3")]
     pub bind_address: ::prost::alloc::string::String,
-    /// Time-to-live (TTL) for multicast packets (default: 1)
-    /// - 1 = local network only
-    /// - Higher values allow routing across subnets
+    /// TTL for messages (default: 60 seconds)
     #[prost(uint32, tag="4")]
-    pub ttl: u32,
-    /// Maximum message size in bytes (default: 65507, max UDP packet size)
-    /// - Messages larger than this will be fragmented
-    /// - Recommended: 1400 bytes for Ethernet MTU
+    pub message_ttl_seconds: u32,
+}
+/// AWS SQS configuration
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SqsConfig {
+    /// AWS region (e.g., "us-east-1")
+    #[prost(string, tag="1")]
+    pub region: ::prost::alloc::string::String,
+    /// Queue name prefix (default: "plexspaces-")
+    /// Actual queue names will be: {prefix}{channel_name}
+    #[prost(string, tag="2")]
+    pub queue_prefix: ::prost::alloc::string::String,
+    /// Endpoint URL (for local testing with SQS Local)
+    /// Leave empty for production (uses AWS service)
+    #[prost(string, tag="3")]
+    pub endpoint_url: ::prost::alloc::string::String,
+    /// Visibility timeout in seconds (default: 30)
+    /// How long a message is invisible after being received
+    #[prost(uint32, tag="4")]
+    pub visibility_timeout_seconds: u32,
+    /// Message retention period in seconds (default: 345600 = 4 days)
     #[prost(uint32, tag="5")]
-    pub max_message_size: u32,
-    /// Enable unicast mode for point-to-point messaging (default: false)
-    /// - If true, uses unicast instead of multicast
-    /// - Requires target address for each send
+    pub message_retention_period_seconds: u32,
+    /// Dead Letter Queue configuration
     #[prost(bool, tag="6")]
-    pub unicast_mode: bool,
-    /// Cluster name (required for multicast)
-    /// - Nodes with same cluster_name can communicate
-    /// - Must match node's cluster_name
-    #[prost(string, tag="7")]
-    pub cluster_name: ::prost::alloc::string::String,
-    /// Interface name to bind to (optional)
-    /// - If set, binds to specific network interface
-    /// - If empty, uses bind_address
-    #[prost(string, tag="8")]
-    pub interface_name: ::prost::alloc::string::String,
+    pub dlq_enabled: bool,
+    /// Max receive count before sending to DLQ (default: 3)
+    #[prost(uint32, tag="7")]
+    pub dlq_max_receive_count: u32,
+    /// Receive message wait time in seconds (long polling, default: 20)
+    /// 0 = short polling, >0 = long polling
+    #[prost(uint32, tag="8")]
+    pub receive_message_wait_time_seconds: u32,
 }
 /// Channel message envelope
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -607,6 +618,12 @@ pub enum ChannelBackend {
     /// - No persistence, best-effort delivery
     /// - Requires nodes to share same cluster_name
     ChannelBackendUdp = 5,
+    /// AWS SQS for managed message queuing
+    /// - Fully managed, serverless
+    /// - Dead Letter Queue (DLQ) support
+    /// - At-least-once delivery with visibility timeout
+    /// - Auto-scaling, no infrastructure management
+    ChannelBackendSqs = 6,
     /// Custom backend (user-provided implementation)
     ChannelBackendCustom = 99,
 }
@@ -623,6 +640,7 @@ impl ChannelBackend {
             ChannelBackend::ChannelBackendSqlite => "CHANNEL_BACKEND_SQLITE",
             ChannelBackend::ChannelBackendNats => "CHANNEL_BACKEND_NATS",
             ChannelBackend::ChannelBackendUdp => "CHANNEL_BACKEND_UDP",
+            ChannelBackend::ChannelBackendSqs => "CHANNEL_BACKEND_SQS",
             ChannelBackend::ChannelBackendCustom => "CHANNEL_BACKEND_CUSTOM",
         }
     }
@@ -635,6 +653,7 @@ impl ChannelBackend {
             "CHANNEL_BACKEND_SQLITE" => Some(Self::ChannelBackendSqlite),
             "CHANNEL_BACKEND_NATS" => Some(Self::ChannelBackendNats),
             "CHANNEL_BACKEND_UDP" => Some(Self::ChannelBackendUdp),
+            "CHANNEL_BACKEND_SQS" => Some(Self::ChannelBackendSqs),
             "CHANNEL_BACKEND_CUSTOM" => Some(Self::ChannelBackendCustom),
             _ => None,
         }

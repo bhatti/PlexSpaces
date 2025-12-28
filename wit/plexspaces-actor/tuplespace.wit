@@ -1,0 +1,148 @@
+// PlexSpaces Actor Interface - TupleSpace
+//
+// Linda-style tuple space for distributed coordination.
+// Enables decoupled communication between actors using pattern matching.
+
+interface tuplespace {
+    use types.{tuple-data, pattern, duration-ms, actor-error};
+
+    /// Write tuple to space
+    ///
+    /// Tuple is stored until taken or TTL expires.
+    /// Multiple identical tuples can exist.
+    ///
+    /// # Arguments
+    /// - `tuple`: Tuple to write
+    ///
+    /// # Returns
+    /// - `ok`: Tuple written successfully
+    /// - `err`: Write failed
+    ///
+    /// # Example (Rust)
+    /// ```rust
+    /// // Write a configuration tuple
+    /// let tuple = vec![
+    ///     TupleField::StringVal("config".into()),
+    ///     TupleField::StringVal("timeout".into()),
+    ///     TupleField::IntVal(30),
+    /// ];
+    /// tuplespace::write(tuple)?;
+    /// ```
+    write: func(tuple-data: tuple-data) -> result<_, actor-error>;
+
+    /// Write tuple with time-to-live
+    ///
+    /// # Arguments
+    /// - `tuple`: Tuple to write
+    /// - `ttl-ms`: Time-to-live in milliseconds (0 = infinite)
+    write-with-ttl: func(tuple-data: tuple-data, ttl-ms: duration-ms) -> result<_, actor-error>;
+
+    /// Read tuple matching pattern (non-destructive)
+    ///
+    /// Returns first matching tuple without removing it.
+    /// Returns immediately if no match found.
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match
+    ///
+    /// # Returns
+    /// - `ok(some(tuple))`: Matching tuple found
+    /// - `ok(none)`: No matching tuple
+    /// - `err`: Read failed
+    ///
+    /// # Example (Rust)
+    /// ```rust
+    /// // Read config tuple
+    /// let pattern = vec![
+    ///     PatternField::Exact(TupleField::StringVal("config".into())),
+    ///     PatternField::Any,  // Any key
+    ///     PatternField::Any,  // Any value
+    /// ];
+    /// if let Some(tuple) = tuplespace::read(pattern)? {
+    ///     // Process tuple
+    /// }
+    /// ```
+    read: func(pattern-data: pattern) -> result<option<tuple-data>, actor-error>;
+
+    /// Read tuple with blocking wait
+    ///
+    /// Blocks until matching tuple found or timeout expires.
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match
+    /// - `timeout-ms`: Maximum time to wait (0 = no timeout, wait forever)
+    read-blocking: func(pattern-data: pattern, timeout-ms: duration-ms) -> result<option<tuple-data>, actor-error>;
+
+    /// Read all matching tuples (non-destructive)
+    ///
+    /// Returns all tuples matching pattern without removing them.
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match
+    /// - `limit`: Maximum number of tuples to return (0 = no limit)
+    read-all: func(pattern-data: pattern, limit: u32) -> result<list<tuple-data>, actor-error>;
+
+    /// Take tuple matching pattern (destructive)
+    ///
+    /// Removes and returns first matching tuple.
+    /// Returns immediately if no match found.
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match
+    ///
+    /// # Returns
+    /// - `ok(some(tuple))`: Tuple taken
+    /// - `ok(none)`: No matching tuple
+    /// - `err`: Take failed
+    take: func(pattern-data: pattern) -> result<option<tuple-data>, actor-error>;
+
+    /// Take tuple with blocking wait
+    ///
+    /// Blocks until matching tuple found or timeout expires.
+    /// Atomically removes the tuple.
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match
+    /// - `timeout-ms`: Maximum time to wait (0 = wait forever)
+    take-blocking: func(pattern-data: pattern, timeout-ms: duration-ms) -> result<option<tuple-data>, actor-error>;
+
+    /// Count tuples matching pattern
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match
+    ///
+    /// # Returns
+    /// Number of matching tuples
+    count: func(pattern-data: pattern) -> result<u64, actor-error>;
+
+    /// Subscribe to tuple events
+    ///
+    /// Receive notifications when tuples matching pattern are written.
+    /// Useful for reactive patterns.
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to watch
+    ///
+    /// # Returns
+    /// Subscription ID for unsubscribe
+    subscribe: func(pattern-data: pattern) -> result<u64, actor-error>;
+
+    /// Unsubscribe from tuple events
+    unsubscribe: func(subscription-id: u64) -> result<_, actor-error>;
+
+    /// Atomic compare-and-swap
+    ///
+    /// Atomically replaces tuple if current value matches expected.
+    /// Useful for optimistic concurrency control.
+    ///
+    /// # Arguments
+    /// - `pattern`: Pattern to match current tuple
+    /// - `expected`: Expected current tuple (for comparison)
+    /// - `new-tuple`: New tuple to write if match succeeds
+    ///
+    /// # Returns
+    /// - `ok(true)`: Swap succeeded
+    /// - `ok(false)`: Current value didn't match expected
+    /// - `err`: Operation failed
+    compare-and-swap: func(pattern-data: pattern, expected: tuple-data, new-tuple: tuple-data) -> result<bool, actor-error>;
+}

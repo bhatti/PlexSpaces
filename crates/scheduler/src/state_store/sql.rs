@@ -21,6 +21,7 @@
 use crate::state_store::SchedulingStateStore;
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
+use plexspaces_core::RequestContext;
 use plexspaces_proto::v1::actor::ActorResourceRequirements;
 use plexspaces_proto::scheduling::v1::{SchedulingRequest, SchedulingStatus};
 use prost::Message;
@@ -60,7 +61,22 @@ impl SqliteSchedulingStateStore {
 
 #[async_trait]
 impl SchedulingStateStore for SqliteSchedulingStateStore {
-    async fn store_request(&self, request: SchedulingRequest) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn store_request(
+        &self,
+        ctx: &RequestContext,
+        request: SchedulingRequest,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Validate tenant/namespace match
+        if request.tenant_id != ctx.tenant_id() || request.namespace != ctx.namespace() {
+            return Err(format!(
+                "Request tenant_id/namespace ({}/{}) does not match context ({}/{})",
+                request.tenant_id,
+                request.namespace,
+                ctx.tenant_id(),
+                ctx.namespace()
+            )
+            .into());
+        }
         // Serialize requirements (using prost Message encoding, then base64)
         let requirements_json = if let Some(ref req) = request.requirements {
             let mut buf = Vec::new();
@@ -112,17 +128,23 @@ impl SchedulingStateStore for SqliteSchedulingStateStore {
         Ok(())
     }
 
-    async fn get_request(&self, request_id: &str) -> Result<Option<SchedulingRequest>, Box<dyn Error + Send + Sync>> {
+    async fn get_request(
+        &self,
+        ctx: &RequestContext,
+        request_id: &str,
+    ) -> Result<Option<SchedulingRequest>, Box<dyn Error + Send + Sync>> {
         let row = sqlx::query(
             r#"
             SELECT request_id, status, requirements_json, namespace, tenant_id,
                    selected_node_id, actor_id, error_message, metadata_json,
                    created_at, scheduled_at, completed_at
             FROM scheduling_requests
-            WHERE request_id = ?
+            WHERE request_id = ? AND tenant_id = ? AND namespace = ?
             "#,
         )
         .bind(request_id)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .fetch_optional(&self.pool)
         .await?;
 
@@ -133,7 +155,22 @@ impl SchedulingStateStore for SqliteSchedulingStateStore {
         }
     }
 
-    async fn update_request(&self, request: SchedulingRequest) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn update_request(
+        &self,
+        ctx: &RequestContext,
+        request: SchedulingRequest,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Validate tenant/namespace match
+        if request.tenant_id != ctx.tenant_id() || request.namespace != ctx.namespace() {
+            return Err(format!(
+                "Request tenant_id/namespace ({}/{}) does not match context ({}/{})",
+                request.tenant_id,
+                request.namespace,
+                ctx.tenant_id(),
+                ctx.namespace()
+            )
+            .into());
+        }
         // Serialize requirements (using prost Message encoding, then base64)
         let requirements_json = if let Some(ref req) = request.requirements {
             let mut buf = Vec::new();
@@ -169,7 +206,7 @@ impl SchedulingStateStore for SqliteSchedulingStateStore {
                 scheduled_at = COALESCE(?, CASE WHEN ? = 'SCHEDULED' AND scheduled_at IS NULL THEN CAST(strftime('%s', 'now') AS INTEGER) ELSE scheduled_at END),
                 completed_at = COALESCE(?, CASE WHEN ? IN ('SCHEDULED', 'FAILED') AND completed_at IS NULL THEN CAST(strftime('%s', 'now') AS INTEGER) ELSE completed_at END),
                 updated_at = CAST(strftime('%s', 'now') AS INTEGER)
-            WHERE request_id = ?
+            WHERE request_id = ? AND tenant_id = ? AND namespace = ?
             "#,
         )
         .bind(&status_str)
@@ -184,23 +221,30 @@ impl SchedulingStateStore for SqliteSchedulingStateStore {
         .bind(&completed_at_secs)
         .bind(&status_str)
         .bind(&request.request_id)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .execute(&self.pool)
         .await?;
 
         Ok(())
     }
 
-    async fn query_pending_requests(&self) -> Result<Vec<SchedulingRequest>, Box<dyn Error + Send + Sync>> {
+    async fn query_pending_requests(
+        &self,
+        ctx: &RequestContext,
+    ) -> Result<Vec<SchedulingRequest>, Box<dyn Error + Send + Sync>> {
         let rows = sqlx::query(
             r#"
             SELECT request_id, status, requirements_json, namespace, tenant_id,
                    selected_node_id, actor_id, error_message, metadata_json,
                    created_at, scheduled_at, completed_at
             FROM scheduling_requests
-            WHERE status = 'PENDING'
+            WHERE status = 'PENDING' AND tenant_id = ? AND namespace = ?
             ORDER BY created_at ASC
             "#,
         )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
         .fetch_all(&self.pool)
         .await?;
 

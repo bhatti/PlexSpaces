@@ -47,3 +47,6 @@ pub use state_store::sql::SqliteSchedulingStateStore;
 #[cfg(feature = "memory-backend")]
 pub use state_store::memory::MemorySchedulingStateStore;
 
+#[cfg(feature = "ddb-backend")]
+pub use state_store::ddb::DynamoDBSchedulingStateStore;
+

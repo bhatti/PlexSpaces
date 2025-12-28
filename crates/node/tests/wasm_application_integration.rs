@@ -87,7 +87,6 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
             ChildSpec {
                 id: "worker-1".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: "test::Worker1".to_string(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: Some(ProstDuration {
@@ -100,7 +99,6 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
             ChildSpec {
                 id: "worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
-                start_module: "test::Worker2".to_string(),
                 args: HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: Some(ProstDuration {

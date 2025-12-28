@@ -1,0 +1,126 @@
+// PlexSpaces Actor Interface - Durability
+//
+// Persistence and recovery primitives for durable actors.
+// Enables event sourcing, checkpointing, and crash recovery.
+
+interface durability {
+    use types.{payload, actor-error};
+
+    /// Journal entry representing a persisted event
+    record journal-entry {
+        /// Sequence number (monotonically increasing)
+        sequence: u64,
+        /// Event type
+        event-type: string,
+        /// Event payload
+        payload: payload,
+        /// Timestamp when persisted
+        timestamp: u64,
+    }
+
+    /// Append event to journal
+    ///
+    /// Event is durably persisted before returning.
+    /// Use for event sourcing patterns.
+    ///
+    /// # Arguments
+    /// - `event-type`: Event type identifier
+    /// - `payload`: Event payload
+    ///
+    /// # Returns
+    /// - `ok(sequence)`: Sequence number of persisted event
+    /// - `err`: Persistence failed
+    ///
+    /// # Example
+    /// ```rust
+    /// // Persist state change event
+    /// let event = serde_json::to_vec(&OrderCreated { id: "123" })?;
+    /// let seq = durability::persist("order.created", event)?;
+    /// ```
+    persist: func(event-type: string, payload: payload) -> result<u64, actor-error>;
+
+    /// Persist multiple events atomically
+    ///
+    /// All events are persisted in a single transaction.
+    /// Either all succeed or all fail.
+    ///
+    /// # Arguments
+    /// - `events`: List of (event_type, payload) tuples
+    ///
+    /// # Returns
+    /// - `ok(first_sequence)`: Sequence number of first event
+    persist-batch: func(events: list<tuple<string, payload>>) -> result<u64, actor-error>;
+
+    /// Create checkpoint (snapshot)
+    ///
+    /// Forces immediate snapshot of actor state.
+    /// After checkpoint, replay only needs events after this point.
+    ///
+    /// # Returns
+    /// - `ok(sequence)`: Sequence number of checkpoint
+    /// - `err`: Checkpoint failed
+    checkpoint: func() -> result<u64, actor-error>;
+
+    /// Get current journal sequence number
+    ///
+    /// Returns highest persisted sequence number.
+    /// Useful for tracking progress.
+    get-sequence: func() -> result<u64, actor-error>;
+
+    /// Get last checkpoint sequence number
+    ///
+    /// Returns sequence number of most recent checkpoint.
+    /// Events before this are compacted.
+    get-checkpoint-sequence: func() -> result<u64, actor-error>;
+
+    /// Check if currently in replay mode
+    ///
+    /// Returns true during recovery (replaying journal).
+    /// Actors should skip side effects during replay.
+    ///
+    /// # Example
+    /// ```rust
+    /// if !durability::is_replaying()? {
+    ///     // Only send email during normal execution
+    ///     send_notification_email()?;
+    /// }
+    /// ```
+    is-replaying: func() -> result<bool, actor-error>;
+
+    /// Cache result of side effect
+    ///
+    /// During replay, returns cached result instead of re-executing.
+    /// Use for non-deterministic operations (HTTP calls, random, time).
+    ///
+    /// # Arguments
+    /// - `key`: Unique key for this side effect
+    /// - `result`: Result to cache (only used during normal execution)
+    ///
+    /// # Returns
+    /// - During normal execution: Returns provided result
+    /// - During replay: Returns previously cached result
+    ///
+    /// # Example
+    /// ```rust
+    /// // HTTP call is cached during replay
+    /// let response = durability::cache_side_effect(
+    ///     "http:orders:123",
+    ///     || http_client.get("https://api.example.com/orders/123")
+    /// )?;
+    /// ```
+    cache-side-effect: func(key: string, result-value: payload) -> result<payload, actor-error>;
+
+    /// Read journal entries (for debugging/introspection)
+    ///
+    /// # Arguments
+    /// - `from-sequence`: Start sequence (inclusive)
+    /// - `to-sequence`: End sequence (exclusive), 0 = to end
+    /// - `limit`: Maximum entries to return
+    read-journal: func(from-sequence: u64, to-sequence: u64, limit: u32) -> result<list<journal-entry>, actor-error>;
+
+    /// Compact journal up to sequence
+    ///
+    /// Removes journal entries before sequence.
+    /// Only allowed if checkpoint exists at or after sequence.
+    compact: func(up-to-sequence: u64) -> result<_, actor-error>;
+}

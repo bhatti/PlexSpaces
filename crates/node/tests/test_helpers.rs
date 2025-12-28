@@ -195,21 +195,6 @@ pub fn spawn_actor_builder_helper(_node: &Node) {
     // Tests should use ActorBuilder::new(...).spawn(node.service_locator().clone())
 }
 
-/// Spawn remote actor (replaces Node::spawn_remote)
-/// Note: This is deprecated - use ActorService gRPC client directly
-pub async fn spawn_remote_helper(
-    node: &Node,
-    _target_node_id: &plexspaces_node::NodeId,
-    _actor_type: &str,
-    _initial_state: Vec<u8>,
-    _config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-    _labels: std::collections::HashMap<String, String>,
-) -> Result<ActorRef, plexspaces_node::NodeError> {
-    Err(plexspaces_node::NodeError::ConfigError(
-        "spawn_remote is deprecated - use ActorService gRPC client directly".to_string()
-    ))
-}
-
 /// Helper to register an actor with MessageSender (replaces register_local)
 pub async fn register_actor_with_message_sender(
     node: &Node,

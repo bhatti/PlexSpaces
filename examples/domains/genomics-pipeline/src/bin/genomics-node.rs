@@ -86,6 +86,7 @@ async fn main() -> Result<()> {
         NodeBuilder::new(node_id.clone())
             .with_listen_address(listen_addr.clone())
             .build()
+            .await
     );
 
     info!("Node created: {}", node_id);

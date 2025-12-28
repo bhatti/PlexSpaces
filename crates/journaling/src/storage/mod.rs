@@ -461,3 +461,8 @@ pub use sql::PostgresJournalStorage;
 mod redis;
 #[cfg(feature = "redis-backend")]
 pub use redis::RedisJournalStorage;
+
+#[cfg(feature = "ddb-backend")]
+mod ddb;
+#[cfg(feature = "ddb-backend")]
+pub use ddb::DynamoDBJournalStorage;

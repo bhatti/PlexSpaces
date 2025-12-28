@@ -34,6 +34,7 @@
 use crate::{AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions, RenewLockOptions};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use plexspaces_common::RequestContext;
 use std::collections::HashMap;
 use tracing::instrument;
 use ulid::Ulid;
@@ -79,24 +80,39 @@ impl SqliteLockManager {
             .await
             .map_err(|e| LockError::BackendError(format!("failed to connect SQLite: {e}")))?;
 
-        // Initialize schema lazily
+        // Initialize schema lazily with tenant/namespace support
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS locks (
-              lock_key TEXT PRIMARY KEY,
+              tenant_id TEXT NOT NULL DEFAULT 'default',
+              namespace TEXT NOT NULL DEFAULT 'default',
+              lock_key TEXT NOT NULL,
               holder_id TEXT NOT NULL,
               version TEXT NOT NULL,
               expires_at INTEGER NOT NULL,
               lease_duration_secs INTEGER NOT NULL,
               last_heartbeat INTEGER NOT NULL,
               locked INTEGER NOT NULL,
-              metadata TEXT
+              metadata TEXT,
+              PRIMARY KEY (tenant_id, namespace, lock_key)
             );
         "#,
         )
         .execute(&pool)
         .await
         .map_err(|e| LockError::BackendError(format!("failed to create locks table: {e}")))?;
+
+        // Create indexes
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_locks_tenant_namespace
+            ON locks(tenant_id, namespace, lock_key)
+            WHERE locked = 1;
+        "#,
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| LockError::BackendError(format!("failed to create index: {e}")))?;
 
         Ok(Self { pool })
     }
@@ -144,8 +160,11 @@ impl SqliteLockManager {
 #[cfg(feature = "sqlite-backend")]
 #[async_trait]
 impl LockManager for SqliteLockManager {
-    #[instrument(skip(self, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id))]
-    async fn acquire_lock(&self, options: AcquireLockOptions) -> LockResult<Lock> {
+    #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
+    async fn acquire_lock(&self, ctx: &RequestContext, options: AcquireLockOptions) -> LockResult<Lock> {
+        let tenant_id = if ctx.tenant_id().is_empty() { "default" } else { ctx.tenant_id() };
+        let namespace = if ctx.namespace().is_empty() { "default" } else { ctx.namespace() };
+        
         let mut conn = self
             .pool
             .acquire()
@@ -160,12 +179,14 @@ impl LockManager for SqliteLockManager {
         let lease_secs = options.lease_duration_secs as i64;
         let expires_at = now + lease_secs;
 
-        // Load existing lock (if any)
+        // Load existing lock (if any) - MUST filter by tenant_id and namespace
         let row = sqlx::query(
             r#"SELECT lock_key, holder_id, version, expires_at, lease_duration_secs,
                       last_heartbeat, locked, metadata
-               FROM locks WHERE lock_key = ?1"#,
+               FROM locks WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
         )
+        .bind(tenant_id)
+        .bind(namespace)
         .bind(&options.lock_key)
         .fetch_optional(&mut *tx)
         .await
@@ -201,15 +222,17 @@ impl LockManager for SqliteLockManager {
 
             sqlx::query(
                 r#"UPDATE locks
-                   SET holder_id = ?2,
-                       version = ?3,
-                       expires_at = ?4,
-                       lease_duration_secs = ?5,
-                       last_heartbeat = ?6,
+                   SET holder_id = ?4,
+                       version = ?5,
+                       expires_at = ?6,
+                       lease_duration_secs = ?7,
+                       last_heartbeat = ?8,
                        locked = 1,
-                       metadata = ?7
-                 WHERE lock_key = ?1"#,
+                       metadata = ?9
+                 WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
             )
+            .bind(tenant_id)
+            .bind(namespace)
             .bind(&options.lock_key)
             .bind(&options.holder_id)
             .bind(&new_version)
@@ -250,10 +273,12 @@ impl LockManager for SqliteLockManager {
 
         sqlx::query(
             r#"INSERT INTO locks
-               (lock_key, holder_id, version, expires_at, lease_duration_secs,
+               (tenant_id, namespace, lock_key, holder_id, version, expires_at, lease_duration_secs,
                 last_heartbeat, locked, metadata)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)"#,
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)"#,
         )
+        .bind(tenant_id)
+        .bind(namespace)
         .bind(&options.lock_key)
         .bind(&options.holder_id)
         .bind(&version)
@@ -281,8 +306,11 @@ impl LockManager for SqliteLockManager {
         )
     }
 
-    #[instrument(skip(self, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version))]
-    async fn renew_lock(&self, options: RenewLockOptions) -> LockResult<Lock> {
+    #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
+    async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions) -> LockResult<Lock> {
+        let tenant_id = if ctx.tenant_id().is_empty() { "default" } else { ctx.tenant_id() };
+        let namespace = if ctx.namespace().is_empty() { "default" } else { ctx.namespace() };
+        
         let mut conn = self
             .pool
             .acquire()
@@ -300,8 +328,10 @@ impl LockManager for SqliteLockManager {
         let row = sqlx::query(
             r#"SELECT holder_id, version, expires_at, lease_duration_secs,
                       last_heartbeat, locked, metadata
-               FROM locks WHERE lock_key = ?1"#,
+               FROM locks WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
         )
+        .bind(tenant_id)
+        .bind(namespace)
         .bind(&options.lock_key)
         .fetch_optional(&mut *tx)
         .await
@@ -345,13 +375,15 @@ impl LockManager for SqliteLockManager {
 
         sqlx::query(
             r#"UPDATE locks
-               SET version = ?2,
-                   expires_at = ?3,
-                   lease_duration_secs = ?4,
-                   last_heartbeat = ?5,
-                   metadata = ?6
-             WHERE lock_key = ?1"#,
+               SET version = ?4,
+                   expires_at = ?5,
+                   lease_duration_secs = ?6,
+                   last_heartbeat = ?7,
+                   metadata = ?8
+             WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
         )
+        .bind(tenant_id)
+        .bind(namespace)
         .bind(&options.lock_key)
         .bind(&new_version)
         .bind(new_expires)
@@ -378,8 +410,11 @@ impl LockManager for SqliteLockManager {
         )
     }
 
-    #[instrument(skip(self, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version))]
-    async fn release_lock(&self, options: ReleaseLockOptions) -> LockResult<()> {
+    #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
+    async fn release_lock(&self, ctx: &RequestContext, options: ReleaseLockOptions) -> LockResult<()> {
+        let tenant_id = if ctx.tenant_id().is_empty() { "default" } else { ctx.tenant_id() };
+        let namespace = if ctx.namespace().is_empty() { "default" } else { ctx.namespace() };
+        
         let mut conn = self
             .pool
             .acquire()
@@ -390,10 +425,12 @@ impl LockManager for SqliteLockManager {
             .await
             .map_err(|e| LockError::BackendError(format!("begin tx: {e}")))?;
 
-        // Load lock
+        // Load lock - MUST filter by tenant_id and namespace
         let row = sqlx::query(
-            r#"SELECT holder_id, version FROM locks WHERE lock_key = ?1"#,
+            r#"SELECT holder_id, version FROM locks WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
         )
+        .bind(tenant_id)
+        .bind(namespace)
         .bind(&options.lock_key)
         .fetch_optional(&mut *tx)
         .await
@@ -418,7 +455,9 @@ impl LockManager for SqliteLockManager {
         }
 
         if options.delete_lock {
-            sqlx::query(r#"DELETE FROM locks WHERE lock_key = ?1"#)
+            sqlx::query(r#"DELETE FROM locks WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#)
+                .bind(tenant_id)
+                .bind(namespace)
                 .bind(&options.lock_key)
                 .execute(&mut *tx)
                 .await
@@ -427,8 +466,10 @@ impl LockManager for SqliteLockManager {
             sqlx::query(
                 r#"UPDATE locks
                    SET locked = 0
-                 WHERE lock_key = ?1"#,
+                 WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
             )
+            .bind(tenant_id)
+            .bind(namespace)
             .bind(&options.lock_key)
             .execute(&mut *tx)
             .await
@@ -442,13 +483,18 @@ impl LockManager for SqliteLockManager {
         Ok(())
     }
 
-    #[instrument(skip(self))]
-    async fn get_lock(&self, lock_key: &str) -> LockResult<Option<Lock>> {
+    #[instrument(skip(self, ctx), fields(lock_key = %lock_key, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
+    async fn get_lock(&self, ctx: &RequestContext, lock_key: &str) -> LockResult<Option<Lock>> {
+        let tenant_id = if ctx.tenant_id().is_empty() { "default" } else { ctx.tenant_id() };
+        let namespace = if ctx.namespace().is_empty() { "default" } else { ctx.namespace() };
+        
         let row = sqlx::query(
             r#"SELECT lock_key, holder_id, version, expires_at, lease_duration_secs,
                       last_heartbeat, locked, metadata
-               FROM locks WHERE lock_key = ?1"#,
+               FROM locks WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
         )
+        .bind(tenant_id)
+        .bind(namespace)
         .bind(lock_key)
         .fetch_optional(&self.pool)
         .await

@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     let node1 = NodeBuilder::new("node1")
         .with_listen_address("127.0.0.1:9001".to_string())
-        .build();
+        .build().await;
 
     // Spawn counter actor on node1
     use plexspaces_actor::ActorBuilder;

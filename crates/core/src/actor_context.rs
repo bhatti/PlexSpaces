@@ -579,18 +579,6 @@ impl ActorContext {
         self.parent_ref.as_ref()
     }
 
-    /// Create a minimal ActorContext (for testing/backward compatibility)
-    ///
-    /// ## Note
-    /// This creates a context with an empty ServiceLocator. Use `new()` for production.
-    ///
-    /// ## Deprecated
-    /// This is for backward compatibility. New code should use `new()` with real ServiceLocator.
-    ///
-    /// ## Note on actor_id
-    /// Actor ID parameter is deprecated and ignored. Actors should get their ID from
-    /// `Envelope.target_id` or `Actor.id` field.
-
     /// Send a reply message to the sender of the original message
     ///
     /// ## Purpose

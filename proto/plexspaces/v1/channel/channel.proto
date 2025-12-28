@@ -88,6 +88,13 @@ enum ChannelBackend {
   // - Requires nodes to share same cluster_name
   CHANNEL_BACKEND_UDP = 5;
 
+  // AWS SQS for managed message queuing
+  // - Fully managed, serverless
+  // - Dead Letter Queue (DLQ) support
+  // - At-least-once delivery with visibility timeout
+  // - Auto-scaling, no infrastructure management
+  CHANNEL_BACKEND_SQS = 6;
+
   // Custom backend (user-provided implementation)
   CHANNEL_BACKEND_CUSTOM = 99;
 }
@@ -144,6 +151,7 @@ message ChannelConfig {
     SqliteConfig sqlite = 13;
     NatsConfig nats = 14;
     UdpConfig udp = 15;
+    SqsConfig sqs = 16;
   }
 
   // Optional: TTL for messages
@@ -340,34 +348,41 @@ message UdpConfig {
   uint32 multicast_port = 2;
 
   // Local bind address (default: "0.0.0.0")
-  // - "0.0.0.0" binds to all interfaces
-  // - Specific IP binds to that interface only
   string bind_address = 3;
 
-  // Time-to-live (TTL) for multicast packets (default: 1)
-  // - 1 = local network only
-  // - Higher values allow routing across subnets
-  uint32 ttl = 4;
+  // TTL for messages (default: 60 seconds)
+  uint32 message_ttl_seconds = 4;
+}
 
-  // Maximum message size in bytes (default: 65507, max UDP packet size)
-  // - Messages larger than this will be fragmented
-  // - Recommended: 1400 bytes for Ethernet MTU
-  uint32 max_message_size = 5;
+// AWS SQS configuration
+message SqsConfig {
+  // AWS region (e.g., "us-east-1")
+  string region = 1;
 
-  // Enable unicast mode for point-to-point messaging (default: false)
-  // - If true, uses unicast instead of multicast
-  // - Requires target address for each send
-  bool unicast_mode = 6;
+  // Queue name prefix (default: "plexspaces-")
+  // Actual queue names will be: {prefix}{channel_name}
+  string queue_prefix = 2;
 
-  // Cluster name (required for multicast)
-  // - Nodes with same cluster_name can communicate
-  // - Must match node's cluster_name
-  string cluster_name = 7;
+  // Endpoint URL (for local testing with SQS Local)
+  // Leave empty for production (uses AWS service)
+  string endpoint_url = 3;
 
-  // Interface name to bind to (optional)
-  // - If set, binds to specific network interface
-  // - If empty, uses bind_address
-  string interface_name = 8;
+  // Visibility timeout in seconds (default: 30)
+  // How long a message is invisible after being received
+  uint32 visibility_timeout_seconds = 4;
+
+  // Message retention period in seconds (default: 345600 = 4 days)
+  uint32 message_retention_period_seconds = 5;
+
+  // Dead Letter Queue configuration
+  bool dlq_enabled = 6;
+
+  // Max receive count before sending to DLQ (default: 3)
+  uint32 dlq_max_receive_count = 7;
+
+  // Receive message wait time in seconds (long polling, default: 20)
+  // 0 = short polling, >0 = long polling
+  uint32 receive_message_wait_time_seconds = 8;
 }
 
 // Channel message envelope

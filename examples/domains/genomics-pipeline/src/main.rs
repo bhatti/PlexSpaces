@@ -69,7 +69,8 @@ async fn main() -> Result<()> {
     let node = Arc::new(
         NodeBuilder::new("genomics-pipeline-node")
             .with_listen_address("0.0.0.0:9000")
-            .build(),
+            .build()
+            .await,
     );
     info!("✅ Node created: genomics-pipeline-node");
     println!();

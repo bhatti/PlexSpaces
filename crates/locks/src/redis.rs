@@ -30,6 +30,7 @@
 
 use crate::{AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions, RenewLockOptions};
 use async_trait::async_trait;
+use plexspaces_common::RequestContext;
 
 #[cfg(feature = "redis-backend")]
 use redis::aio::ConnectionManager;
@@ -68,25 +69,25 @@ impl RedisLockManager {
 #[cfg(feature = "redis-backend")]
 #[async_trait]
 impl LockManager for RedisLockManager {
-    async fn acquire_lock(&self, _options: AcquireLockOptions) -> LockResult<Lock> {
+    async fn acquire_lock(&self, _ctx: &RequestContext, _options: AcquireLockOptions) -> LockResult<Lock> {
         Err(LockError::BackendError(
             "RedisLockManager::acquire_lock not yet implemented".into(),
         ))
     }
 
-    async fn renew_lock(&self, _options: RenewLockOptions) -> LockResult<Lock> {
+    async fn renew_lock(&self, _ctx: &RequestContext, _options: RenewLockOptions) -> LockResult<Lock> {
         Err(LockError::BackendError(
             "RedisLockManager::renew_lock not yet implemented".into(),
         ))
     }
 
-    async fn release_lock(&self, _options: ReleaseLockOptions) -> LockResult<()> {
+    async fn release_lock(&self, _ctx: &RequestContext, _options: ReleaseLockOptions) -> LockResult<()> {
         Err(LockError::BackendError(
             "RedisLockManager::release_lock not yet implemented".into(),
         ))
     }
 
-    async fn get_lock(&self, _lock_key: &str) -> LockResult<Option<Lock>> {
+    async fn get_lock(&self, _ctx: &RequestContext, _lock_key: &str) -> LockResult<Option<Lock>> {
         Err(LockError::BackendError(
             "RedisLockManager::get_lock not yet implemented".into(),
         ))

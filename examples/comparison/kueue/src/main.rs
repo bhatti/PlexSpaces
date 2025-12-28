@@ -222,7 +222,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating Kueue AI Workload Scheduling (ML Training Jobs with Elastic Pools)");
 
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Kueue manages ML training jobs with GPU/CPU resource scheduling and elastic pools
     let actor_id: ActorId = "ml-job-queue/kueue-1@comparison-node-1".to_string();
@@ -377,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn test_job_queue() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "ml-job-queue/test-1@test-node".to_string();
         let behavior = Box::new(JobQueueActor::new(2, 4)); // 2 GPUs, 4 CPUs

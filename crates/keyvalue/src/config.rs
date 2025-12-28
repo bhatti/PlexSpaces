@@ -100,6 +100,16 @@ pub enum BackendType {
         /// Redis key namespace prefix
         namespace: String,
     },
+    /// DynamoDB backend (requires ddb-backend feature)
+    #[cfg(feature = "ddb-backend")]
+    DynamoDB {
+        /// AWS region
+        region: String,
+        /// Table name prefix
+        table_prefix: String,
+        /// Endpoint URL (for local testing)
+        endpoint_url: Option<String>,
+    },
     /// Blob backend from environment variables (requires blob-backend feature)
     /// Created asynchronously in create_keyvalue_from_config
     /// Uses object_store directly - no SQL database or blob service needed
@@ -148,8 +158,18 @@ impl KVConfig {
     /// # }
     /// ```
     pub fn from_env() -> KVResult<Self> {
+        // Check if AWS should be used as default
+        #[cfg(feature = "ddb-backend")]
+        let default_backend = if plexspaces_common::AWSConfig::should_use_as_default() {
+            "dynamodb"
+        } else {
+            "in-memory"
+        };
+        #[cfg(not(feature = "ddb-backend"))]
+        let default_backend = "in-memory";
+
         let backend_str = std::env::var("PLEXSPACES_KV_BACKEND")
-            .unwrap_or_else(|_| "in-memory".to_string())
+            .unwrap_or_else(|_| default_backend.to_string())
             .to_lowercase();
 
         let backend = match backend_str.as_str() {
@@ -184,6 +204,17 @@ impl KVConfig {
                 BackendType::Redis { url, namespace }
             }
 
+            #[cfg(feature = "ddb-backend")]
+            "dynamodb" | "ddb" => {
+                use plexspaces_common::DynamoDBConfig;
+                let ddb_config = DynamoDBConfig::from_env();
+                BackendType::DynamoDB {
+                    region: ddb_config.region,
+                    table_prefix: ddb_config.table_prefix,
+                    endpoint_url: ddb_config.endpoint_url,
+                }
+            }
+
             #[cfg(feature = "blob-backend")]
             "blob" => {
                 // Create blob keyvalue store from environment variables
@@ -195,14 +226,18 @@ impl KVConfig {
             }
 
             other => {
-                let valid_options = if cfg!(feature = "blob-backend") {
-                    "in-memory, sqlite, postgres, redis, blob"
-                } else {
-                    "in-memory, sqlite, postgres, redis"
-                };
+                let mut valid_options = vec!["in-memory", "sqlite", "postgres", "redis"];
+                #[cfg(feature = "ddb-backend")]
+                {
+                    valid_options.push("dynamodb");
+                }
+                #[cfg(feature = "blob-backend")]
+                {
+                    valid_options.push("blob");
+                }
                 return Err(KVError::ConfigError(format!(
                     "Unknown backend type: {}. Valid options: {}",
-                    other, valid_options
+                    other, valid_options.join(", ")
                 )));
             }
         };
@@ -296,6 +331,22 @@ pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn K
         BackendType::Redis { .. } => Err(KVError::ConfigError(
             "Redis backend requires 'redis-backend' feature".to_string(),
         )),
+
+        #[cfg(feature = "ddb-backend")]
+        BackendType::DynamoDB {
+            region,
+            table_prefix,
+            endpoint_url,
+        } => {
+            use crate::ddb::DynamoDBKVStore;
+            // Construct full table name using prefix
+            let table_name = format!("{}{}", table_prefix, "keyvalue");
+            let store = DynamoDBKVStore::new(region, table_name, endpoint_url)
+                .await
+                .map_err(|e| KVError::ConfigError(format!("Failed to create DynamoDB keyvalue store: {}", e)))?;
+            Ok(Arc::new(store))
+        }
+
 
         #[cfg(feature = "blob-backend")]
         BackendType::BlobFromEnv { config } => {

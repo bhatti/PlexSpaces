@@ -714,7 +714,7 @@ impl ActorFactory for ActorFactoryImpl {
         // TODO: Call FacetSetupService if available
         
         // Register actor with config
-        registry.register_actor_with_config(actor_id.clone(), actor_config.clone()).await;
+        let _ = registry.register_actor_with_config(actor_id.clone(), actor_config.clone()).await;
         
         // Store actor instance
         {

@@ -558,11 +558,25 @@ impl DashboardService for DashboardServiceImpl {
 
         // Aggregate actors by type from ActorRegistry using actor_type_index
         let mut actors_by_type: HashMap<String, u32> = HashMap::new();
-        if let Some(actor_registry) = self.service_locator.get_service::<ActorRegistry>().await {
+        
+        // Try get_service first, then fallback to get_service_by_name
+        let actor_registry = self.service_locator.get_service::<ActorRegistry>().await;
+        
+        // If get_service failed, try get_service_by_name
+        let actor_registry = if actor_registry.is_none() {
+            use plexspaces_core::service_locator::service_names;
+            self.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
+        } else {
+            actor_registry
+        };
+        
+        if let Some(actor_registry) = actor_registry {
             // Use actor_type_index to get counts by type
             let index = actor_registry.actor_type_index().read().await;
+            tracing::debug!("get_summary: actor_type_index has {} entries", index.len());
             for ((_tenant, _namespace, actor_type), actor_ids) in index.iter() {
                 *actors_by_type.entry(actor_type.clone()).or_insert(0) += actor_ids.len() as u32;
+                tracing::debug!("get_summary: aggregated actor_type={}, count={}", actor_type, actor_ids.len());
             }
             
             // Also count actors without type (registered but not in index)
@@ -671,7 +685,19 @@ impl DashboardService for DashboardServiceImpl {
 
         // Get actors by type with proper type detection using actor_type_index
         let mut actors_by_type: HashMap<String, u32> = HashMap::new();
-        if let Some(actor_registry) = self.service_locator.get_service::<ActorRegistry>().await {
+        
+        // Try get_service first, then fallback to get_service_by_name
+        let actor_registry = self.service_locator.get_service::<ActorRegistry>().await;
+        
+        // If get_service failed, try get_service_by_name
+        let actor_registry = if actor_registry.is_none() {
+            use plexspaces_core::service_locator::service_names;
+            self.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
+        } else {
+            actor_registry
+        };
+        
+        if let Some(actor_registry) = actor_registry {
             // Use actor_type_index to get counts by type
             let index = actor_registry.actor_type_index().read().await;
             for ((_tenant, _namespace, actor_type), actor_ids) in index.iter() {

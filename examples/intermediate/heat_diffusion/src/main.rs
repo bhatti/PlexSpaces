@@ -90,7 +90,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create node using NodeBuilder
     let node = Arc::new(NodeBuilder::new("heat-node")
-        .build());
+        .build()
+        .await);
 
     // Create coordinator
     let mut coordinator = Coordinator::new(config);

@@ -137,7 +137,7 @@ async fn start_empty_node(node_id: &str, address: &str) -> Result<()> {
     // Create and start an empty node (no applications pre-loaded)
     let node = NodeBuilder::new(node_id.to_string())
         .with_listen_address(address.to_string())
-        .build();
+        .build().await;
     let node_arc = Arc::new(node);
     let node_clone = node_arc.clone();
     

@@ -1836,6 +1836,7 @@ impl Mailbox {
             Ok(ChannelBackend::ChannelBackendSqlite) => "sqlite",
             Ok(ChannelBackend::ChannelBackendNats) => "nats",
             Ok(ChannelBackend::ChannelBackendUdp) => "udp",
+            Ok(ChannelBackend::ChannelBackendSqs) => "sqs",
             Ok(ChannelBackend::ChannelBackendCustom) => "custom",
             Err(_) => "unknown",
         }

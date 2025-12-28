@@ -97,10 +97,14 @@ impl Coordinator {
                 use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
                 use plexspaces_core::RequestContext;
                 use std::sync::Arc;
-                let actor_id = position.actor_id();
+                let actor_name = position.actor_id();
+                let actor_id = format!("{}@{}", actor_name, node.as_ref().id().as_str());
                 let service_locator = node.as_ref().service_locator().clone();
-                let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
-                    .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
+                use plexspaces_core::service_locator::service_names;
+                let actor_factory: Arc<ActorFactoryImpl> = service_locator
+                    .get_service_by_name::<ActorFactoryImpl>(service_names::ACTOR_FACTORY_IMPL)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("ActorFactory not found in ServiceLocator"))?;
                 let ctx = RequestContext::internal();
                 let _message_sender = actor_factory.spawn_actor(
                     &ctx,

@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
     let node = NodeBuilder::new("entity-recognition-app")
         .with_listen_address("0.0.0.0:9000")
         .with_clustering_enabled(true)
-        .build();
+        .build().await;
 
     let node = Arc::new(node);
     // Note: We don't call node.start() here because:

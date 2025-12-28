@@ -27,6 +27,7 @@ authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 [dependencies]
 # PlexSpaces crates
 plexspaces-proto = { path = "../proto" }
+plexspaces-common = { path = "../common" }
 
 # Async runtime
 tokio = { version = "1.44", features = ["sync", "time", "macros", "rt-multi-thread"] }
@@ -35,6 +36,8 @@ async-trait = "0.1"
 # Database backends (all optional)
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "migrate"], optional = true }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], optional = true }
+aws-sdk-dynamodb = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -49,6 +52,9 @@ ulid = { version = "1.1", features = ["serde"] }
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 
+# Observability
+metrics = "0.23"
+
 [features]
 default = ["memory-backend", "sqlite-backend"]
 
@@ -57,9 +63,10 @@ memory-backend = []
 postgres-backend = ["sqlx", "sqlx/postgres"]
 redis-backend = ["redis"]
 sqlite-backend = ["sqlx", "sqlx/sqlite"]
+ddb-backend = ["aws-sdk-dynamodb", "aws-config"]
 
 # All backends
-all-backends = ["postgres-backend", "redis-backend", "sqlite-backend"]
+all-backends = ["postgres-backend", "redis-backend", "sqlite-backend", "ddb-backend"]
 
 # Full feature set
 full = ["all-backends"]

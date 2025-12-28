@@ -20,6 +20,7 @@
 
 use crate::state_store::SchedulingStateStore;
 use async_trait::async_trait;
+use plexspaces_core::RequestContext;
 use plexspaces_proto::scheduling::v1::SchedulingRequest;
 use std::collections::HashMap;
 use std::error::Error;
@@ -49,33 +50,85 @@ impl Default for MemorySchedulingStateStore {
 
 #[async_trait]
 impl SchedulingStateStore for MemorySchedulingStateStore {
-    async fn store_request(&self, request: SchedulingRequest) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn store_request(
+        &self,
+        ctx: &RequestContext,
+        request: SchedulingRequest,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Validate tenant/namespace match
+        if request.tenant_id != ctx.tenant_id() || request.namespace != ctx.namespace() {
+            return Err(format!(
+                "Request tenant_id/namespace ({}/{}) does not match context ({}/{})",
+                request.tenant_id,
+                request.namespace,
+                ctx.tenant_id(),
+                ctx.namespace()
+            )
+            .into());
+        }
+
         let mut requests = self.requests.write().await;
         requests.insert(request.request_id.clone(), request);
         Ok(())
     }
 
-    async fn get_request(&self, request_id: &str) -> Result<Option<SchedulingRequest>, Box<dyn Error + Send + Sync>> {
+    async fn get_request(
+        &self,
+        ctx: &RequestContext,
+        request_id: &str,
+    ) -> Result<Option<SchedulingRequest>, Box<dyn Error + Send + Sync>> {
         let requests = self.requests.read().await;
-        Ok(requests.get(request_id).cloned())
+        if let Some(request) = requests.get(request_id) {
+            // Validate tenant/namespace match
+            if request.tenant_id == ctx.tenant_id() && request.namespace == ctx.namespace() {
+                Ok(Some(request.clone()))
+            } else {
+                // Request exists but belongs to different tenant/namespace - return None for security
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 
-    async fn update_request(&self, request: SchedulingRequest) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn update_request(
+        &self,
+        ctx: &RequestContext,
+        request: SchedulingRequest,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Validate tenant/namespace match
+        if request.tenant_id != ctx.tenant_id() || request.namespace != ctx.namespace() {
+            return Err(format!(
+                "Request tenant_id/namespace ({}/{}) does not match context ({}/{})",
+                request.tenant_id,
+                request.namespace,
+                ctx.tenant_id(),
+                ctx.namespace()
+            )
+            .into());
+        }
+
         let mut requests = self.requests.write().await;
         requests.insert(request.request_id.clone(), request);
         Ok(())
     }
 
-    async fn query_pending_requests(&self) -> Result<Vec<SchedulingRequest>, Box<dyn Error + Send + Sync>> {
+    async fn query_pending_requests(
+        &self,
+        ctx: &RequestContext,
+    ) -> Result<Vec<SchedulingRequest>, Box<dyn Error + Send + Sync>> {
         use plexspaces_proto::scheduling::v1::SchedulingStatus;
-        
+
         let requests = self.requests.read().await;
         let pending: Vec<SchedulingRequest> = requests
             .values()
             .filter(|req| {
-                SchedulingStatus::try_from(req.status)
-                    .map(|s| s == SchedulingStatus::SchedulingStatusPending)
-                    .unwrap_or(false)
+                // Filter by status AND tenant/namespace
+                req.tenant_id == ctx.tenant_id()
+                    && req.namespace == ctx.namespace()
+                    && SchedulingStatus::try_from(req.status)
+                        .map(|s| s == SchedulingStatus::SchedulingStatusPending)
+                        .unwrap_or(false)
             })
             .cloned()
             .collect();

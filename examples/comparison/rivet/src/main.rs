@@ -95,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a node
     let node = NodeBuilder::new("comparison-node-1")
-        .build();
+        .build().await;
 
     // Create counter actor with VirtualActorFacet and DurabilityFacet
     // Rivet actors are virtual actors with automatic activation and state persistence
@@ -215,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn test_counter_increment() {
         let node = NodeBuilder::new("test-node")
-            .build();
+            .build().await;
 
         let actor_id: ActorId = "counter/test-1@test-node".to_string();
         

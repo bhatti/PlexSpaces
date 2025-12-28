@@ -156,27 +156,23 @@ pub struct ChildSpec {
     /// Child type (worker or supervisor)
     #[prost(enumeration="ChildType", tag="2")]
     pub r#type: i32,
-    /// Module to start (fully qualified name)
-    /// e.g., "byzantine::General" or "byzantine::GeneralSupervisor"
-    #[prost(string, tag="3")]
-    pub start_module: ::prost::alloc::string::String,
     /// Arguments to pass to start function
-    #[prost(map="string, string", tag="4")]
+    #[prost(map="string, string", tag="3")]
     pub args: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Restart policy
-    #[prost(enumeration="RestartPolicy", tag="5")]
+    #[prost(enumeration="RestartPolicy", tag="4")]
     pub restart: i32,
     /// Shutdown timeout
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag="5")]
     pub shutdown_timeout: ::core::option::Option<::prost_types::Duration>,
     /// Nested supervisor (if type=SUPERVISOR)
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag="6")]
     pub supervisor: ::core::option::Option<SupervisorSpec>,
     /// Facet configuration (for automatic attachment during actor creation)
     /// Facets are attached in priority order (high priority first) before actor.init() is called
     /// All facets are automatically restored during supervisor restart
     /// Phase 1: Unified Lifecycle - Multiple facets support
-    #[prost(message, repeated, tag="8")]
+    #[prost(message, repeated, tag="7")]
     pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
 }
 /// Application instance (runtime representation).

@@ -70,12 +70,45 @@ impl SchedulingService for SchedulingServiceImpl {
         &self,
         request: Request<ScheduleActorRequest>,
     ) -> Result<Response<ScheduleActorResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
         // Validate request
         if req.requirements.is_none() {
             return Err(Status::invalid_argument("requirements is required"));
         }
+
+        // Extract tenant_id and namespace from gRPC metadata (preferred, set by JWT middleware)
+        // Fall back to request fields for backward compatibility or when auth is disabled
+        let tenant_id = metadata
+            .get("x-tenant-id")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                if !req.tenant_id.is_empty() {
+                    Some(req.tenant_id)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                Status::unauthenticated("Missing x-tenant-id header or tenant_id in request. JWT authentication required.")
+            })?;
+
+        let namespace = metadata
+            .get("x-namespace")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                if !req.namespace.is_empty() {
+                    Some(req.namespace)
+                } else {
+                    Some("default".to_string())
+                }
+            })
+            .unwrap_or_else(|| "default".to_string());
 
         // Generate request ID if not provided
         let request_id = if req.request_id.is_empty() {
@@ -84,12 +117,15 @@ impl SchedulingService for SchedulingServiceImpl {
             req.request_id
         };
 
+        // Create RequestContext for proper tenant/namespace isolation
+        let ctx = RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
+
         // Create scheduling request
         let scheduling_request = SchedulingRequest {
             request_id: request_id.clone(),
             requirements: req.requirements,
-            namespace: req.namespace,
-            tenant_id: req.tenant_id,
+            namespace: namespace.clone(),
+            tenant_id: tenant_id.clone(),
             status: SchedulingStatus::SchedulingStatusPending as i32,
             selected_node_id: String::new(),
             actor_id: String::new(),
@@ -99,9 +135,10 @@ impl SchedulingService for SchedulingServiceImpl {
             completed_at: None,
         };
 
+
         // Store request in state store (PENDING)
         self.state_store
-            .store_request(scheduling_request.clone())
+            .store_request(&ctx, scheduling_request.clone())
             .await
             .map_err(|e| Status::internal(format!("Failed to store request: {}", e)))?;
 
@@ -144,12 +181,32 @@ impl SchedulingService for SchedulingServiceImpl {
         &self,
         request: Request<GetSchedulingStatusRequest>,
     ) -> Result<Response<GetSchedulingStatusResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
-        // Query state store for request
+        // Extract tenant_id and namespace from gRPC metadata (required for security)
+        // These are set by JWT middleware or auth interceptor
+        let tenant_id = metadata
+            .get("x-tenant-id")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                Status::unauthenticated("Missing x-tenant-id header. JWT authentication required.")
+            })?;
+
+        let namespace = metadata
+            .get("x-namespace")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("default");
+
+        // Create RequestContext for proper tenant/namespace isolation
+        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
+        // Query state store for request (with tenant/namespace isolation)
         let scheduling_request = self
             .state_store
-            .get_request(&req.request_id)
+            .get_request(&ctx, &req.request_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to get request: {}", e)))?
             .ok_or_else(|| Status::not_found(format!("Scheduling request {} not found", req.request_id)))?;
@@ -316,7 +373,8 @@ mod tests {
         assert!(!response.request_id.is_empty());
 
         // Verify request was stored
-        let stored = state_store.get_request(&response.request_id).await.unwrap();
+        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        let stored = state_store.get_request(&ctx, &response.request_id).await.unwrap();
         assert!(stored.is_some());
         assert_eq!(
             stored.unwrap().status,
@@ -371,14 +429,18 @@ mod tests {
             completed_at: Some(prost_types::Timestamp::from(SystemTime::now())),
         };
 
-        state_store.store_request(scheduling_request.clone()).await.unwrap();
+        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        state_store.store_request(&ctx, scheduling_request.clone()).await.unwrap();
 
         // Get status
         let req = GetSchedulingStatusRequest {
             request_id: request_id.clone(),
         };
+        let mut request = Request::new(req);
+        request.metadata_mut().insert("x-tenant-id", tonic::metadata::AsciiMetadataValue::from_static("default"));
+        request.metadata_mut().insert("x-namespace", tonic::metadata::AsciiMetadataValue::from_static("default"));
         let response = service
-            .get_scheduling_status(Request::new(req))
+            .get_scheduling_status(request)
             .await
             .unwrap()
             .into_inner();
@@ -400,8 +462,10 @@ mod tests {
         let req = GetSchedulingStatusRequest {
             request_id: "non-existent".to_string(),
         };
-
-        let result = service.get_scheduling_status(Request::new(req)).await;
+        let mut request = Request::new(req);
+        request.metadata_mut().insert("x-tenant-id", tonic::metadata::AsciiMetadataValue::from_static("default"));
+        request.metadata_mut().insert("x-namespace", tonic::metadata::AsciiMetadataValue::from_static("default"));
+        let result = service.get_scheduling_status(request).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
     }

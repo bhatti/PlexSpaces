@@ -1,9 +1,5 @@
 # PlexSpaces Unified Actor System
 
-**Version**: 2.0  
-**Last Updated**: 2025-01-XX  
-**Status**: Production Ready
-
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -162,19 +158,19 @@ Actors follow a well-defined state machine with detailed state transitions:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Creating: spawn_actor()
-    Creating --> Activating: init() succeeds
-    Creating --> Failed: init() fails
+    [*] --> Creating: spawn_actor
+    Creating --> Activating: init succeeds
+    Creating --> Failed: init fails
     Activating --> Active: activation complete
     Activating --> Failed: activation fails
-    Active --> Deactivating: idle timeout (virtual actors)
-    Active --> Stopping: stop() called
+    Active --> Deactivating: idle timeout
+    Active --> Stopping: stop called
     Active --> Migrating: migration started
-    Active --> Failed: error/crash
+    Active --> Failed: error crash
     Deactivating --> Inactive: deactivation complete
-    Inactive --> Activating: first message (virtual actors)
+    Inactive --> Activating: first message
     Stopping --> Terminated: shutdown complete
-    Migrating --> Active: migration complete (new node)
+    Migrating --> Active: migration complete
     Failed --> Active: supervisor restart
     Failed --> Terminated: permanent failure
     Terminated --> [*]
@@ -217,9 +213,28 @@ let actor_ref = actor_factory.spawn_actor(
 
 #### 2. Application-Based (Declarative)
 
-Actors are defined in `ApplicationSpec` and spawned automatically:
+Actors are defined in `ApplicationSpec` and spawned automatically. Applications can be:
+
+**Native Rust Applications:**
+- Actor type is derived from `child.id` in `ChildSpec`
+- Requires `BehaviorFactory` to create behaviors (future enhancement)
+
+**WASM Applications:**
+- WASM module is deployed at the **application level** via `DeployApplicationRequest.wasm_module`
+- All actors in the supervision tree use the same deployed WASM module
+- Actor type is derived from `child.id` in `ChildSpec`
+- Actors are instantiated from the deployed WASM module using `module_hash`
 
 ```protobuf
+// Deploy WASM application
+message DeployApplicationRequest {
+  string application_id = 1;
+  string name = 2;
+  string version = 3;
+  optional WasmModule wasm_module = 4;  // WASM module deployed at application level
+  ApplicationSpec config = 5;           // Supervision tree definition
+}
+
 message ApplicationSpec {
   string name = 1;
   optional SupervisorSpec supervisor = 2;  // Root supervisor tree
@@ -231,11 +246,11 @@ message SupervisorSpec {
 }
 
 message ChildSpec {
-  string id = 1;                    // Actor ID
-  ChildType type = 2;                // Worker or Supervisor
-  string start_module = 3;           // WASM module or Rust module
-  RestartPolicy restart = 4;
-  repeated Facet facets = 5;         // Facets to attach
+  string id = 1;                    // Actor ID (also used as actor_type)
+  ChildType type = 2;              // Worker or Supervisor
+  map<string, string> args = 3;     // Arguments to pass to start function
+  RestartPolicy restart = 4;        // Restart policy
+  repeated Facet facets = 5;        // Facets to attach
 }
 ```
 
@@ -482,7 +497,6 @@ message ApplicationSpec {
       {
         id: "worker-1";
         type: CHILD_TYPE_WORKER;
-        start_module: "counter.wasm";
         restart: RESTART_POLICY_PERMANENT;
         facets: [
           {
@@ -501,7 +515,6 @@ message ApplicationSpec {
             {
               id: "child-1";
               type: CHILD_TYPE_WORKER;
-              start_module: "processor.wasm";
             }
           ];
         };
@@ -848,8 +861,6 @@ sequenceDiagram
     
     Child->>Child: crashes
     Registry->>Supervisor: TerminationNotification
-    
-    style Child fill:#FF6B6B,stroke:#C92A2A,stroke-width:2px,color:#fff
 ```
 
 **Characteristics**:
@@ -873,11 +884,8 @@ sequenceDiagram
     Note over Actor1,Actor2: Both actors running...
     
     Actor1->>Actor1: crashes abnormally
-    Registry->>Actor2: Exit signal (abnormal)
+    Registry->>Actor2: Exit signal abnormal
     Actor2->>Actor2: terminates
-    
-    style Actor1 fill:#FF6B6B,stroke:#C92A2A,stroke-width:2px,color:#fff
-    style Actor2 fill:#FF6B6B,stroke:#C92A2A,stroke-width:2px,color:#fff
 ```
 
 **Characteristics**:
@@ -1183,45 +1191,58 @@ let actor_ref = actor_factory.spawn_actor(
 // State is automatically persisted and replayed
 ```
 
-### Example 4: Supervised Actor Tree
+### Example 4: Supervised Actor Tree (WASM Application)
 
 ```protobuf
-message ApplicationSpec {
+// Deploy WASM application with supervision tree
+message DeployApplicationRequest {
+  application_id: "my-app";
   name: "my-app";
-  supervisor: {
-    strategy: SUPERVISION_STRATEGY_ONE_FOR_ONE;
-    max_restarts: 5;
-    children: [
-      {
-        id: "worker-1";
-        type: CHILD_TYPE_WORKER;
-        start_module: "worker.wasm";
-        restart: RESTART_POLICY_PERMANENT;
-        facets: [
-          {
-            type: "virtual_actor";
-            config: { "idle_timeout_seconds": 300 };
-          }
-        ];
-      },
-      {
-        id: "supervisor-1";
-        type: CHILD_TYPE_SUPERVISOR;
-        supervisor: {
-          strategy: SUPERVISION_STRATEGY_ONE_FOR_ALL;
-          children: [
+  version: "1.0.0";
+  wasm_module: {
+    name: "my-app";
+    version: "1.0.0";
+    module_bytes: <WASM bytes>;
+  };
+  config: {
+    name: "my-app";
+    version: "1.0.0";
+    type: APPLICATION_TYPE_ACTIVE;
+    supervisor: {
+      strategy: SUPERVISION_STRATEGY_ONE_FOR_ONE;
+      max_restarts: 5;
+      children: [
+        {
+          id: "worker-1";
+          type: CHILD_TYPE_WORKER;
+          restart: RESTART_POLICY_PERMANENT;
+          facets: [
             {
-              id: "child-1";
-              type: CHILD_TYPE_WORKER;
-              start_module: "processor.wasm";
+              type: "virtual_actor";
+              config: { "idle_timeout_seconds": 300 };
             }
           ];
-        };
-      }
-    ];
+        },
+        {
+          id: "supervisor-1";
+          type: CHILD_TYPE_SUPERVISOR;
+          supervisor: {
+            strategy: SUPERVISION_STRATEGY_ONE_FOR_ALL;
+            children: [
+              {
+                id: "child-1";
+                type: CHILD_TYPE_WORKER;
+              }
+            ];
+          };
+        }
+      ];
+    };
   };
 }
 ```
+
+**Note:** Actor type is derived from `child.id` for both native Rust and WASM applications.
 
 ---
 
@@ -1231,19 +1252,19 @@ message ApplicationSpec {
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Creating: spawn_actor()
-    Creating --> Activating: init() succeeds
-    Creating --> Failed: init() fails
+    [*] --> Creating: spawn_actor
+    Creating --> Activating: init succeeds
+    Creating --> Failed: init fails
     Activating --> Active: activation complete
     Activating --> Failed: activation fails
-    Active --> Deactivating: idle timeout (virtual actors)
-    Active --> Stopping: stop() called
+    Active --> Deactivating: idle timeout
+    Active --> Stopping: stop called
     Active --> Migrating: migration started
-    Active --> Failed: error/crash
+    Active --> Failed: error crash
     Deactivating --> Inactive: deactivation complete
-    Inactive --> Activating: first message (virtual actors)
+    Inactive --> Activating: first message
     Stopping --> Terminated: shutdown complete
-    Migrating --> Active: migration complete (new node)
+    Migrating --> Active: migration complete
     Failed --> Active: supervisor restart
     Failed --> Terminated: permanent failure
     Terminated --> [*]
@@ -1358,6 +1379,46 @@ Each facet can:
 
 ## Virtual Actor Activation Details
 
+### Get or Activate Actor API
+
+The `get_or_activate_actor` API provides a convenient way to get an existing actor or create and activate it if it doesn't exist. This is particularly useful for virtual actors that are activated on-demand.
+
+```rust
+use plexspaces_proto::v1::actor_service::{ActorServiceClient, GetOrActivateActorRequest};
+use tonic::Request;
+
+let mut client = ActorServiceClient::connect("http://localhost:9000").await?;
+
+let request = GetOrActivateActorRequest {
+    actor_id: "user-123@node1".to_string(),
+    actor_type: "UserSession".to_string(),
+    initial_state: vec![],  // Optional initial state
+    config: None,            // Optional actor configuration
+    force_activation: false, // Force activation even if actor exists
+};
+
+let response = client.get_or_activate_actor(Request::new(request)).await?;
+let response_inner = response.into_inner();
+
+println!("Actor ID: {}", response_inner.actor_ref);
+println!("Was activated: {}", response_inner.was_activated);
+if let Some(actor) = response_inner.actor {
+    println!("Actor state: {:?}", actor.state);
+}
+```
+
+**Behavior:**
+- If actor exists and is active: Returns actor details, `was_activated = false`
+- If actor exists but is inactive: Activates the actor, returns details, `was_activated = true`
+- If actor doesn't exist: Creates and activates the actor, returns details, `was_activated = true`
+- If `force_activation = true`: Forces activation even if actor is already active
+
+**Use Cases:**
+- Virtual actor activation on first access
+- Lazy initialization of actors
+- Actor creation with type information
+- Idempotent actor access patterns
+
 ### Activation Strategies
 
 Virtual actors support three activation strategies:
@@ -1460,17 +1521,17 @@ sequenceDiagram
     participant Supervisor
     participant Actor
     
-    App->>Builder: initialize_supervisor_tree(spec)
-    Builder->>Builder: breadth_first_traversal()
+    App->>Builder: initialize_supervisor_tree
+    Builder->>Builder: breadth_first_traversal
     
     loop For each level
-        Builder->>Actor: spawn_worker(child_spec)
+        Builder->>Actor: spawn_worker
         Actor-->>Builder: actor_id
-        Builder->>Supervisor: register_child(actor_id)
+        Builder->>Supervisor: register_child
     end
     
-    Builder->>Supervisor: start()
-    Supervisor->>Supervisor: monitor_children()
+    Builder->>Supervisor: start
+    Supervisor->>Supervisor: monitor_children
     Supervisor-->>App: tree_initialized
 ```
 
@@ -1511,7 +1572,6 @@ The PlexSpaces unified actor system provides:
 
 ### Next Steps
 
-- Read [Actor System Comprehensive Analysis](../archived_docs/actor-system-comprehensive-analysis.md) for complete analysis, verified gaps, and prioritized recommendations
 - Explore [Examples](examples.md) for practical usage patterns
 - Check [Getting Started](getting-started.md) to build your first actor
 
@@ -1525,10 +1585,4 @@ The PlexSpaces unified actor system provides:
 - [Examples](examples.md) - More examples
 - [Durability](durability.md) - Durability and journaling
 - [Security](security.md) - Security features
-- [Actor System Comprehensive Analysis](../archived_docs/actor-system-comprehensive-analysis.md) - Complete analysis, verified gaps, and prioritized recommendations
-
----
-
-**Last Updated**: 2025-01-XX  
-**Maintainer**: PlexSpaces Team
 

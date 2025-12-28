@@ -91,3 +91,10 @@ impl From<redis::RedisError> for LockError {
     }
 }
 
+#[cfg(feature = "ddb-backend")]
+impl From<aws_sdk_dynamodb::Error> for LockError {
+    fn from(err: aws_sdk_dynamodb::Error) -> Self {
+        LockError::BackendError(format!("DynamoDB error: {}", err))
+    }
+}
+

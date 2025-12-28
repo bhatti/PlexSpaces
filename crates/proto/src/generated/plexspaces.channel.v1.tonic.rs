@@ -277,8 +277,6 @@ pub mod channel_service_client {
                 .insert(GrpcMethod::new("plexspaces.channel.v1.ChannelService", "Nack"));
             self.inner.unary(req, path, codec).await
         }
-        /** Get channel statistics
-*/
         pub async fn get_stats(
             &mut self,
             request: impl tonic::IntoRequest<super::GetStatsRequest>,
@@ -396,8 +394,6 @@ pub mod channel_service_server {
             &self,
             request: tonic::Request<super::NackRequest>,
         ) -> std::result::Result<tonic::Response<super::NackResponse>, tonic::Status>;
-        /** Get channel statistics
-*/
         async fn get_stats(
             &self,
             request: tonic::Request<super::GetStatsRequest>,

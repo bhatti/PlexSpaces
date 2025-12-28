@@ -20,8 +20,8 @@ mod firecracker_integration_tests {
 
     const DOCKER_IMAGE: &str = "plexspaces-firecracker-test:latest";
     const CONTAINER_NAME: &str = "plexspaces-firecracker-test";
-    const GRPC_PORT: u16 = 9001;
-    const GRPC_ADDR: &str = "http://localhost:9001";
+    const GRPC_PORT: u16 = 8000;
+    const GRPC_ADDR: &str = "http://localhost:8000";
 
     /// Helper to check if Docker is available
     fn docker_available() -> bool {

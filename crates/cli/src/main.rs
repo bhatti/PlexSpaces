@@ -49,8 +49,8 @@ struct Cli {
 enum Commands {
     /// Deploy an application (like AWS Lambda deploy)
     Deploy {
-        /// Node address (e.g., localhost:9001)
-        #[arg(short, long, default_value = "localhost:9001")]
+        /// Node address (e.g., localhost:8000)
+        #[arg(short, long, default_value = "localhost:8000")]
         node: String,
         
         /// Application ID
@@ -84,8 +84,8 @@ enum Commands {
     
     /// Deploy an actor (legacy, use Deploy for applications)
     DeployActor {
-        /// Node address (e.g., localhost:9001)
-        #[arg(short, long, default_value = "localhost:9001")]
+        /// Node address (e.g., localhost:8000)
+        #[arg(short, long, default_value = "localhost:8000")]
         node: String,
         
         /// Actor name
@@ -108,7 +108,7 @@ enum Commands {
     /// Invoke an actor (like AWS Lambda invoke)
     Invoke {
         /// Node address
-        #[arg(short, long, default_value = "localhost:9001")]
+        #[arg(short, long, default_value = "localhost:8000")]
         node: String,
         
         /// Actor ID
@@ -123,14 +123,14 @@ enum Commands {
     /// List applications on a node
     List {
         /// Node address
-        #[arg(short, long, default_value = "localhost:9001")]
+        #[arg(short, long, default_value = "localhost:8000")]
         node: String,
     },
     
     /// Undeploy an application (graceful shutdown)
     Undeploy {
         /// Node address
-        #[arg(short, long, default_value = "localhost:9001")]
+        #[arg(short, long, default_value = "localhost:8000")]
         node: String,
         
         /// Application ID
@@ -146,7 +146,7 @@ enum Commands {
     /// Node status and health
     Status {
         /// Node address
-        #[arg(short, long, default_value = "localhost:9001")]
+        #[arg(short, long, default_value = "localhost:8000")]
         node: String,
     },
     
@@ -157,7 +157,7 @@ enum Commands {
         node_id: String,
         
         /// Listen address for gRPC server
-        #[arg(long, default_value = "0.0.0.0:9001")]
+        #[arg(long, default_value = "0.0.0.0:8000")]
         listen_addr: String,
     },
 }

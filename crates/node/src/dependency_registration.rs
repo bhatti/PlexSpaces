@@ -550,12 +550,12 @@ mod tests {
     async fn test_dependency_checker() {
         let checker = DependencyHealthChecker {
             name: "test-service".to_string(),
-            grpc_address: "127.0.0.1:9001".to_string(),
+            grpc_address: "127.0.0.1:8000".to_string(),
             is_critical: true,
         };
 
         let ctx = HealthCheckContext::default();
-        // This will fail if 127.0.0.1:9001 is not listening, but that's OK for the test
+        // This will fail if 127.0.0.1:8000 is not listening, but that's OK for the test
         let _result = checker.check(&ctx).await;
         assert_eq!(checker.name(), "test-service");
         assert!(checker.is_critical());

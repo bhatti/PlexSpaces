@@ -52,7 +52,7 @@ elif [ "$MODE" == "multi-process" ]; then
     echo "  3. Start Worker 1 (Terminal 3)"
     echo "  4. Watch output in Master terminal"
     echo ""
-    echo -e "${RED}NOTE: Make sure ports 9001, 9002, 9003 are available${NC}"
+    echo -e "${RED}NOTE: Make sure ports 8000, 8001, 8002 are available${NC}"
 
 elif [ "$MODE" == "automated" ]; then
     echo -e "${BLUE}Starting automated distributed test...${NC}"

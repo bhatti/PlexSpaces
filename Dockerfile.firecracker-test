@@ -86,11 +86,11 @@ RUN echo "Firecracker kernel and rootfs should be provided via volume mount" > /
 COPY --from=builder /app/target/release/plexspaces /usr/local/bin/plexspaces
 
 # Expose gRPC port
-EXPOSE 9001
+EXPOSE 8000
 
 # Health check (using simple TCP check)
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-    CMD nc -z localhost 9001 || exit 1
+    CMD nc -z localhost 8000 || exit 1
 
 # Run node using CLI start command
-CMD ["plexspaces", "start", "--node-id", "docker-node-1", "--listen-addr", "0.0.0.0:9001"]
+CMD ["plexspaces", "start", "--node-id", "docker-node-1", "--listen-addr", "0.0.0.0:8000"]

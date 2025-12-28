@@ -14,7 +14,8 @@ docker pull plexspaces/node:latest
 docker run -d \
   --name plexspaces-node \
   -p 8080:8080 \
-  -p 9001:9001 \
+  -p 8000:8000 \
+  -p 8001:8001 \
   plexspaces/node:latest
 ```
 
@@ -41,9 +42,10 @@ docker-compose logs -f
 docker run -d \
   --name plexspaces-node \
   -p 8080:8080 \
-  -p 9001:9001 \
+  -p 8000:8000 \
+  -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=node1 \
-  -e PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001 \
+  -e PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000 \
   plexspaces/node:latest
 ```
 
@@ -58,28 +60,29 @@ services:
     image: plexspaces/node:latest
     environment:
       - PLEXSPACES_NODE_ID=node1
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001,node3:9001
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node2:8000,node3:8000
     ports:
-      - "9001:9001"
+      - "8000:8000"
+      - "8001:8001"
   
   node2:
     image: plexspaces/node:latest
     environment:
       - PLEXSPACES_NODE_ID=node2
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001,node3:9001
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node2:8000,node3:8000
     ports:
-      - "9002:9001"
+      - "8001:8000"
   
   node3:
     image: plexspaces/node:latest
     environment:
       - PLEXSPACES_NODE_ID=node3
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001,node3:9001
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node2:8000,node3:8000
     ports:
-      - "9003:9001"
+      - "8002:8000"
 ```
 
 ### 2. Kubernetes
@@ -120,7 +123,7 @@ spec:
       - name: plexspaces-node
         image: plexspaces/node:latest
         ports:
-        - containerPort: 9001
+        - containerPort: 8000
           name: grpc
         env:
         - name: PLEXSPACES_NODE_ID
@@ -128,15 +131,15 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: PLEXSPACES_LISTEN_ADDR
-          value: "0.0.0.0:9001"
+          value: "0.0.0.0:8000"
         livenessProbe:
           grpc:
-            port: 9001
+            port: 8000
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           grpc:
-            port: 9001
+            port: 8000
           initialDelaySeconds: 10
           periodSeconds: 5
         resources:
@@ -155,6 +158,58 @@ spec:
 - Rust 1.70+
 - Protocol Buffers compiler (`buf` CLI recommended)
 - Git
+- **macOS only**: CA certificates for SSL (see SSL Certificate Configuration below)
+
+#### SSL Certificate Configuration (macOS)
+
+On macOS, cargo requires SSL certificates to download dependencies from crates.io. After installing `ca-certificates` via homebrew, configure the system:
+
+**Option 1: Create Symlink (Recommended)**
+```bash
+# Install ca-certificates
+brew install ca-certificates
+
+# Create symlink (requires sudo)
+sudo mkdir -p /etc/ssl
+sudo ln -sf /opt/homebrew/etc/ca-certificates/cert.pem /etc/ssl/cert.pem
+
+# Verify symlink
+ls -la /etc/ssl/cert.pem
+```
+
+**Option 2: Copy Certificate File**
+```bash
+# Install ca-certificates
+brew install ca-certificates
+
+# Copy certificate file (requires sudo)
+sudo mkdir -p /etc/ssl
+sudo cp /opt/homebrew/etc/ca-certificates/cert.pem /etc/ssl/cert.pem
+
+# Verify file exists
+ls -la /etc/ssl/cert.pem
+```
+
+**Option 3: Environment Variables (No sudo required)**
+```bash
+# Install ca-certificates
+brew install ca-certificates
+
+# Add to ~/.zshrc or ~/.bash_profile
+export SSL_CERT_FILE=/opt/homebrew/etc/ca-certificates/cert.pem
+export GIT_SSL_CAINFO=/opt/homebrew/etc/ca-certificates/cert.pem
+
+# Reload shell
+source ~/.zshrc  # or source ~/.bash_profile
+```
+
+**Verify SSL Configuration:**
+```bash
+# Test cargo can download dependencies
+cargo build --package plexspaces-wasm-runtime --lib
+```
+
+If you see SSL certificate errors, try Option 2 (copy) instead of Option 1 (symlink), as some tools may not follow symlinks properly.
 
 #### Build Steps
 
@@ -191,25 +246,25 @@ cargo run --release --bin plexspaces -- start
 # Or with custom node ID and address
 cargo run --release --bin plexspaces -- start \
   --node-id my-node-1 \
-  --listen-addr 0.0.0.0:9001
+  --listen-addr 0.0.0.0:8000
 
 # With release config file (if supported)
 cargo run --release --bin plexspaces -- start \
   --node-id my-node-1 \
-  --listen-addr 0.0.0.0:9001
+  --listen-addr 0.0.0.0:8000
 ```
 
 **Default ports:**
-- gRPC: `9001`
-- HTTP/Dashboard: `9002`
+- gRPC: `8000`
+- HTTP/Dashboard: `8001`
 
 **Verify node is running:**
 ```bash
 # Check health
-curl http://localhost:9002/api/v1/health
+curl http://localhost:8001/api/v1/health
 
 # View dashboard
-open http://localhost:9002
+open http://localhost:8001
 ```
 
 ## Security
@@ -230,7 +285,7 @@ PlexSpaces provides comprehensive security features including:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PLEXSPACES_NODE_ID` | Unique node identifier | `node1` |
-| `PLEXSPACES_LISTEN_ADDR` | gRPC listen address | `0.0.0.0:9001` |
+| `PLEXSPACES_LISTEN_ADDR` | gRPC listen address | `0.0.0.0:8000` |
 | `PLEXSPACES_CLUSTER_SEED_NODES` | Cluster seed nodes | - |
 | `PLEXSPACES_JOURNALING_BACKEND` | Journaling backend | `sqlite` (or `ddb` if `AWS_REGION` set) |
 | `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` (or `ddb` if `AWS_REGION` set) |
@@ -245,7 +300,7 @@ PlexSpaces provides comprehensive security features including:
 
 ### HTTP Endpoints
 
-PlexSpaces exposes HTTP endpoints via gRPC-Gateway on the same port as gRPC (default: 9001):
+PlexSpaces exposes HTTP endpoints via gRPC-Gateway on the same port as gRPC (default: 8000):
 
 **FaaS-Style Actor Invocation**:
 - `GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}?param1=value1` - Read operations (ask pattern)
@@ -256,18 +311,18 @@ PlexSpaces exposes HTTP endpoints via gRPC-Gateway on the same port as gRPC (def
 **Example**:
 ```bash
 # Get counter value (with tenant_id and namespace)
-curl "http://localhost:9001/api/v1/actors/default/default/counter?action=get"
+curl "http://localhost:8001/api/v1/actors/default/default/counter?action=get"
 
 # Get counter value (without tenant_id, defaults to "default")
-curl "http://localhost:9001/api/v1/actors/default/counter?action=get"
+curl "http://localhost:8001/api/v1/actors/default/counter?action=get"
 
 # Increment counter (with tenant_id and namespace)
-curl -X POST "http://localhost:9001/api/v1/actors/default/default/counter" \
+curl -X POST "http://localhost:8001/api/v1/actors/default/default/counter" \
   -H "Content-Type: application/json" \
   -d '{"action":"increment"}'
 
 # Increment counter (without tenant_id)
-curl -X POST "http://localhost:9001/api/v1/actors/default/counter" \
+curl -X POST "http://localhost:8001/api/v1/actors/default/counter" \
   -H "Content-Type: application/json" \
   -d '{"action":"increment"}'
 ```
@@ -280,12 +335,12 @@ See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) for det
 # config/default.yaml
 node:
   id: node1
-  listen_addr: "0.0.0.0:9001"
+  listen_addr: "0.0.0.0:8000"
   cluster:
     seed_nodes:
-      - "node1:9001"
-      - "node2:9001"
-      - "node3:9001"
+      - "node1:8000"
+      - "node2:8000"
+      - "node3:8000"
 
 journaling:
   backend: sqlite  # or "ddb" for DynamoDB (requires AWS_REGION)
@@ -519,7 +574,7 @@ spec:
       - name: plexspaces-node
         image: plexspaces/node:latest
         ports:
-        - containerPort: 9001
+        - containerPort: 8000
           name: grpc
         env:
         - name: AWS_REGION
@@ -529,7 +584,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: PLEXSPACES_LISTEN_ADDR
-          value: "0.0.0.0:9001"
+          value: "0.0.0.0:8000"
         # AWS credentials via IAM role (no need to set AWS_ACCESS_KEY_ID)
         resources:
           requests:
@@ -628,7 +683,7 @@ kubectl apply -f k8s/deployment.yaml
 
 ```bash
 # Using grpc_health_probe
-grpc_health_probe -addr=localhost:9001
+grpc_health_probe -addr=localhost:8000
 
 # Using curl (if HTTP gateway enabled)
 curl http://localhost:8080/health
@@ -639,13 +694,13 @@ curl http://localhost:8080/health
 ```yaml
 livenessProbe:
   grpc:
-    port: 9001
+    port: 8000
   initialDelaySeconds: 30
   periodSeconds: 10
 
 readinessProbe:
   grpc:
-    port: 9001
+    port: 8000
   initialDelaySeconds: 10
   periodSeconds: 5
 ```
@@ -675,7 +730,7 @@ kubectl logs -f -l app=plexspaces
 
 ```bash
 # Find process using port
-lsof -i :9001
+lsof -i :8000
 
 # Kill process
 kill -9 <PID>
@@ -685,7 +740,7 @@ kill -9 <PID>
 
 1. Check logs: `docker logs plexspaces-node`
 2. Verify configuration: Check environment variables
-3. Test connectivity: `telnet localhost 9001`
+3. Test connectivity: `telnet localhost 8000`
 
 ### Cluster Not Forming
 
@@ -704,8 +759,8 @@ kill -9 <PID>
 **Best for**: Files >5MB (Python WASM, unoptimized builds)
 
 ```bash
-# HTTP gateway runs on gRPC port + 1 (e.g., 9002 if gRPC is 9001)
-curl -X POST http://localhost:9002/api/v1/applications/deploy \
+# HTTP gateway runs on gRPC port + 1 (e.g., 8001 if gRPC is 8000)
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -721,7 +776,7 @@ curl -X POST http://localhost:9002/api/v1/applications/deploy \
 ```bash
 # Deploy using the CLI (gRPC, 5MB limit)
 ./target/release/plexspaces deploy \
-  --node localhost:9001 \
+  --node localhost:8000 \
   --app-id calculator-app \
   --name calculator \
   --version 1.0.0 \
@@ -729,7 +784,7 @@ curl -X POST http://localhost:9002/api/v1/applications/deploy \
 
 # Or using --wasm-module (alias)
 ./target/release/plexspaces deploy \
-  --node localhost:9001 \
+  --node localhost:8000 \
   --app-id calculator-app \
   --name calculator \
   --wasm-module examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
@@ -744,7 +799,7 @@ curl -X POST http://localhost:9002/api/v1/applications/deploy \
 ```bash
 # Deploy using the helper script
 ./scripts/deploy-wasm-app-test.sh \
-  http://localhost:9002 \
+  http://localhost:8001 \
   calculator-app \
   examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
 ```
@@ -777,7 +832,7 @@ grpcurl -plaintext \
       \"module_bytes\": \"${WASM_BASE64}\"
     }
   }" \
-  localhost:9001 \
+  localhost:8000 \
   plexspaces.application.v1.ApplicationService/DeployApplication
 ```
 
@@ -788,7 +843,7 @@ grpcurl -plaintext \
 WASM_BASE64=$(base64 -w 0 calculator_actor.wasm)
 
 # Deploy via HTTP
-curl -X POST http://localhost:9002/api/v1/applications \
+curl -X POST http://localhost:8001/api/v1/applications \
   -H "Content-Type: application/json" \
   -d "{
     \"application_id\": \"calculator-app\",
@@ -828,21 +883,21 @@ cd examples/simple/wasm_calculator
 
 ```bash
 # Deploy calculator actor (HTTP multipart for large Python WASM)
-curl -X POST http://localhost:9002/api/v1/applications/deploy \
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
   -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm"
 
 # Deploy durable calculator actor
-curl -X POST http://localhost:9002/api/v1/applications/deploy \
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "application_id=durable-calculator-app" \
   -F "name=durable-calculator" \
   -F "version=1.0.0" \
   -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/durable_calculator_actor.wasm"
 
 # Deploy tuplespace calculator actor
-curl -X POST http://localhost:9002/api/v1/applications/deploy \
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "application_id=tuplespace-calculator-app" \
   -F "name=tuplespace-calculator" \
   -F "version=1.0.0" \
@@ -855,22 +910,22 @@ curl -X POST http://localhost:9002/api/v1/applications/deploy \
 
 ```bash
 # List all applications
-curl http://localhost:9002/api/v1/dashboard/applications | jq
+curl http://localhost:8001/api/v1/dashboard/applications | jq
 
 # Or check via dashboard API
-curl http://localhost:9002/api/v1/dashboard/applications | jq '.applications[]'
+curl http://localhost:8001/api/v1/dashboard/applications | jq '.applications[]'
 ```
 
 ### View Dashboard
 
 ```bash
 # Open dashboard in browser
-open http://localhost:9002
+open http://localhost:8001
 
 # Or view specific endpoints
-curl http://localhost:9002/api/v1/dashboard/summary | jq
-curl http://localhost:9002/api/v1/dashboard/applications | jq
-curl http://localhost:9002/api/v1/dashboard/actors | jq
+curl http://localhost:8001/api/v1/dashboard/summary | jq
+curl http://localhost:8001/api/v1/dashboard/applications | jq
+curl http://localhost:8001/api/v1/dashboard/actors | jq
 ```
 
 ## Complete Deployment Example
@@ -880,7 +935,7 @@ curl http://localhost:9002/api/v1/dashboard/actors | jq
 make release
 
 # 2. Start node (in one terminal)
-cargo run --release --bin plexspaces -- start --node-id test-node --listen-addr 0.0.0.0:9001
+cargo run --release --bin plexspaces -- start --node-id test-node --listen-addr 0.0.0.0:8000
 
 # 3. Build Python WASM actors (in another terminal)
 cd examples/simple/wasm_calculator
@@ -888,17 +943,17 @@ cd examples/simple/wasm_calculator
 
 # 4. Deploy calculator actor (HTTP multipart for large Python WASM)
 cd ../..
-curl -X POST http://localhost:9002/api/v1/applications/deploy \
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
   -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm"
 
 # 5. Verify deployment
-curl http://localhost:9002/api/v1/dashboard/applications | jq '.applications[] | select(.name == "calculator")'
+curl http://localhost:8001/api/v1/dashboard/applications | jq '.applications[] | select(.name == "calculator")'
 
 # 6. View dashboard
-open http://localhost:9002
+open http://localhost:8001
 ```
 
 ## Troubleshooting Deployment
@@ -907,13 +962,13 @@ open http://localhost:9002
 
 ```bash
 # Check node is running
-curl http://localhost:9002/api/v1/health
+curl http://localhost:8001/api/v1/health
 
 # Check WASM file exists and is valid
 file examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
 
 # Check gRPC connection
-grpcurl -plaintext localhost:9001 list
+grpcurl -plaintext localhost:8000 list
 ```
 
 ### WASM file too large

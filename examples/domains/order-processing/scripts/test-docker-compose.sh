@@ -51,9 +51,9 @@ function docker_compose_up() {
     docker-compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" ps
     echo ""
     echo -e "${BLUE}=== Ports ===${NC}"
-    echo "  Node 1 (Orders+Payment): localhost:9001"
-    echo "  Node 2 (Inventory):      localhost:9002"
-    echo "  Node 3 (Shipping):       localhost:9003"
+    echo "  Node 1 (Orders+Payment): localhost:8000"
+    echo "  Node 2 (Inventory):      localhost:8001"
+    echo "  Node 3 (Shipping):       localhost:8002"
     echo ""
     echo -e "${BLUE}=== Next Steps ===${NC}"
     echo "  View logs:   $0 logs"

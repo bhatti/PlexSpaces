@@ -17,16 +17,16 @@ description = "Genomics Pipeline QC and Alignment Workers"
 
 [node]
 id = "genomics-qc-alignment"
-listen_address = "0.0.0.0:9002"
+listen_address = "0.0.0.0:8001"
 cluster_seed_nodes = [
-    "genomics-coordinator:9001",
-    "genomics-chromosomes:9003",
-    "genomics-annotation:9004"
+    "genomics-coordinator:8000",
+    "genomics-chromosomes:8002",
+    "genomics-annotation:8003"
 ]
 
 [runtime.grpc]
 enabled = true
-address = "0.0.0.0:9002"
+address = "0.0.0.0:8001"
 max_connections = 200
 keepalive_interval_seconds = 30
 connection_timeout_seconds = 10
@@ -97,7 +97,7 @@ CHROMOSOME_POOL_ENABLED = "false"
 ANNOTATION_POOL_ENABLED = "false"
 REPORT_POOL_ENABLED = "false"
 # Coordinator address
-COORDINATOR_ADDRESS = "genomics-coordinator:9001"
+COORDINATOR_ADDRESS = "genomics-coordinator:8000"
 
 # Resource limits (I/O intensive)
 [resources]

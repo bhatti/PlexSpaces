@@ -30,11 +30,24 @@ async fn create_test_service() -> (Arc<BlobService>, TempDir) {
     let temp_dir = TempDir::new().unwrap();
     let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
 
-    // Create SQLite repository - use in-memory to prevent concurrency issues
-    use sqlx::AnyPool;
-    let any_pool = AnyPool::connect("sqlite::memory:").await.unwrap();
-    SqlBlobRepository::migrate(&any_pool).await.unwrap();
-    let repository = Arc::new(SqlBlobRepository::new(any_pool));
+    // Create SQLite repository - use temporary file-based database for reliability
+        use sqlx::AnyPool;
+        use sqlx::any::AnyPoolOptions;
+    use tempfile::NamedTempFile;
+    
+    // Use temporary file-based database (more reliable than in-memory)
+    let temp_db = NamedTempFile::new().unwrap();
+    let db_path = temp_db.path().to_str().unwrap();
+    let db_url = format!("sqlite:{}", db_path);
+    
+    let any_pool = AnyPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await
+        .unwrap();
+    
+    // Migrations are auto-applied in new()
+    let repository = Arc::new(SqlBlobRepository::new(any_pool).await.unwrap());
 
     // Create blob config (not used when using with_object_store, but needed for type)
     let config = ProtoBlobConfig {

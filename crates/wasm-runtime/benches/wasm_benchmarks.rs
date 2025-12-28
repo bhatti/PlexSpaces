@@ -291,6 +291,15 @@ fn bench_actor_instantiation(c: &mut Criterion) {
                         black_box(actor_id),
                         black_box(&[]),
                         black_box(WasmConfig::default()),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        
+                        None,
                     )
                     .await
                     .unwrap();
@@ -343,6 +352,15 @@ fn bench_actor_instantiation_with_state(c: &mut Criterion) {
                             black_box(actor_id),
                             black_box(&state),
                             black_box(WasmConfig::default()),
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            
+                            None,
                         )
                         .await
                         .unwrap();
@@ -393,9 +411,9 @@ fn bench_concurrent_instantiation(c: &mut Criterion) {
                     handles.push(tokio::spawn(async move {
                         let module = runtime.resolve_module("test-actor@1.0.0").await.unwrap();
                         runtime
-                            .instantiate(module, actor_id, &[], WasmConfig::default())
-                            .await
-                            .unwrap();
+                        .instantiate(module, actor_id, &[], WasmConfig::default(), None, None, None, None, None, None, None, None,  None)
+                        .await
+                        .unwrap();
                     }));
                 }
 
@@ -485,7 +503,7 @@ fn bench_memory_limits(c: &mut Criterion) {
 
                     let module = runtime.resolve_module("test-actor@1.0.0").await.unwrap();
                     runtime
-                        .instantiate(black_box(module), black_box(actor_id), &[], black_box(config))
+                        .instantiate(black_box(module), black_box(actor_id), &[], black_box(config), None, None, None, None, None, None, None, None,  None)
                         .await
                         .unwrap();
                 }
@@ -543,6 +561,15 @@ fn bench_execution_timeouts(c: &mut Criterion) {
                                 black_box(actor_id),
                                 &[],
                                 black_box(config),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                
+                                None,
                             )
                             .await
                             .unwrap();
@@ -592,6 +619,15 @@ fn bench_e2e_deployment(c: &mut Criterion) {
                         black_box(actor_id),
                         black_box(&[]),
                         black_box(WasmConfig::default()),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        
+                        None,
                     )
                     .await
                     .unwrap();

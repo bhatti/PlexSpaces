@@ -42,7 +42,7 @@
 //! // Start gRPC server
 //! Server::builder()
 //!     .add_service(WasmRuntimeServiceServer::new(service))
-//!     .serve("0.0.0.0:9001".parse()?)
+//!     .serve("0.0.0.0:8000".parse()?)
 //!     .await?;
 //! # Ok(())
 //! # }

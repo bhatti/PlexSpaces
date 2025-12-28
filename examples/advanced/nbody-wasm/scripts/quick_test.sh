@@ -16,7 +16,7 @@ fi
 
 # Start node
 export PLEXSPACES_NODE_ID="nbody-test-node"
-export PLEXSPACES_LISTEN_ADDR="0.0.0.0:9001"
+export PLEXSPACES_LISTEN_ADDR="0.0.0.0:8000"
 
 cargo run --release --bin node-starter > /tmp/nbody-node.log 2>&1 &
 NODE_PID=$!
@@ -37,7 +37,7 @@ sleep 2
 echo "Deploying application..."
 cargo run --release --bin nbody-wasm -- deploy \
     --wasm wasm-modules/nbody-application.wasm \
-    --node http://localhost:9001 \
+    --node http://localhost:8000 \
     --name nbody-simulation \
     --version 0.1.0
 

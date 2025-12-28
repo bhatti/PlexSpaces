@@ -126,7 +126,10 @@ mod tests {
 
     // Helper to create test memory
     async fn create_test_memory<T: Default>() -> WasmResult<(Engine, Store<T>, Memory)> {
-        let engine = Engine::new(&Config::default())?;
+        // Create engine without async support for tests (simpler, faster)
+        let mut config = Config::default();
+        config.async_support(false); // Disable async for test helper
+        let engine = Engine::new(&config)?;
         let mut store = Store::new(&engine, T::default());
 
         // Create module with exported memory
@@ -141,6 +144,7 @@ mod tests {
         let module = Module::new(&engine, &wasm_bytes)?;
 
         let mut linker = Linker::new(&engine);
+        // Use synchronous instantiate since we disabled async support for tests
         let instance = linker.instantiate(&mut store, &module)?;
         let memory = instance.get_memory(&mut store, "memory")
             .ok_or_else(|| WasmError::ActorFunctionError("Memory not found".to_string()))?;

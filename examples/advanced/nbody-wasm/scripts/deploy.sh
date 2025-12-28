@@ -5,7 +5,7 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-NODE="${NODE:-http://localhost:9001}"
+NODE="${NODE:-http://localhost:8000}"
 WASM="${WASM:-wasm-modules/nbody-application.wasm}"
 
 echo "╔════════════════════════════════════════════════════════════════╗"

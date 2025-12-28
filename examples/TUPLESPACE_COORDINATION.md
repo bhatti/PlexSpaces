@@ -81,7 +81,7 @@ registry.register(
     "ts-sqlite-army1-consensus",
     "army1",      // tenant (multi-tenancy isolation)
     "consensus",  // namespace (coordination scope)
-    "localhost:9001",
+    "localhost:8000",
     "sqlite",
     capabilities,
 ).await?;
@@ -428,7 +428,7 @@ registry.register(
     "ts-hpc-heat-simulation",
     "hpc-lab",
     "heat-diffusion",
-    "localhost:9001",
+    "localhost:8000",
     "redis",  // Redis backend for low-latency
     capabilities,
 ).await?;

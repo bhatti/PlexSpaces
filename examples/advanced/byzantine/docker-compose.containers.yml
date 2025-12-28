@@ -42,11 +42,11 @@ services:
     container_name: byzantine-node1
     hostname: node1
     ports:
-      - "9001:9001"
+      - "8000:8000"
     environment:
       - PLEXSPACES_NODE_ID=node1
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node2:9001,node3:9001,node4:9001
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+      - PLEXSPACES_CLUSTER_SEED_NODES=node2:8000,node3:8000,node4:8000
       - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
       - RUST_LOG=info
       - PLEXSPACES_TUPLESPACE_BACKEND=redis
@@ -55,7 +55,7 @@ services:
       - ../../../config:/app/config:ro
       - node1-data:/app/data
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8000", "-service=readiness"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -74,11 +74,11 @@ services:
     container_name: byzantine-node2
     hostname: node2
     ports:
-      - "9002:9001"
+      - "8001:8000"
     environment:
       - PLEXSPACES_NODE_ID=node2
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node3:9001,node4:9001
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node3:8000,node4:8000
       - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
       - RUST_LOG=info
       - PLEXSPACES_TUPLESPACE_BACKEND=redis
@@ -87,7 +87,7 @@ services:
       - ../../../config:/app/config:ro
       - node2-data:/app/data
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8000", "-service=readiness"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -106,11 +106,11 @@ services:
     container_name: byzantine-node3
     hostname: node3
     ports:
-      - "9003:9001"
+      - "8002:8000"
     environment:
       - PLEXSPACES_NODE_ID=node3
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001,node4:9001
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node2:8000,node4:8000
       - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
       - RUST_LOG=info
       - PLEXSPACES_TUPLESPACE_BACKEND=redis
@@ -119,7 +119,7 @@ services:
       - ../../../config:/app/config:ro
       - node3-data:/app/data
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8000", "-service=readiness"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -138,11 +138,11 @@ services:
     container_name: byzantine-node4
     hostname: node4
     ports:
-      - "9004:9001"
+      - "8003:8000"
     environment:
       - PLEXSPACES_NODE_ID=node4
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:9001,node2:9001,node3:9001
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node2:8000,node3:8000
       - PLEXSPACES_CONFIG_PATH=/app/config/node.toml
       - RUST_LOG=info
       - PLEXSPACES_TUPLESPACE_BACKEND=redis
@@ -151,7 +151,7 @@ services:
       - ../../../config:/app/config:ro
       - node4-data:/app/data
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8000", "-service=readiness"]
       interval: 10s
       timeout: 5s
       retries: 3

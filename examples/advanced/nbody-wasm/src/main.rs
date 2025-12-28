@@ -43,7 +43,7 @@ enum Commands {
         #[arg(short, long)]
         wasm: PathBuf,
         /// Node address (gRPC)
-        #[arg(short, long, default_value = "http://localhost:9001")]
+        #[arg(short, long, default_value = "http://localhost:8000")]
         node: String,
         /// Application name
         #[arg(short, long, default_value = "nbody-simulation")]

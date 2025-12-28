@@ -6,9 +6,16 @@
 //! Host functions provided to WASM actors
 
 use async_trait::async_trait;
-use plexspaces_core::ChannelService;
+use plexspaces_core::{ChannelService, RequestContext};
+use plexspaces_keyvalue::KeyValueStore;
+use plexspaces_process_groups::ProcessGroupRegistry;
+use plexspaces_locks::LockManager;
+use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_journaling::JournalStorage;
 use plexspaces_mailbox::Message;
 use std::sync::Arc;
+
+use plexspaces_blob::BlobService;
 
 /// Trait for sending messages from WASM actors to other actors
 ///
@@ -32,14 +39,146 @@ pub trait MessageSender: Send + Sync {
     /// ## Returns
     /// Success or error
     async fn send_message(&self, from: &str, to: &str, message: &str) -> Result<(), String>;
+
+    /// Send a message and wait for reply (request-reply pattern)
+    ///
+    /// ## Arguments
+    /// * `from` - Sender actor ID
+    /// * `to` - Recipient actor ID
+    /// * `message_type` - Message type for behavior routing
+    /// * `payload` - Request payload bytes
+    /// * `timeout_ms` - Maximum time to wait for reply (0 = default timeout)
+    ///
+    /// ## Returns
+    /// Reply payload bytes or error
+    async fn ask(
+        &self,
+        from: &str,
+        to: &str,
+        message_type: &str,
+        payload: Vec<u8>,
+        timeout_ms: u64,
+    ) -> Result<Vec<u8>, String>;
+
+    /// Spawn a new actor from a WASM module
+    ///
+    /// ## Arguments
+    /// * `from` - Spawning actor ID
+    /// * `module_ref` - Module reference (name@version or hash)
+    /// * `initial_state` - Initial state bytes
+    /// * `actor_id` - Optional actor ID (if None, system generates)
+    /// * `labels` - Optional labels for the actor
+    /// * `durable` - Whether actor should be durable
+    ///
+    /// ## Returns
+    /// Spawned actor ID or error
+    async fn spawn_actor(
+        &self,
+        from: &str,
+        module_ref: &str,
+        initial_state: Vec<u8>,
+        actor_id: Option<String>,
+        labels: Vec<(String, String)>,
+        durable: bool,
+    ) -> Result<String, String>;
+
+    /// Stop an actor gracefully
+    ///
+    /// ## Arguments
+    /// * `from` - Actor requesting stop
+    /// * `actor_id` - Actor to stop
+    /// * `timeout_ms` - Maximum time to wait for graceful shutdown
+    ///
+    /// ## Returns
+    /// Success or error
+    async fn stop_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+        timeout_ms: u64,
+    ) -> Result<(), String>;
+
+    /// Link two actors (bidirectional death propagation)
+    ///
+    /// ## Arguments
+    /// * `from` - Actor requesting link
+    /// * `actor_id` - First actor ID
+    /// * `linked_actor_id` - Second actor ID
+    ///
+    /// ## Returns
+    /// Success or error
+    async fn link_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+        linked_actor_id: &str,
+    ) -> Result<(), String>;
+
+    /// Unlink two actors
+    ///
+    /// ## Arguments
+    /// * `from` - Actor requesting unlink
+    /// * `actor_id` - First actor ID
+    /// * `linked_actor_id` - Second actor ID
+    ///
+    /// ## Returns
+    /// Success or error
+    async fn unlink_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+        linked_actor_id: &str,
+    ) -> Result<(), String>;
+
+    /// Monitor an actor (one-way notification on termination)
+    ///
+    /// ## Arguments
+    /// * `from` - Actor doing the monitoring
+    /// * `actor_id` - Actor to monitor
+    ///
+    /// ## Returns
+    /// Monitor reference (u64) or error
+    async fn monitor_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+    ) -> Result<u64, String>;
+
+    /// Remove monitoring for an actor
+    ///
+    /// ## Arguments
+    /// * `from` - Actor doing the demonitoring
+    /// * `actor_id` - Actor being monitored
+    /// * `monitor_ref` - Monitor reference returned from monitor_actor
+    ///
+    /// ## Returns
+    /// Success or error
+    async fn demonitor_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+        monitor_ref: u64,
+    ) -> Result<(), String>;
 }
 
 /// Host functions for WASM actors
 pub struct HostFunctions {
     /// Message sender for routing messages (optional)
-    message_sender: Option<Box<dyn MessageSender>>,
+    message_sender: Option<Arc<dyn MessageSender>>,
     /// Channel service for queue/topic patterns (optional)
     channel_service: Option<Arc<dyn ChannelService>>,
+    /// Key-value store for state/config/registry (optional)
+    keyvalue_store: Option<Arc<dyn KeyValueStore>>,
+    /// Process group registry for pub/sub (optional)
+    process_group_registry: Option<Arc<ProcessGroupRegistry>>,
+    /// Lock manager for distributed locks (optional)
+    lock_manager: Option<Arc<dyn LockManager>>,
+    /// Object registry for service discovery (optional)
+    object_registry: Option<Arc<ObjectRegistry>>,
+    /// Journal storage for durability (optional)
+    journal_storage: Option<Arc<dyn JournalStorage>>,
+    /// Blob service for object storage (optional)
+    blob_service: Option<Arc<BlobService>>,
 }
 
 impl HostFunctions {
@@ -48,14 +187,26 @@ impl HostFunctions {
         Self {
             message_sender: None,
             channel_service: None,
+            keyvalue_store: None,
+            process_group_registry: None,
+            lock_manager: None,
+            object_registry: None,
+            journal_storage: None,
+            blob_service: None,
         }
     }
 
     /// Create with message sender for multi-node coordination
-    pub fn with_message_sender(sender: Box<dyn MessageSender>) -> Self {
+    pub fn with_message_sender(sender: Arc<dyn MessageSender>) -> Self {
         Self {
             message_sender: Some(sender),
             channel_service: None,
+            keyvalue_store: None,
+            process_group_registry: None,
+            lock_manager: None,
+            object_registry: None,
+            journal_storage: None,
+            blob_service: None,
         }
     }
 
@@ -64,18 +215,93 @@ impl HostFunctions {
         Self {
             message_sender: None,
             channel_service: Some(channel_service),
+            keyvalue_store: None,
+            process_group_registry: None,
+            lock_manager: None,
+            object_registry: None,
+            journal_storage: None,
+            blob_service: None,
         }
     }
 
     /// Create with both message sender and channel service
     pub fn with_services(
-        sender: Option<Box<dyn MessageSender>>,
+        sender: Option<Arc<dyn MessageSender>>,
         channel_service: Option<Arc<dyn ChannelService>>,
     ) -> Self {
         Self {
             message_sender: sender,
             channel_service,
+            keyvalue_store: None,
+            process_group_registry: None,
+            lock_manager: None,
+            object_registry: None,
+            journal_storage: None,
+            blob_service: None,
         }
+    }
+
+    /// Create with all services
+    pub fn with_all_services(
+        sender: Option<Arc<dyn MessageSender>>,
+        channel_service: Option<Arc<dyn ChannelService>>,
+        keyvalue_store: Option<Arc<dyn KeyValueStore>>,
+        process_group_registry: Option<Arc<ProcessGroupRegistry>>,
+        lock_manager: Option<Arc<dyn LockManager>>,
+        object_registry: Option<Arc<ObjectRegistry>>,
+        journal_storage: Option<Arc<dyn JournalStorage>>,
+        blob_service: Option<Arc<BlobService>>,
+    ) -> Self {
+        Self {
+            message_sender: sender,
+            channel_service,
+            keyvalue_store,
+            process_group_registry,
+            lock_manager,
+            object_registry,
+            journal_storage,
+            blob_service,
+        }
+    }
+    
+    /// Get blob service if available
+    pub fn blob_service(&self) -> Option<&Arc<BlobService>> {
+        self.blob_service.as_ref()
+    }
+
+    /// Get message sender if available
+    pub fn message_sender(&self) -> Option<&Arc<dyn MessageSender>> {
+        self.message_sender.as_ref()
+    }
+
+    /// Get channel service if available
+    pub fn channel_service(&self) -> Option<&Arc<dyn ChannelService>> {
+        self.channel_service.as_ref()
+    }
+
+    /// Get key-value store if available
+    pub fn keyvalue_store(&self) -> Option<&Arc<dyn KeyValueStore>> {
+        self.keyvalue_store.as_ref()
+    }
+
+    /// Get process group registry if available
+    pub fn process_group_registry(&self) -> Option<&Arc<ProcessGroupRegistry>> {
+        self.process_group_registry.as_ref()
+    }
+
+    /// Get lock manager if available
+    pub fn lock_manager(&self) -> Option<&Arc<dyn LockManager>> {
+        self.lock_manager.as_ref()
+    }
+
+    /// Get object registry if available
+    pub fn object_registry(&self) -> Option<&Arc<ObjectRegistry>> {
+        self.object_registry.as_ref()
+    }
+
+    /// Get journal storage if available
+    pub fn journal_storage(&self) -> Option<&Arc<dyn JournalStorage>> {
+        self.journal_storage.as_ref()
     }
 
     /// Send message via message sender if available
@@ -91,6 +317,139 @@ impl HostFunctions {
                 "Message sender not configured, message not delivered"
             );
             Ok(())
+        }
+    }
+
+    /// Get key-value store operation helper
+    pub async fn get_keyvalue(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.get(ctx, key)
+                .await
+                .map_err(|e| format!("KeyValue get failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Put key-value store operation helper
+    pub async fn put_keyvalue(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        value: Vec<u8>,
+    ) -> Result<(), String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.put(ctx, key, value)
+                .await
+                .map_err(|e| format!("KeyValue put failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Send message and wait for reply via message sender if available
+    pub async fn ask(
+        &self,
+        from: &str,
+        to: &str,
+        message_type: &str,
+        payload: Vec<u8>,
+        timeout_ms: u64,
+    ) -> Result<Vec<u8>, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.ask(from, to, message_type, payload, timeout_ms).await
+        } else {
+            Err("Message sender not configured for ask".to_string())
+        }
+    }
+
+    /// Spawn a new actor via message sender if available
+    pub async fn spawn_actor(
+        &self,
+        from: &str,
+        module_ref: &str,
+        initial_state: Vec<u8>,
+        actor_id: Option<String>,
+        labels: Vec<(String, String)>,
+        durable: bool,
+    ) -> Result<String, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.spawn_actor(from, module_ref, initial_state, actor_id, labels, durable).await
+        } else {
+            Err("Message sender not configured for spawn_actor".to_string())
+        }
+    }
+
+    /// Stop an actor via message sender if available
+    pub async fn stop_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+        timeout_ms: u64,
+    ) -> Result<(), String> {
+        if let Some(sender) = &self.message_sender {
+            sender.stop_actor(from, actor_id, timeout_ms).await
+        } else {
+            Err("Message sender not configured for stop_actor".to_string())
+        }
+    }
+
+    /// Link two actors via message sender if available
+    pub async fn link_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+        linked_actor_id: &str,
+    ) -> Result<(), String> {
+        if let Some(sender) = &self.message_sender {
+            sender.link_actor(from, actor_id, linked_actor_id).await
+        } else {
+            Err("Message sender not configured for link_actor".to_string())
+        }
+    }
+
+    /// Unlink two actors via message sender if available
+    pub async fn unlink_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+        linked_actor_id: &str,
+    ) -> Result<(), String> {
+        if let Some(sender) = &self.message_sender {
+            sender.unlink_actor(from, actor_id, linked_actor_id).await
+        } else {
+            Err("Message sender not configured for unlink_actor".to_string())
+        }
+    }
+
+    /// Monitor an actor via message sender if available
+    pub async fn monitor_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+    ) -> Result<u64, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.monitor_actor(from, actor_id).await
+        } else {
+            Err("Message sender not configured for monitor_actor".to_string())
+        }
+    }
+
+    /// Demonitor an actor via message sender if available
+    pub async fn demonitor_actor(
+        &self,
+        from: &str,
+        actor_id: &str,
+        monitor_ref: u64,
+    ) -> Result<(), String> {
+        if let Some(sender) = &self.message_sender {
+            sender.demonitor_actor(from, actor_id, monitor_ref).await
+        } else {
+            Err("Message sender not configured for demonitor_actor".to_string())
         }
     }
 

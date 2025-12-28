@@ -15,13 +15,13 @@ description: "Default PlexSpaces node with empty application"
 
 node:
   id: "${NODE_ID:-node1}"
-  listen_address: "${NODE_LISTEN_ADDRESS:-0.0.0.0:9001}"
+  listen_address: "${NODE_LISTEN_ADDRESS:-0.0.0.0:8000}"
   cluster_seed_nodes: []
 
 runtime:
   grpc:
     enabled: true
-    address: "${GRPC_ADDRESS:-0.0.0.0:9001}"
+    address: "${GRPC_ADDRESS:-0.0.0.0:8000}"
     max_connections: 1000
     keepalive_interval_seconds: 30
     middleware: []

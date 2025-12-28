@@ -1,0 +1,130 @@
+// PlexSpaces Actor Interface - Process Groups
+//
+// Distributed pub/sub and broadcast messaging for actor coordination (Erlang pg/pg2-inspired).
+// Enables named groups where actors subscribe to topics and receive broadcast messages.
+
+interface process-groups {
+    use types.{payload, actor-error, actor-id, duration-ms, context};
+
+    /// Create a new process group
+    ///
+    /// # Arguments
+    /// - `group-name`: Unique group identifier within tenant
+    /// - `namespace`: Namespace within tenant
+    ///
+    /// # Returns
+    /// - `ok`: Group created
+    /// - `err`: Create failed (group already exists, storage error)
+    create-group: func(
+        ctx: context,
+        group-name: string,
+        namespace: string
+    ) -> result<_, actor-error>;
+
+    /// Delete a process group
+    ///
+    /// Removes group and all memberships. Idempotent.
+    ///
+    /// # Arguments
+    /// - `group-name`: Group to delete
+    ///
+    /// # Returns
+    /// - `ok`: Group deleted
+    /// - `err`: Delete failed (storage error)
+    delete-group: func(
+        ctx: context,
+        group-name: string
+    ) -> result<_, actor-error>;
+
+    /// Join a process group
+    ///
+    /// Actor can join multiple groups and same group multiple times (join_count tracked).
+    /// Must call leave() equal number of times to fully remove.
+    ///
+    /// # Arguments
+    /// - `group-name`: Group to join
+    /// - `namespace`: Namespace within tenant
+    /// - `topics`: Optional topics to subscribe to (empty = all topics)
+    ///
+    /// # Returns
+    /// - `ok`: Actor joined group
+    /// - `err`: Join failed (group not found, storage error)
+    join-group: func(
+        ctx: context,
+        group-name: string,
+        namespace: string,
+        topics: list<string>
+    ) -> result<_, actor-error>;
+
+    /// Leave a process group
+    ///
+    /// Decrements join_count. Actor fully removed when join_count reaches 0.
+    ///
+    /// # Arguments
+    /// - `group-name`: Group to leave
+    ///
+    /// # Returns
+    /// - `ok`: Actor left group
+    /// - `err`: Leave failed (group not found, actor not in group)
+    leave-group: func(
+        ctx: context,
+        group-name: string
+    ) -> result<_, actor-error>;
+
+    /// Get all group members (cluster-wide)
+    ///
+    /// # Arguments
+    /// - `group-name`: Group to query
+    ///
+    /// # Returns
+    /// - `ok(list<actor-id>)`: List of actor IDs in this group across all nodes
+    /// - `err`: Query failed (group not found)
+    get-members: func(
+        ctx: context,
+        group-name: string
+    ) -> result<list<actor-id>, actor-error>;
+
+    /// Get local group members (this node only)
+    ///
+    /// # Arguments
+    /// - `group-name`: Group to query
+    ///
+    /// # Returns
+    /// - `ok(list<actor-id>)`: List of actor IDs in this group on current node
+    /// - `err`: Query failed (group not found)
+    get-local-members: func(
+        ctx: context,
+        group-name: string
+    ) -> result<list<actor-id>, actor-error>;
+
+    /// List all groups
+    ///
+    /// # Returns
+    /// - `ok(list<string>)`: List of group names in the current namespace
+    /// - `err`: List failed (storage error)
+    list-groups: func(ctx: context) -> result<list<string>, actor-error>;
+
+    /// Publish message to all group members
+    ///
+    /// Message delivered to all current members. Topic filtering applied if specified.
+    ///
+    /// # Arguments
+    /// - `group-name`: Group to publish to
+    /// - `topic`: Optional topic filter (None = broadcast to all)
+    /// - `message`: Message payload to broadcast
+    ///
+    /// # Returns
+    /// - `ok(list<actor-id>)`: List of actor IDs that received the message
+    /// - `err`: Publish failed (group not found)
+    publish-to-group: func(
+        ctx: context,
+        group-name: string,
+        topic: option<string>,
+        message: payload
+    ) -> result<list<actor-id>, actor-error>;
+}
+
+
+
+
+

@@ -10,12 +10,12 @@ description = "Distributed block-based matrix multiplication using TupleSpace"
 
 [node]
 id = "matrix-node-1"
-listen_address = "0.0.0.0:9001"
+listen_address = "0.0.0.0:8000"
 cluster_seed_nodes = []
 
 [runtime.grpc]
 enabled = true
-address = "0.0.0.0:9001"
+address = "0.0.0.0:8000"
 max_connections = 1000
 keepalive_interval_seconds = 30
 

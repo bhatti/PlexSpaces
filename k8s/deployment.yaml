@@ -33,7 +33,7 @@ spec:
         
         ports:
         - name: grpc
-          containerPort: 9001
+          containerPort: 8000
           protocol: TCP
         
         env:
@@ -42,11 +42,11 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: PLEXSPACES_LISTEN_ADDR
-          value: "0.0.0.0:9001"
+          value: "0.0.0.0:8000"
         - name: RUST_LOG
           value: "info"
         - name: PLEXSPACES_CLUSTER_SEED_NODES
-          value: "plexspaces-node-0.plexspaces-headless:9001"
+          value: "plexspaces-node-0.plexspaces-headless:8000"
         
         # Health checks using gRPC health protocol
         # Requires grpc_health_probe binary (included in image or sidecar)
@@ -54,7 +54,7 @@ spec:
           exec:
             command:
             - grpc_health_probe
-            - -addr=:9001
+            - -addr=:8000
             - -service=startup
           initialDelaySeconds: 0
           periodSeconds: 5
@@ -65,7 +65,7 @@ spec:
           exec:
             command:
             - grpc_health_probe
-            - -addr=:9001
+            - -addr=:8000
             - -service=liveness
           initialDelaySeconds: 30
           periodSeconds: 10
@@ -76,7 +76,7 @@ spec:
           exec:
             command:
             - grpc_health_probe
-            - -addr=:9001
+            - -addr=:8000
             - -service=readiness
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -138,8 +138,8 @@ spec:
   type: ClusterIP
   ports:
   - name: grpc
-    port: 9001
-    targetPort: 9001
+    port: 8000
+    targetPort: 8000
     protocol: TCP
   selector:
     app: plexspaces
@@ -157,8 +157,8 @@ spec:
   clusterIP: None  # Headless service for stateful pods
   ports:
   - name: grpc
-    port: 9001
-    targetPort: 9001
+    port: 8000
+    targetPort: 8000
     protocol: TCP
   selector:
     app: plexspaces
@@ -175,11 +175,11 @@ data:
   release.toml: |
     [node]
     id = "plexspaces-node"
-    listen_address = "0.0.0.0:9001"
+    listen_address = "0.0.0.0:8000"
     
     [runtime.grpc]
     enabled = true
-    address = "0.0.0.0:9001"
+    address = "0.0.0.0:8000"
     max_connections = 100
     
     [runtime.health]

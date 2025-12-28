@@ -14,10 +14,10 @@ services:
     container_name: plexspaces-firecracker-test
     hostname: firecracker-test-node
     ports:
-      - "9001:9001"
+      - "8000:8000"
     environment:
       - PLEXSPACES_NODE_ID=firecracker-test-node
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:9001
+      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
       - RUST_LOG=info
     # Required capabilities for Firecracker
     cap_add:
@@ -30,7 +30,7 @@ services:
     volumes:
       - firecracker-data:/var/lib/firecracker
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9001"]
+      test: ["CMD", "nc", "-z", "localhost", "8000"]
       interval: 10s
       timeout: 5s
       retries: 5

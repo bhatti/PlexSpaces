@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a node with configuration
     let node = NodeBuilder::new()
         .with_node_id("node1".to_string())
-        .with_listen_address("0.0.0.0:9001".to_string())
+        .with_listen_address("0.0.0.0:8000".to_string())
         .build()
         .await?;
     
@@ -369,7 +369,7 @@ Environment variables override file configuration:
 ```bash
 # Set environment variables
 export PLEXSPACES_NODE_ID=node1
-export PLEXSPACES_GRPC_ADDRESS=0.0.0.0:9001
+export PLEXSPACES_GRPC_ADDRESS=0.0.0.0:8000
 export PLEXSPACES_JWT_SECRET=my-secret-key
 
 # Load config (env vars override file values)
@@ -383,7 +383,7 @@ Use `${VAR_NAME}` or `${VAR_NAME:-default}` in YAML:
 ```yaml
 node:
   id: "${PLEXSPACES_NODE_ID:-node1}"
-  listen_address: "${PLEXSPACES_LISTEN_ADDR:-0.0.0.0:9001}"
+  listen_address: "${PLEXSPACES_LISTEN_ADDR:-0.0.0.0:8000}"
 
 runtime:
   security:

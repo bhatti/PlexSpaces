@@ -16,14 +16,14 @@ Usage: $0 [OPTIONS]
 Deploy a WASM module to a PlexSpaces framework node.
 
 Options:
-    --node ADDR          Node address (e.g., localhost:9001)
+    --node ADDR          Node address (e.g., localhost:8000)
     --module NAME        Module name (e.g., rust-counter)
     --version VERSION    Module version (e.g., 1.0.0)
     --file PATH          Path to WASM module file
     -h, --help           Show this help message
 
 Example:
-    $0 --node localhost:9001 \\
+    $0 --node localhost:8000 \\
        --module rust-counter \\
        --version 1.0.0 \\
        --file target/wasm32-wasi/release/rust_counter.wasm

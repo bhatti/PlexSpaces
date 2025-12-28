@@ -4,6 +4,9 @@
 // This file is part of PlexSpaces.
 //
 // Integration tests for WASM runtime behavior-specific routing and channel functions
+//
+// NOTE: These tests are designed to run offline without network access or SSL.
+// All tests use MockChannelService (in-memory) and do not require external services.
 
 use plexspaces_wasm_runtime::*;
 use plexspaces_core::ChannelService;
@@ -114,7 +117,15 @@ async fn test_genserver_handle_request() {
         &[],
         crate::capabilities::profiles::default(),
         limits,
-        None,
+        None, // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -164,7 +175,15 @@ async fn test_genevent_handle_event() {
         &[],
         crate::capabilities::profiles::default(),
         limits,
-        None,
+        None, // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -214,7 +233,15 @@ async fn test_genfsm_handle_transition() {
         &[],
         crate::capabilities::profiles::default(),
         limits,
-        None,
+        None, // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -263,7 +290,15 @@ async fn test_fallback_to_handle_message() {
         &[],
         crate::capabilities::profiles::default(),
         limits,
-        None,
+        None, // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -325,7 +360,15 @@ async fn test_channel_send_to_queue() {
         &[],
         crate::capabilities::profiles::default(),
         limits,
-        Some(channel_service),
+        Some(channel_service), // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -366,7 +409,15 @@ async fn test_channel_publish_to_topic() {
         &[],
         crate::capabilities::profiles::default(),
         limits,
-        Some(channel_service),
+        Some(channel_service), // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -409,7 +460,15 @@ async fn test_channel_service_optional() {
         &[],
         crate::capabilities::profiles::default(),
         limits,
-        None, // No channel service
+        None, // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");

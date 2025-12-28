@@ -120,17 +120,17 @@ plexspaces deploy \
   --application nbody-simulation \
   --version 0.1.0 \
   --wasm wasm-modules/nbody-application.wasm \
-  --node localhost:9001
+  --node localhost:8000
 
 # Start application
 plexspaces start-application \
   --application nbody-simulation \
-  --node localhost:9001
+  --node localhost:8000
 
 # Check application status
 plexspaces status \
   --application nbody-simulation \
-  --node localhost:9001
+  --node localhost:8000
 ```
 
 ### Using Application Service (gRPC)
@@ -141,7 +141,7 @@ The example includes a Rust binary that demonstrates deploying via gRPC:
 cargo run --release --bin nbody-wasm -- \
   --deploy \
   --wasm wasm-modules/nbody-application.wasm \
-  --node localhost:9001
+  --node localhost:8000
 ```
 
 ## Configuration
@@ -253,12 +253,12 @@ npm run build
 ```
 
 ### Node fails to start
-- Check if port 9001 is already in use
+- Check if port 8000 is already in use
 - Check node logs: `/tmp/nbody-node.log`
 - Verify environment variables: `PLEXSPACES_NODE_ID`, `PLEXSPACES_LISTEN_ADDR`
 
 ### Deployment fails
-- Ensure node is running and accessible at `http://localhost:9001`
+- Ensure node is running and accessible at `http://localhost:8000`
 - Check WASM file exists: `wasm-modules/nbody-application.wasm`
 - Verify node logs for errors
 

@@ -36,10 +36,11 @@ cd plexspaces
 make build
 
 # Run tests
-make test
+make test  # See docs/testing.md for detailed testing guide
 ```
 
 See [Installation Guide](installation.md) for detailed setup instructions.
+See [Testing Guide](testing.md) for how to run unit tests, integration tests, and example tests.
 
 **Note**: For actors using non-memory channels (Redis, Kafka, SQLite, NATS), graceful shutdown is automatically handled. When an actor stops, it completes all in-progress messages before terminating. See [Durability Guide](durability.md) for details on graceful shutdown and message recovery.
 
@@ -321,7 +322,7 @@ If you see connection errors:
 
 1. Verify the node is running: `curl http://localhost:8080/health`
 2. Check network connectivity between nodes
-3. Review firewall rules for gRPC port (default: 9001)
+3. Review firewall rules for gRPC port (default: 8000)
 
 ### Build Errors
 

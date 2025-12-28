@@ -81,7 +81,7 @@
 //!     object_id: "counter@node1".to_string(),
 //!     object_type: ObjectType::ObjectTypeActor as i32,
 //!     object_category: "GenServer".to_string(),
-//!     grpc_address: "http://node1:9001".to_string(),
+//!     grpc_address: "http://node1:8000".to_string(),
 //!     ..Default::default()
 //! };
 //!
@@ -286,7 +286,7 @@ impl ObjectRegistry {
     /// let registration = ObjectRegistration {
     ///     object_id: "counter@node1".to_string(),
     ///     object_type: ObjectType::ObjectTypeActor as i32,
-    ///     grpc_address: "http://node1:9001".to_string(),
+    ///     grpc_address: "http://node1:8000".to_string(),
     ///     ..Default::default()
     /// };
     /// registry.register(&ctx, registration).await?;
@@ -745,7 +745,7 @@ mod tests {
         ObjectRegistration {
             object_id: object_id.to_string(),
             object_type: object_type as i32,
-            grpc_address: format!("http://test-node:9001"),
+            grpc_address: format!("http://test-node:8000"),
             // tenant_id and namespace are ignored - they come from RequestContext
             object_category: "GenServer".to_string(),
             ..Default::default()
@@ -769,7 +769,7 @@ mod tests {
         assert!(found.is_some());
         let found_reg = found.unwrap();
         assert_eq!(found_reg.object_id, "test-actor@node1");
-        assert_eq!(found_reg.grpc_address, "http://test-node:9001");
+        assert_eq!(found_reg.grpc_address, "http://test-node:8000");
     }
 
     #[tokio::test]

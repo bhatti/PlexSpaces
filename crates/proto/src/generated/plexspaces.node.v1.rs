@@ -56,11 +56,11 @@ pub struct NodeConfig {
     /// Can be environment variable like "${NODE_ID}"
     #[prost(string, tag="1")]
     pub id: ::prost::alloc::string::String,
-    /// Address this node listens on (e.g., "0.0.0.0:9001")
+    /// Address this node listens on (e.g., "0.0.0.0:8000")
     #[prost(string, tag="2")]
     pub listen_address: ::prost::alloc::string::String,
     /// Cluster seed nodes for discovery
-    /// e.g., \["node1.cluster.local:9001", "node2.cluster.local:9001"\]
+    /// e.g., \["node1.cluster.local:8000", "node2.cluster.local:8000"\]
     #[prost(string, repeated, tag="3")]
     pub cluster_seed_nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Default tenant ID for this node
@@ -152,7 +152,7 @@ pub struct GrpcConfig {
     /// Enable gRPC server
     #[prost(bool, tag="1")]
     pub enabled: bool,
-    /// gRPC listen address (e.g., "0.0.0.0:9001")
+    /// gRPC listen address (e.g., "0.0.0.0:8000")
     #[prost(string, tag="2")]
     pub address: ::prost::alloc::string::String,
     /// Maximum concurrent connections
@@ -539,7 +539,7 @@ pub struct NodeCapabilities {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NodeRuntimeConfig {
-    /// Listen address for gRPC server (e.g., "0.0.0.0:9000")
+    /// Listen address for gRPC server (e.g., "0.0.0.0:8000")
     #[prost(string, tag="1")]
     pub listen_addr: ::prost::alloc::string::String,
     /// Maximum number of concurrent connections
@@ -853,7 +853,7 @@ pub struct NodeHealth {
 pub struct NodeRegistration {
     #[prost(string, tag="1")]
     pub node_id: ::prost::alloc::string::String,
-    /// gRPC address (e.g., "<http://localhost:9001">)
+    /// gRPC address (e.g., "<http://localhost:8000">)
     #[prost(string, tag="2")]
     pub node_address: ::prost::alloc::string::String,
     #[prost(map="string, string", tag="3")]

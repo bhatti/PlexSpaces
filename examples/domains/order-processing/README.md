@@ -130,7 +130,7 @@ redis_url = "redis://localhost:6379"
 
 [node]
 node_id = "order-node-1"
-grpc_port = 9001
+grpc_port = 8000
 ```
 
 **Environment Variables**:
@@ -226,10 +226,10 @@ cargo run --bin order-coordinator
 
 ```bash
 # Terminal 1: Node 1
-NODE_ID=node1 NODE_ADDRESS=localhost:9001 cargo run
+NODE_ID=node1 NODE_ADDRESS=localhost:8000 cargo run
 
 # Terminal 2: Node 2
-NODE_ID=node2 NODE_ADDRESS=localhost:9002 cargo run
+NODE_ID=node2 NODE_ADDRESS=localhost:8001 cargo run
 ```
 
 ## Implementation

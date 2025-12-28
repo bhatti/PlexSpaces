@@ -1,14 +1,111 @@
 # Examples
 
-PlexSpaces includes comprehensive examples organized by complexity. Each example demonstrates specific patterns and use cases.
+PlexSpaces includes comprehensive examples organized by core functionality and complexity. Each example demonstrates specific patterns and use cases.
 
 ## Quick Navigation
 
+- [Examples by Core Functionality](#examples-by-core-functionality): Actors, Workflows, GenServer, Services
 - [Simple Examples](#simple-examples): Basic patterns and concepts
 - [Intermediate Examples](#intermediate-examples): Multi-actor coordination
 - [Advanced Examples](#advanced-examples): Complex distributed systems
 - [Domain Examples](#domain-examples): Real-world applications
 - [Framework Comparisons](#framework-comparisons): Side-by-side comparisons
+
+## Examples by Core Functionality
+
+### Actors
+
+**Basic Actor Pattern** (Fire-and-Forget):
+- `examples/simple/timers_example/` - Timer-based actors
+- `examples/simple/wasm_calculator/actors/python/calculator_actor.py` - Basic message handling
+- `examples/simple/polyglot_wasm_deployment/actors/typescript/greeter.ts` - TypeScript actor
+
+**GenServer Pattern** (Request-Reply):
+- `examples/simple/wasm_calculator/actors/python/calculator_actor.py` - GenServer behavior with request-reply
+- `examples/domains/order-processing/src/actors/order_processor.rs` - Rust GenServer implementation
+- `examples/simple/faas_actor/` - FaaS-style request-reply
+
+**Durable Actors** (State Persistence):
+- `examples/simple/wasm_calculator/actors/python/durable_calculator_actor.py` - Python durable actor
+- `examples/simple/durable_actor_example/` - Complete durability example with journaling, checkpoints, replay
+- `examples/domains/genomics-pipeline/src/workers/` - Durable workers with state recovery
+
+**Supervision Trees**:
+- `examples/simple/supervision_tree/` - Supervisor hierarchies and restart policies
+- `examples/domains/genomics-pipeline/` - Multi-level supervision with worker pools
+- `examples/domains/order-processing/` - Service supervision with circuit breakers
+
+### Workflows
+
+**Durable Workflows**:
+- `examples/domains/genomics-pipeline/` - Multi-step DNA sequencing workflow
+  - **Steps**: Quality Control → Alignment → Variant Calling → Annotation → Report
+  - **Features**: Workflow orchestration, activity scheduling, state recovery, checkpointing
+  - **See**: `src/coordinator.rs` for workflow coordinator implementation
+- `examples/domains/order-processing/` - Order processing workflow
+  - **Steps**: Order creation → Payment → Inventory → Shipping
+  - **Features**: State machines, workflow coordination, event-driven architecture
+  - **See**: `src/actors/order_processor.rs` for workflow implementation
+
+**Workflow Patterns**:
+- Multi-step orchestration with recovery
+- Activity scheduling and coordination
+- State machine transitions
+- Long-running process management
+
+**Documentation**: See [Polyglot WASM Development Guide](polyglot.md#5-workflow-orchestration) for workflow examples in Python/TypeScript
+
+### Services
+
+**TupleSpace Coordination**:
+- `examples/simple/wasm_calculator/actors/python/tuplespace_calculator_actor.py` - TupleSpace for result sharing
+- `examples/TUPLESPACE_COORDINATION.md` - Comprehensive TupleSpace examples and patterns
+- `examples/intermediate/heat_diffusion/` - Region-based coordination via TupleSpace
+
+**Key-Value Store**:
+- `examples/wasm_showcase/` - Key-value operations via WIT host functions
+- `examples/simple/durable_actor_example/` - State storage with KV store
+- `examples/domains/order-processing/` - Order state management
+
+**Blob Storage**:
+- `examples/wasm_showcase/` - Blob upload/download operations
+- `examples/simple/faas_actor/` - FaaS-style file handling
+
+**Channels (Queues & Pub/Sub)**:
+- `examples/simple/process_groups_pubsub/` - Process groups with pub/sub messaging
+- `examples/domains/order-processing/` - Event-driven architecture with channels
+- `examples/simple/durable_actor_example/` - Channel-based mailboxes with ACK/NACK
+
+**Process Groups**:
+- `examples/simple/process_groups_pubsub/` - Actor clustering and group messaging
+- `examples/simple/actor_groups_sharding/` - Hash-based routing and load distribution
+
+**Registry (Service Discovery)**:
+- `examples/wasm_showcase/` - Service registration and discovery
+- `examples/node_discovery.rs` - Node discovery and registration
+
+### Polyglot Examples
+
+**Python WASM**:
+- `examples/simple/wasm_calculator/actors/python/` - Complete Python actor examples
+  - `calculator_actor.py` - GenServer pattern
+  - `durable_calculator_actor.py` - Durable actor with state persistence
+  - `tuplespace_calculator_actor.py` - TupleSpace coordination
+  - `channel_calculator_actor.py` - Channel-based communication
+
+**TypeScript/JavaScript WASM**:
+- `examples/simple/polyglot_wasm_deployment/actors/typescript/greeter.ts` - TypeScript actor
+- `examples/advanced/nbody-wasm/ts-actors/` - TypeScript physics simulation
+
+**Rust WASM**:
+- `examples/simple/polyglot_wasm_deployment/actors/rust/` - Rust WASM actors
+- `examples/advanced/nbody-wasm/wasm-actors/` - Rust physics simulation
+
+**Multi-Language Deployment**:
+- `examples/simple/polyglot_wasm_deployment/` - Deploy actors from multiple languages
+- `examples/wasm_showcase/` - Comprehensive WASM capabilities across languages
+
+**Documentation**: See [Polyglot WASM Development Guide](polyglot.md) for complete language-specific guides and examples
 
 ## Simple Examples
 
@@ -56,13 +153,19 @@ cargo run --features sqlite-backend
 
 **Location**: `examples/simple/wasm_calculator/`
 
-Learn WASM actor deployment with polyglot support (Python/JavaScript).
+Learn WASM actor deployment with polyglot support (Python/JavaScript). Demonstrates multiple core patterns:
+
+**Core Patterns Demonstrated**:
+- ✅ **GenServer Pattern**: Request-reply in `calculator_actor.py`
+- ✅ **Durable Actors**: State persistence in `durable_calculator_actor.py`
+- ✅ **TupleSpace Coordination**: Distributed coordination in `tuplespace_calculator_actor.py`
+- ✅ **Channel Communication**: Queue-based messaging in `channel_calculator_actor.py`
 
 **Features**:
-- Python actors
-- JavaScript actors
-- WASM deployment
-- HTTP multipart upload for large files
+- Python actors with multiple behavior patterns
+- WASM deployment via HTTP multipart upload
+- State persistence and recovery
+- Distributed coordination
 
 **Run**:
 ```bash
@@ -70,7 +173,15 @@ cd examples/simple/wasm_calculator
 ./test.sh
 ```
 
-**Documentation**: For comprehensive WASM deployment guide with polyglot examples (Rust, Python, TypeScript, Go), see [WASM Deployment Guide](wasm-deployment.md).
+**Key Files**:
+- `actors/python/calculator_actor.py` - GenServer behavior (request-reply)
+- `actors/python/durable_calculator_actor.py` - Durable actor with journaling
+- `actors/python/tuplespace_calculator_actor.py` - TupleSpace coordination
+- `actors/python/channel_calculator_actor.py` - Channel-based communication
+
+**Documentation**: 
+- [WASM Deployment Guide](wasm-deployment.md) - Deployment instructions and API reference
+- [Polyglot WASM Development Guide](polyglot.md) - Comprehensive guide for polyglot development with all WIT abstractions and language-specific examples
 
 ### Actor Groups (Sharding)
 
@@ -205,16 +316,75 @@ cargo run
 
 ## Domain Examples
 
+### Genomics Pipeline
+
+**Location**: `examples/domains/genomics-pipeline/`
+
+Complete DNA sequencing analysis pipeline demonstrating **durable workflow orchestration**.
+
+**Core Functionality**:
+- ✅ **Durable Workflows**: Multi-step workflow with state recovery
+- ✅ **GenServer Actors**: Request-reply pattern for workflow coordination
+- ✅ **Supervision Trees**: Multi-level supervision with worker pools
+- ✅ **State Persistence**: SQLite-backed journaling for crash recovery
+
+**Workflow Steps**:
+1. Quality Control (QC Worker Pool)
+2. Genome Alignment (Alignment Worker Pool)
+3. Variant Calling (24 Chromosome Workers - fan-out/fan-in)
+4. Annotation (Annotation Worker)
+5. Report Generation (Report Worker)
+
+**Features**:
+- Multi-step workflow orchestration
+- Activity scheduling and coordination
+- State recovery and checkpointing
+- Exactly-once semantics
+- Side effect caching
+- Multi-node distributed deployment
+
+**Run**:
+```bash
+cd examples/domains/genomics-pipeline
+cargo run
+```
+
+**Key Files**:
+- `src/coordinator.rs` - Workflow coordinator with durable orchestration
+- `src/workers/` - Worker actors (QC, Alignment, Chromosome, Annotation, Report)
+- `src/application.rs` - Application with supervision trees
+
+**Documentation**: See [Polyglot WASM Development Guide](polyglot.md#5-workflow-orchestration) for workflow patterns
+
 ### Order Processing
 
 **Location**: `examples/domains/order-processing/`
 
-E-commerce order processing with workflow orchestration.
+Complete order processing microservices architecture demonstrating **hybrid behavior patterns**.
+
+**Core Functionality**:
+- ✅ **GenServer Behavior**: Request-reply for queries (`GetOrder`, `GetStatus`)
+- ✅ **Actor Behavior**: Fire-and-forget for commands (`CreateOrder`, `CancelOrder`)
+- ✅ **State Machine**: Order state transitions (Pending → Payment → Reserved → Shipped)
+- ✅ **Event-Driven**: Distributed pub/sub via channels
+- ✅ **Service Coordination**: Payment, Inventory, Shipping services
+
+**Architecture**:
+```
+RootSupervisor (OneForOne)
+  ├─ ServiceSupervisor (OneForOne)
+  │   ├─ PaymentServiceActor (Permanent, CircuitBreaker)
+  │   ├─ InventoryServiceActor (Permanent)
+  │   └─ ShippingServiceActor (Permanent, CircuitBreaker)
+  └─ OrderProcessorActor (Permanent)
+```
 
 **Features**:
-- Workflow orchestration
-- Multi-step processes
-- Error handling
+- Hybrid behavior patterns (GenServer + Actor + StateMachine)
+- Event-driven architecture
+- Service coordination
+- Circuit breakers for fault tolerance
+- Complete microservices example
 
 **Run**:
 ```bash
@@ -222,22 +392,12 @@ cd examples/domains/order-processing
 cargo run
 ```
 
-### Genomics Pipeline
+**Key Files**:
+- `src/actors/order_processor.rs` - Order processor with hybrid behaviors
+- `src/actors/services/` - Service actors (Payment, Inventory, Shipping)
+- `src/application.rs` - Application with supervision trees
 
-**Location**: `examples/domains/genomics-pipeline/`
-
-Scientific computing with data processing pipelines.
-
-**Features**:
-- Data pipelines
-- Scientific computing
-- Large-scale processing
-
-**Run**:
-```bash
-cd examples/domains/genomics-pipeline
-cargo run
-```
+**Documentation**: See [Polyglot WASM Development Guide](polyglot.md#2-genserver-request-reply-pattern) for GenServer examples
 
 ### Finance Risk
 

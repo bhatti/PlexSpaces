@@ -106,10 +106,10 @@ fi
 
 echo ""
 echo -e "${GREEN}=== Node Endpoints ===${NC}"
-echo "  Coordinator:   localhost:9001 (gRPC)"
-echo "  QC/Alignment:  localhost:9002 (gRPC)"
-echo "  Chromosomes:   localhost:9003 (gRPC)"
-echo "  Annotation:    localhost:9004 (gRPC)"
+echo "  Coordinator:   localhost:8000 (gRPC)"
+echo "  QC/Alignment:  localhost:8001 (gRPC)"
+echo "  Chromosomes:   localhost:8002 (gRPC)"
+echo "  Annotation:    localhost:8003 (gRPC)"
 
 echo ""
 echo -e "${GREEN}=== Useful Commands ===${NC}"

@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let node1 = NodeRegistry::with_capabilities(
         "compute-node-1",
-        "http://192.168.1.10:9001",
+        "http://192.168.1.10:8000",
         caps1,
         kv_store.clone(),
     );
@@ -118,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let node2 = NodeRegistry::with_capabilities(
         "isolation-node-1",
-        "http://192.168.1.20:9002",
+        "http://192.168.1.20:8001",
         caps2,
         kv_store.clone(),
     );
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let node3 = NodeRegistry::with_capabilities(
         "hybrid-node-1",
-        "http://192.168.1.30:9003",
+        "http://192.168.1.30:8002",
         caps3,
         kv_store.clone(),
     );

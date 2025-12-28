@@ -173,7 +173,7 @@ let registration = ServiceRegistration {
     instance_id: ulid::Ulid::new().to_string(),
     service_name: "order-service".to_string(),
     version: "1.0.0".to_string(),
-    endpoint: "grpc://localhost:9001".to_string(),
+        endpoint: "grpc://localhost:8000".to_string(),
     capabilities: hashmap!{
         "region" => "us-west-2",
         "env" => "production",
@@ -563,7 +563,7 @@ version = "1.0.0"
 
 [node]
 id = "order-node-1"
-listen_address = "0.0.0.0:9001"
+listen_address = "0.0.0.0:8000"
 
 # Service Registry
 [services.registry]

@@ -21,7 +21,7 @@ PlexSpaces is the evolution of **JavaNow**, a comprehensive parallel computing f
 
 PlexSpaces modernizes these concepts with:
 - Rust for performance and safety
-- WebAssembly for polyglot support
+- WebAssembly for polyglot support (Python, TypeScript, Rust, Go) - see [Polyglot WASM Development Guide](polyglot.md)
 - Protocol Buffers for type-safe APIs
 - Modern observability and deployment patterns
 - Integration with Erlang/OTP supervision, Orleans virtual actors, and Temporal-style durable workflows
@@ -814,8 +814,8 @@ The HTTP gateway (Axum) runs as a separate server alongside the gRPC server:
 ```mermaid
 graph TB
     subgraph Node["PlexSpaces Node"]
-        HTTP["HTTP Gateway<br/>(Axum, Port 9003)"]
-        GRPC["gRPC Server<br/>(Tonic, Port 9002)"]
+        HTTP["HTTP Gateway<br/>(Axum, Port 8001)"]
+        GRPC["gRPC Server<br/>(Tonic, Port 8000)"]
         Service["ActorService<br/>(Shared State)"]
     end
     
@@ -832,7 +832,7 @@ graph TB
 **Key Design Decisions**:
 - **Separate Servers**: HTTP gateway and gRPC server run concurrently using `tokio::select!`
 - **Shared State**: Both servers share the same `ActorServiceImpl` instance
-- **Port Configuration**: HTTP gateway listens on `grpc_port + 1` (e.g., 9003 if gRPC is 9002)
+- **Port Configuration**: HTTP gateway listens on `grpc_port + 1` (e.g., 8001 if gRPC is 8000)
 - **Direct Service Calls**: HTTP handlers directly invoke `ActorServiceTrait::invoke_actor` rather than making gRPC calls
 
 #### Request Flow

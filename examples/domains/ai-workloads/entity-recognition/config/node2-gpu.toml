@@ -1,7 +1,7 @@
 # Node 2: GPU node for processors
 
 node_id = "node-2"
-listen_addr = "0.0.0.0:9001"
+listen_addr = "0.0.0.0:8000"
 backend = "redis"
 redis_url = "redis://localhost:6379"
 

@@ -66,11 +66,24 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
     };
 
     // Create SQLite repository using AnyPool (like the node does)
-    // Use sqlite::memory: format (not sqlite://:memory:)
+    // Use temporary file-based database for reliability
     use sqlx::AnyPool;
-    let any_pool = AnyPool::connect("sqlite::memory:").await.ok()?;
-    SqlBlobRepository::migrate(&any_pool).await.ok()?;
-    let repository = Arc::new(SqlBlobRepository::new(any_pool));
+    use sqlx::any::AnyPoolOptions;
+    use tempfile::NamedTempFile;
+    
+    // Use temporary file-based database (more reliable than in-memory)
+    let temp_db = NamedTempFile::new().ok()?;
+    let db_path = temp_db.path().to_str()?;
+    let db_url = format!("sqlite:{}", db_path);
+    
+    let any_pool = AnyPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await
+        .ok()?;
+    
+    // Migrations are auto-applied in new()
+    let repository = Arc::new(SqlBlobRepository::new(any_pool).await.ok()?);
 
     // Create blob config for MinIO
     let config = ProtoBlobConfig {

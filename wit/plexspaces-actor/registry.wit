@@ -1,0 +1,156 @@
+// PlexSpaces Actor Interface - Object Registry
+//
+// Unified registration and discovery for all distributed objects in PlexSpaces:
+// - Actors: Stateful computation units (actor model)
+// - TupleSpaces: Coordination primitives (Linda model)
+// - Services: Microservices and gRPC endpoints
+
+interface registry {
+    use types.{payload, actor-error, context};
+
+    /// Object type enumeration
+    enum object-type {
+        unspecified,
+        actor,
+        tuplespace,
+        service,
+        vm,
+        application,
+        workflow,
+        node,
+    }
+
+    /// Health status enumeration
+    enum health-status {
+        unknown,
+        healthy,
+        degraded,
+        unhealthy,
+        starting,
+        stopping,
+    }
+
+    /// Label (key-value pair)
+    record label {
+        key: string,
+        value: string,
+    }
+
+    /// Object registration metadata
+    record object-registration {
+        /// Object identifier
+        object-id: string,
+        /// Object type
+        object-type: object-type,
+        /// gRPC address
+        grpc-address: string,
+        /// Object category (e.g., "GenServer", "Workflow")
+        object-category: string,
+        /// List of capabilities
+        capabilities: list<string>,
+        /// Key-value labels
+        labels: list<label>,
+        /// Health status
+        health-status: health-status,
+        /// Created timestamp (Unix epoch milliseconds)
+        created-at: u64,
+        /// Updated timestamp (Unix epoch milliseconds)
+        updated-at: u64,
+        /// Last heartbeat timestamp (Unix epoch milliseconds)
+        last-heartbeat: option<u64>,
+    }
+
+    /// Register an object (actor, tuplespace, or service)
+    ///
+    /// # Arguments
+    /// - `object-id`: Unique object identifier
+    /// - `object-type`: Type of object (actor, tuplespace, service, etc.)
+    /// - `grpc-address`: gRPC address for the object
+    /// - `object-category`: Optional category (e.g., "GenServer", "Workflow")
+    /// - `capabilities`: Optional list of capabilities
+    /// - `labels`: Optional key-value labels
+    ///
+    /// # Returns
+    /// - `ok`: Object registered
+    /// - `err`: Register failed (object already registered, invalid input, storage error)
+    register: func(
+        ctx: context,
+        object-id: string,
+        object-type: object-type,
+        grpc-address: string,
+        object-category: option<string>,
+        capabilities: list<string>,
+        labels: list<label>
+    ) -> result<_, actor-error>;
+
+    /// Unregister an object
+    ///
+    /// # Arguments
+    /// - `object-type`: Type of object
+    /// - `object-id`: Object identifier
+    ///
+    /// # Returns
+    /// - `ok`: Object unregistered
+    /// - `err`: Unregister failed (object not found, storage error)
+    unregister: func(
+        ctx: context,
+        object-type: object-type,
+        object-id: string
+    ) -> result<_, actor-error>;
+
+    /// Lookup specific object by ID
+    ///
+    /// # Arguments
+    /// - `object-type`: Type of object
+    /// - `object-id`: Object identifier
+    ///
+    /// # Returns
+    /// - `ok(option<object-registration>)`: Object registration if found, None if not found
+    /// - `err`: Lookup failed (serialization error, storage error)
+    lookup: func(
+        ctx: context,
+        object-type: object-type,
+        object-id: string
+    ) -> result<option<object-registration>, actor-error>;
+
+    /// Discover objects with filtering
+    ///
+    /// # Arguments
+    /// - `object-type`: Filter by type (None = all types)
+    /// - `object-category`: Filter by category (None = all categories)
+    /// - `capabilities`: Filter by capabilities (None = all)
+    /// - `labels`: Filter by labels (None = all)
+    /// - `health-status`: Filter by health status (None = all)
+    /// - `offset`: Pagination offset
+    /// - `limit`: Maximum results to return
+    ///
+    /// # Returns
+    /// - `ok(list<object-registration>)`: List of matching object registrations
+    /// - `err`: Discover failed (storage error)
+    discover: func(
+        ctx: context,
+        object-type: option<object-type>,
+        object-category: option<string>,
+        capabilities: list<string>,
+        labels: list<string>,
+        health-status: option<health-status>,
+        offset: u32,
+        limit: u32
+    ) -> result<list<object-registration>, actor-error>;
+
+    /// Update heartbeat for object
+    ///
+    /// # Arguments
+    /// - `object-type`: Type of object
+    /// - `object-id`: Object identifier
+    ///
+    /// # Returns
+    /// - `ok`: Heartbeat updated
+    /// - `err`: Heartbeat failed (object not found, storage error)
+    heartbeat: func(
+        ctx: context,
+        object-type: object-type,
+        object-id: string
+    ) -> result<_, actor-error>;
+}
+

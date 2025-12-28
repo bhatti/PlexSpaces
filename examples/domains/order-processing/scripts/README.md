@@ -69,7 +69,7 @@
 **Features**:
 - Colorized output for easy reading
 - Health checks for all 3 nodes
-- Port information display (9001, 9002, 9003)
+- Port information display (8000, 8001, 8002)
 - Helpful next-step suggestions
 
 **What it does**:
@@ -81,9 +81,9 @@
 
 **Cluster Configuration**:
 ```
-Node 1 (localhost:9001): OrderProcessor + PaymentService
-Node 2 (localhost:9002): InventoryService
-Node 3 (localhost:9003): ShippingService
+Node 1 (localhost:8000): OrderProcessor + PaymentService
+Node 2 (localhost:8001): InventoryService
+Node 3 (localhost:8002): ShippingService
 ```
 
 ---
@@ -109,7 +109,7 @@ Node 3 (localhost:9003): ShippingService
 
 **Terminal 1 - Node 1 (Coordinator)**:
 ```bash
-NODE_ID=node1 NODE_ADDRESS=localhost:9001 \
+NODE_ID=node1 NODE_ADDRESS=localhost:8000 \
 SPAWN_SERVICES=orders,payment \
 cargo run --bin order-coordinator
 ```
@@ -119,7 +119,7 @@ cargo run --bin order-coordinator
 
 **Terminal 2 - Node 2 (Inventory)**:
 ```bash
-NODE_ID=node2 NODE_ADDRESS=localhost:9002 \
+NODE_ID=node2 NODE_ADDRESS=localhost:8001 \
 SPAWN_SERVICES=inventory \
 cargo run --bin order-coordinator
 ```
@@ -129,7 +129,7 @@ cargo run --bin order-coordinator
 
 **Terminal 3 - Node 3 (Shipping)**:
 ```bash
-NODE_ID=node3 NODE_ADDRESS=localhost:9003 \
+NODE_ID=node3 NODE_ADDRESS=localhost:8002 \
 SPAWN_SERVICES=shipping \
 cargo run --bin order-coordinator
 ```
@@ -209,7 +209,7 @@ docker compose version
 ```bash
 ./test-docker-compose.sh down
 # or
-docker ps  # Find containers using ports 9001-9003
+docker ps  # Find containers using ports 8000-8002
 docker stop <container_id>
 ```
 
@@ -223,7 +223,7 @@ docker stop <container_id>
 ### Local nodes can't communicate
 **Solution**: Check firewall and ports
 ```bash
-# Ensure ports 9001-9003 are open
+# Ensure ports 8000-8002 are open
 netstat -an | grep LISTEN | grep '900[123]'
 
 # Check if ActorRegistry is working
@@ -241,7 +241,7 @@ All scripts respect these environment variables:
 
 **Node-specific variables** (for manual testing):
 - `NODE_ID` - Node identifier (e.g., "node1", "node2", "node3")
-- `NODE_ADDRESS` - gRPC address (e.g., "localhost:9001")
+- `NODE_ADDRESS` - gRPC address (e.g., "localhost:8000")
 - `SPAWN_SERVICES` - Comma-separated services (e.g., "orders,payment")
 
 ---

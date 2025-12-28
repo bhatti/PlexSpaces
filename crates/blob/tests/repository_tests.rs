@@ -30,12 +30,23 @@ mod sql_tests {
 
     async fn create_test_repository() -> Arc<SqlBlobRepository> {
         use sqlx::AnyPool;
+        use sqlx::any::AnyPoolOptions;
+        use tempfile::NamedTempFile;
         
-        // Use in-memory database to prevent concurrency issues
-        let any_pool = AnyPool::connect("sqlite::memory:").await.unwrap();
+        // Use temporary file-based database for reliability
+        // This is more production-grade than in-memory and works correctly with connection pools
+        let temp_db = NamedTempFile::new().unwrap();
+        let db_path = temp_db.path().to_str().unwrap();
+        let db_url = format!("sqlite:{}", db_path);
         
-        SqlBlobRepository::migrate(&any_pool).await.unwrap();
-        Arc::new(SqlBlobRepository::new(any_pool))
+        let any_pool = AnyPoolOptions::new()
+            .max_connections(5)
+            .connect(&db_url)
+            .await
+            .unwrap();
+        
+        // Migrations are auto-applied in new()
+        Arc::new(SqlBlobRepository::new(any_pool).await.unwrap())
     }
 
     fn create_test_metadata(blob_id: &str, tenant_id: &str, namespace: &str) -> BlobMetadata {

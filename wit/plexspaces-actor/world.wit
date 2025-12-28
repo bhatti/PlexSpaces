@@ -13,6 +13,12 @@ world plexspaces-actor {
     import tuplespace;
     import channels;
     import durability;
+    import workflow;
+    import blob;
+    import keyvalue;
+    import process-groups;
+    import locks;
+    import registry;
     
     // Actor-implemented interfaces (exports)
     export actor;

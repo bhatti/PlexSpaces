@@ -4,7 +4,7 @@
 // Enables decoupled communication between actors using pattern matching.
 
 interface tuplespace {
-    use types.{tuple-data, pattern, duration-ms, actor-error};
+    use types.{tuple-data, pattern, duration-ms, actor-error, context};
 
     /// Write tuple to space
     ///
@@ -28,14 +28,14 @@ interface tuplespace {
     /// ];
     /// tuplespace::write(tuple)?;
     /// ```
-    write: func(tuple-data: tuple-data) -> result<_, actor-error>;
+    write: func(ctx: context, tuple-data: tuple-data) -> result<_, actor-error>;
 
     /// Write tuple with time-to-live
     ///
     /// # Arguments
     /// - `tuple`: Tuple to write
     /// - `ttl-ms`: Time-to-live in milliseconds (0 = infinite)
-    write-with-ttl: func(tuple-data: tuple-data, ttl-ms: duration-ms) -> result<_, actor-error>;
+    write-with-ttl: func(ctx: context, tuple-data: tuple-data, ttl-ms: duration-ms) -> result<_, actor-error>;
 
     /// Read tuple matching pattern (non-destructive)
     ///
@@ -62,7 +62,7 @@ interface tuplespace {
     ///     // Process tuple
     /// }
     /// ```
-    read: func(pattern-data: pattern) -> result<option<tuple-data>, actor-error>;
+    read: func(ctx: context, pattern-data: pattern) -> result<option<tuple-data>, actor-error>;
 
     /// Read tuple with blocking wait
     ///
@@ -71,7 +71,7 @@ interface tuplespace {
     /// # Arguments
     /// - `pattern`: Pattern to match
     /// - `timeout-ms`: Maximum time to wait (0 = no timeout, wait forever)
-    read-blocking: func(pattern-data: pattern, timeout-ms: duration-ms) -> result<option<tuple-data>, actor-error>;
+    read-blocking: func(ctx: context, pattern-data: pattern, timeout-ms: duration-ms) -> result<option<tuple-data>, actor-error>;
 
     /// Read all matching tuples (non-destructive)
     ///
@@ -80,7 +80,7 @@ interface tuplespace {
     /// # Arguments
     /// - `pattern`: Pattern to match
     /// - `limit`: Maximum number of tuples to return (0 = no limit)
-    read-all: func(pattern-data: pattern, limit: u32) -> result<list<tuple-data>, actor-error>;
+    read-all: func(ctx: context, pattern-data: pattern, limit: u32) -> result<list<tuple-data>, actor-error>;
 
     /// Take tuple matching pattern (destructive)
     ///
@@ -94,7 +94,7 @@ interface tuplespace {
     /// - `ok(some(tuple))`: Tuple taken
     /// - `ok(none)`: No matching tuple
     /// - `err`: Take failed
-    take: func(pattern-data: pattern) -> result<option<tuple-data>, actor-error>;
+    take: func(ctx: context, pattern-data: pattern) -> result<option<tuple-data>, actor-error>;
 
     /// Take tuple with blocking wait
     ///
@@ -104,7 +104,7 @@ interface tuplespace {
     /// # Arguments
     /// - `pattern`: Pattern to match
     /// - `timeout-ms`: Maximum time to wait (0 = wait forever)
-    take-blocking: func(pattern-data: pattern, timeout-ms: duration-ms) -> result<option<tuple-data>, actor-error>;
+    take-blocking: func(ctx: context, pattern-data: pattern, timeout-ms: duration-ms) -> result<option<tuple-data>, actor-error>;
 
     /// Count tuples matching pattern
     ///
@@ -113,7 +113,7 @@ interface tuplespace {
     ///
     /// # Returns
     /// Number of matching tuples
-    count: func(pattern-data: pattern) -> result<u64, actor-error>;
+    count: func(ctx: context, pattern-data: pattern) -> result<u64, actor-error>;
 
     /// Subscribe to tuple events
     ///
@@ -125,7 +125,7 @@ interface tuplespace {
     ///
     /// # Returns
     /// Subscription ID for unsubscribe
-    subscribe: func(pattern-data: pattern) -> result<u64, actor-error>;
+    subscribe: func(ctx: context, pattern-data: pattern) -> result<u64, actor-error>;
 
     /// Unsubscribe from tuple events
     unsubscribe: func(subscription-id: u64) -> result<_, actor-error>;
@@ -144,5 +144,5 @@ interface tuplespace {
     /// - `ok(true)`: Swap succeeded
     /// - `ok(false)`: Current value didn't match expected
     /// - `err`: Operation failed
-    compare-and-swap: func(pattern-data: pattern, expected: tuple-data, new-tuple: tuple-data) -> result<bool, actor-error>;
+    compare-and-swap: func(ctx: context, pattern-data: pattern, expected: tuple-data, new-tuple: tuple-data) -> result<bool, actor-error>;
 }

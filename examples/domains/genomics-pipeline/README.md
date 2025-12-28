@@ -251,7 +251,7 @@ version = "0.1.0"
 
 [node]
 id = "genomics-coordinator-node"
-listen_address = "0.0.0.0:9001"
+listen_address = "0.0.0.0:8000"
 
 # gRPC Middleware Stack
 [[runtime.grpc.middleware]]
@@ -397,7 +397,7 @@ docker-compose down -v
 
 **Networking**:
 - Network: `genomics-network` (172.25.0.0/16)
-- Ports: 9001 (coordinator), 9002 (qc-alignment), 9003 (chromosomes), 9004 (annotation)
+- Ports: 8000 (coordinator), 8001 (qc-alignment), 8002 (chromosomes), 8003 (annotation)
 - Health checks: gRPC health probe every 10s
 
 ---

@@ -26,8 +26,8 @@ Client -> ActorService.SendMessage("counter@node2", msg)
   |      -> ActorRef.tell(msg) -> Direct mailbox delivery
   |
   +--> If node2 != local_node_id:
-         -> Registry.get_node_address("node2") -> "remote_host:9002"
-         -> gRPC client.SendMessage("remote_host:9002", msg)
+         -> Registry.get_node_address("node2") -> "remote_host:8001"
+         -> gRPC client.SendMessage("remote_host:8001", msg)
          -> Remote node's ActorService receives
          -> Remote node routes locally
 ```
@@ -198,7 +198,7 @@ A test harness that spawns multiple ActorService instances in separate processes
 │         ▼                ▼                               │
 │  ┌─────────────┐  ┌─────────────┐                       │
 │  │ Node1       │  │ Node2       │                       │
-│  │ Port: 9001  │  │ Port: 9002  │                       │
+│  │ Port: 8000  │  │ Port: 8001  │                       │
 │  └─────────────┘  └─────────────┘                       │
 └─────────────────────────────────────────────────────────┘
 ```

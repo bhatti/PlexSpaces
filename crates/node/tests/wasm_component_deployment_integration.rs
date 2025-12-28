@@ -58,7 +58,7 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
     // Get HTTP port
     let grpc_port = node.config().listen_addr.split(':').last()
         .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(9001);
+        .unwrap_or(8000);
     let http_port = grpc_port + 1;
     let http_url = format!("http://127.0.0.1:{}", http_port);
     
@@ -169,7 +169,7 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
     // Get HTTP port
     let grpc_port = node.config().listen_addr.split(':').last()
         .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(9001);
+        .unwrap_or(8000);
     let http_port = grpc_port + 1;
     let http_url = format!("http://127.0.0.1:{}", http_port);
     

@@ -1,0 +1,122 @@
+// PlexSpaces Actor Interface - Distributed Locks
+//
+// Provides distributed lock/lease coordination for background schedulers and
+// other coordination tasks. Uses version-based optimistic locking for atomic operations.
+
+interface locks {
+    use types.{payload, actor-error, duration-ms, context};
+
+    /// Lock metadata
+    record lock {
+        /// Lock key
+        lock-key: string,
+        /// Current holder ID
+        holder-id: string,
+        /// Lock version (for optimistic locking)
+        version: string,
+        /// Whether lock is currently held
+        locked: bool,
+        /// Lock expiration timestamp (Unix epoch milliseconds)
+        expires-at: u64,
+        /// Last heartbeat timestamp (Unix epoch milliseconds)
+        last-heartbeat: u64,
+    }
+
+    /// Acquire a lock (atomic operation)
+    ///
+    /// If lock doesn't exist: Create lock with new version.
+    /// If lock exists and expired: Acquire lock with new version.
+    /// If lock exists and not expired: Return error if held by different holder.
+    ///
+    /// # Arguments
+    /// - `lock-key`: Unique lock identifier
+    /// - `holder-id`: Identifier for the lock holder (e.g., actor ID, node ID)
+    /// - `lease-duration-ms`: Lock lease duration in milliseconds
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(lock)`: Lock acquired successfully
+    /// - `err`: Acquire failed (lock already held, backend error)
+    acquire: func(
+        ctx: context,
+        lock-key: string,
+        holder-id: string,
+        lease-duration-ms: duration-ms
+    ) -> result<lock, actor-error>;
+
+    /// Renew a lock (heartbeat mechanism)
+    ///
+    /// Validates version matches current lock version and updates expiration timestamp.
+    ///
+    /// # Arguments
+    /// - `lock-key`: Lock identifier
+    /// - `holder-id`: Lock holder identifier
+    /// - `version`: Current lock version (from acquire or previous renew)
+    /// - `lease-duration-ms`: New lease duration in milliseconds
+    ///
+    /// # Returns
+    /// - `ok(lock)`: Lock renewed successfully
+    /// - `err`: Renew failed (version mismatch, lock not found, lock expired)
+    renew: func(
+        ctx: context,
+        lock-key: string,
+        holder-id: string,
+        version: string,
+        lease-duration-ms: duration-ms
+    ) -> result<lock, actor-error>;
+
+    /// Release a lock (atomic operation)
+    ///
+    /// Validates version matches current lock version.
+    ///
+    /// # Arguments
+    /// - `lock-key`: Lock identifier
+    /// - `holder-id`: Lock holder identifier
+    /// - `version`: Current lock version
+    /// - `delete-lock`: If true, removes lock entry completely; if false, sets locked = false but keeps entry
+    ///
+    /// # Returns
+    /// - `ok`: Lock released successfully
+    /// - `err`: Release failed (version mismatch, lock not found)
+    release: func(
+        ctx: context,
+        lock-key: string,
+        holder-id: string,
+        version: string,
+        delete-lock: bool
+    ) -> result<_, actor-error>;
+
+    /// Try to acquire a lock (non-blocking)
+    ///
+    /// Attempts to acquire lock without waiting. Returns immediately if lock is held.
+    ///
+    /// # Arguments
+    /// - `lock-key`: Lock identifier
+    /// - `holder-id`: Lock holder identifier
+    /// - `lease-duration-ms`: Lock lease duration in milliseconds
+    ///
+    /// # Returns
+    /// - `ok(option<lock>)`: Some(lock) if acquired, None if lock is held
+    /// - `err`: Try-acquire failed (backend error)
+    try-acquire: func(
+        ctx: context,
+        lock-key: string,
+        holder-id: string,
+        lease-duration-ms: duration-ms
+    ) -> result<option<lock>, actor-error>;
+
+    /// Get current lock state (non-blocking)
+    ///
+    /// # Arguments
+    /// - `lock-key`: Lock identifier
+    ///
+    /// # Returns
+    /// - `ok(option<lock>)`: Current lock state if exists, None if not found
+    /// - `err`: Get failed (backend error)
+    get-lock: func(
+        ctx: context,
+        lock-key: string
+    ) -> result<option<lock>, actor-error>;
+}
+

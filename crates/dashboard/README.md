@@ -61,7 +61,7 @@ All endpoints support pagination via `PageRequest` and return `PageResponse`:
 The dependency health endpoint provides detailed information about external dependencies:
 
 ```bash
-curl http://localhost:9002/api/v1/dashboard/dependencies | jq
+curl http://localhost:8001/api/v1/dashboard/dependencies | jq
 ```
 
 Response includes:
@@ -136,14 +136,14 @@ cargo build --release --bin plexspaces-node -p plexspaces-node
 # Start the node
 ./target/release/plexspaces-node \
     --node-id "test-node" \
-    --listen-address "0.0.0.0:9001"
+    --listen-address "0.0.0.0:8000"
 ```
 
 The node will start with:
-- **gRPC endpoint**: `http://localhost:9001`
-- **Dashboard HTTP**: `http://localhost:9002`
+- **gRPC endpoint**: `http://localhost:8000`
+- **Dashboard HTTP**: `http://localhost:8001`
 
-Access dashboard at: http://localhost:9002
+Access dashboard at: http://localhost:8001
 
 ### Step 2b: Deploy Test Environment (Kubernetes)
 
@@ -174,8 +174,8 @@ This script will:
 ✅ Deployment complete!
 
 📊 Dashboard URLs:
-  Node 1: http://localhost:9002 (port-forward: kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 9002:9002)
-  Node 2: http://localhost:9003 (port-forward: kubectl port-forward -n plexspaces-test svc/plexspaces-node-2 9003:9002)
+  Node 1: http://localhost:8001 (port-forward: kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 8001:8001)
+  Node 2: http://localhost:8002 (port-forward: kubectl port-forward -n plexspaces-test svc/plexspaces-node-2 8002:8001)
 ```
 
 ### Step 3: Verify Deployment
@@ -214,18 +214,18 @@ Set up port forwarding to access the dashboard from your local machine:
 
 ```bash
 # Terminal 1: Port forward Node 1
-kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 9002:9002
+kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 8001:8001
 
 # Terminal 2: Port forward Node 2 (optional, for multi-node testing)
-kubectl port-forward -n plexspaces-test svc/plexspaces-node-2 9003:9002
+kubectl port-forward -n plexspaces-test svc/plexspaces-node-2 8002:8001
 ```
 
 ### Step 5: Access Dashboard in Browser
 
 Open your browser and navigate to:
 
-- **Node 1 Dashboard**: http://localhost:9002/
-- **Node 2 Dashboard**: http://localhost:9003/ (if port-forwarded)
+- **Node 1 Dashboard**: http://localhost:8001/
+- **Node 2 Dashboard**: http://localhost:8002/ (if port-forwarded)
 
 You should see:
 - Home page with aggregated metrics (clusters, nodes, tenants, apps, actors)
@@ -239,7 +239,7 @@ Deploy a WASM application to generate metrics for the dashboard:
 
 ```bash
 # Deploy WASM calculator application (script will build if needed)
-./scripts/deploy-wasm-app-test.sh http://localhost:9002 wasm-calculator
+./scripts/deploy-wasm-app-test.sh http://localhost:8001 wasm-calculator
 ```
 
 The script will:
@@ -250,7 +250,7 @@ The script will:
 **Expected output:**
 ```
 🚀 Deploying WASM application: wasm-calculator
-   Node: http://localhost:9002 (gRPC: localhost:9001)
+   Node: http://localhost:8001 (gRPC: localhost:8000)
 📦 Building wasm-calculator...
 📦 WASM file: examples/simple/wasm_calculator/target/wasm32-wasi/release/wasm_calculator.wasm
    Size: 123456 bytes
@@ -259,7 +259,7 @@ The script will:
 ✅ Deployment successful via gRPC!
 
 🔍 Verify deployment:
-   curl -s http://localhost:9002/api/v1/dashboard/applications | jq '.applications[] | select(.name == "wasm-calculator")'
+   curl -s http://localhost:8001/api/v1/dashboard/applications | jq '.applications[] | select(.name == "wasm-calculator")'
 ```
 
 **Alternative: Manual Deployment**
@@ -281,7 +281,7 @@ grpcurl -plaintext \
       \"module_bytes\": \"${WASM_BASE64}\"
     }
   }" \
-  localhost:9001 \
+  localhost:8000 \
   plexspaces.application.v1.ApplicationService/DeployApplication
 ```
 
@@ -295,7 +295,7 @@ cd ../../..
 
 # Deploy using the built WASM
 ./scripts/deploy-wasm-app-test.sh \
-  http://localhost:9002 \
+  http://localhost:8001 \
   wasm-calculator \
   examples/simple/wasm_calculator/target/wasm32-wasi/release/wasm_calculator.wasm
 
@@ -306,7 +306,7 @@ cd ../..
 
 # Deploy Python counter actor
 ./scripts/deploy-wasm-app-test.sh \
-  http://localhost:9002 \
+  http://localhost:8001 \
   python-counter \
   examples/wasm_showcase/wasm-modules/counter_actor.wasm
 ```
@@ -315,15 +315,15 @@ cd ../..
 
 ```bash
 # Check applications list
-curl -s http://localhost:9002/api/v1/dashboard/applications | jq '.applications'
+curl -s http://localhost:8001/api/v1/dashboard/applications | jq '.applications'
 
 # Check application status
-curl -s http://localhost:9002/api/v1/applications/wasm-calculator/status | jq '.'
+curl -s http://localhost:8001/api/v1/applications/wasm-calculator/status | jq '.'
 
 # View in dashboard
-open http://localhost:9002/  # macOS
+open http://localhost:8001/  # macOS
 # or
-xdg-open http://localhost:9002/  # Linux
+xdg-open http://localhost:8001/  # Linux
 ```
 
 ### Step 7: Test Dashboard APIs
@@ -337,7 +337,7 @@ xdg-open http://localhost:9002/  # Linux
 
 This script will:
 - Build the node binary if needed
-- Start the node on `localhost:9001` (gRPC) and `localhost:9002` (HTTP/Dashboard)
+- Start the node on `localhost:8000` (gRPC) and `localhost:8001` (HTTP/Dashboard)
 - Test all dashboard endpoints
 - Display dashboard URLs
 
@@ -347,41 +347,41 @@ This script will:
 
 ```bash
 # Test summary API
-curl -s http://localhost:9002/api/v1/dashboard/summary | jq '.'
+curl -s http://localhost:8001/api/v1/dashboard/summary | jq '.'
 
 # Test nodes API
-curl -s http://localhost:9002/api/v1/dashboard/nodes | jq '.'
+curl -s http://localhost:8001/api/v1/dashboard/nodes | jq '.'
 
 # Test node dashboard (replace node-1 with actual node ID)
-curl -s http://localhost:9002/api/v1/dashboard/node/node-1 | jq '.'
+curl -s http://localhost:8001/api/v1/dashboard/node/node-1 | jq '.'
 
 # Test applications API
-curl -s http://localhost:9002/api/v1/dashboard/applications | jq '.'
+curl -s http://localhost:8001/api/v1/dashboard/applications | jq '.'
 
 # Test actors API
-curl -s http://localhost:9002/api/v1/dashboard/actors | jq '.'
+curl -s http://localhost:8001/api/v1/dashboard/actors | jq '.'
 
 # Test workflows API
-curl -s http://localhost:9002/api/v1/dashboard/workflows | jq '.'
+curl -s http://localhost:8001/api/v1/dashboard/workflows | jq '.'
 
 # Test dependency health API (new)
-curl -s http://localhost:9002/api/v1/dashboard/dependencies | jq '.'
+curl -s http://localhost:8001/api/v1/dashboard/dependencies | jq '.'
 ```
 
 **Test with Filters:**
 
 ```bash
 # Filter by tenant
-curl -s "http://localhost:9002/api/v1/dashboard/applications?tenant_id=test-tenant" | jq '.'
+curl -s "http://localhost:8001/api/v1/dashboard/applications?tenant_id=test-tenant" | jq '.'
 
 # Filter by name pattern
-curl -s "http://localhost:9002/api/v1/dashboard/applications?name_pattern=calc" | jq '.'
+curl -s "http://localhost:8001/api/v1/dashboard/applications?name_pattern=calc" | jq '.'
 
 # Filter actors by type
-curl -s "http://localhost:9002/api/v1/dashboard/actors?actor_type=calculator" | jq '.'
+curl -s "http://localhost:8001/api/v1/dashboard/actors?actor_type=calculator" | jq '.'
 
 # Pagination
-curl -s "http://localhost:9002/api/v1/dashboard/actors?page_size=10&page_token=0" | jq '.'
+curl -s "http://localhost:8001/api/v1/dashboard/actors?page_size=10&page_token=0" | jq '.'
 ```
 
 ### Step 8: Verify Dashboard Functionality
@@ -420,14 +420,14 @@ If both nodes are running:
 ```bash
 # Port forward both nodes
 # Terminal 1:
-kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 9002:9002
+kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 8001:8001
 
 # Terminal 2:
-kubectl port-forward -n plexspaces-test svc/plexspaces-node-2 9003:9002
+kubectl port-forward -n plexspaces-test svc/plexspaces-node-2 8002:8001
 ```
 
 1. Deploy applications to both nodes
-2. Access Node 1 dashboard: http://localhost:9002/
+2. Access Node 1 dashboard: http://localhost:8001/
 3. Verify aggregated metrics show data from both nodes
 4. Click on node links to navigate to individual node pages
 
@@ -451,13 +451,13 @@ kubectl get pods -n plexspaces-test
 
 ### Dashboard Not Accessible
 
-**Issue**: Cannot access dashboard at http://localhost:9002
+**Issue**: Cannot access dashboard at http://localhost:8001
 
 **Solutions**:
 1. **Verify port-forward is running**:
    ```bash
    kubectl get pods -n plexspaces-test
-   kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 9002:9002
+   kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 8001:8001
    ```
 
 2. **Check node logs for errors**:
@@ -481,10 +481,10 @@ kubectl get pods -n plexspaces-test
 4. **Check firewall/network settings**:
    ```bash
    # Test port-forward connectivity
-   curl -v http://localhost:9002/
+   curl -v http://localhost:8001/
    
    # Check if port is listening
-   lsof -i :9002  # macOS/Linux
+   lsof -i :8001  # macOS/Linux
    ```
 
 5. **Verify HTTP port is exposed**:
@@ -500,7 +500,7 @@ kubectl get pods -n plexspaces-test
 **Solutions**:
 1. **Deploy test applications to generate metrics**:
    ```bash
-   ./scripts/deploy-wasm-app-test.sh http://localhost:9002 wasm-calculator
+   ./scripts/deploy-wasm-app-test.sh http://localhost:8001 wasm-calculator
    ```
 
 2. **Check that actors are registered**:
@@ -512,7 +512,7 @@ kubectl get pods -n plexspaces-test
 3. **Verify ApplicationManager is working**:
    ```bash
    # List applications via API
-   curl -s http://localhost:9002/api/v1/dashboard/applications | jq '.applications | length'
+   curl -s http://localhost:8001/api/v1/dashboard/applications | jq '.applications | length'
    
    # Should return > 0 if applications are deployed
    ```
@@ -520,10 +520,10 @@ kubectl get pods -n plexspaces-test
 4. **Check ActorRegistry for registered actors**:
    ```bash
    # List actors via API
-   curl -s http://localhost:9002/api/v1/dashboard/actors | jq '.actors | length'
+   curl -s http://localhost:8001/api/v1/dashboard/actors | jq '.actors | length'
    
    # Check specific actor
-   curl -s http://localhost:9002/api/v1/dashboard/actors | jq '.actors[0]'
+   curl -s http://localhost:8001/api/v1/dashboard/actors | jq '.actors[0]'
    ```
 
 5. **Wait for metrics to populate**:
@@ -539,7 +539,7 @@ kubectl get pods -n plexspaces-test
 1. **Check gRPC-Gateway is configured correctly**:
    ```bash
    # Test gRPC-Gateway endpoint
-   curl -v http://localhost:9002/api/v1/dashboard/summary
+   curl -v http://localhost:8001/api/v1/dashboard/summary
    
    # Should return JSON, not HTML
    ```
@@ -562,14 +562,14 @@ kubectl get pods -n plexspaces-test
    cat proto/plexspaces/v1/dashboard/dashboard.proto | grep -A 10 "GetSummaryRequest"
    
    # Test with minimal request
-   curl -s -X POST http://localhost:9002/api/v1/dashboard/summary \
+   curl -s -X POST http://localhost:8001/api/v1/dashboard/summary \
      -H "Content-Type: application/json" \
      -d '{}' | jq '.'
    ```
 
 5. **Check HTTP vs gRPC ports**:
-   - Dashboard HTTP: port 9002
-   - gRPC: port 9001
+   - Dashboard HTTP: port 8001
+   - gRPC: port 8000
    - Ensure you're using the correct port for the protocol
 
 ### Pagination Not Working
@@ -597,7 +597,7 @@ kubectl get pods -n plexspaces-test
    ```bash
    # Test connectivity from node-1 to node-2
    kubectl exec -n plexspaces-test deployment/plexspaces-node-1 -- \
-     curl -s http://plexspaces-node-2.plexspaces-test:9002/api/v1/dashboard/summary
+     curl -s http://plexspaces-node-2.plexspaces-test:8001/api/v1/dashboard/summary
    ```
 
 3. **Verify gRPC client configuration**:
@@ -642,7 +642,7 @@ cargo build --bin plexspaces-node -p plexspaces-node --profile dev
 cargo run --bin plexspaces-node -p plexspaces-node
 
 # Or run the release binary
-./target/release/plexspaces-node --node-id "dev-node" --listen-address "0.0.0.0:9001"
+./target/release/plexspaces-node --node-id "dev-node" --listen-address "0.0.0.0:8000"
 ```
 
 ### Adding New Metrics
@@ -687,7 +687,7 @@ For production deployments:
              service:
                name: plexspaces-node-1
                port:
-                 number: 9002
+                 number: 8001
    ```
 
 4. **Configure TLS** for secure connections:
@@ -730,19 +730,19 @@ cargo build --release --bin plexspaces-node -p plexspaces-node
 ./scripts/test-dashboard.sh
 
 # Or start node manually
-./target/release/plexspaces-node --node-id "test-node" --listen-address "0.0.0.0:9001"
+./target/release/plexspaces-node --node-id "test-node" --listen-address "0.0.0.0:8000"
 
 # Deploy test environment (Kubernetes)
 ./scripts/deploy-dashboard-k8s-test.sh
 
 # Port forward to access dashboard (Kubernetes)
-kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 9002:9002
+kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 8001:8001
 
 # Deploy test application
-./scripts/deploy-wasm-app-test.sh http://localhost:9002 wasm-calculator
+./scripts/deploy-wasm-app-test.sh http://localhost:8001 wasm-calculator
 
 # Test dashboard APIs (manual)
-curl http://localhost:9002/api/v1/dashboard/summary | jq
+curl http://localhost:8001/api/v1/dashboard/summary | jq
 
 # Check logs (local)
 tail -f /tmp/plexspaces-node.log
@@ -758,25 +758,25 @@ kubectl delete -f tests/k8s/
 
 ```bash
 # Summary (aggregated metrics)
-curl http://localhost:9002/api/v1/dashboard/summary
+curl http://localhost:8001/api/v1/dashboard/summary
 
 # Nodes list
-curl http://localhost:9002/api/v1/dashboard/nodes
+curl http://localhost:8001/api/v1/dashboard/nodes
 
 # Node details
-curl http://localhost:9002/api/v1/dashboard/node/node-1
+curl http://localhost:8001/api/v1/dashboard/node/node-1
 
 # Applications (with filters)
-curl "http://localhost:9002/api/v1/dashboard/applications?name_pattern=calc"
+curl "http://localhost:8001/api/v1/dashboard/applications?name_pattern=calc"
 
 # Actors (with filters)
-curl "http://localhost:9002/api/v1/dashboard/actors?actor_type=calculator&status=running"
+curl "http://localhost:8001/api/v1/dashboard/actors?actor_type=calculator&status=running"
 
 # Workflows
-curl http://localhost:9002/api/v1/dashboard/workflows
+curl http://localhost:8001/api/v1/dashboard/workflows
 
 # Dependency Health (with circuit breaker info)
-curl http://localhost:9002/api/v1/dashboard/dependencies
+curl http://localhost:8001/api/v1/dashboard/dependencies
 ```
 
 ## References

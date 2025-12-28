@@ -69,7 +69,7 @@ let registration = ObjectRegistration {
     object_id: "counter@node1".to_string(),
     object_type: ObjectType::ObjectTypeActor as i32,
     object_category: "GenServer".to_string(),
-    grpc_address: "http://node1:9001".to_string(),
+    grpc_address: "http://node1:8000".to_string(),
     ..Default::default()
 };
 

@@ -17,18 +17,18 @@ version: "1.0.0"
 description: "Test release"
 node:
   id: "test-node"
-  listen_address: "0.0.0.0:9001"
+  listen_address: "0.0.0.0:8000"
   cluster_seed_nodes: []
 runtime:
   grpc:
     enabled: true
-    address: "0.0.0.0:9001"
+    address: "0.0.0.0:8000"
     max_connections: 100
     keepalive_interval_seconds: 30
   health:
     heartbeat_interval_seconds: 10
     heartbeat_timeout_seconds: 5
-    registry_url: "http://localhost:9001"
+    registry_url: "http://localhost:8000"
 applications: []
 env: {}
 shutdown:
@@ -72,7 +72,7 @@ runtime:
   health:
     heartbeat_interval_seconds: 10
     heartbeat_timeout_seconds: 5
-    registry_url: "http://localhost:9001"
+    registry_url: "http://localhost:8000"
 applications: []
 env: {}
 shutdown:
@@ -107,18 +107,18 @@ version: "1.0.0"
 description: "Test release"
 node:
   id: "${TEST_NODE_ID:-default-node}"
-  listen_address: "0.0.0.0:9001"
+  listen_address: "0.0.0.0:8000"
   cluster_seed_nodes: []
 runtime:
   grpc:
     enabled: true
-    address: "0.0.0.0:9001"
+    address: "0.0.0.0:8000"
     max_connections: 100
     keepalive_interval_seconds: 30
   health:
     heartbeat_interval_seconds: 10
     heartbeat_timeout_seconds: 5
-    registry_url: "http://localhost:9001"
+    registry_url: "http://localhost:8000"
 applications: []
 env: {}
 shutdown:
@@ -148,7 +148,7 @@ version: "1.0.0"
 description: "Test release"
 node:
   id: "test-node"
-  listen_address: "0.0.0.0:9001"
+  listen_address: "0.0.0.0:8000"
   cluster_seed_nodes: []
 runtime:
   security:
@@ -159,13 +159,13 @@ runtime:
         issuer: "https://auth.example.com"
   grpc:
     enabled: true
-    address: "0.0.0.0:9001"
+    address: "0.0.0.0:8000"
     max_connections: 100
     keepalive_interval_seconds: 30
   health:
     heartbeat_interval_seconds: 10
     heartbeat_timeout_seconds: 5
-    registry_url: "http://localhost:9001"
+    registry_url: "http://localhost:8000"
 applications: []
 env: {}
 shutdown:
@@ -196,7 +196,7 @@ version: "1.0.0"
 description: "Test release"
 node:
   id: "test-node"
-  listen_address: "0.0.0.0:9001"
+  listen_address: "0.0.0.0:8000"
   cluster_seed_nodes: []
 runtime:
   security:
@@ -207,13 +207,13 @@ runtime:
         issuer: "https://auth.example.com"
   grpc:
     enabled: true
-    address: "0.0.0.0:9001"
+    address: "0.0.0.0:8000"
     max_connections: 100
     keepalive_interval_seconds: 30
   health:
     heartbeat_interval_seconds: 10
     heartbeat_timeout_seconds: 5
-    registry_url: "http://localhost:9001"
+    registry_url: "http://localhost:8000"
 applications: []
 env: {}
 shutdown:
@@ -252,18 +252,18 @@ version: "1.0.0"
 description: "Test release"
 node:
   id: "file-node"
-  listen_address: "0.0.0.0:9001"
+  listen_address: "0.0.0.0:8000"
   cluster_seed_nodes: []
 runtime:
   grpc:
     enabled: true
-    address: "0.0.0.0:9001"
+    address: "0.0.0.0:8000"
     max_connections: 100
     keepalive_interval_seconds: 30
   health:
     heartbeat_interval_seconds: 10
     heartbeat_timeout_seconds: 5
-    registry_url: "http://localhost:9001"
+    registry_url: "http://localhost:8000"
 applications: []
 env: {}
 shutdown:

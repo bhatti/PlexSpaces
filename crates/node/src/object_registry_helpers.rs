@@ -35,7 +35,7 @@ use std::time::SystemTime;
 /// * `object_registry` - ObjectRegistry instance
 /// * `ctx` - RequestContext for tenant isolation
 /// * `node_id` - Node identifier
-/// * `grpc_address` - Node's gRPC address (e.g., "http://127.0.0.1:9001")
+/// * `grpc_address` - Node's gRPC address (e.g., "http://127.0.0.1:8000")
 /// * `cluster_name` - Optional cluster name
 ///
 /// ## Returns

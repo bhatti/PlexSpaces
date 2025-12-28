@@ -146,7 +146,7 @@ message NodeCapabilities {
 // This is different from NodeConfig in release.proto which is for release/deployment.
 // This NodeRuntimeConfig is for runtime operational settings.
 message NodeRuntimeConfig {
-  // Listen address for gRPC server (e.g., "0.0.0.0:9000")
+  // Listen address for gRPC server (e.g., "0.0.0.0:8000")
   string listen_addr = 1 [(google.api.field_behavior) = REQUIRED];
 
   // Maximum number of concurrent connections
@@ -361,7 +361,7 @@ message NodeHealth {
 // Used by NodeRegistry for node lookup and health tracking
 message NodeRegistration {
   string node_id = 1;
-  string node_address = 2;  // gRPC address (e.g., "http://localhost:9001")
+  string node_address = 2;  // gRPC address (e.g., "http://localhost:8000")
   map<string, string> capabilities = 3;
   NodeStatus status = 4;
   google.protobuf.Timestamp last_heartbeat = 5;

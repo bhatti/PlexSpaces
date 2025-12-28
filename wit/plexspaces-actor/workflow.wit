@@ -1,0 +1,175 @@
+// PlexSpaces Actor Interface - Workflow Orchestration
+//
+// Durable workflow orchestration with Temporal/Restate-inspired patterns.
+// Workflows are actors with journaling enabled for deterministic replay.
+
+interface workflow {
+    use types.{payload, actor-id, actor-error, duration-ms, context};
+
+    /// Workflow execution context
+    record workflow-context {
+        /// Workflow execution ID
+        workflow-id: string,
+        /// Run ID (unique per execution attempt)
+        run-id: string,
+        /// Workflow type/name
+        workflow-type: string,
+        /// Whether currently replaying (recovery mode)
+        is-replaying: bool,
+    }
+
+    /// Workflow options for starting execution
+    record workflow-options {
+        /// Custom workflow ID (optional, will be generated if not provided)
+        workflow-id: option<string>,
+        /// Task queue name
+        task-queue: option<string>,
+        /// Execution timeout in milliseconds
+        execution-timeout: option<duration-ms>,
+        /// Retry policy (encoded as JSON string)
+        retry-policy: option<string>,
+    }
+
+    /// Activity options for scheduling
+    record activity-options {
+        /// Custom activity ID (optional)
+        activity-id: option<string>,
+        /// Start-to-close timeout
+        start-to-close-timeout: option<duration-ms>,
+        /// Schedule-to-close timeout
+        schedule-to-close-timeout: option<duration-ms>,
+        /// Retry policy (encoded as JSON string)
+        retry-policy: option<string>,
+    }
+
+    /// Start a new workflow execution
+    ///
+    /// Creates a new workflow instance and begins execution.
+    /// Workflow ID is returned for tracking and querying.
+    ///
+    /// # Arguments
+    /// - `workflow-type`: Type/name of workflow to start
+    /// - `workflow-id`: Optional custom workflow ID
+    /// - `input`: Initial input payload
+    /// - `options`: Workflow execution options
+    ///
+    /// # Returns
+    /// - `ok(workflow-id)`: Workflow execution ID
+    /// - `err`: Start failed (invalid type, resource limit)
+    ///
+    /// # Example
+    /// ```rust
+    /// let workflow_id = workflow::start_workflow(
+    ///     "order-processing",
+    ///     None,
+    ///     order_bytes,
+    ///     WorkflowOptions { ..default() }
+    /// )?;
+    /// ```
+    start-workflow: func(
+        ctx: context,
+        workflow-type: string,
+        workflow-id: option<string>,
+        input: payload,
+        options: workflow-options
+    ) -> result<string, actor-error>;
+
+    /// Signal a running workflow
+    ///
+    /// Sends an external event to a running workflow.
+    /// Signals can modify workflow state and are persisted.
+    ///
+    /// # Arguments
+    /// - `workflow-id`: Workflow execution ID
+    /// - `signal-name`: Signal name/type
+    /// - `payload`: Signal data
+    ///
+    /// # Returns
+    /// - `ok`: Signal delivered
+    /// - `err`: Signal failed (workflow not found, not running)
+    signal-workflow: func(
+        ctx: context,
+        workflow-id: string,
+        signal-name: string,
+        payload: payload
+    ) -> result<_, actor-error>;
+
+    /// Query workflow state (read-only)
+    ///
+    /// Queries workflow state without modifying it.
+    /// Can be called concurrently with workflow execution.
+    ///
+    /// # Arguments
+    /// - `workflow-id`: Workflow execution ID
+    /// - `query-type`: Query type/name
+    ///
+    /// # Returns
+    /// - `ok(payload)`: Query result
+    /// - `err`: Query failed (workflow not found, query not supported)
+    query-workflow: func(
+        ctx: context,
+        workflow-id: string,
+        query-type: string
+    ) -> result<payload, actor-error>;
+
+    /// Wait for workflow completion
+    ///
+    /// Blocks until workflow completes or timeout expires.
+    /// Returns final workflow result.
+    ///
+    /// # Arguments
+    /// - `workflow-id`: Workflow execution ID
+    /// - `timeout-ms`: Maximum time to wait (0 = infinite)
+    ///
+    /// # Returns
+    /// - `ok(payload)`: Workflow result
+    /// - `err`: Wait failed (timeout, workflow failed)
+    await-workflow: func(
+        ctx: context,
+        workflow-id: string,
+        timeout-ms: duration-ms
+    ) -> result<payload, actor-error>;
+
+    /// Schedule activity (deterministic side effect)
+    ///
+    /// Schedules an activity for execution. Activities are deterministic
+    /// and replayable - results are cached during replay.
+    ///
+    /// # Arguments
+    /// - `activity-type`: Activity type/name
+    /// - `input`: Activity input
+    /// - `options`: Activity execution options
+    ///
+    /// # Returns
+    /// - `ok(payload)`: Activity result
+    /// - `err`: Activity failed (timeout, retries exhausted)
+    schedule-activity: func(
+        ctx: context,
+        activity-type: string,
+        input: payload,
+        options: activity-options
+    ) -> result<payload, actor-error>;
+
+    /// Sleep (deterministic, replayable)
+    ///
+    /// Sleeps for specified duration. During replay, sleep is skipped
+    /// and cached timestamps are used.
+    ///
+    /// # Arguments
+    /// - `duration-ms`: Sleep duration in milliseconds
+    sleep: func(duration-ms: duration-ms);
+
+    /// Get current workflow execution context
+    ///
+    /// Returns context information for the current workflow execution.
+    /// Only valid when called from within a workflow actor.
+    ///
+    /// # Returns
+    /// - `ok(context)`: Workflow context
+    /// - `err`: Not in workflow context
+    get-workflow-context: func() -> result<workflow-context, actor-error>;
+}
+
+
+
+

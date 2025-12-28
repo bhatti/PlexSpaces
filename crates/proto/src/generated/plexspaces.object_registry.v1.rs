@@ -50,8 +50,8 @@ pub struct ObjectRegistration {
     /// gRPC address to connect to this object (PRIMARY PURPOSE!)
     /// Format: "<http://host:port"> or "<https://host:port">
     /// Examples:
-    /// - Actor: "<http://node1:9001"> (ActorService endpoint)
-    /// - TupleSpace: "<http://ts-node:9002"> (TuplePlexSpaceService endpoint)
+    /// - Actor: "<http://node1:8000"> (ActorService endpoint)
+    /// - TupleSpace: "<http://ts-node:8001"> (TuplePlexSpaceService endpoint)
     /// - Service: "<http://order-pod:50051"> (Custom service endpoint)
     #[prost(string, tag="8")]
     pub grpc_address: ::prost::alloc::string::String,

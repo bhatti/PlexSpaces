@@ -377,11 +377,11 @@ impl JournalStorage for MemoryJournalStorage {
 
         let mut all_events = self.events.write().await;
 
-        let first_sequence = events[0].sequence;
-        let last_sequence = events[events.len() - 1].sequence;
+        let mut first_sequence = 0u64;
+        let mut last_sequence = 0u64;
         let count = events.len();
 
-        for event in events {
+        for (i, event) in events.iter().enumerate() {
             let actor_events = all_events
                 .entry(event.actor_id.clone())
                 .or_insert_with(Vec::new);
@@ -390,6 +390,12 @@ impl JournalStorage for MemoryJournalStorage {
             if event.sequence == 0 {
                 event.sequence = self.next_event_sequence(&event.actor_id).await;
             }
+
+            // Track first and last sequence after assignment
+            if i == 0 {
+                first_sequence = event.sequence;
+            }
+            last_sequence = event.sequence;
 
             actor_events.push(event);
         }

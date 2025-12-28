@@ -331,11 +331,28 @@ run-all-standalone-examples:
 #        CARGO_BUILD_JOBS=0 make test # Uses all available cores
 test:
 	@echo "Running unit tests (excluding integration tests)..."
-	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	@echo "Cleaning up any existing SQLite database files..."
+	@find . -maxdepth 3 -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) ! -path "./target/*" ! -path "./.git/*" -delete 2>/dev/null || true; \
+	if [ -d "data" ]; then \
+		find data -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) -delete 2>/dev/null || true; \
+	fi; \
+	echo "SQLite database files cleaned up."; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
 	fi; \
 	echo "Configuration: Using $$CARGO_JOBS CPU cores for building (override with CARGO_BUILD_JOBS env var)"; \
+	CERT_FILE=""; \
+	if [ -f "$$(pwd)/archived_docs/cert.pem" ]; then \
+		CERT_FILE="$$(pwd)/archived_docs/cert.pem"; \
+	elif [ -f "$$HOME/mac_certs.pem" ]; then \
+		CERT_FILE="$$HOME/mac_certs.pem"; \
+	fi; \
+	if [ -n "$$CERT_FILE" ]; then \
+		export SSL_CERT_FILE="$$CERT_FILE"; \
+		export CARGO_HTTP_CAINFO="$$CERT_FILE"; \
+		echo "Using SSL certificates from: $$SSL_CERT_FILE"; \
+	fi; \
 	echo "Building workspace first for faster test execution (incremental build enabled)..."; \
 	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
@@ -354,7 +371,16 @@ test:
 		-p plexspaces-actor-service -p plexspaces-grpc-middleware -p plexspaces-blob \
 		-p plexspaces-tuplespace-service || exit 1; \
 	echo ""; \
-	echo "All unit tests passed!"
+	echo "Running WASM integration tests (offline, no AWS/MinIO required)..."; \
+	$(CARGO) test --package plexspaces-wasm-runtime --test blob_host_functions_integration --jobs $$CARGO_JOBS || exit 1; \
+	$(CARGO) test --package plexspaces-wasm-runtime --test new_host_functions_integration --jobs $$CARGO_JOBS || exit 1; \
+	$(CARGO) test --package plexspaces-wasm-runtime --test durability_host_functions_integration --jobs $$CARGO_JOBS || exit 1; \
+	$(CARGO) test --package plexspaces-wasm-runtime --test messaging_host_functions_integration --jobs $$CARGO_JOBS || exit 1; \
+	$(CARGO) test --package plexspaces-wasm-runtime --test wasm_component_integration --jobs $$CARGO_JOBS || exit 1; \
+	$(CARGO) test --package plexspaces-wasm-runtime --test integration_tests --jobs $$CARGO_JOBS || exit 1; \
+	$(CARGO) test --package plexspaces-wasm-runtime --test grpc_integration --jobs $$CARGO_JOBS || exit 1; \
+	echo ""; \
+	echo "All unit and integration tests passed!"
 
 # Run all example tests (examples with tests subdirectories)
 # Examples are standalone, so we test them from their directories
@@ -939,7 +965,7 @@ logs:
 health:
 	@echo "Checking health..."
 	@if command -v grpc_health_probe > /dev/null; then \
-		grpc_health_probe -addr=localhost:9001 || echo "Health check failed"; \
+		grpc_health_probe -addr=localhost:8000 || echo "Health check failed"; \
 	else \
 		echo "grpc_health_probe not found. Install from: https://github.com/grpc-ecosystem/grpc-health-probe"; \
 	fi
@@ -947,7 +973,7 @@ health:
 # View metrics (if HTTP gateway enabled)
 metrics:
 	@echo "Fetching metrics..."
-	@curl -s http://localhost:9001/metrics || echo "Metrics endpoint not available. Ensure HTTP gateway is enabled."
+	@curl -s http://localhost:8001/metrics || echo "Metrics endpoint not available. Ensure HTTP gateway is enabled."
 
 # Backup data (SQLite)
 backup:

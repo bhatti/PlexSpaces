@@ -96,7 +96,7 @@
 //! // Instantiate actor
 //! let actor_id = "actor-001".to_string();
 //! let initial_state = vec![]; // Empty state for new actor
-//! let instance = runtime.instantiate(module, actor_id, &initial_state, config, None).await?;
+//! let instance = runtime.instantiate(module, actor_id, &initial_state, config, None, None, None, None, None, None, None).await?;
 //!
 //! // Call actor's handle_message function
 //! let from = "caller-actor";
@@ -244,7 +244,7 @@ pub use capabilities::WasmCapabilities;
 pub use deployment_service::WasmDeploymentService;
 pub use error::{WasmError, WasmResult};
 pub use grpc_service::WasmRuntimeServiceImpl;
-pub use host_functions::HostFunctions;
+pub use host_functions::{HostFunctions, MessageSender};
 pub use instance::{InstanceContext, WasmInstance};
 pub use instance_pool::{InstancePool, PoolStats, PooledInstance};
 pub use resource_limits::ResourceLimits;

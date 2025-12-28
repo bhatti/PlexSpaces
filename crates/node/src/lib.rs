@@ -88,6 +88,7 @@ pub mod external_dependency_checkers;
 pub mod application_service;
 pub mod application_impl;
 pub mod wasm_application;
+pub mod wasm_message_sender;
 
 // Firecracker VM service for VM management and application deployment
 #[cfg(feature = "firecracker")]

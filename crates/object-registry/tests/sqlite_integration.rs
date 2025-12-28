@@ -27,7 +27,7 @@ mod tests {
         ObjectRegistration {
             object_id: object_id.to_string(),
             object_type: object_type as i32,
-            grpc_address: format!("http://{}:9001", node_id),
+            grpc_address: format!("http://{}:8000", node_id),
             object_category: "GenServer".to_string(),
             ..Default::default()
         }
@@ -98,7 +98,7 @@ mod tests {
         assert!(found.is_some());
         let found_reg = found.unwrap();
         assert_eq!(found_reg.object_id, "counter@node1");
-        assert_eq!(found_reg.grpc_address, "http://node1:9001");
+        assert_eq!(found_reg.grpc_address, "http://node1:8000");
     }
 
     #[tokio::test]

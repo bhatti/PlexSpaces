@@ -473,6 +473,14 @@ impl WasmRuntime {
         initial_state: &[u8],
         config: crate::WasmConfig,
         channel_service: Option<std::sync::Arc<dyn plexspaces_core::ChannelService>>,
+        message_sender: Option<std::sync::Arc<dyn crate::MessageSender>>,
+        tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
+        keyvalue_store: Option<std::sync::Arc<dyn plexspaces_keyvalue::KeyValueStore>>,
+        process_group_registry: Option<std::sync::Arc<plexspaces_process_groups::ProcessGroupRegistry>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_locks::LockManager>>,
+        object_registry: Option<std::sync::Arc<plexspaces_object_registry::ObjectRegistry>>,
+        journal_storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
+        blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>>,
     ) -> WasmResult<crate::WasmInstance> {
         use wasmtime::StoreLimitsBuilder;
 
@@ -488,6 +496,14 @@ impl WasmRuntime {
             config.capabilities,
             limits,
             channel_service,
+            message_sender,
+            tuplespace_provider,
+            keyvalue_store,
+            process_group_registry,
+            lock_manager,
+            object_registry,
+            journal_storage,
+            blob_service,
         )
         .await
     }
@@ -555,10 +571,10 @@ impl WasmRuntime {
         }
 
         // Try name@version format
-        // Note: ModuleCache is hash-based, so name@version lookup requires
-        // maintaining a separate index or iterating
-        // For now, only hash-based lookup is supported
-        // TODO: Add name@version index if needed for this use case
+        // NOTE: ModuleCache is hash-based, so name@version lookup requires
+        // maintaining a separate index or iterating. For now, only hash-based lookup
+        // is supported. This is an acceptable limitation - name@version indexing can be
+        // added if needed for specific use cases, but hash-based lookup is the primary method.
         if let Some((name, version)) = module_ref.split_once('@') {
             tracing::debug!(
                 name = %name,

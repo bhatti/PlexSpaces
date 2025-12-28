@@ -41,7 +41,7 @@ mod tests {
         // Try port 9000 first (default MinIO API)
         let endpoints = vec![
             "http://localhost:9000",
-            "http://localhost:9001",
+            "http://localhost:8000",
         ];
 
         for endpoint in endpoints {

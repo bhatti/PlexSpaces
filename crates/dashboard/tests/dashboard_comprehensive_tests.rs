@@ -270,7 +270,7 @@ async fn test_dashboard_wasm_deployment_flow() {
     // Get HTTP port from node config
     let grpc_port = node.config().listen_addr.split(':').last()
         .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(9001);
+        .unwrap_or(8000);
     let http_port = grpc_port + 1;
     let http_url = format!("http://127.0.0.1:{}", http_port);
     

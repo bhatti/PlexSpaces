@@ -142,9 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("PLEXSPACES_JWT_SECRET", &jwt_secret);
 
     // Create node with in-memory backends (for testing)
-    // Use port 9002 to avoid conflict with MinIO (which uses 9001)
+    // Use port 8001 to avoid conflict with MinIO (which uses 9000/9001)
     let node = NodeBuilder::new("counter-node")
-        .with_listen_address("0.0.0.0:9002")
+        .with_listen_address("0.0.0.0:8001")
         .with_in_memory_backends()
         .build();
 
@@ -160,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for node to be ready and services to be registered
     // Services are registered in start(), so we need to wait a bit
     tokio::time::sleep(Duration::from_millis(1000)).await;
-    info!("✅ Node started on port 9002 (Startup complete)");
+    info!("✅ Node started on port 8001 (Startup complete)");
     
     // Register ActorFactory (needed for spawn_actor to work)
     // ActorFactory is normally registered in create_actor_context_arc, but for examples we register it here
@@ -217,9 +217,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Get HTTP gateway endpoint (gRPC port + 1, following demo pattern)
-    // Using port 9002 for gRPC to avoid conflict with MinIO (9001)
-    let grpc_port = 9002;
-    let http_port = grpc_port + 1;  // HTTP gateway on 9003
+    // Using port 8001 for gRPC to avoid conflict with MinIO (9000/9001)
+    let grpc_port = 8001;
+    let http_port = grpc_port + 1;  // HTTP gateway on 8002
     let http_endpoint = format!("http://127.0.0.1:{}", http_port);
     
     // Wait for HTTP gateway server to be ready by checking if port is listening

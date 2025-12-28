@@ -74,8 +74,11 @@ impl Actor for WasmActorBehavior {
         // Use message payload directly
         let payload = message.payload.clone();
 
+        // Clone Arc before await to ensure Send
+        let instance = self.instance.clone();
+        
         // Call WASM instance's handle_message
-        match self.instance.handle_message(from, message_type, payload).await {
+        match instance.handle_message(from, message_type, payload).await {
             Ok(response) => {
                 // Handle response for request-reply patterns
                 // If message has sender_id, send reply using ActorRef::send_reply()
@@ -357,6 +360,10 @@ impl WasmApplication {
         // 3. Create a behavior that wraps the WASM instance
         // 4. Spawn the actor with that behavior
 
+        // Get ServiceLocator from node
+        let service_locator = node.service_locator()
+            .ok_or_else(|| ApplicationError::Other("ServiceLocator not available from node".to_string()))?;
+
         // Resolve module by hash
         let module = runtime
             .get_module(module_hash)
@@ -368,12 +375,60 @@ impl WasmApplication {
                 ))
             })?;
 
-        // Create ChannelService for WASM instance (same as in create_actor_context)
+        // Create ChannelService for WASM instance
         use plexspaces_core::ChannelService;
         use crate::service_wrappers::ChannelServiceWrapper;
         let channel_service: Arc<dyn ChannelService> = Arc::new(ChannelServiceWrapper::new());
 
-        // Create WASM instance with ChannelService
+        // Create MessageSender for WASM instance
+        use crate::wasm_message_sender::ActorServiceMessageSender;
+        use plexspaces_core::ActorService;
+        let actor_service: Arc<dyn ActorService + Send + Sync> = service_locator
+            .get_actor_service()
+            .await
+            .ok_or_else(|| ApplicationError::Other("ActorService not found in ServiceLocator".to_string()))?;
+        let message_sender: Arc<dyn plexspaces_wasm_runtime::MessageSender> = Arc::new(
+            ActorServiceMessageSender::new(actor_service, service_locator.clone())
+        );
+
+        // Get TupleSpaceProvider from service locator if available
+        use plexspaces_core::TupleSpaceProvider;
+        let tuplespace_provider: Option<Arc<dyn TupleSpaceProvider>> = service_locator
+            .get_tuplespace_provider()
+            .await;
+
+        // Get KeyValueStore from service locator if available
+        // Note: KeyValueStore may not be registered directly - it's used by ObjectRegistry
+        // For now, we'll pass None and implement KeyValue operations via ObjectRegistry if needed
+        let keyvalue_store: Option<Arc<dyn plexspaces_keyvalue::KeyValueStore>> = None;
+
+        // Get ProcessGroupRegistry from service locator if available
+        use plexspaces_process_groups::ProcessGroupRegistry;
+        use plexspaces_core::service_locator::service_names;
+        let process_group_registry: Option<Arc<ProcessGroupRegistry>> = service_locator
+            .get_service_by_name::<ProcessGroupRegistry>(service_names::PROCESS_GROUP_REGISTRY)
+            .await;
+
+        // Get LockManager from service locator if available
+        // Note: LockManager may not be registered - for now pass None
+        let lock_manager: Option<Arc<dyn plexspaces_locks::LockManager>> = None;
+
+        // Get ObjectRegistry from service locator if available
+        use plexspaces_object_registry::ObjectRegistry;
+        let object_registry: Option<Arc<ObjectRegistry>> = service_locator
+            .get_service_by_name::<ObjectRegistry>(service_names::OBJECT_REGISTRY)
+            .await;
+
+        // Get JournalStorage - create default in-memory storage for WASM actors
+        // This allows durability functions to work even if no storage is configured
+        // In production, a proper storage backend (PostgreSQL, SQLite, etc.) should be configured
+        use plexspaces_journaling::{JournalStorage, MemoryJournalStorage};
+        let journal_storage: Option<Arc<dyn JournalStorage>> = Some(Arc::new(MemoryJournalStorage::new()));
+
+        // Get BlobService from service locator if available
+        let blob_service = service_locator.get_service::<plexspaces_blob::BlobService>().await;
+
+        // Create WASM instance with all available services
         let wasm_instance = runtime
             .instantiate(
                 module,
@@ -381,6 +436,14 @@ impl WasmApplication {
                 &[], // No initial state
                 plexspaces_wasm_runtime::WasmConfig::default(),
                 Some(channel_service),
+                Some(message_sender),
+                tuplespace_provider,
+                keyvalue_store,
+                process_group_registry,
+                lock_manager,
+                object_registry,
+                journal_storage,
+                blob_service,
             )
             .await
             .map_err(|e| {
@@ -465,6 +528,14 @@ impl WasmApplication {
                 &[], // No initial state needed
                 config,
                 Some(channel_service),
+                None, // No message sender for temporary instance
+                None, // No tuplespace provider for temporary instance
+                None, // No keyvalue store for temporary instance
+                None, // No process group registry for temporary instance
+                None, // No lock manager for temporary instance
+                None, // No object registry for temporary instance
+                None, // No journal storage for temporary instance
+                None, // No blob service for temporary instance
             )
             .await
             .map_err(|e| {
@@ -822,7 +893,7 @@ mod tests {
         }
 
         fn listen_addr(&self) -> &str {
-            "127.0.0.1:9000"
+            "127.0.0.1:8000"
         }
     }
 
@@ -1126,7 +1197,7 @@ mod tests {
             }
 
             fn listen_addr(&self) -> &str {
-                "127.0.0.1:9000"
+                "127.0.0.1:8000"
             }
         }
 
@@ -1216,7 +1287,7 @@ mod tests {
             }
 
             fn listen_addr(&self) -> &str {
-                "127.0.0.1:9000"
+                "127.0.0.1:8000"
             }
         }
 
@@ -1257,7 +1328,7 @@ mod tests {
             }
 
             fn listen_addr(&self) -> &str {
-                "127.0.0.1:9000"
+                "127.0.0.1:8000"
             }
         }
 

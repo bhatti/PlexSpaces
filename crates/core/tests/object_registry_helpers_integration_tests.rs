@@ -34,9 +34,9 @@ mod tests {
         let ctx = RequestContext::internal();
         
         // Register multiple nodes
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", Some("cluster1")).await.unwrap();
-        register_node(&registry, &ctx, "node2", "http://127.0.0.1:9002", Some("cluster1")).await.unwrap();
-        register_node(&registry, &ctx, "node3", "http://127.0.0.1:9003", Some("cluster2")).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", Some("cluster1")).await.unwrap();
+        register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", Some("cluster1")).await.unwrap();
+        register_node(&registry, &ctx, "node3", "http://127.0.0.1:8002", Some("cluster2")).await.unwrap();
         
         // Discover all nodes
         let nodes = discover_nodes(&registry, &ctx).await.unwrap();
@@ -54,7 +54,7 @@ mod tests {
         let ctx = RequestContext::internal();
         
         // Register a node
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         // First discovery - should query registry
         let nodes1 = discover_nodes(&trait_registry, &ctx).await.unwrap();
@@ -72,12 +72,12 @@ mod tests {
         let ctx = RequestContext::internal();
         
         // Register and discover
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         let nodes1 = discover_nodes(&trait_registry, &ctx).await.unwrap();
         assert_eq!(nodes1.len(), 1);
         
         // Register another node - should invalidate cache
-        register_node(&registry, &ctx, "node2", "http://127.0.0.1:9002", None).await.unwrap();
+        register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Next discovery should see both nodes (cache was invalidated)
         let nodes2 = discover_nodes(&trait_registry, &ctx).await.unwrap();
@@ -90,14 +90,14 @@ mod tests {
         let ctx = RequestContext::internal();
         
         // Register a node
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         // First discovery
         let nodes1 = discover_nodes(&trait_registry, &ctx).await.unwrap();
         assert_eq!(nodes1.len(), 1);
         
         // Register another node after cache is populated
-        register_node(&registry, &ctx, "node2", "http://127.0.0.1:9002", None).await.unwrap();
+        register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Wait for cache to expire (60 seconds) - but we'll test invalidation instead
         // Since register_node invalidates cache, we should see both nodes
@@ -111,12 +111,12 @@ mod tests {
         let ctx = RequestContext::internal();
         
         // Register nodes
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
-        register_node(&registry, &ctx, "node2", "http://127.0.0.1:9002", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
+        register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Register application on multiple nodes
-        register_application(&registry, &ctx, "myapp", "1.0.0", "node1", "http://127.0.0.1:9001").await.unwrap();
-        register_application(&registry, &ctx, "myapp", "1.0.0", "node2", "http://127.0.0.1:9002").await.unwrap();
+        register_application(&registry, &ctx, "myapp", "1.0.0", "node1", "http://127.0.0.1:8000").await.unwrap();
+        register_application(&registry, &ctx, "myapp", "1.0.0", "node2", "http://127.0.0.1:8001").await.unwrap();
         
         // Discover application nodes
         let nodes = discover_application_nodes(&trait_registry, &ctx, "myapp").await.unwrap();
@@ -132,8 +132,8 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = RequestContext::internal();
         
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
-        register_application(&registry, &ctx, "myapp", "1.0.0", "node1", "http://127.0.0.1:9001").await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
+        register_application(&registry, &ctx, "myapp", "1.0.0", "node1", "http://127.0.0.1:8000").await.unwrap();
         
         // First discovery
         let nodes1 = discover_application_nodes(&trait_registry, &ctx, "myapp").await.unwrap();
@@ -151,12 +151,12 @@ mod tests {
         let ctx = RequestContext::internal();
         
         // Register nodes
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
-        register_node(&registry, &ctx, "node2", "http://127.0.0.1:9002", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
+        register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Register workflows with same definition on different nodes
-        register_workflow(&registry, &ctx, "workflow1", "def1", "node1", "http://127.0.0.1:9001").await.unwrap();
-        register_workflow(&registry, &ctx, "workflow2", "def1", "node2", "http://127.0.0.1:9002").await.unwrap();
+        register_workflow(&registry, &ctx, "workflow1", "def1", "node1", "http://127.0.0.1:8000").await.unwrap();
+        register_workflow(&registry, &ctx, "workflow2", "def1", "node2", "http://127.0.0.1:8001").await.unwrap();
         
         // Discover workflow nodes
         let nodes = discover_workflow_nodes(&trait_registry, &ctx, "def1").await.unwrap();
@@ -172,8 +172,8 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = RequestContext::internal();
         
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
-        register_workflow(&registry, &ctx, "workflow1", "def1", "node1", "http://127.0.0.1:9001").await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
+        register_workflow(&registry, &ctx, "workflow1", "def1", "node1", "http://127.0.0.1:8000").await.unwrap();
         
         // First discovery
         let nodes1 = discover_workflow_nodes(&trait_registry, &ctx, "def1").await.unwrap();
@@ -191,10 +191,10 @@ mod tests {
         
         // Register nodes in different tenants
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "namespace1".to_string());
-        register_node(&registry, &ctx1, "node1", "http://127.0.0.1:9001", None).await.unwrap();
+        register_node(&registry, &ctx1, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         let ctx2 = RequestContext::new_without_auth("tenant2".to_string(), "namespace2".to_string());
-        register_node(&registry, &ctx2, "node2", "http://127.0.0.1:9002", None).await.unwrap();
+        register_node(&registry, &ctx2, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Discover nodes in tenant1 - should only see node1
         let nodes1 = discover_nodes(&trait_registry, &ctx1).await.unwrap();
@@ -234,7 +234,7 @@ mod tests {
             &trait_registry,
             &ctx,
             "node1",
-            "http://127.0.0.1:9001",
+            "http://127.0.0.1:8000",
             Some("cluster1"),
         ).await;
         
@@ -245,7 +245,7 @@ mod tests {
         assert!(registration.is_some());
         let reg = registration.unwrap();
         assert_eq!(reg.object_id, "node1");
-        assert_eq!(reg.grpc_address, "http://127.0.0.1:9001");
+        assert_eq!(reg.grpc_address, "http://127.0.0.1:8000");
         assert!(reg.labels.contains(&"cluster1".to_string()));
     }
 
@@ -254,7 +254,7 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = RequestContext::internal();
         
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         let result = register_application(
             &trait_registry,
@@ -262,7 +262,7 @@ mod tests {
             "myapp",
             "1.0.0",
             "node1",
-            "http://127.0.0.1:9001",
+            "http://127.0.0.1:8000",
         ).await;
         
         assert!(result.is_ok());
@@ -281,7 +281,7 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = RequestContext::internal();
         
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         let result = register_workflow(
             &trait_registry,
@@ -289,7 +289,7 @@ mod tests {
             "workflow1",
             "def1",
             "node1",
-            "http://127.0.0.1:9001",
+            "http://127.0.0.1:8000",
         ).await;
         
         assert!(result.is_ok());
@@ -308,13 +308,13 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = RequestContext::internal();
         
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
-        register_node(&registry, &ctx, "node2", "http://127.0.0.1:9002", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
+        register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Register different applications
-        register_application(&registry, &ctx, "app1", "1.0.0", "node1", "http://127.0.0.1:9001").await.unwrap();
-        register_application(&registry, &ctx, "app2", "1.0.0", "node1", "http://127.0.0.1:9001").await.unwrap();
-        register_application(&registry, &ctx, "app1", "1.0.0", "node2", "http://127.0.0.1:9002").await.unwrap();
+        register_application(&registry, &ctx, "app1", "1.0.0", "node1", "http://127.0.0.1:8000").await.unwrap();
+        register_application(&registry, &ctx, "app2", "1.0.0", "node1", "http://127.0.0.1:8000").await.unwrap();
+        register_application(&registry, &ctx, "app1", "1.0.0", "node2", "http://127.0.0.1:8001").await.unwrap();
         
         // Discover app1 nodes - should find both node1 and node2
         let app1_nodes = discover_application_nodes(&trait_registry, &ctx, "app1").await.unwrap();
@@ -331,13 +331,13 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = RequestContext::internal();
         
-        register_node(&registry, &ctx, "node1", "http://127.0.0.1:9001", None).await.unwrap();
-        register_node(&registry, &ctx, "node2", "http://127.0.0.1:9002", None).await.unwrap();
+        register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
+        register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Register workflows with different definitions
-        register_workflow(&registry, &ctx, "workflow1", "def1", "node1", "http://127.0.0.1:9001").await.unwrap();
-        register_workflow(&registry, &ctx, "workflow2", "def1", "node2", "http://127.0.0.1:9002").await.unwrap();
-        register_workflow(&registry, &ctx, "workflow3", "def2", "node1", "http://127.0.0.1:9001").await.unwrap();
+        register_workflow(&registry, &ctx, "workflow1", "def1", "node1", "http://127.0.0.1:8000").await.unwrap();
+        register_workflow(&registry, &ctx, "workflow2", "def1", "node2", "http://127.0.0.1:8001").await.unwrap();
+        register_workflow(&registry, &ctx, "workflow3", "def2", "node1", "http://127.0.0.1:8000").await.unwrap();
         
         // Discover def1 workflows - should find both node1 and node2
         let def1_nodes = discover_workflow_nodes(&trait_registry, &ctx, "def1").await.unwrap();

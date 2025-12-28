@@ -17,16 +17,16 @@ description = "Genomics Pipeline Chromosome Variant Calling Workers"
 
 [node]
 id = "genomics-chromosomes"
-listen_address = "0.0.0.0:9003"
+listen_address = "0.0.0.0:8002"
 cluster_seed_nodes = [
-    "genomics-coordinator:9001",
-    "genomics-qc-alignment:9002",
-    "genomics-annotation:9004"
+    "genomics-coordinator:8000",
+    "genomics-qc-alignment:8001",
+    "genomics-annotation:8003"
 ]
 
 [runtime.grpc]
 enabled = true
-address = "0.0.0.0:9003"
+address = "0.0.0.0:8002"
 max_connections = 500
 keepalive_interval_seconds = 30
 connection_timeout_seconds = 10
@@ -94,7 +94,7 @@ ALIGNMENT_POOL_ENABLED = "false"
 ANNOTATION_POOL_ENABLED = "false"
 REPORT_POOL_ENABLED = "false"
 # Coordinator address
-COORDINATOR_ADDRESS = "genomics-coordinator:9001"
+COORDINATOR_ADDRESS = "genomics-coordinator:8000"
 # Variant calling settings
 VARIANT_CALLER = "gatk"  # gatk or freebayes
 VARIANT_CALLING_THREADS_PER_WORKER = "2"

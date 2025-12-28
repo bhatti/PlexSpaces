@@ -7,8 +7,8 @@
 # Usage:
 #   ./scripts/test-blob-api.sh [GRPC_PORT]
 #
-# Default: if gRPC is on 9000, HTTP is on 9001
-# Example: ./scripts/test-blob-api.sh 9000  (will use HTTP port 9001)
+# Default: if gRPC is on 8000, HTTP is on 8001
+# Example: ./scripts/test-blob-api.sh 8000  (will use HTTP port 8001)
 
 set -euo pipefail
 

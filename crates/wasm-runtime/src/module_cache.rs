@@ -181,7 +181,7 @@ mod tests {
         
         // Create a dummy module (we can't easily create real WasmModule in tests)
         // For now, test the structure
-        let hash1 = "hash1".to_string();
+        let _hash1 = "hash1".to_string();
         // Note: In real usage, we'd need actual WasmModule, but for structure test this is fine
         // The actual WasmModule creation is tested in integration tests
         
@@ -191,15 +191,15 @@ mod tests {
 
     #[test]
     fn test_lru_eviction() {
-        let mut cache = ModuleCache::new(2);
+        let _cache = ModuleCache::new(2);
         
         // Insert 2 modules
-        let hash1 = "hash1".to_string();
-        let hash2 = "hash2".to_string();
+        let _hash1 = "hash1".to_string();
+        let _hash2 = "hash2".to_string();
         // Note: Would need actual WasmModule instances here
         
         // Insert 3rd module should evict first
-        let hash3 = "hash3".to_string();
+        let _hash3 = "hash3".to_string();
         // cache.insert(hash3, module3);
         // assert!(cache.get("hash1").is_none());
         // assert!(cache.get("hash2").is_some());

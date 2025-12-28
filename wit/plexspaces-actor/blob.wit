@@ -1,0 +1,178 @@
+// PlexSpaces Actor Interface - Blob Storage
+//
+// S3-compatible blob storage for files, images, and large data.
+// Supports multiple backends: S3, MinIO, GCP Cloud Storage, Azure Blob Storage.
+
+interface blob {
+    use types.{payload, actor-error, context};
+
+    /// Blob metadata
+    record blob-metadata {
+        /// Blob ID (unique identifier)
+        blob-id: string,
+        /// Bucket name
+        bucket: string,
+        /// Object key/path
+        key: string,
+        /// Blob size in bytes
+        size: u64,
+        /// Content type (MIME type)
+        content-type: option<string>,
+        /// ETag (for versioning/validation)
+        etag: option<string>,
+        /// Last modified timestamp (milliseconds since Unix epoch)
+        last-modified: u64,
+        /// Tenant ID (for multi-tenancy, empty string for default)
+        tenant-id: string,
+        /// Namespace (for organization, empty string for default)
+        namespace: string,
+    }
+
+    /// Upload blob to storage
+    ///
+    /// Stores binary data in blob storage backend and creates metadata record.
+    ///
+    /// # Arguments
+    /// - `bucket`: Bucket name
+    /// - `key`: Object key/path
+    /// - `data`: Blob data
+    /// - `content-type`: Optional MIME type
+    ///
+    /// # Returns
+    /// - `ok(metadata)`: Blob metadata with generated blob-id
+    /// - `err`: Upload failed (storage error, quota exceeded)
+    upload: func(
+        ctx: context,
+        bucket: string,
+        key: string,
+        data: payload,
+        content-type: option<string>
+    ) -> result<blob-metadata, actor-error>;
+
+    /// Download blob from storage
+    ///
+    /// Retrieves blob data by blob-id or bucket+key.
+    ///
+    /// # Arguments
+    /// - `blob-id`: Blob ID (preferred) or empty string
+    /// - `bucket`: Bucket name (required if blob-id is empty)
+    /// - `key`: Object key (required if blob-id is empty)
+    ///
+    /// # Returns
+    /// - `ok(data)`: Blob data
+    /// - `err`: Download failed (not found, access denied)
+    download: func(
+        ctx: context,
+        blob-id: string,
+        bucket: string,
+        key: string
+    ) -> result<payload, actor-error>;
+
+    /// Delete blob
+    ///
+    /// Removes blob from storage and metadata.
+    ///
+    /// # Arguments
+    /// - `blob-id`: Blob ID (preferred) or empty string
+    /// - `bucket`: Bucket name (required if blob-id is empty)
+    /// - `key`: Object key (required if blob-id is empty)
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok`: Blob deleted
+    /// - `err`: Delete failed (not found, access denied)
+    delete: func(
+        ctx: context,
+        blob-id: string,
+        bucket: string,
+        key: string
+    ) -> result<_, actor-error>;
+
+    /// Check if blob exists
+    ///
+    /// # Arguments
+    /// - `blob-id`: Blob ID (preferred) or empty string
+    /// - `bucket`: Bucket name (required if blob-id is empty)
+    /// - `key`: Object key (required if blob-id is empty)
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(bool)`: True if blob exists, false otherwise
+    /// - `err`: Check failed (access denied)
+    exists: func(
+        ctx: context,
+        blob-id: string,
+        bucket: string,
+        key: string
+    ) -> result<bool, actor-error>;
+
+    /// List blobs with prefix
+    ///
+    /// Lists all blobs matching the given prefix.
+    ///
+    /// # Arguments
+    /// - `bucket`: Bucket name
+    /// - `prefix`: Key prefix to match
+    /// - `limit`: Maximum number of results (0 = unlimited)
+    /// - `tenant-id`: Tenant ID filter (required, empty string for default)
+    /// - `namespace`: Namespace filter (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(list<metadata>)`: List of blob metadata
+    /// - `err`: List failed (access denied)
+    list-blobs: func(
+        ctx: context,
+        bucket: string,
+        prefix: string,
+        limit: u32
+    ) -> result<list<blob-metadata>, actor-error>;
+
+    /// Get blob metadata
+    ///
+    /// Retrieves metadata without downloading the blob data.
+    ///
+    /// # Arguments
+    /// - `blob-id`: Blob ID (preferred) or empty string
+    /// - `bucket`: Bucket name (required if blob-id is empty)
+    /// - `key`: Object key (required if blob-id is empty)
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(metadata)`: Blob metadata
+    /// - `err`: Get failed (not found, access denied)
+    metadata: func(
+        ctx: context,
+        blob-id: string,
+        bucket: string,
+        key: string
+    ) -> result<blob-metadata, actor-error>;
+
+    /// Copy blob
+    ///
+    /// Copies blob from source to destination (server-side copy).
+    ///
+    /// # Arguments
+    /// - `source-blob-id`: Source blob ID (preferred) or empty string
+    /// - `source-bucket`: Source bucket (required if blob-id is empty)
+    /// - `source-key`: Source key (required if blob-id is empty)
+    /// - `dest-bucket`: Destination bucket
+    /// - `dest-key`: Destination key
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(metadata)`: Destination blob metadata
+    /// - `err`: Copy failed (source not found, access denied)
+    copy: func(
+        ctx: context,
+        source-blob-id: string,
+        source-bucket: string,
+        source-key: string,
+        dest-bucket: string,
+        dest-key: string
+    ) -> result<blob-metadata, actor-error>;
+}
+

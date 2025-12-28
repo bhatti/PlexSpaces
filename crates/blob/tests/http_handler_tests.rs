@@ -34,11 +34,24 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
 
-        // Use in-memory database to prevent concurrency issues
+        // Use temporary file-based database for reliability
         use sqlx::AnyPool;
-        let any_pool = AnyPool::connect("sqlite::memory:").await.unwrap();
-        SqlBlobRepository::migrate(&any_pool).await.unwrap();
-        let repository = Arc::new(SqlBlobRepository::new(any_pool));
+        use sqlx::any::AnyPoolOptions;
+        use tempfile::NamedTempFile;
+        
+        // Use temporary file-based database (more reliable than in-memory)
+        let temp_db = NamedTempFile::new().unwrap();
+        let db_path = temp_db.path().to_str().unwrap();
+        let db_url = format!("sqlite:{}", db_path);
+        
+        let any_pool = AnyPoolOptions::new()
+            .max_connections(5)
+            .connect(&db_url)
+            .await
+            .unwrap();
+        
+        // Migrations are auto-applied in new()
+        let repository = Arc::new(SqlBlobRepository::new(any_pool).await.unwrap());
 
         let config = ProtoBlobConfig {
             backend: "local".to_string(),

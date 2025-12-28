@@ -230,7 +230,22 @@ impl WasmDeploymentService {
         // Create instance
         let _instance = self
             .runtime
-            .instantiate(module, actor_id.to_string(), initial_state, config, None)
+            .instantiate(
+                module,
+                actor_id.to_string(),
+                initial_state,
+                config,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                
+                None,
+            )
             .await
             .map_err(|e| {
                 WasmError::InstantiationError(format!(

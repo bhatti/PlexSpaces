@@ -283,7 +283,7 @@ mod tests {
             tenant_id: "internal".to_string(),
             namespace: "system".to_string(),
             node_id: node_id.to_string(),
-            grpc_address: format!("http://{}:9001", node_id),
+            grpc_address: format!("http://{}:8000", node_id),
             object_category: "node".to_string(),
             capabilities: vec![],
             metadata: Some(Metadata {

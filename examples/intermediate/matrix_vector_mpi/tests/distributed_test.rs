@@ -90,10 +90,10 @@ async fn test_distributed_master() {
     let num_cols = 500;
 
     // Create distributed node
-    let node = create_test_node("master", 9001);
+    let node = create_test_node("master", 8000);
     let space = node.tuplespace(); // Returns Arc<TupleSpace>
 
-    println!("Master node started at 127.0.0.1:9001");
+    println!("Master node started at 127.0.0.1:8000");
     println!("Waiting for workers to connect...\n");
 
     // Give workers time to start
@@ -172,17 +172,17 @@ async fn test_distributed_worker_0() {
     println!("\n=== WORKER 0: Waiting for tasks ===\n");
 
     // Connect to master
-    let node = create_test_node("worker0", 9002);
+    let node = create_test_node("worker0", 8001);
     let space = node.tuplespace(); // Returns Arc<TupleSpace>
 
     // Connect to master node
     node.connect_to(
         NodeId::new("master"),
-        "http://127.0.0.1:9001".to_string()
+        "http://127.0.0.1:8000".to_string()
     ).await.unwrap();
 
-    println!("Worker 0 connected to master at 127.0.0.1:9001");
-    println!("Listening on 127.0.0.1:9002\n");
+    println!("Worker 0 connected to master at 127.0.0.1:8000");
+    println!("Listening on 127.0.0.1:8001\n");
 
     // Wait for computation task
     println!("Waiting for scatter...");
@@ -208,17 +208,17 @@ async fn test_distributed_worker_1() {
     println!("\n=== WORKER 1: Waiting for tasks ===\n");
 
     // Connect to master
-    let node = create_test_node("worker1", 9003);
+    let node = create_test_node("worker1", 8002);
     let space = node.tuplespace(); // Returns Arc<TupleSpace>
 
     // Connect to master node
     node.connect_to(
         NodeId::new("master"),
-        "http://127.0.0.1:9001".to_string()
+        "http://127.0.0.1:8000".to_string()
     ).await.unwrap();
 
-    println!("Worker 1 connected to master at 127.0.0.1:9001");
-    println!("Listening on 127.0.0.1:9003\n");
+    println!("Worker 1 connected to master at 127.0.0.1:8000");
+    println!("Listening on 127.0.0.1:8002\n");
 
     // Wait for computation task
     println!("Waiting for scatter...");
@@ -247,7 +247,7 @@ async fn test_distributed_4_workers() {
     let num_rows = 2000;
     let num_cols = 1000;
 
-    let node = create_test_node("master", 9001);
+    let node = create_test_node("master", 8000);
     let space = node.tuplespace(); // Returns Arc<TupleSpace>
 
     println!("Master node started. Waiting for 4 workers...\n");

@@ -116,7 +116,7 @@ Get PlexSpaces running in under 5 minutes:
 
 ```bash
 # Using Docker (recommended)
-docker run -p 8080:8080 -p 9001:9001 plexspaces/node:latest
+docker run -p 8080:8080 -p 8000:8000 -p 8001:8001 plexspaces/node:latest
 
 # Or build from source
 git clone https://github.com/plexobject/plexspaces.git
@@ -297,6 +297,7 @@ See [Examples](examples/README.md) for the complete list.
 - **[Architecture](docs/architecture.md)**: System design, abstractions, and primitives (including FaaS Invocation)
 - **[Detailed Design](docs/detailed-design.md)**: Comprehensive component documentation with all facets, behaviors, APIs, and primitives (including InvokeActor Service)
 - **[Installation](docs/installation.md)**: Docker, Kubernetes, and manual setup
+- **[Testing](docs/testing.md)**: How to run unit tests, integration tests, and example tests
 - **[WASM Deployment](docs/wasm-deployment.md)**: Deploy polyglot WASM applications (Rust, Python, TypeScript, Go)
 - **[Use Cases](docs/use-cases.md)**: Real-world application patterns and use cases (including FaaS Platforms)
 - **[Examples](docs/examples.md)**: Example gallery with feature matrix
@@ -359,7 +360,7 @@ cd plexspaces
 make build
 
 # Run tests
-make test
+make test  # Includes unit tests and integration tests (see docs/testing.md)
 
 # Run examples
 make test-examples

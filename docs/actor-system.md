@@ -1008,13 +1008,13 @@ PlexSpaces exposes comprehensive metrics in Prometheus format:
 
 ```bash
 # Scrape metrics
-curl http://localhost:9001/metrics
+curl http://localhost:8001/metrics
 
 # Prometheus configuration
 scrape_configs:
   - job_name: 'plexspaces'
     static_configs:
-      - targets: ['localhost:9001']
+      - targets: ['localhost:8000']
 ```
 
 ### Logging

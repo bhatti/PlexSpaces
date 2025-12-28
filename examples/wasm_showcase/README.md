@@ -102,6 +102,55 @@ This example demonstrates **all implemented WASM runtime capabilities** in PlexS
 
 **Why This Matters**: WASM actors can fully participate in the PlexSpaces ecosystem, spawning children, coordinating via TupleSpace, and using channels for pub/sub and work distribution patterns. All service access is capability-based for security.
 
+### 9. **KeyValue Storage** 💾 ⭐ NEW
+- Store and retrieve key-value pairs
+- Atomic operations (increment, compare-and-swap)
+- TTL support (time-to-live expiration)
+- Multiple backends (SQLite, PostgreSQL, Redis, DynamoDB)
+
+**Why This Matters**: Enables state management, configuration storage, and distributed coordination via shared key-value store.
+
+### 10. **ProcessGroups Pub/Sub** 📢 ⭐ NEW
+- Join/leave process groups
+- Topic-based message filtering
+- Broadcast to all group members
+- Erlang pg2 semantics (multiple joins, topic merging)
+
+**Why This Matters**: Enables event broadcasting, topic-based subscriptions, and group coordination patterns.
+
+### 11. **Distributed Locks** 🔒 ⭐ NEW
+- Acquire/renew/release locks
+- Version-based optimistic locking
+- Lease-based expiration
+- Leader election support
+
+**Why This Matters**: Enables coordination, mutual exclusion, and leader election for distributed systems.
+
+### 12. **Object Registry** 📋 ⭐ NEW
+- Service registration and discovery
+- Health monitoring
+- Multi-tenant isolation
+- Label-based filtering
+
+**Why This Matters**: Enables service discovery, health monitoring, and dynamic service location in distributed systems.
+
+### 13. **Durability/Journaling** 📝 ⭐ NEW
+- Event sourcing (persist events)
+- Checkpoint creation (snapshots)
+- Event replay (reconstruct state)
+- Deterministic replay (side effect caching)
+
+**Why This Matters**: Enables crash recovery, audit logging, and state persistence for fault-tolerant systems.
+
+### 14. **Blob Storage** 📦 ⭐ NEW
+- Upload/download blobs (S3-compatible)
+- Blob metadata management
+- List blobs with prefix filtering
+- Copy blobs (server-side)
+- Multi-tenant isolation
+
+**Why This Matters**: Enables file storage, image processing, and large data management for actors.
+
 ## Running the Showcase
 
 ### Prerequisites
@@ -188,6 +237,24 @@ cargo run --release --bin wasm-showcase -- --demo behaviors
 
 # Service access (ChannelService, TupleSpace, ActorService)
 cargo run --release --bin wasm-showcase -- --demo services
+
+# KeyValue storage
+cargo run --release --bin wasm-showcase -- --demo keyvalue
+
+# ProcessGroups pub/sub
+cargo run --release --bin wasm-showcase -- --demo process-groups
+
+# Distributed locks
+cargo run --release --bin wasm-showcase -- --demo locks
+
+# Object registry
+cargo run --release --bin wasm-showcase -- --demo registry
+
+# Durability/journaling
+cargo run --release --bin wasm-showcase -- --demo durability
+
+# Blob storage
+cargo run --release --bin wasm-showcase -- --demo blob
 ```
 
 ### Quick Start Script
@@ -263,6 +330,44 @@ pip install --user componentize-py
    - `clear` - Clear event log
 
 3. **fsm_actor.py** - GenFSM behavior (state machine)
+   - `start` - Transition: idle -> processing
+   - `complete` - Transition: processing -> done
+   - `reset` - Transition: any -> idle
+   - `get_state` - Query current state
+
+4. **service_demo_actor.py** - Service access demonstration
+   - `spawn_actor` - Spawn child actor
+   - `send_message` - Send message to actor
+   - `tuplespace_write` - Write tuple
+   - `tuplespace_read` - Read tuple
+
+5. **keyvalue_actor.py** - KeyValue storage demonstration ⭐ NEW
+   - `store` - Store key-value pair
+   - `retrieve` - Retrieve value by key
+   - `delete` - Delete key
+   - `list` - List all keys
+
+6. **process_groups_actor.py** - ProcessGroups pub/sub demonstration ⭐ NEW
+   - `join_group` - Join process group
+   - `publish` - Publish message to group
+   - `leave_group` - Leave process group
+
+7. **locks_actor.py** - Distributed locks demonstration ⭐ NEW
+   - `acquire` - Acquire lock
+   - `release` - Release lock
+   - `try_acquire` - Try acquire (non-blocking)
+
+8. **registry_actor.py** - Object registry demonstration ⭐ NEW
+   - `register` - Register object/service
+   - `lookup` - Lookup object
+   - `discover` - Discover objects by type
+   - `unregister` - Unregister object
+
+9. **durability_actor.py** - Durability/journaling demonstration ⭐ NEW
+   - `increment` - Increment counter (with event persistence)
+   - `checkpoint` - Create checkpoint
+   - `get_sequence` - Get current event sequence
+   - `persist_batch` - Persist multiple events atomically
    - `start` - Transition: idle -> processing
    - `complete` - Transition: processing -> done
    - `reset` - Transition: any -> idle

@@ -56,8 +56,22 @@ use plexspaces_wasm_runtime::{
     ResourceLimits, WasmCapabilities, WasmConfig, WasmDeploymentService, WasmRuntime,
     WasmRuntimeServiceImpl,
 };
-use plexspaces_core::ActorRef;
+use plexspaces_core::{ActorId, ActorRef, RequestContext};
 use plexspaces_mailbox::Message;
+use plexspaces_keyvalue::InMemoryKVStore;
+use plexspaces_process_groups::ProcessGroupRegistry;
+use plexspaces_locks::memory::MemoryLockManager;
+use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_journaling::{JournalStorage, MemoryJournalStorage};
+use plexspaces_blob::{BlobService, repository::sql::SqlBlobRepository};
+use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
+use plexspaces_wasm_runtime::component_host::{
+    KeyValueImpl, ProcessGroupsImpl, LocksImpl, RegistryImpl, DurabilityImpl, BlobImpl,
+};
+use plexspaces_wasm_runtime::component_host::plexspaces::actor::registry::{ObjectType, Label};
+use object_store::local::LocalFileSystem;
+use sqlx::AnyPool;
+use tempfile::TempDir;
 use std::sync::Arc;
 use std::path::PathBuf;
 use tonic::transport::{Channel, Server};
@@ -139,6 +153,18 @@ enum DemoMode {
     Behaviors,
     /// Service access (ChannelService, TupleSpace, ActorService)
     Services,
+    /// KeyValue storage demonstration
+    KeyValue,
+    /// ProcessGroups pub/sub demonstration
+    ProcessGroups,
+    /// Distributed locks demonstration
+    Locks,
+    /// Object registry demonstration
+    Registry,
+    /// Durability/journaling demonstration
+    Durability,
+    /// Blob storage demonstration
+    Blob,
 }
 
 #[derive(Parser, Debug)]
@@ -178,6 +204,12 @@ async fn main() -> Result<()> {
             run_python_demo().await?;
             run_behaviors_demo().await?;
             run_services_demo().await?;
+            run_keyvalue_demo().await?;
+            run_process_groups_demo().await?;
+            run_locks_demo().await?;
+            run_registry_demo().await?;
+            run_durability_demo().await?;
+            run_blob_demo().await?;
         }
         DemoMode::Deployment => run_deployment_demo().await?,
         DemoMode::Security => run_security_demo().await?,
@@ -186,6 +218,12 @@ async fn main() -> Result<()> {
         DemoMode::Python => run_python_demo().await?,
         DemoMode::Behaviors => run_behaviors_demo().await?,
         DemoMode::Services => run_services_demo().await?,
+        DemoMode::KeyValue => run_keyvalue_demo().await?,
+        DemoMode::ProcessGroups => run_process_groups_demo().await?,
+        DemoMode::Locks => run_locks_demo().await?,
+        DemoMode::Registry => run_registry_demo().await?,
+        DemoMode::Durability => run_durability_demo().await?,
+        DemoMode::Blob => run_blob_demo().await?,
     }
 
     info!("\n✅ All demonstrations completed successfully!");
@@ -215,7 +253,7 @@ async fn run_deployment_demo() -> Result<()> {
 
     // Connect to ApplicationService
     info!("\n2. Connecting to ApplicationService...");
-    let channel = Channel::from_shared("http://127.0.0.1:9000".to_string())?
+    let channel = Channel::from_shared("http://127.0.0.1:8000".to_string())?
         .connect()
         .await?;
     let mut client = ApplicationServiceClient::new(channel);
@@ -296,14 +334,21 @@ async fn run_deployment_demo() -> Result<()> {
     let runtime = Arc::new(WasmRuntime::new().await?);
     let module = runtime.load_module("counter-demo", "1.0.0", &demo_wasm).await?;
     
-    // Instantiate actor
-    let instance = runtime.instantiate(
-        module,
-        "counter-actor-1".to_string(),
-        &[],
-        WasmConfig::default(),
-        None, // No channel service for this demo
-    ).await?;
+     // Instantiate actor
+     let instance = runtime.instantiate(
+         module,
+         "counter-actor-1".to_string(),
+         &[],
+         WasmConfig::default(),
+         None, // No message sender
+         None, // No tuplespace provider
+         None, // No channel service
+         None, // No keyvalue store
+         None, // No process groups registry
+         None, // No lock manager
+         None, // No object registry
+         None, // No journal storage
+     ).await?;
     info!("✓ Actor instantiated: {}", instance.actor_id());
     
     // Send increment message
@@ -384,7 +429,7 @@ async fn run_security_demo() -> Result<()> {
 
     // Connect to ApplicationService
     info!("\n2. Connecting to ApplicationService...");
-    let channel = Channel::from_shared("http://127.0.0.1:9000".to_string())?
+    let channel = Channel::from_shared("http://127.0.0.1:8000".to_string())?
         .connect()
         .await?;
     let mut client = ApplicationServiceClient::new(channel);
@@ -852,7 +897,7 @@ async fn run_services_demo() -> Result<()> {
     // Wait for node to be ready
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     
-    let channel = Channel::from_shared("http://127.0.0.1:9000".to_string())?
+    let channel = Channel::from_shared("http://127.0.0.1:8000".to_string())?
         .connect()
         .await?;
     let mut client = ApplicationServiceClient::new(channel);
@@ -900,5 +945,418 @@ async fn run_services_demo() -> Result<()> {
     node_handle.abort();
 
     info!("\n✅ Services demo complete!\n");
+    Ok(())
+}
+
+/// Demo 8: KeyValue Storage
+async fn run_keyvalue_demo() -> Result<()> {
+    info!("💾 Demo 8: KeyValue Storage");
+    info!("---------------------------");
+
+    // Create in-memory key-value store
+    let kv_store = Arc::new(InMemoryKVStore::new());
+    let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_all_services(
+        None, None, Some(kv_store), None, None, None, None, None,
+    ));
+
+    let actor_id = ActorId::from("kv-demo-actor".to_string());
+    let mut kv = KeyValueImpl {
+        actor_id: actor_id.clone(),
+        host_functions: host_functions.clone(),
+    };
+
+    info!("\n1. Storing key-value pairs...");
+    kv.put("user:1".to_string(), b"Alice".to_vec()).await?;
+    kv.put("user:2".to_string(), b"Bob".to_vec()).await?;
+    kv.put("config:timeout".to_string(), b"30".to_vec()).await?;
+    info!("✓ Stored 3 key-value pairs");
+
+    info!("\n2. Retrieving values...");
+    let value1 = kv.get("user:1".to_string()).await?;
+    assert_eq!(value1, Some(b"Alice".to_vec()));
+    info!("✓ Retrieved user:1 = {}", String::from_utf8_lossy(&value1.unwrap()));
+
+    info!("\n3. Atomic increment operation...");
+    let count1 = kv.increment("counter:views".to_string(), 1).await?;
+    let count2 = kv.increment("counter:views".to_string(), 5).await?;
+    info!("✓ Incremented counter:views from {} to {}", count1, count2);
+
+    info!("\n4. Compare-and-swap operation...");
+    let cas_result = kv.compare_and_swap(
+        "config:timeout".to_string(),
+        Some(b"30".to_vec()),
+        b"60".to_vec(),
+    ).await?;
+    assert!(cas_result);
+    info!("✓ Updated config:timeout from 30 to 60 using CAS");
+
+    info!("\n5. Listing keys...");
+    let keys = kv.list_keys("user:".to_string(), 10).await?;
+    info!("✓ Found {} keys with prefix 'user:'", keys.len());
+    for key in &keys {
+        info!("  - {}", key);
+    }
+
+    info!("\n✅ KeyValue demo complete!\n");
+    Ok(())
+}
+
+/// Demo 9: ProcessGroups Pub/Sub
+async fn run_process_groups_demo() -> Result<()> {
+    info!("📢 Demo 9: ProcessGroups Pub/Sub");
+    info!("-------------------------------");
+
+    let kv_store = Arc::new(InMemoryKVStore::new());
+    let process_group_registry = Arc::new(ProcessGroupRegistry::new(
+        "demo-node".to_string(),
+        kv_store.clone(),
+    ));
+    let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_all_services(
+        None, None, Some(kv_store), Some(process_group_registry), None, None, None, None,
+    ));
+
+    let actor_id = ActorId::from("pg-demo-actor".to_string());
+    let mut pg = ProcessGroupsImpl {
+        actor_id: actor_id.clone(),
+        host_functions: host_functions.clone(),
+    };
+
+    info!("\n1. Creating process group...");
+    pg.create_group("notifications".to_string(), "default".to_string()).await?;
+    info!("✓ Created group 'notifications'");
+
+    info!("\n2. Joining process group with topics...");
+    pg.join_group(
+        "notifications".to_string(),
+        "default".to_string(),
+        vec!["alerts".to_string(), "updates".to_string()],
+    ).await?;
+    info!("✓ Joined group with topics: alerts, updates");
+
+    info!("\n3. Getting group members...");
+    let members = pg.get_members("notifications".to_string()).await?;
+    info!("✓ Group has {} member(s)", members.len());
+    for member in &members {
+        info!("  - {}", member);
+    }
+
+    info!("\n4. Publishing message to group...");
+    let recipients = pg.publish_to_group(
+        "notifications".to_string(),
+        Some("alerts".to_string()),
+        b"System alert: High CPU usage".to_vec(),
+    ).await?;
+    info!("✓ Published message to {} recipient(s)", recipients.len());
+
+    info!("\n5. Leaving process group...");
+    pg.leave_group("notifications".to_string()).await?;
+    info!("✓ Left group");
+
+    info!("\n✅ ProcessGroups demo complete!\n");
+    Ok(())
+}
+
+/// Demo 10: Distributed Locks
+async fn run_locks_demo() -> Result<()> {
+    info!("🔒 Demo 10: Distributed Locks");
+    info!("---------------------------");
+
+    let lock_manager = Arc::new(MemoryLockManager::new());
+    let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_all_services(
+        None, None, None, None, Some(lock_manager), None, None, None,
+    ));
+
+    let actor_id = ActorId::from("locks-demo-actor".to_string());
+    let mut locks = LocksImpl {
+        actor_id: actor_id.clone(),
+        host_functions: host_functions.clone(),
+    };
+
+    info!("\n1. Acquiring lock...");
+    let lock = locks.acquire(
+        "resource:db".to_string(),
+        "worker-1".to_string(),
+        30000, // 30 seconds
+    ).await?;
+    info!("✓ Acquired lock 'resource:db' (version: {})", lock.version);
+    info!("  - Holder: {}", lock.holder_id);
+    info!("  - Expires in: {}ms", lock.expires_at_ms - lock.acquired_at_ms);
+
+    info!("\n2. Renewing lock...");
+    let renewed = locks.renew(
+        "resource:db".to_string(),
+        "worker-1".to_string(),
+        lock.version.clone(),
+        60000, // 60 seconds
+    ).await?;
+    info!("✓ Renewed lock (new version: {})", renewed.version);
+
+    info!("\n3. Trying to acquire same lock (should fail)...");
+    let try_result = locks.try_acquire(
+        "resource:db".to_string(),
+        "worker-2".to_string(),
+        30000,
+    ).await?;
+    if try_result.is_none() {
+        info!("✓ Lock correctly denied (already held by worker-1)");
+    } else {
+        warn!("⚠ Lock was acquired (unexpected)");
+    }
+
+    info!("\n4. Releasing lock...");
+    locks.release(
+        "resource:db".to_string(),
+        "worker-1".to_string(),
+        renewed.version,
+        false, // Don't delete
+    ).await?;
+    info!("✓ Released lock");
+
+    info!("\n5. Acquiring lock again (should succeed now)...");
+    let lock2 = locks.try_acquire(
+        "resource:db".to_string(),
+        "worker-2".to_string(),
+        30000,
+    ).await?;
+    assert!(lock2.is_some());
+    info!("✓ Successfully acquired lock after release");
+
+    info!("\n✅ Locks demo complete!\n");
+    Ok(())
+}
+
+/// Demo 11: Object Registry
+async fn run_registry_demo() -> Result<()> {
+    info!("📋 Demo 11: Object Registry");
+    info!("--------------------------");
+
+    let kv_store = Arc::new(InMemoryKVStore::new());
+    let object_registry = Arc::new(ObjectRegistry::new(kv_store.clone()));
+    let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_all_services(
+        None, None, Some(kv_store), None, None, Some(object_registry), None, None,
+    ));
+
+    let actor_id = ActorId::from("registry-demo-actor".to_string());
+    let mut registry = RegistryImpl {
+        actor_id: actor_id.clone(),
+        host_functions: host_functions.clone(),
+    };
+
+    info!("\n1. Registering service...");
+    registry.register(
+        "payment-service".to_string(),
+        ObjectType::Service,
+        "http://payment:8000".to_string(),
+        Some("PaymentProcessor".to_string()),
+        vec!["payment".to_string(), "transaction".to_string()],
+        vec![
+            Label { key: "env".to_string(), value: "production".to_string() },
+            Label { key: "version".to_string(), value: "1.0.0".to_string() },
+        ],
+    ).await?;
+    info!("✓ Registered payment-service");
+
+    info!("\n2. Looking up service...");
+    let lookup_result = registry.lookup(
+        ObjectType::Service,
+        "payment-service".to_string(),
+    ).await?;
+    if let Some(reg) = lookup_result {
+        info!("✓ Found service: {}", reg.object_id);
+        info!("  - Address: {}", reg.grpc_address);
+        info!("  - Type: {:?}", reg.object_type);
+    }
+
+    info!("\n3. Discovering services by type...");
+    let discovered = registry.discover(
+        ObjectType::Service,
+        Some("payment".to_string()),
+        vec![],
+    ).await?;
+    info!("✓ Discovered {} service(s)", discovered.len());
+    for service in &discovered {
+        info!("  - {} at {}", service.object_id, service.grpc_address);
+    }
+
+    info!("\n4. Sending heartbeat...");
+    registry.heartbeat("payment-service".to_string()).await?;
+    info!("✓ Heartbeat sent");
+
+    info!("\n5. Unregistering service...");
+    registry.unregister("payment-service".to_string()).await?;
+    info!("✓ Service unregistered");
+
+    info!("\n✅ Registry demo complete!\n");
+    Ok(())
+}
+
+/// Demo 12: Durability/Journaling
+async fn run_durability_demo() -> Result<()> {
+    info!("📝 Demo 12: Durability/Journaling");
+    info!("-------------------------------");
+
+    let journal_storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+    let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_all_services(
+        None, None, None, None, None, None, Some(journal_storage), None,
+    ));
+
+    let actor_id = ActorId::from("durability-demo-actor".to_string());
+    let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
+
+    info!("\n1. Persisting events...");
+    let seq1 = durability.persist(
+        "order.created".to_string(),
+        b"{\"order_id\": \"123\", \"amount\": 99.99}".to_vec(),
+    ).await?;
+    let seq2 = durability.persist(
+        "order.paid".to_string(),
+        b"{\"order_id\": \"123\", \"payment_id\": \"pay-456\"}".to_vec(),
+    ).await?;
+    info!("✓ Persisted 2 events (sequences: {}, {})", seq1, seq2);
+
+    info!("\n2. Persisting batch of events...");
+    let events = vec![
+        ("order.shipped".to_string(), b"{\"order_id\": \"123\", \"tracking\": \"TRK789\"}".to_vec()),
+        ("order.delivered".to_string(), b"{\"order_id\": \"123\"}".to_vec()),
+    ];
+    let batch_seq = durability.persist_batch(events).await?;
+    info!("✓ Persisted batch (first sequence: {})", batch_seq);
+
+    info!("\n3. Getting current sequence...");
+    let current_seq = durability.get_sequence().await?;
+    info!("✓ Current sequence: {}", current_seq);
+
+    info!("\n4. Creating checkpoint...");
+    let checkpoint_seq = durability.checkpoint(b"{\"state\": \"completed\"}".to_vec()).await?;
+    info!("✓ Created checkpoint at sequence: {}", checkpoint_seq);
+
+    info!("\n5. Getting checkpoint sequence...");
+    let cp_seq = durability.get_checkpoint_sequence().await?;
+    info!("✓ Checkpoint sequence: {}", cp_seq.unwrap_or(0));
+
+    info!("\n6. Checking if replaying...");
+    let is_replaying = durability.is_replaying().await?;
+    info!("✓ Is replaying: {}", is_replaying);
+
+    info!("\n7. Reading journal events...");
+    let events = durability.read_journal(1, 10).await?;
+    info!("✓ Read {} event(s) from journal", events.len());
+
+    info!("\n✅ Durability demo complete!\n");
+    Ok(())
+}
+
+/// Demo 13: Blob Storage
+async fn run_blob_demo() -> Result<()> {
+    info!("📦 Demo 13: Blob Storage");
+    info!("-----------------------");
+
+    // Install sqlx::any default drivers before any database operations
+    sqlx::any::install_default_drivers();
+
+    // Create in-memory blob service
+    let temp_dir = TempDir::new()?;
+    let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path())?);
+    let any_pool = AnyPool::connect("sqlite::memory:").await?;
+    // Migrations are auto-applied in new()
+    let repository = Arc::new(SqlBlobRepository::new(any_pool).await?);
+    let config = ProtoBlobConfig {
+        backend: "local".to_string(),
+        bucket: "demo-bucket".to_string(),
+        endpoint: String::new(),
+        region: String::new(),
+        access_key_id: String::new(),
+        secret_access_key: String::new(),
+        use_ssl: false,
+        prefix: "/plexspaces".to_string(),
+        gcp_service_account_json: String::new(),
+        azure_account_name: String::new(),
+        azure_account_key: String::new(),
+    };
+    let blob_service = Arc::new(BlobService::with_object_store(config, local_store, repository));
+    let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_all_services(
+        None, None, None, None, None, None, None, Some(blob_service),
+    ));
+
+    let actor_id = ActorId::from("blob-demo-actor".to_string());
+    let mut blob = BlobImpl {
+        actor_id: actor_id.clone(),
+        host_functions: host_functions.clone(),
+    };
+
+    info!("\n1. Uploading blob...");
+    let data = b"Hello, PlexSpaces! This is a test blob.".to_vec();
+    let metadata = blob.upload(
+        "demo-bucket".to_string(),
+        "test/file.txt".to_string(),
+        data.clone(),
+        Some("text/plain".to_string()),
+        Some("demo-tenant".to_string()),
+        Some("demo-namespace".to_string()),
+    ).await?;
+    info!("✓ Uploaded blob: {}", metadata.blob_id);
+    info!("  - Size: {} bytes", metadata.size);
+    info!("  - Content-Type: {:?}", metadata.content_type);
+
+    info!("\n2. Downloading blob...");
+    let downloaded = blob.download(
+        metadata.blob_id.clone(),
+        "demo-bucket".to_string(),
+        "test/file.txt".to_string(),
+    ).await?;
+    assert_eq!(downloaded, data);
+    info!("✓ Downloaded blob ({} bytes)", downloaded.len());
+
+    info!("\n3. Getting blob metadata...");
+    let meta = blob.metadata(
+        metadata.blob_id.clone(),
+        "demo-bucket".to_string(),
+        "test/file.txt".to_string(),
+    ).await?;
+    info!("✓ Retrieved metadata");
+    info!("  - Blob ID: {}", meta.blob_id);
+    info!("  - Key: {}", meta.key);
+    info!("  - Size: {} bytes", meta.size);
+
+    info!("\n4. Checking if blob exists...");
+    let exists = blob.exists(
+        metadata.blob_id.clone(),
+        "demo-bucket".to_string(),
+        "test/file.txt".to_string(),
+    ).await?;
+    info!("✓ Blob exists: {}", exists);
+
+    info!("\n5. Listing blobs...");
+    let blobs = blob.list_blobs(
+        "demo-bucket".to_string(),
+        "test/".to_string(),
+        10,
+        Some("demo-tenant".to_string()),
+        Some("demo-namespace".to_string()),
+    ).await?;
+    info!("✓ Found {} blob(s) with prefix 'test/'", blobs.len());
+    for b in &blobs {
+        info!("  - {} ({} bytes)", b.key, b.size);
+    }
+
+    info!("\n6. Copying blob...");
+    let copy_meta = blob.copy(
+        metadata.blob_id.clone(),
+        "demo-bucket".to_string(),
+        "test/file.txt".to_string(),
+        "demo-bucket".to_string(),
+        "test/file-copy.txt".to_string(),
+    ).await?;
+    info!("✓ Copied blob to {}", copy_meta.key);
+
+    info!("\n7. Deleting blob...");
+    blob.delete(
+        metadata.blob_id,
+        "demo-bucket".to_string(),
+        "test/file.txt".to_string(),
+    ).await?;
+    info!("✓ Deleted blob");
+
+    info!("\n✅ Blob demo complete!\n");
     Ok(())
 }

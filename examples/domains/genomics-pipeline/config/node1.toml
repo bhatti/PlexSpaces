@@ -17,17 +17,17 @@ description = "Genomics Pipeline Coordinator Node"
 
 [node]
 id = "genomics-coordinator"
-listen_address = "0.0.0.0:9001"
+listen_address = "0.0.0.0:8000"
 # Cluster seed nodes (other nodes in the cluster)
 cluster_seed_nodes = [
-    "genomics-qc-alignment:9002",
-    "genomics-chromosomes:9003",
-    "genomics-annotation:9004"
+    "genomics-qc-alignment:8001",
+    "genomics-chromosomes:8002",
+    "genomics-annotation:8003"
 ]
 
 [runtime.grpc]
 enabled = true
-address = "0.0.0.0:9001"
+address = "0.0.0.0:8000"
 max_connections = 100
 keepalive_interval_seconds = 30
 connection_timeout_seconds = 10
@@ -106,11 +106,11 @@ SQLITE_PATH = "/data/genomics/coordinator.db"
 CHECKPOINT_INTERVAL = "10"
 # Cluster configuration
 CLUSTER_MODE = "distributed"
-QC_POOL_ADDRESS = "genomics-qc-alignment:9002"
-ALIGNMENT_POOL_ADDRESS = "genomics-qc-alignment:9002"
-CHROMOSOME_POOL_ADDRESS = "genomics-chromosomes:9003"
-ANNOTATION_POOL_ADDRESS = "genomics-annotation:9004"
-REPORT_POOL_ADDRESS = "genomics-annotation:9004"
+QC_POOL_ADDRESS = "genomics-qc-alignment:8001"
+ALIGNMENT_POOL_ADDRESS = "genomics-qc-alignment:8001"
+CHROMOSOME_POOL_ADDRESS = "genomics-chromosomes:8002"
+ANNOTATION_POOL_ADDRESS = "genomics-annotation:8003"
+REPORT_POOL_ADDRESS = "genomics-annotation:8003"
 
 # Resource limits
 [resources]

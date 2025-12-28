@@ -22,7 +22,7 @@ MINIO_URL="${BLOB_ENDPOINT:-http://localhost:9000}"
 MINIO_KEY="${BLOB_ACCESS_KEY_ID:-minioadmin_user}"
 MINIO_SECRET="${BLOB_SECRET_ACCESS_KEY:-minioadmin_pass}"
 BUCKET="${BLOB_BUCKET:-plexspaces}"
-PORT="${PLEXSPACES_LISTEN_ADDR:-0.0.0.0:9000}"
+PORT="${PLEXSPACES_LISTEN_ADDR:-0.0.0.0:8000}"
 NODE_ID="${PLEXSPACES_NODE_ID:-node-$(date +%s)}"
 
 # Parse arguments
@@ -140,7 +140,7 @@ echo ""
 echo -e "${GREEN}Starting node...${NC}"
 echo ""
 
-# Extract port from address (e.g., "0.0.0.0:9000" -> "9000")
+# Extract port from address (e.g., "0.0.0.0:8000" -> "8000")
 # HTTP port is gRPC_PORT + 100 to avoid conflicts with MinIO console (which uses gRPC_PORT + 1)
 GRPC_PORT="${PORT##*:}"
 HTTP_PORT=$((GRPC_PORT + 100))

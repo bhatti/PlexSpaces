@@ -6,7 +6,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 NODE_ID="${PLEXSPACES_NODE_ID:-nbody-test-node}"
-LISTEN_ADDR="${PLEXSPACES_LISTEN_ADDR:-0.0.0.0:9001}"
+LISTEN_ADDR="${PLEXSPACES_LISTEN_ADDR:-0.0.0.0:8000}"
 
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║     Starting PlexSpaces Node                                  ║"

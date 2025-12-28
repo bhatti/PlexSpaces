@@ -15,6 +15,6 @@ kafka_brokers = ["localhost:9092"]
 
 [node]
 node_id = "order-node-1"
-grpc_port = 9001
+grpc_port = 8000
 registry_port = 9101
 

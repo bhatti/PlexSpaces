@@ -43,8 +43,8 @@
 //!   |      -> ActorRef.tell(msg) -> Direct mailbox delivery
 //!   |
 //!   +--> If node2 != local_node_id:
-//!          -> Registry.get_node_address("node2") -> "remote_host:9002"
-//!          -> gRPC client.SendMessage("remote_host:9002", msg)
+//!          -> Registry.get_node_address("node2") -> "remote_host:8001"
+//!          -> gRPC client.SendMessage("remote_host:8001", msg)
 //!          -> Remote node's ActorService receives
 //!          -> Remote node routes locally
 //! ```
@@ -71,7 +71,7 @@
 //! let actor_service = ActorServiceImpl::new(service_locator, "node1".to_string());
 //!
 //! // Start gRPC server
-//! let addr = "0.0.0.0:9001".parse()?;
+//! let addr = "0.0.0.0:8000".parse()?;
 //! tonic::transport::Server::builder()
 //!     .add_service(ActorServiceServer::new(actor_service))
 //!     .serve(addr)

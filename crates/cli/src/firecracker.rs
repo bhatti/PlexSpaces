@@ -36,7 +36,7 @@
 //! # Start VM and deploy application
 //! plexspaces vm start --id vm-001 \
 //!   --app app.wasm \
-//!   --node localhost:9001
+//!   --node localhost:8000
 //! ```
 
 use anyhow::{Context, Result};
@@ -72,7 +72,7 @@ pub enum VmCommands {
         #[arg(long)]
         app: Option<PathBuf>,
 
-        /// Node address for app deployment (e.g., localhost:9001)
+        /// Node address for app deployment (e.g., localhost:8000)
         /// Required when using --app flag
         #[arg(long)]
         node: Option<String>,

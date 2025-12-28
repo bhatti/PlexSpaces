@@ -51,12 +51,12 @@
 //
 // 1. **ACTOR**: Stateful computation units
 //    - `object_category`: "GenServer", "Workflow", "VirtualActor", "Supervisor", etc.
-//    - `grpc_address`: Node's ActorService endpoint (e.g., "http://node-1:9001")
+//    - `grpc_address`: Node's ActorService endpoint (e.g., "http://node-1:8000")
 //    - Use case: Route messages to remote actors
 //
 // 2. **TUPLESPACE**: Coordination primitives
 //    - `object_category`: "redis", "postgresql", "sqlite", "memory"
-//    - `grpc_address`: TupleSpaceService endpoint (e.g., "http://ts-node:9002")
+//    - `grpc_address`: TupleSpaceService endpoint (e.g., "http://ts-node:8001")
 //    - Use case: Discover distributed tuple spaces by backend type
 //
 // 3. **SERVICE**: Microservices and gRPC endpoints
@@ -115,7 +115,7 @@
 //     object_type: ObjectType::Actor,
 //     object_id: "counter@node1",
 //     object_category: "GenServer",
-//     grpc_address: "http://node1:9001",
+//     grpc_address: "http://node1:8000",
 //     ...
 // }).await?;
 // let obj = object_registry.lookup("counter@node1", ObjectType::Actor).await?;
@@ -125,7 +125,7 @@
 //     object_type: ObjectType::TupleSpace,
 //     object_id: "ts-redis-acme-prod",
 //     object_category: "redis",
-//     grpc_address: "http://ts-node:9002",
+//     grpc_address: "http://ts-node:8001",
 //     capabilities: vec!["persistent", "distributed"],
 //     ...
 // }).await?;
@@ -291,8 +291,8 @@ message ObjectRegistration {
   // gRPC address to connect to this object (PRIMARY PURPOSE!)
   // Format: "http://host:port" or "https://host:port"
   // Examples:
-  // - Actor: "http://node1:9001" (ActorService endpoint)
-  // - TupleSpace: "http://ts-node:9002" (TuplePlexSpaceService endpoint)
+  // - Actor: "http://node1:8000" (ActorService endpoint)
+  // - TupleSpace: "http://ts-node:8001" (TuplePlexSpaceService endpoint)
   // - Service: "http://order-pod:50051" (Custom service endpoint)
   string grpc_address = 8 [(google.api.field_behavior) = REQUIRED];
 

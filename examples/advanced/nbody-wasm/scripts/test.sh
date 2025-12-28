@@ -103,7 +103,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "Step 4: Starting PlexSpaces node"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 export PLEXSPACES_NODE_ID="nbody-test-node"
-export PLEXSPACES_LISTEN_ADDR="0.0.0.0:9001"
+export PLEXSPACES_LISTEN_ADDR="0.0.0.0:8000"
 
 # Start node in background
 cargo run --release --bin node-starter > /tmp/nbody-node.log 2>&1 &
@@ -138,7 +138,7 @@ echo "Step 5: Deploying WASM application"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 cargo run --release --bin nbody-wasm -- deploy \
     --wasm wasm-modules/nbody-application.wasm \
-    --node http://localhost:9001 \
+    --node http://localhost:8000 \
     --name nbody-simulation \
     --version 0.1.0
 

@@ -79,12 +79,12 @@ services:
     container_name: plexspaces-node
     hostname: node1
     ports:
-      - "9001:9001"
+      - "8000:8000"
     environment:
       # Node configuration
       - NODE_ID=node1
-      - NODE_LISTEN_ADDRESS=0.0.0.0:9001
-      - GRPC_ADDRESS=0.0.0.0:9001
+      - NODE_LISTEN_ADDRESS=0.0.0.0:8000
+      - GRPC_ADDRESS=0.0.0.0:8000
       
       # Release configuration
       - PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
@@ -112,7 +112,7 @@ services:
     volumes:
       - ./config:/app/config:ro
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9001", "-service=readiness"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8000", "-service=readiness"]
       interval: 10s
       timeout: 5s
       retries: 3

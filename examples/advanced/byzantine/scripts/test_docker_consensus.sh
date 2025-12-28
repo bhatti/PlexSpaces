@@ -95,10 +95,10 @@ check_health() {
 
 ALL_HEALTHY=false
 while [ $ELAPSED -lt $MAX_WAIT ]; do
-    if check_health "node1" "9001" && \
-       check_health "node2" "9002" && \
-       check_health "node3" "9003" && \
-       check_health "node4" "9004"; then
+    if check_health "node1" "8000" && \
+       check_health "node2" "8001" && \
+       check_health "node3" "8002" && \
+       check_health "node4" "8003"; then
         ALL_HEALTHY=true
         break
     fi

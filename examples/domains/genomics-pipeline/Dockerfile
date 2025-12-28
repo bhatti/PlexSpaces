@@ -33,7 +33,7 @@ USER plexspaces
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-  CMD [ "sh", "-c", "curl -f http://localhost:9001/health || exit 1" ]
+  CMD [ "sh", "-c", "curl -f http://localhost:8001/health || exit 1" ]
 
 # Default command
 ENTRYPOINT ["genomics-node"]

@@ -21,7 +21,7 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Step 2: Starting PlexSpaces node (if not running)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Note: Make sure a PlexSpaces node is running on localhost:9001"
+echo "Note: Make sure a PlexSpaces node is running on localhost:8000"
 echo "      You can start one with: cargo run --bin plexspaces-node"
 echo ""
 

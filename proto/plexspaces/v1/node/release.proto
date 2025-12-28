@@ -96,11 +96,11 @@ message NodeConfig {
   // Can be environment variable like "${NODE_ID}"
   string id = 1;
 
-  // Address this node listens on (e.g., "0.0.0.0:9001")
+  // Address this node listens on (e.g., "0.0.0.0:8000")
   string listen_address = 2;
 
   // Cluster seed nodes for discovery
-  // e.g., ["node1.cluster.local:9001", "node2.cluster.local:9001"]
+  // e.g., ["node1.cluster.local:8000", "node2.cluster.local:8000"]
   repeated string cluster_seed_nodes = 3;
 
   // Default tenant ID for this node
@@ -188,7 +188,7 @@ message GrpcConfig {
   // Enable gRPC server
   bool enabled = 1;
 
-  // gRPC listen address (e.g., "0.0.0.0:9001")
+  // gRPC listen address (e.g., "0.0.0.0:8000")
   string address = 2;
 
   // Maximum concurrent connections

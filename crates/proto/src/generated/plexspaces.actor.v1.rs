@@ -487,12 +487,12 @@ pub struct ActorMetrics {
 /// ## Example
 /// ```rust
 /// // Create actor locally on node1
-/// let client1 = ActorServiceClient::connect("<http://node1:9001">).await?;
+/// let client1 = ActorServiceClient::connect("<http://node1:8000">).await?;
 /// let response = client1.create_actor(CreateActorRequest { actor_type: "worker", ... }).await?;
 /// // Actor is created on node1
 ///
 /// // Create actor on remote node2
-/// let client2 = ActorServiceClient::connect("<http://node2:9002">).await?;
+/// let client2 = ActorServiceClient::connect("<http://node2:8001">).await?;
 /// let response = client2.create_actor(CreateActorRequest { actor_type: "worker", ... }).await?;
 /// // Actor is created on node2
 /// ```
@@ -1053,7 +1053,7 @@ pub struct ActorMigrating {
 /// - actor_id: The actor to monitor (can be "actor@node" for remote)
 /// - supervisor_id: The supervisor that wants notifications (for logging/debugging)
 /// - supervisor_callback: gRPC address where to send NotifyActorDown
-///    (e.g., "<http://supervisor-node:9001">)
+///    (e.g., "<http://supervisor-node:8000">)
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MonitorActorRequest {

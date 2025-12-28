@@ -30,7 +30,7 @@ Or use the test script:
 ## Testing
 
 The example will:
-1. Start a node on port 9001
+1. Start a node on port 8000
 2. Spawn a counter actor
 3. Test GET requests to read the counter
 4. Test POST requests to increment the counter

@@ -4,7 +4,7 @@
 // Queues provide load-balanced delivery, Topics provide broadcast.
 
 interface channels {
-    use types.{payload, message-id, duration-ms, actor-error};
+    use types.{payload, message-id, duration-ms, actor-error, context};
 
     /// Queue message with metadata
     record queue-message {
@@ -40,7 +40,7 @@ interface channels {
     /// ```rust
     /// channels::send_to_queue("orders", "order.created", order_bytes)?;
     /// ```
-    send-to-queue: func(queue-name: string, msg-type: string, payload: payload) -> result<message-id, actor-error>;
+    send-to-queue: func(ctx: context, queue-name: string, msg-type: string, payload: payload) -> result<message-id, actor-error>;
 
     /// Send with options
     ///
@@ -52,6 +52,7 @@ interface channels {
     /// - `ttl-ms`: Time-to-live (0 = infinite)
     /// - `headers`: Custom headers
     send-to-queue-with-options: func(
+        ctx: context,
         queue-name: string,
         msg-type: string,
         payload: payload,
@@ -73,13 +74,13 @@ interface channels {
     /// - `ok(some(message))`: Message received
     /// - `ok(none)`: No message available (timeout)
     /// - `err`: Receive failed
-    receive-from-queue: func(queue-name: string, timeout-ms: duration-ms) -> result<option<queue-message>, actor-error>;
+    receive-from-queue: func(ctx: context, queue-name: string, timeout-ms: duration-ms) -> result<option<queue-message>, actor-error>;
 
     /// Acknowledge message processing
     ///
     /// Removes message from queue permanently.
     /// Must be called after successful processing.
-    ack: func(queue-name: string, message-id: message-id) -> result<_, actor-error>;
+    ack: func(ctx: context, queue-name: string, message-id: message-id) -> result<_, actor-error>;
 
     /// Negative acknowledge (reject message)
     ///
@@ -90,7 +91,7 @@ interface channels {
     /// - `queue-name`: Queue name
     /// - `message-id`: Message to reject
     /// - `requeue`: If true, message goes back to queue. If false, goes to DLQ.
-    nack: func(queue-name: string, message-id: message-id, requeue: bool) -> result<_, actor-error>;
+    nack: func(ctx: context, queue-name: string, message-id: message-id, requeue: bool) -> result<_, actor-error>;
 
     /// Publish message to topic
     ///
@@ -104,7 +105,7 @@ interface channels {
     /// # Returns
     /// - `ok(message-id)`: Message published
     /// - `err`: Publish failed
-    publish-to-topic: func(topic-name: string, msg-type: string, payload: payload) -> result<message-id, actor-error>;
+    publish-to-topic: func(ctx: context, topic-name: string, msg-type: string, payload: payload) -> result<message-id, actor-error>;
 
     /// Subscribe to topic
     ///
@@ -117,7 +118,7 @@ interface channels {
     ///
     /// # Returns
     /// Subscription ID for unsubscribe
-    subscribe-to-topic: func(topic-name: string, filter: option<string>) -> result<u64, actor-error>;
+    subscribe-to-topic: func(ctx: context, topic-name: string, filter: option<string>) -> result<u64, actor-error>;
 
     /// Unsubscribe from topic
     unsubscribe-from-topic: func(subscription-id: u64) -> result<_, actor-error>;
@@ -128,11 +129,11 @@ interface channels {
     /// - `queue-name`: Queue name
     /// - `max-size`: Maximum queue size (0 = unlimited)
     /// - `message-ttl-ms`: Default TTL for messages (0 = infinite)
-    create-queue: func(queue-name: string, max-size: u32, message-ttl-ms: duration-ms) -> result<_, actor-error>;
+    create-queue: func(ctx: context, queue-name: string, max-size: u32, message-ttl-ms: duration-ms) -> result<_, actor-error>;
 
     /// Delete queue
-    delete-queue: func(queue-name: string) -> result<_, actor-error>;
+    delete-queue: func(ctx: context, queue-name: string) -> result<_, actor-error>;
 
     /// Get queue depth (number of messages)
-    queue-depth: func(queue-name: string) -> result<u64, actor-error>;
+    queue-depth: func(ctx: context, queue-name: string) -> result<u64, actor-error>;
 }

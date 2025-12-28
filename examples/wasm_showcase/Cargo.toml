@@ -17,6 +17,12 @@ plexspaces-proto = { path = "../../crates/proto" }
 plexspaces-node = { path = "../../crates/node" }
 plexspaces-core = { path = "../../crates/core" }
 plexspaces-mailbox = { path = "../../crates/mailbox" }
+plexspaces-keyvalue = { path = "../../crates/keyvalue" }
+plexspaces-process-groups = { path = "../../crates/process-groups" }
+plexspaces-locks = { path = "../../crates/locks" }
+plexspaces-object-registry = { path = "../../crates/object-registry" }
+plexspaces-journaling = { path = "../../crates/journaling" }
+plexspaces-blob = { path = "../../crates/blob", features = ["sql-backend"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -42,3 +48,6 @@ anyhow = "1.0"
 # Utilities
 hex = "0.4"
 wat = "1.0"
+object_store = { version = "0.10", features = ["aws", "gcp", "azure"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any", "migrate"] }
+tempfile = "3.8"

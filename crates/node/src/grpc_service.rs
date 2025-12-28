@@ -943,7 +943,7 @@ fn convert_proto_to_internal(proto_msg: &ProtoMessage) -> Result<Message, Status
 /// Notify a supervisor via gRPC that an actor has terminated
 ///
 /// ## Arguments
-/// * `supervisor_callback` - gRPC address of supervisor node (e.g., "http://localhost:9001")
+/// * `supervisor_callback` - gRPC address of supervisor node (e.g., "http://localhost:8000")
 /// * `actor_id` - The actor that terminated
 /// * `supervisor_id` - The supervisor to notify
 /// * `reason` - Why the actor terminated

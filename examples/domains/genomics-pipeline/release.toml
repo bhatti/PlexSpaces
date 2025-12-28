@@ -10,12 +10,12 @@ description = "DNA Sequencing Analysis Pipeline with Durable Actors"
 
 [node]
 id = "genomics-coordinator-node"
-listen_address = "0.0.0.0:9001"
+listen_address = "0.0.0.0:8000"
 cluster_seed_nodes = []
 
 [runtime.grpc]
 enabled = true
-address = "0.0.0.0:9001"
+address = "0.0.0.0:8000"
 max_connections = 1000
 keepalive_interval_seconds = 30
 
@@ -96,7 +96,7 @@ report = 1
 
 [genomics_pipeline.node]
 id = "genomics-coordinator-node"
-listen_address = "0.0.0.0:9001"
+listen_address = "0.0.0.0:8000"
 
 # Graceful shutdown configuration
 [shutdown]

@@ -51,7 +51,7 @@ NODE1_PID=$!
 # Node 2 (GPU)
 cargo run --release --bin entity-recognition-node -- \
     --node-id node-2 \
-    --listen-addr 0.0.0.0:9001 \
+    --listen-addr 0.0.0.0:8000 \
     --backend redis \
     --redis-url redis://localhost:6379 \
     --labels workload=gpu-intensive,tier=gpu &
@@ -61,7 +61,7 @@ NODE2_PID=$!
 # Node 3 (CPU)
 cargo run --release --bin entity-recognition-node -- \
     --node-id node-3 \
-    --listen-addr 0.0.0.0:9002 \
+    --listen-addr 0.0.0.0:8001 \
     --backend redis \
     --redis-url redis://localhost:6379 \
     --labels workload=cpu-intensive,tier=standard &

@@ -128,7 +128,7 @@ Content-Type: application/json
 Response:
 ```json
 {
-  "url": "http://localhost:9001/plexspaces/...?X-Amz-Algorithm=...",
+  "url": "http://localhost:8001/plexspaces/...?X-Amz-Algorithm=...",
   "expires_at": "2025-01-15T11:00:00Z"
 }
 ```
@@ -156,8 +156,8 @@ Configuration can be provided via:
 ### Integration Tests
 
 Integration tests require MinIO running at:
-- Endpoint: `http://localhost:9001` (or `9000` as fallback)
-- Console: `http://localhost:9002`
+- Endpoint: `http://localhost:8000` (or `8001` as fallback)
+- Console: `http://localhost:9001` (MinIO console, not PlexSpaces)
 - Access Key: `minioadmin_user`
 - Secret Key: `minioadmin_pass`
 

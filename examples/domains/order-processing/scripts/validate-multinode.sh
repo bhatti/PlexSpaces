@@ -161,8 +161,8 @@ else
     fail "Node 1 missing correct SPAWN_SERVICES configuration"
 fi
 
-if grep -A 5 "node1:" "$PROJECT_DIR/docker-compose.yml" | grep -q "9001:9001"; then
-    pass "Node 1 port mapping correct (9001)"
+if grep -A 5 "node1:" "$PROJECT_DIR/docker-compose.yml" | grep -q "8000:8000"; then
+    pass "Node 1 port mapping correct (8000)"
 else
     fail "Node 1 port mapping incorrect"
 fi

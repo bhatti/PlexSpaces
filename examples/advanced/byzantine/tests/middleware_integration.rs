@@ -225,7 +225,7 @@ async fn test_auth_with_byzantine_votes_permissive_vs_strict() {
     let vote_message = InterceptorRequest {
         method: "/ActorService/SendMessage".to_string(), // Byzantine vote via actor messaging
         headers: HashMap::new(), // No auth token
-        remote_addr: "127.0.0.1:9001".to_string(),
+        remote_addr: "127.0.0.1:8000".to_string(),
         timestamp: None,
         request_id: ulid::Ulid::new().to_string(),
         peer_certificate: String::new(),
@@ -339,7 +339,7 @@ async fn test_full_middleware_stack_execution_order() {
     let consensus_message = InterceptorRequest {
         method: "/ActorService/SendMessage".to_string(),
         headers: HashMap::new(),
-        remote_addr: "127.0.0.1:9001".to_string(),
+        remote_addr: "127.0.0.1:8000".to_string(),
         timestamp: None,
         request_id: ulid::Ulid::new().to_string(),
         peer_certificate: String::new(),

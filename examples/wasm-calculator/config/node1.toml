@@ -55,7 +55,7 @@ algorithm = "gzip"
 [runtime.health]
 heartbeat_interval_seconds = 5
 heartbeat_timeout_seconds = 15
-registry_url = "http://localhost:9000"
+registry_url = "http://localhost:8000"
 
 [system_applications]
 included = [

@@ -33,7 +33,7 @@ fi
 # Start node in background
 NODE_PID=$(cargo run --bin plexspaces-node --release -- \
     --node-id test-node \
-    --listen-addr 0.0.0.0:9001 \
+    --listen-addr 0.0.0.0:8000 \
     > /tmp/plexspaces-node.log 2>&1 & echo $!)
 
 echo "Node started with PID: $NODE_PID"
@@ -41,8 +41,8 @@ echo "Waiting for node to be ready..."
 
 # Wait for node to be ready (check health endpoint)
 for i in {1..30}; do
-    if curl -s http://localhost:9001/health > /dev/null 2>&1 || \
-       grpc_health_probe -addr=localhost:9001 -service=readiness > /dev/null 2>&1; then
+    if curl -s http://localhost:8001/health > /dev/null 2>&1 || \
+       grpc_health_probe -addr=localhost:8000 -service=readiness > /dev/null 2>&1; then
         echo -e "${GREEN}✓ Node is ready${NC}"
         break
     fi
@@ -93,7 +93,7 @@ EOF
 # Deploy via CLI
 if cargo run --bin plexspaces-cli --release -- \
     deploy \
-    --node localhost:9001 \
+    --node localhost:8000 \
     --app-id test-app-001 \
     --name test-wasm-app \
     --version 1.0.0 \
@@ -113,7 +113,7 @@ sleep 2
 
 if cargo run --bin plexspaces-cli --release -- \
     list \
-    --node localhost:9001 2>&1 | grep -q "test-wasm-app"; then
+    --node localhost:8000 2>&1 | grep -q "test-wasm-app"; then
     echo -e "${GREEN}✓ Application is listed${NC}"
 else
     echo -e "${RED}✗ Application not found in list${NC}"
@@ -125,7 +125,7 @@ fi
 echo -e "\n${YELLOW}Step 4: Getting application status...${NC}"
 if cargo run --bin plexspaces-cli --release -- \
     status \
-    --node localhost:9001 \
+    --node localhost:8000 \
     --app test-wasm-app 2>&1 | grep -q "running\|Running"; then
     echo -e "${GREEN}✓ Application is running${NC}"
 else
@@ -136,7 +136,7 @@ fi
 echo -e "\n${YELLOW}Step 5: Undeploying application...${NC}"
 if cargo run --bin plexspaces-cli --release -- \
     undeploy \
-    --node localhost:9001 \
+    --node localhost:8000 \
     --app-id test-app-001 2>&1 | tee /tmp/undeploy.log; then
     echo -e "${GREEN}✓ Application undeployed successfully${NC}"
 else

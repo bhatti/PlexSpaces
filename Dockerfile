@@ -101,14 +101,14 @@ RUN chown plexspaces:plexspaces /app/config/release.yaml
 USER plexspaces
 
 # Expose the default gRPC port
-EXPOSE 9001
+EXPOSE 8000
 
 # Default environment variables
 # These can be overridden via docker-compose or Kubernetes
 ENV PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
 ENV NODE_ID=node1
-ENV NODE_LISTEN_ADDRESS=0.0.0.0:9001
-ENV GRPC_ADDRESS=0.0.0.0:9001
+ENV NODE_LISTEN_ADDRESS=0.0.0.0:8000
+ENV GRPC_ADDRESS=0.0.0.0:8000
 
 # Database configuration (defaults to SQLite, override in docker-compose)
 # SQLite is easier for local development and can be overridden to PostgreSQL
@@ -139,7 +139,7 @@ ENV BLOB_PREFIX=/app/data/blob
 # Health check using gRPC health probe
 # Note: Requires grpc_health_probe binary (install separately or use HTTP via gRPC-Gateway)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD grpc_health_probe -addr=:9001 -service=readiness || exit 1
+    CMD grpc_health_probe -addr=:8000 -service=readiness || exit 1
 
 # Run the PlexSpaces framework node
 # Framework starts empty, ready to accept WASM deployments via gRPC

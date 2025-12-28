@@ -324,7 +324,7 @@ fn default_true() -> bool {
 }
 
 fn default_grpc_address() -> String {
-    "0.0.0.0:9001".to_string()
+    "0.0.0.0:8000".to_string()
 }
 
 fn default_max_connections() -> u32 {

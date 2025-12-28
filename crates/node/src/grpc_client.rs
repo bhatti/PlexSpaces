@@ -39,7 +39,7 @@ use tonic::{transport::Channel, Request};
 /// # use plexspaces_proto::v1::actor::Message as ProtoMessage;
 /// # use plexspaces_proto::v1::common::ActorId as ProtoActorId;
 /// # async fn example() -> Result<(), String> {
-/// let mut client = RemoteActorClient::connect("http://localhost:9001").await?;
+/// let mut client = RemoteActorClient::connect("http://localhost:8000").await?;
 ///
 /// let message = ProtoMessage {
 ///     id: "msg-1".to_string(),
@@ -71,7 +71,7 @@ impl RemoteActorClient {
     /// Connect to a remote node
     ///
     /// ## Arguments
-    /// * `node_address` - Address of the remote node (e.g., "http://localhost:9001")
+    /// * `node_address` - Address of the remote node (e.g., "http://localhost:8000")
     ///
     /// ## Returns
     /// A connected client instance or error
@@ -162,7 +162,7 @@ impl RemoteActorClient {
     /// # use plexspaces_node::grpc_client::RemoteActorClient;
     /// # use plexspaces_proto::v1::actor::ActorConfig;
     /// # async fn example() -> Result<(), String> {
-    /// let mut client = RemoteActorClient::connect("http://localhost:9001").await?;
+    /// let mut client = RemoteActorClient::connect("http://localhost:8000").await?;
     ///
     /// let actor_ref = client
     ///     .spawn_remote_actor(
@@ -215,15 +215,15 @@ mod tests {
     #[test]
     fn test_endpoint_formatting() {
         // Without scheme
-        let addr = "localhost:9001";
+        let addr = "localhost:8000";
         assert!(format!("http://{}", addr).starts_with("http://"));
 
         // With http scheme
-        let addr = "http://localhost:9001";
+        let addr = "http://localhost:8000";
         assert!(addr.starts_with("http://"));
 
         // With https scheme
-        let addr = "https://localhost:9001";
+        let addr = "https://localhost:8000";
         assert!(addr.starts_with("https://"));
     }
 }

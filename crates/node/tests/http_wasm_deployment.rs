@@ -75,7 +75,7 @@ async fn test_http_deploy_wasm_application_small() {
 
     // Start node on a fixed port for testing (avoid permission issues with port < 1024)
     let node = Arc::new(NodeBuilder::new("test-node-http-wasm-small".to_string())
-        .with_listen_address("127.0.0.1:9001".to_string())
+        .with_listen_address("127.0.0.1:8000".to_string())
         .build()
         .await);
 
@@ -90,7 +90,7 @@ async fn test_http_deploy_wasm_application_small() {
     sleep(Duration::from_millis(2000)).await;
     
     // Use fixed HTTP port (gRPC port + 1)
-    let http_port = 9002;
+    let http_port = 8001;
     let http_url = format!("http://127.0.0.1:{}", http_port);
     
     // Wait for HTTP server to be ready
@@ -236,7 +236,7 @@ async fn test_http_deploy_wasm_application() {
 
     // Start node on a fixed port for testing (avoid permission issues with port < 1024)
     let node = Arc::new(NodeBuilder::new("test-node-http-wasm".to_string())
-        .with_listen_address("127.0.0.1:9003".to_string()) // Use different port to avoid conflicts
+        .with_listen_address("127.0.0.1:8002".to_string()) // Use different port to avoid conflicts
         .build()
         .await);
 
@@ -253,7 +253,7 @@ async fn test_http_deploy_wasm_application() {
     // Get HTTP port (gRPC port + 1)
     let grpc_port = node.config().listen_addr.split(':').last()
         .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(9003);
+        .unwrap_or(8002);
     let http_port = grpc_port + 1;
     let http_url = format!("http://127.0.0.1:{}", http_port);
     

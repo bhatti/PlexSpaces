@@ -34,14 +34,14 @@
 //! use plexspaces_node::{Node, NodeBuilder};
 //!
 //! let node = NodeBuilder::new("my-node")
-//!     .with_listen_address("0.0.0.0:9000")
+//!     .with_listen_address("0.0.0.0:8000")
 //!     .build();
 //! ```
 //!
 //! ### Node with Custom Configuration
 //! ```rust,ignore
 //! let node = NodeBuilder::new("production-node")
-//!     .with_listen_address("0.0.0.0:9001")
+//!     .with_listen_address("0.0.0.0:8000")
 //!     .with_max_connections(200)
 //!     .with_heartbeat_interval_ms(10000)
 //!     .with_clustering_enabled(true)
@@ -90,12 +90,12 @@ impl NodeBuilder {
     /// Set the listen address for this node
     ///
     /// ## Arguments
-    /// * `address` - Listen address (e.g., "0.0.0.0:9000")
+    /// * `address` - Listen address (e.g., "0.0.0.0:8000")
     ///
     /// ## Example
     /// ```rust,ignore
     /// let builder = NodeBuilder::new("my-node")
-    ///     .with_listen_address("0.0.0.0:9000");
+    ///     .with_listen_address("0.0.0.0:8000");
     /// ```
     pub fn with_listen_address(mut self, address: impl Into<String>) -> Self {
         self.config.listen_addr = address.into();
@@ -280,7 +280,7 @@ impl NodeBuilder {
     /// * `Node` - The configured node instance with all services initialized
     ///
     /// ## Defaults
-    /// - Listen address: "0.0.0.0:9000" if not provided
+    /// - Listen address: "0.0.0.0:8000" if not provided
     /// - Max connections: 100 if not provided
     /// - Heartbeat interval: 5000ms if not provided
     /// - Clustering: enabled if not provided
@@ -297,7 +297,7 @@ impl NodeBuilder {
     /// ## Example
     /// ```rust,ignore
     /// let node = NodeBuilder::new("my-node")
-    ///     .with_listen_address("0.0.0.0:9000")
+    ///     .with_listen_address("0.0.0.0:8000")
     ///     .build()
     ///     .await;
     /// // Node is ready to use - services are initialized
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(node.id().as_str(), "test-node");
         // Verify default config
         let config = node.config();
-        assert_eq!(config.listen_addr, "0.0.0.0:9000");
+        assert_eq!(config.listen_addr, "0.0.0.0:8000");
         assert_eq!(config.max_connections, 100);
         assert_eq!(config.heartbeat_interval_ms, 5000);
         assert!(config.clustering_enabled);
@@ -386,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn test_node_builder_fluent_api() {
         let node = NodeBuilder::new("test-node")
-            .with_listen_address("0.0.0.0:9001")
+            .with_listen_address("0.0.0.0:8000")
             .with_max_connections(150)
             .with_heartbeat_interval_ms(7500)
             .with_clustering_enabled(true)
@@ -394,7 +394,7 @@ mod tests {
             .build().await;
 
         assert_eq!(node.id().as_str(), "test-node");
-        assert_eq!(node.config().listen_addr, "0.0.0.0:9001");
+        assert_eq!(node.config().listen_addr, "0.0.0.0:8000");
         assert_eq!(node.config().max_connections, 150);
         assert_eq!(node.config().heartbeat_interval_ms, 7500);
         assert!(node.config().clustering_enabled);

@@ -67,10 +67,10 @@ docker stats --no-stream
 # Show connection info
 echo ""
 echo -e "${GREEN}=== Node Endpoints ===${NC}"
-echo "  Coordinator:   http://localhost:9001 (gRPC)"
-echo "  QC/Alignment:  http://localhost:9002 (gRPC)"
-echo "  Chromosomes:   http://localhost:9003 (gRPC)"
-echo "  Annotation:    http://localhost:9004 (gRPC)"
+echo "  Coordinator:   http://localhost:8000 (gRPC)"
+echo "  QC/Alignment:  http://localhost:8001 (gRPC)"
+echo "  Chromosomes:   http://localhost:8002 (gRPC)"
+echo "  Annotation:    http://localhost:8003 (gRPC)"
 
 echo ""
 echo -e "${GREEN}=== Useful Commands ===${NC}"

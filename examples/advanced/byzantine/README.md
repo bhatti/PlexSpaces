@@ -225,7 +225,7 @@ docker run -p 6379:6379 redis:7
 # Terminal 2: Node 1
 cargo run --release --bin byzantine_node -- \
   --node-id node1 \
-  --address localhost:9001 \
+  --address localhost:8000 \
   --tuplespace-backend redis \
   --redis-url redis://localhost:6379 \
   --generals general0,general1
@@ -233,7 +233,7 @@ cargo run --release --bin byzantine_node -- \
 # Terminal 3: Node 2
 cargo run --release --bin byzantine_node -- \
   --node-id node2 \
-  --address localhost:9002 \
+  --address localhost:8001 \
   --tuplespace-backend redis \
   --redis-url redis://localhost:6379 \
   --generals general2,general3

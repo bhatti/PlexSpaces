@@ -24,7 +24,7 @@ services:
     networks:
       - genomics-network
     ports:
-      - "9001:9001"  # gRPC
+      - "8000:8000"  # gRPC
     volumes:
       - genomics-data:/data/genomics
       - ./config/node1.toml:/config/node.toml:ro
@@ -37,7 +37,7 @@ services:
       - VARIANT_POOL_SIZE=0
     command: ["genomics-node", "--config", "/config/node.toml"]
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9001"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8000"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -60,7 +60,7 @@ services:
     networks:
       - genomics-network
     ports:
-      - "9002:9002"
+      - "8001:8001"
     volumes:
       - genomics-data:/data/genomics
       - ./config/node2.toml:/config/node.toml:ro
@@ -74,7 +74,7 @@ services:
       - VARIANT_POOL_SIZE=0
     command: ["genomics-node", "--config", "/config/node.toml"]
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9002"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8001"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -100,7 +100,7 @@ services:
     networks:
       - genomics-network
     ports:
-      - "9003:9003"
+      - "8002:8002"
     volumes:
       - genomics-data:/data/genomics
       - ./config/node3.toml:/config/node.toml:ro
@@ -114,7 +114,7 @@ services:
       - VARIANT_POOL_SIZE=24
     command: ["genomics-node", "--config", "/config/node.toml"]
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9003"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8002"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -140,7 +140,7 @@ services:
     networks:
       - genomics-network
     ports:
-      - "9004:9004"
+      - "8003:8003"
     volumes:
       - genomics-data:/data/genomics
       - ./config/node4.toml:/config/node.toml:ro
@@ -155,7 +155,7 @@ services:
       - VARIANT_POOL_SIZE=0
     command: ["genomics-node", "--config", "/config/node.toml"]
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:9004"]
+      test: ["CMD", "grpc_health_probe", "-addr=:8003"]
       interval: 10s
       timeout: 5s
       retries: 3

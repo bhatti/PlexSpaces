@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Creating Node 1...");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     let node1 = NodeBuilder::new("node1")
-        .with_listen_address("127.0.0.1:9001".to_string())
+        .with_listen_address("127.0.0.1:8000".to_string())
         .build().await;
 
     // Spawn counter actor on node1

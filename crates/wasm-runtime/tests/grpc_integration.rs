@@ -43,12 +43,15 @@ const SIMPLE_WASM: &[u8] = &[
 ];
 
 /// Start gRPC server on random port, return port and server handle
+/// 
+/// NOTE: This uses localhost (127.0.0.1) only - no external network access required.
+/// The server runs entirely locally and does not require SSL or external connectivity.
 async fn start_grpc_server() -> (u16, tokio::task::JoinHandle<()>) {
     // Create runtime and service
     let runtime = WasmRuntime::new().await.unwrap();
     let service = WasmRuntimeServiceImpl::new(Arc::new(runtime));
 
-    // Bind to localhost on random port
+    // Bind to localhost on random port (no external network access required)
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .unwrap();

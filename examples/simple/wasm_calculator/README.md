@@ -150,7 +150,7 @@ The example creates and starts a node automatically, but you can also start one 
 # From project root
 cargo run --release --bin plexspaces-node -- \
     --node-id wasm-calc-node \
-    --listen-address 0.0.0.0:9001
+    --listen-address 0.0.0.0:8000
 ```
 
 ### 2. Deploy WASM Applications
@@ -159,7 +159,7 @@ The example demonstrates deploying Python WASM applications via ApplicationServi
 
 ```rust
 // Connect to ApplicationService
-let channel = Channel::from_shared("http://0.0.0.0:9001")?
+let channel = Channel::from_shared("http://0.0.0.0:8000")?
     .connect()
     .await?;
 let mut client = ApplicationServiceClient::new(channel);
@@ -182,7 +182,7 @@ let response = client.deploy_application(tonic::Request::new(deploy_request)).aw
 
 ```bash
 # List deployed applications via gRPC
-# Or use the dashboard at http://localhost:9001/ to see deployed applications
+# Or use the dashboard at http://localhost:8001/ to see deployed applications
 ```
 
 ### 4. Using the CLI

@@ -35,56 +35,187 @@ pub struct SqlBlobRepository {
 }
 
 impl SqlBlobRepository {
-    /// Create new SQL repository
-    pub fn new(pool: Pool<sqlx::Any>) -> Self {
-        Self {
+    /// Create new SQL repository with automatic migration
+    /// This ensures migrations are automatically applied when the repository is created
+    /// For in-memory SQLite (sqlite::memory:), migrations are always applied
+    /// 
+    /// IMPORTANT: For in-memory SQLite, ensure the pool uses max_connections=1
+    /// to avoid connection-specific database issues
+    pub async fn new(pool: Pool<sqlx::Any>) -> Result<Self, sqlx::Error> {
+        // Auto-apply migrations using the pool
+        // For in-memory SQLite with max_connections=1, all operations use the same connection
+        Self::migrate(&pool).await?;
+        
+        Ok(Self {
             pool: Arc::new(pool),
-        }
+        })
     }
 
     /// Run migrations to create blob_metadata table
     /// Detects database type and uses appropriate migration path
-    pub async fn migrate(pool: &Pool<sqlx::Any>) -> Result<(), sqlx::Error> {
-        // Try to detect database type by attempting SQLite-specific query
-        // If it succeeds, it's SQLite; otherwise, assume PostgreSQL
-        let is_sqlite = sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
+    /// For in-memory SQLite, uses a single connection for all operations to ensure consistency
+    async fn migrate(pool: &Pool<sqlx::Any>) -> Result<(), sqlx::Error> {
+        use tracing::{debug, error, info, warn};
+        
+        info!("[BLOB_MIGRATION] Starting migration for blob_metadata table");
+        
+        // Try to detect database type first
+        let is_sqlite = match sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
             .fetch_optional(pool)
             .await
-            .is_ok();
+        {
+            Ok(Some(version)) => {
+                info!("[BLOB_MIGRATION] SQLite detected, version: {}", version);
+                true
+            }
+            Ok(None) => {
+                warn!("[BLOB_MIGRATION] sqlite_version() returned None, assuming SQLite");
+                true
+            }
+            Err(e) => {
+                debug!("[BLOB_MIGRATION] sqlite_version() failed: {}, assuming PostgreSQL", e);
+                false
+            }
+        };
         
         if is_sqlite {
-            // SQLite detected
-            sqlx::migrate!("./migrations/sqlite")
-                .run(pool)
-                .await?;
+            info!("[BLOB_MIGRATION] Running SQLite migrations");
+            
+            // For SQLite (especially in-memory), use a single connection for all operations
+            // This ensures that CREATE TABLE and CREATE INDEX see the same database state
+            let mut conn = pool.acquire().await.map_err(|e| {
+                error!("[BLOB_MIGRATION] Failed to acquire connection: {}", e);
+                e
+            })?;
+            
+            // Create table
+            info!("[BLOB_MIGRATION] Creating blob_metadata table...");
+            match sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS blob_metadata (
+                    blob_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    namespace TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    content_type TEXT,
+                    content_length INTEGER NOT NULL,
+                    etag TEXT,
+                    blob_group TEXT,
+                    kind TEXT,
+                    metadata_json TEXT,
+                    tags_json TEXT,
+                    expires_at INTEGER,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                )
+                "#,
+            )
+            .execute(&mut *conn)
+            .await
+            {
+                Ok(result) => {
+                    info!("[BLOB_MIGRATION] CREATE TABLE executed successfully, rows_affected: {}", result.rows_affected());
+                }
+                Err(e) => {
+                    error!("[BLOB_MIGRATION] CREATE TABLE failed: {}", e);
+                    return Err(e);
+                }
+            }
+
+            // Create indexes using the same connection
+            info!("[BLOB_MIGRATION] Creating indexes...");
+            sqlx::query(
+                r#"
+                CREATE INDEX IF NOT EXISTS idx_blob_metadata_tenant_namespace
+                ON blob_metadata(tenant_id, namespace)
+                "#,
+            )
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("[BLOB_MIGRATION] Failed to create idx_blob_metadata_tenant_namespace: {}", e);
+                e
+            })?;
+
+            sqlx::query(
+                r#"
+                CREATE INDEX IF NOT EXISTS idx_blob_metadata_sha256
+                ON blob_metadata(tenant_id, namespace, sha256)
+                "#,
+            )
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("[BLOB_MIGRATION] Failed to create idx_blob_metadata_sha256: {}", e);
+                e
+            })?;
+
+            sqlx::query(
+                r#"
+                CREATE INDEX IF NOT EXISTS idx_blob_metadata_expires_at
+                ON blob_metadata(expires_at)
+                WHERE expires_at IS NOT NULL
+                "#,
+            )
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("[BLOB_MIGRATION] Failed to create idx_blob_metadata_expires_at: {}", e);
+                e
+            })?;
+
+            info!("[BLOB_MIGRATION] SQLite migrations completed successfully");
+            Ok(())
         } else {
-            // PostgreSQL (or other database)
+            info!("[BLOB_MIGRATION] Running PostgreSQL migrations");
             sqlx::migrate!("./migrations/postgres")
                 .run(pool)
-                .await?;
+                .await
+                .map_err(|e| {
+                    error!("[BLOB_MIGRATION] PostgreSQL migration failed: {}", e);
+                    e
+                })?;
+            info!("[BLOB_MIGRATION] PostgreSQL migrations completed successfully");
+            Ok(())
         }
-        
-        Ok(())
     }
 }
 
 #[async_trait]
 impl BlobRepository for SqlBlobRepository {
     async fn get(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<Option<BlobMetadata>> {
-        let row = sqlx::query(
-            r#"
-            SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
-                   content_length, etag, blob_group, kind, metadata_json, tags_json,
-                   expires_at, created_at, updated_at
-            FROM blob_metadata
-            WHERE blob_id = $1 AND tenant_id = $2 AND namespace = $3
-            "#,
-        )
-        .bind(blob_id)
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .fetch_optional(&*self.pool)
-        .await?;
+        // For internal context (empty tenant_id), look up by blob_id only
+        // This allows system operations to find blobs across tenants
+        let row = if ctx.is_internal() || ctx.tenant_id().is_empty() {
+            sqlx::query(
+                r#"
+                SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
+                       content_length, etag, blob_group, kind, metadata_json, tags_json,
+                       expires_at, created_at, updated_at
+                FROM blob_metadata
+                WHERE blob_id = $1
+                "#,
+            )
+            .bind(blob_id)
+            .fetch_optional(&*self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
+                       content_length, etag, blob_group, kind, metadata_json, tags_json,
+                       expires_at, created_at, updated_at
+                FROM blob_metadata
+                WHERE blob_id = $1 AND tenant_id = $2 AND namespace = $3
+                "#,
+            )
+            .bind(blob_id)
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .fetch_optional(&*self.pool)
+            .await?
+        };
 
         if let Some(row) = row {
             Ok(Some(row_to_metadata(&row)?))
@@ -257,12 +388,21 @@ impl BlobRepository for SqlBlobRepository {
     }
 
     async fn delete(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<()> {
-        sqlx::query("DELETE FROM blob_metadata WHERE blob_id = $1 AND tenant_id = $2 AND namespace = $3")
-            .bind(blob_id)
-            .bind(ctx.tenant_id())
-            .bind(ctx.namespace())
-            .execute(&*self.pool)
-            .await?;
+        // For internal context (empty tenant_id), delete by blob_id only
+        // This allows system operations to delete blobs across tenants
+        if ctx.is_internal() || ctx.tenant_id().is_empty() {
+            sqlx::query("DELETE FROM blob_metadata WHERE blob_id = $1")
+                .bind(blob_id)
+                .execute(&*self.pool)
+                .await?;
+        } else {
+            sqlx::query("DELETE FROM blob_metadata WHERE blob_id = $1 AND tenant_id = $2 AND namespace = $3")
+                .bind(blob_id)
+                .bind(ctx.tenant_id())
+                .bind(ctx.namespace())
+                .execute(&*self.pool)
+                .await?;
+        }
 
         Ok(())
     }

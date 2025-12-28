@@ -89,8 +89,8 @@ fn create_proto_pattern(fields: Vec<tuple_field::Value>) -> ProtoTuple {
 #[ignore] // Ignored by default - requires running nodes
 async fn test_distributed_tuplespace_write_read_across_nodes() {
     // Setup: Create 2 nodes
-    let node1 = Arc::new(create_test_node("node1", 9001));
-    let node2 = Arc::new(create_test_node("node2", 9002));
+    let node1 = Arc::new(create_test_node("node1", 8000));
+    let node2 = Arc::new(create_test_node("node2", 8001));
 
     // Start node1 in background
     let node1_clone = node1.clone();
@@ -105,7 +105,7 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
 
     // Register node2 as remote in node1's registry
     node1
-        .register_remote_node(NodeId::new("node2"), "http://127.0.0.1:9002".to_string())
+        .register_remote_node(NodeId::new("node2"), "http://127.0.0.1:8001".to_string())
         .await
         .expect("Failed to register node2");
 
@@ -123,7 +123,7 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
             .expect("Failed to write tuple");
 
         // Connect to node1 via gRPC from external client
-        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:9001")
+        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:8000")
             .await
             .expect("Failed to connect to node1");
 
@@ -158,7 +158,7 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
     // Test 2: Write via gRPC to node2, read from node2's local TupleSpace
     {
         // Connect to node2 via gRPC
-        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:9002")
+        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:8001")
             .await
             .expect("Failed to connect to node2");
 
@@ -190,7 +190,7 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
     // Test 3: Take operation via gRPC
     {
         // Connect to node1 via gRPC
-        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:9001")
+        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:8000")
             .await
             .expect("Failed to connect to node1");
 
@@ -237,8 +237,8 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
 #[ignore] // Ignored by default - requires running nodes
 async fn test_distributed_tuplespace_count_and_exists() {
     // Setup: Create 2 nodes
-    let node1 = Arc::new(create_test_node("node1", 9003));
-    let node2 = Arc::new(create_test_node("node2", 9004));
+    let node1 = Arc::new(create_test_node("node1", 8002));
+    let node2 = Arc::new(create_test_node("node2", 8003));
 
     // Start nodes in background
     let node1_clone = node1.clone();
@@ -264,7 +264,7 @@ async fn test_distributed_tuplespace_count_and_exists() {
     }
 
     // Connect to node1 via gRPC
-    let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:9003")
+        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:8002")
         .await
         .expect("Failed to connect to node1");
 

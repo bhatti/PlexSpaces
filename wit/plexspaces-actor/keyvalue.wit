@@ -1,0 +1,180 @@
+// PlexSpaces Actor Interface - KeyValue Storage
+//
+// Key-value store for state, config, registry, and distributed coordination.
+// Supports multiple backends: SQLite, PostgreSQL, Redis, DynamoDB.
+
+interface keyvalue {
+    use types.{payload, actor-error, duration-ms, context};
+
+    /// Get value by key
+    ///
+    /// # Arguments
+    /// - `key`: Key to retrieve
+    ///
+    /// # Returns
+    /// - `ok(option<payload>)`: Value if found, None if not found
+    /// - `err`: Get failed (access denied, storage error)
+    get: func(
+        ctx: context,
+        key: string
+    ) -> result<option<payload>, actor-error>;
+
+    /// Put value (create or update)
+    ///
+    /// # Arguments
+    /// - `key`: Key to store
+    /// - `value`: Value to store
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok`: Value stored
+    /// - `err`: Put failed (quota exceeded, storage error)
+    put: func(
+        ctx: context,
+        key: string,
+        value: payload
+    ) -> result<_, actor-error>;
+
+    /// Put with TTL (time-to-live)
+    ///
+    /// Stores value with expiration time. Value is automatically deleted after TTL expires.
+    ///
+    /// # Arguments
+    /// - `key`: Key to store
+    /// - `value`: Value to store
+    /// - `ttl-ms`: Time-to-live in milliseconds
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok`: Value stored with TTL
+    /// - `err`: Put failed
+    put-with-ttl: func(
+        ctx: context,
+        key: string,
+        value: payload,
+        ttl-ms: duration-ms
+    ) -> result<_, actor-error>;
+
+    /// Delete key
+    ///
+    /// # Arguments
+    /// - `key`: Key to delete
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok`: Key deleted (or didn't exist)
+    /// - `err`: Delete failed (access denied)
+    delete: func(
+        ctx: context,
+        key: string
+    ) -> result<_, actor-error>;
+
+    /// Check if key exists
+    ///
+    /// # Arguments
+    /// - `key`: Key to check
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(bool)`: True if key exists, false otherwise
+    /// - `err`: Check failed
+    exists: func(
+        ctx: context,
+        key: string
+    ) -> result<bool, actor-error>;
+
+    /// List keys with prefix
+    ///
+    /// Lists all keys matching the given prefix.
+    ///
+    /// # Arguments
+    /// - `prefix`: Key prefix to match
+    /// - `limit`: Maximum number of results (0 = unlimited)
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(list<string>)`: List of matching keys
+    /// - `err`: List failed
+    list-keys: func(
+        ctx: context,
+        prefix: string,
+        limit: u32
+    ) -> result<list<string>, actor-error>;
+
+    /// Atomic compare-and-swap
+    ///
+    /// Atomically updates key if current value matches expected value.
+    ///
+    /// # Arguments
+    /// - `key`: Key to update
+    /// - `expected`: Expected current value (None = key should not exist)
+    /// - `new-value`: New value to set
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(bool)`: True if swap succeeded, false if expected value didn't match
+    /// - `err`: CAS failed (storage error)
+    compare-and-swap: func(
+        ctx: context,
+        key: string,
+        expected: option<payload>,
+        new-value: payload
+    ) -> result<bool, actor-error>;
+
+    /// Increment numeric value
+    ///
+    /// Atomically increments a numeric value stored at key.
+    ///
+    /// # Arguments
+    /// - `key`: Key to increment
+    /// - `delta`: Amount to increment (can be negative)
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(s64)`: New value after increment
+    /// - `err`: Increment failed (key doesn't exist, not a number)
+    increment: func(
+        ctx: context,
+        key: string,
+        delta: s64
+    ) -> result<s64, actor-error>;
+
+    /// Watch for changes (returns subscription ID)
+    ///
+    /// Subscribes to changes for a key. Changes are delivered via actor messages.
+    ///
+    /// # Arguments
+    /// - `key`: Key to watch
+    /// - `tenant-id`: Tenant ID (required, empty string for default)
+    /// - `namespace`: Namespace (required, empty string for default)
+    ///
+    /// # Returns
+    /// - `ok(u64)`: Subscription ID (use with unwatch)
+    /// - `err`: Watch failed
+    watch: func(
+        ctx: context,
+        key: string
+    ) -> result<u64, actor-error>;
+
+    /// Unwatch
+    ///
+    /// Cancels a watch subscription.
+    ///
+    /// # Arguments
+    /// - `subscription-id`: Subscription ID from watch()
+    ///
+    /// # Returns
+    /// - `ok`: Watch cancelled
+    /// - `err`: Unwatch failed (invalid subscription ID)
+    unwatch: func(
+        subscription-id: u64
+    ) -> result<_, actor-error>;
+}
+

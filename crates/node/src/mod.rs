@@ -138,7 +138,7 @@ pub type NodeConfig = NodeRuntimeConfig;
 /// (Can't implement Default trait for type aliases to external types)
 pub fn default_node_config() -> NodeRuntimeConfig {
     NodeRuntimeConfig {
-        listen_addr: "0.0.0.0:9000".to_string(),
+        listen_addr: "0.0.0.0:8000".to_string(),
         max_connections: 100,
         heartbeat_interval_ms: 5000,
         clustering_enabled: true,
@@ -154,7 +154,7 @@ pub fn default_node_config() -> NodeRuntimeConfig {
 struct NodeConnection {
     /// Remote node ID
     remote_id: NodeId,
-    /// Remote node gRPC address (e.g., "http://localhost:9001")
+    /// Remote node gRPC address (e.g., "http://localhost:8000")
     node_address: String,
     /// Connection state
     state: ConnectionState,
@@ -984,11 +984,21 @@ impl Node {
         let db_url = env::var("BLOB_DATABASE_URL")
             .unwrap_or_else(|_| "sqlite::memory:".to_string());
         
-        // Use AnyPool directly to support both SQLite and PostgreSQL
+        // Use AnyPool with max_connections=1 for in-memory SQLite to ensure all operations
+        // use the same connection (critical for in-memory databases)
         // Note: sqlx::any requires install_default_drivers() to be called before use
         // This is called in start() before any database operations
         use sqlx::AnyPool;
-        let any_pool = match AnyPool::connect(&db_url).await {
+        use sqlx::any::AnyPoolOptions;
+        
+        // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
+        let pool_options = if db_url.starts_with("sqlite::memory:") || db_url.starts_with("sqlite://:memory:") {
+            AnyPoolOptions::new().max_connections(1)
+        } else {
+            AnyPoolOptions::new()
+        };
+        
+        let any_pool = match pool_options.connect(&db_url).await {
             Ok(pool) => pool,
             Err(e) => {
                 // Check if it's the "No drivers installed" error
@@ -1002,13 +1012,14 @@ impl Node {
             }
         };
         
-        // Run migrations
-        if let Err(e) = SqlBlobRepository::migrate(&any_pool).await {
-            eprintln!("Warning: Failed to migrate blob service database: {}. Blob service disabled.", e);
-            return None;
-        }
-
-        let repository = Arc::new(SqlBlobRepository::new(any_pool));
+        // Create repository with auto-applied migrations
+        let repository = match SqlBlobRepository::new(any_pool).await {
+            Ok(repo) => Arc::new(repo),
+            Err(e) => {
+                eprintln!("Warning: Failed to create blob repository with migrations: {}. Blob service disabled.", e);
+                return None;
+            }
+        };
 
         // Create blob service
         match plexspaces_blob::BlobService::new(blob_config, repository).await {
@@ -2197,7 +2208,7 @@ impl Node {
                 let http_port = grpc_addr.port() + 1;
                 let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
                     .parse::<std::net::SocketAddr>()
-                    .unwrap_or_else(|_| "127.0.0.1:9002".parse().unwrap());
+                    .unwrap_or_else(|_| "127.0.0.1:8001".parse().unwrap());
                 
                 eprintln!("🌐 Starting HTTP gateway server on http://{}", http_addr);
                 eprintln!("📊 Dashboard available at http://{}/", http_addr);
@@ -3902,7 +3913,7 @@ mod tests {
         let node = NodeBuilder::new("node1").build().await;
 
         // Connect to another node
-        node.connect_to(NodeId::new("node2"), "localhost:9002".to_string())
+        node.connect_to(NodeId::new("node2"), "localhost:8001".to_string())
             .await
             .unwrap();
 
@@ -3921,7 +3932,7 @@ mod tests {
         let node = NodeBuilder::new("node1").build().await;
 
         // Connect
-        node.connect_to(NodeId::new("node2"), "localhost:9002".to_string())
+        node.connect_to(NodeId::new("node2"), "localhost:8001".to_string())
             .await
             .unwrap();
         assert_eq!(node.connected_nodes().await.len(), 1);
@@ -3939,13 +3950,13 @@ mod tests {
         let node = NodeBuilder::new("node1").build().await;
 
         // First connection should succeed
-        node.connect_to(NodeId::new("node2"), "localhost:9002".to_string())
+        node.connect_to(NodeId::new("node2"), "localhost:8001".to_string())
             .await
             .unwrap();
 
         // Second connection should fail
         let result = node
-            .connect_to(NodeId::new("node2"), "localhost:9002".to_string())
+            .connect_to(NodeId::new("node2"), "localhost:8001".to_string())
             .await;
         assert!(result.is_err());
         match result {
@@ -3969,8 +3980,8 @@ mod tests {
         let cluster_config = ClusterConfig {
             name: "test-cluster".to_string(),
             seed_nodes: vec![
-                (NodeId::new("node1"), "localhost:9001".to_string()),
-                (NodeId::new("node2"), "localhost:9002".to_string()),
+                (NodeId::new("node1"), "localhost:8000".to_string()),
+                (NodeId::new("node2"), "localhost:8001".to_string()),
             ],
             min_nodes: 2,
             auto_discovery: true,

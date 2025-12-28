@@ -40,7 +40,7 @@ use test_helpers::{spawn_actor_helper, find_actor_helper};
 async fn test_node_operations_wrapper() {
     let node = Arc::new(
         NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:9001")
+            .with_listen_address("127.0.0.1:8000")
             .build()
     );
     // NodeOperationsWrapper has been removed - NodeOperations trait is no longer needed
@@ -88,7 +88,7 @@ async fn test_actor_service_wrapper_send_message_local() {
     // Create node and spawn an actor
     let node = Arc::new(
         NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:9001")
+            .with_listen_address("127.0.0.1:8000")
             .build()
     );
 
@@ -176,7 +176,7 @@ impl plexspaces_core::Actor for TestBehavior {
 async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
     let node = Arc::new(
         NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:9001")
+            .with_listen_address("127.0.0.1:8000")
             .build()
     );
 
@@ -219,7 +219,7 @@ async fn test_object_registry_wrapper() {
         object_id: "test-actor@node1".to_string(),
         object_type: ObjectType::ObjectTypeActor as i32,
         object_category: "GenServer".to_string(),
-        grpc_address: "http://node1:9001".to_string(),
+        grpc_address: "http://node1:8000".to_string(),
         tenant_id: "default".to_string(),
         namespace: "default".to_string(),
         ..Default::default()
@@ -233,6 +233,6 @@ async fn test_object_registry_wrapper() {
     assert!(found.is_some());
     let reg = found.unwrap();
     assert_eq!(reg.object_id, "test-actor@node1");
-    assert_eq!(reg.grpc_address, "http://node1:9001");
+    assert_eq!(reg.grpc_address, "http://node1:8000");
 }
 

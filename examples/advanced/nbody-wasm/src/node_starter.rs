@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let node_id = std::env::var("PLEXSPACES_NODE_ID").unwrap_or_else(|_| "nbody-test-node".to_string());
-    let listen_addr = std::env::var("PLEXSPACES_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:9001".to_string());
+    let listen_addr = std::env::var("PLEXSPACES_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
 
     println!("╔════════════════════════════════════════════════════════════════╗");
     println!("║     Starting PlexSpaces Node                                  ║");

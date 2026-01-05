@@ -24,12 +24,14 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_actor_context_minimal() {
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "default".to_string(),
-        "test-tenant".to_string(),
+        "test-tenant".to_string(),  // tenant_id
+        "default".to_string(),       // namespace
         service_locator,
         None,
     );
@@ -37,6 +39,7 @@ async fn test_actor_context_minimal() {
     // actor_id is no longer stored in ActorContext - removed as part of envelope refactoring
     // Actors should get their ID from Envelope.target_id or Actor.id field
     assert_eq!(ctx.node_id, "node1");
+    assert_eq!(ctx.tenant_id, "test-tenant");
     assert_eq!(ctx.namespace, "default");
 }
 
@@ -78,12 +81,14 @@ async fn test_stub_actor_service() {
     // StubActorService is private, test via minimal context
     use plexspaces_mailbox::Message;
 
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "default".to_string(),
-        "test-tenant".to_string(),
+        "test-tenant".to_string(),  // tenant_id
+        "default".to_string(),       // namespace
         service_locator,
         None,
     );
@@ -91,6 +96,7 @@ async fn test_stub_actor_service() {
     // Services are accessed via service_locator, not directly
     assert_eq!(ctx.node_id, "node1");
     assert_eq!(ctx.tenant_id, "test-tenant");
+    assert_eq!(ctx.namespace, "default");
 }
 
 #[tokio::test]
@@ -98,12 +104,14 @@ async fn test_stub_object_registry() {
     // StubObjectRegistry is private, test via minimal context
     use plexspaces_proto::object_registry::v1::ObjectType;
 
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "default".to_string(),
-        "test-tenant".to_string(),
+        "test-tenant".to_string(),  // tenant_id
+        "default".to_string(),       // namespace
         service_locator,
         None,
     );
@@ -111,22 +119,26 @@ async fn test_stub_object_registry() {
     // Services are accessed via service_locator, not directly
     assert_eq!(ctx.node_id, "node1");
     assert_eq!(ctx.tenant_id, "test-tenant");
+    assert_eq!(ctx.namespace, "default");
 }
 
 #[tokio::test]
 async fn test_stub_node_operations() {
     // StubNodeOperations is private, test via minimal context
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "default".to_string(),
-        "test-tenant".to_string(),
+        "test-tenant".to_string(),  // tenant_id
+        "default".to_string(),      // namespace
         service_locator,
         None,
     );
     // Node operations are accessed via service_locator, not directly
     assert_eq!(ctx.node_id, "node1");
     assert_eq!(ctx.tenant_id, "test-tenant");
+    assert_eq!(ctx.namespace, "default");
 }
 

@@ -22,9 +22,9 @@
 //! functionality integrated with Node.
 
 mod test_helpers;
-use test_helpers::spawn_actor_helper;
+use test_helpers::{spawn_actor_helper, lookup_actor_ref, activate_virtual_actor};
 
-use plexspaces_core::ActorBehavior;
+use plexspaces_core::Actor as ActorTrait;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
 use plexspaces_node::{Node, NodeBuilder};
@@ -37,7 +37,7 @@ struct TestBehavior {
 }
 
 #[async_trait::async_trait]
-impl ActorBehavior for TestBehavior {
+impl ActorTrait for TestBehavior {
     async fn handle_message(
         &mut self,
         _ctx: &plexspaces_core::ActorContext,
@@ -57,7 +57,8 @@ impl ActorBehavior for TestBehavior {
 async fn test_virtual_actor_implicit_activation() {
     // Create node
     let node = NodeBuilder::new("test-node")
-        .build();
+        .build()
+        .await;
 
     // Create actor with VirtualActorFacet
     let behavior = TestBehavior {
@@ -77,6 +78,7 @@ async fn test_virtual_actor_implicit_activation() {
         Box::new(behavior),
         mailbox,
         "test".to_string(),
+        "default".to_string(),
         None,
     );
 
@@ -85,11 +87,11 @@ async fn test_virtual_actor_implicit_activation() {
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone(), 100));
     
     // Attach facet to actor
     actor
-        .attach_facet(virtual_facet, 100, facet_config)
+        .attach_facet(virtual_facet)
         .await
         .unwrap();
 
@@ -97,21 +99,22 @@ async fn test_virtual_actor_implicit_activation() {
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Check that actor is registered as virtual but not yet active
-    let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&"virtual-actor-1".to_string()).await;
+    let actor_id = plexspaces_core::ActorId::from("virtual-actor-1");
+    let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&actor_id).await;
     assert!(exists, "Virtual actor should exist");
     assert!(is_virtual, "Actor should be registered as virtual");
     // Actor may or may not be active depending on implementation details
     
     // Send first message - should trigger activation
     let message = Message::new(b"test".to_vec());
-    let actor_ref = node.lookup_actor_ref(&"virtual-actor-1".to_string()).await.unwrap().unwrap();
+    let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     actor_ref.tell(message).await.unwrap();
     
     // Wait a bit for activation to complete
     sleep(Duration::from_millis(100)).await;
     
     // Actor should now be active
-    let (exists_after, is_active_after, _) = node.check_virtual_actor_exists(&"virtual-actor-1".to_string()).await;
+    let (exists_after, is_active_after, _) = node.check_virtual_actor_exists(&actor_id).await;
     assert!(exists_after, "Actor should still exist after activation");
     // Actor should be active after receiving message
 }
@@ -120,7 +123,8 @@ async fn test_virtual_actor_implicit_activation() {
 async fn test_virtual_actor_idle_deactivation() {
     // Create node and start idle timeout monitor
     let node = NodeBuilder::new("test-node")
-        .build();
+        .build()
+        .await;
     
     // Start idle timeout monitor
     node.start_idle_timeout_monitor();
@@ -143,6 +147,7 @@ async fn test_virtual_actor_idle_deactivation() {
         Box::new(behavior),
         mailbox,
         "test".to_string(),
+        "default".to_string(),
         None,
     );
 
@@ -151,11 +156,11 @@ async fn test_virtual_actor_idle_deactivation() {
         "idle_timeout": "1s",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone(), 100));
     
     // Attach facet to actor
     actor
-        .attach_facet(virtual_facet, 100, facet_config)
+        .attach_facet(virtual_facet)
         .await
         .unwrap();
 
@@ -163,15 +168,16 @@ async fn test_virtual_actor_idle_deactivation() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Send message to activate
+    let actor_id2 = plexspaces_core::ActorId::from("virtual-actor-2");
     let message = Message::new(b"test".to_vec());
-    let actor_ref = node.lookup_actor_ref(&"virtual-actor-2".to_string()).await.unwrap().unwrap();
+    let actor_ref = lookup_actor_ref(&node, &actor_id2).await.unwrap().unwrap();
     actor_ref.tell(message).await.unwrap();
     
     // Wait a bit for activation
     sleep(Duration::from_millis(100)).await;
     
     // Verify actor is active
-    let (_, is_active, _) = node.check_virtual_actor_exists(&"virtual-actor-2".to_string()).await;
+    let (_, is_active, _) = node.check_virtual_actor_exists(&actor_id2).await;
     assert!(is_active, "Actor should be active after receiving message");
     
     // Wait for idle timeout (1s) + monitor interval (10s) - wait a bit longer
@@ -179,7 +185,7 @@ async fn test_virtual_actor_idle_deactivation() {
     
     // Actor should be deactivated by idle timeout monitor
     // Note: This test may be flaky depending on timing, but it verifies the mechanism works
-    let (exists, is_active_after, is_virtual) = node.check_virtual_actor_exists(&"virtual-actor-2".to_string()).await;
+    let (exists, is_active_after, is_virtual) = node.check_virtual_actor_exists(&actor_id2).await;
     assert!(exists, "Virtual actor should still exist (virtual actors are always addressable)");
     assert!(is_virtual, "Actor should still be registered as virtual");
     // is_active_after may be false if deactivation occurred, or true if timing didn't align
@@ -189,7 +195,8 @@ async fn test_virtual_actor_idle_deactivation() {
 async fn test_virtual_actor_pending_messages() {
     // Create node
     let node = NodeBuilder::new("test-node")
-        .build();
+        .build()
+        .await;
 
     // Create actor with VirtualActorFacet
     let behavior = TestBehavior {
@@ -209,6 +216,7 @@ async fn test_virtual_actor_pending_messages() {
         Box::new(behavior),
         mailbox,
         "test".to_string(),
+        "default".to_string(),
         None,
     );
 
@@ -217,11 +225,11 @@ async fn test_virtual_actor_pending_messages() {
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone(), 100));
     
     // Attach facet to actor
     actor
-        .attach_facet(virtual_facet, 100, facet_config)
+        .attach_facet(virtual_facet)
         .await
         .unwrap();
 
@@ -230,7 +238,8 @@ async fn test_virtual_actor_pending_messages() {
     
     // Send multiple messages before activation completes
     // Messages should be queued in pending_activations
-    let actor_ref = node.lookup_actor_ref(&"virtual-actor-3".to_string()).await.unwrap().unwrap();
+    let actor_id3 = plexspaces_core::ActorId::from("virtual-actor-3");
+    let actor_ref = lookup_actor_ref(&node, &actor_id3).await.unwrap().unwrap();
     for i in 0..5 {
         let message = Message::new(format!("msg-{}", i).into_bytes());
         actor_ref.tell(message).await.unwrap();
@@ -240,7 +249,7 @@ async fn test_virtual_actor_pending_messages() {
     sleep(Duration::from_millis(200)).await;
     
     // Verify actor is now active
-    let (exists, is_active, _) = node.check_virtual_actor_exists(&"virtual-actor-3".to_string()).await;
+    let (exists, is_active, _) = node.check_virtual_actor_exists(&actor_id3).await;
     assert!(exists, "Actor should exist");
     // Messages should have been processed after activation
 }
@@ -249,7 +258,8 @@ async fn test_virtual_actor_pending_messages() {
 async fn test_activate_actor_manual() {
     // Test manual activation of virtual actor
     let node = NodeBuilder::new("test-node")
-        .build();
+        .build()
+        .await;
 
     // Create actor with VirtualActorFacet
     let behavior = TestBehavior {
@@ -269,6 +279,7 @@ async fn test_activate_actor_manual() {
         Box::new(behavior),
         mailbox,
         "test".to_string(),
+        "default".to_string(),
         None,
     );
 
@@ -276,10 +287,10 @@ async fn test_activate_actor_manual() {
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone(), 100));
     
     actor
-        .attach_facet(virtual_facet, 100, facet_config)
+        .attach_facet(virtual_facet)
         .await
         .unwrap();
 
@@ -287,10 +298,11 @@ async fn test_activate_actor_manual() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Manually activate
-    let activated_ref = node.activate_virtual_actor(&"virtual-actor-4".to_string()).await.unwrap();
+    let actor_id4 = plexspaces_core::ActorId::from("virtual-actor-4");
+    let _activated_ref = activate_virtual_actor(&node, &actor_id4).await.unwrap();
     
     // Verify actor is active
-    let (exists, is_active, _) = node.check_virtual_actor_exists(&"virtual-actor-4".to_string()).await;
+    let (exists, is_active, _) = node.check_virtual_actor_exists(&actor_id4).await;
     assert!(exists, "Actor should exist");
     assert!(is_active, "Actor should be active after manual activation");
 }
@@ -299,7 +311,8 @@ async fn test_activate_actor_manual() {
 async fn test_deactivate_actor_manual() {
     // Test manual deactivation of virtual actor
     let node = NodeBuilder::new("test-node")
-        .build();
+        .build()
+        .await;
 
     // Create and spawn virtual actor
     let behavior = TestBehavior {
@@ -319,6 +332,7 @@ async fn test_deactivate_actor_manual() {
         Box::new(behavior),
         mailbox,
         "test".to_string(),
+        "default".to_string(),
         None,
     );
 
@@ -326,27 +340,28 @@ async fn test_deactivate_actor_manual() {
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone(), 100));
     
     actor
-        .attach_facet(virtual_facet, 100, facet_config)
+        .attach_facet(virtual_facet)
         .await
         .unwrap();
 
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Activate first
-    node.activate_virtual_actor(&"virtual-actor-5".to_string()).await.unwrap();
+    let actor_id5 = plexspaces_core::ActorId::from("virtual-actor-5");
+    activate_virtual_actor(&node, &actor_id5).await.unwrap();
     
     // Verify active
-    let (_, is_active, _) = node.check_virtual_actor_exists(&"virtual-actor-5".to_string()).await;
+    let (_, is_active, _) = node.check_virtual_actor_exists(&actor_id5).await;
     assert!(is_active, "Actor should be active");
     
     // Manually deactivate
-    node.deactivate_virtual_actor(&"virtual-actor-5".to_string(), false).await.unwrap();
+    node.deactivate_virtual_actor(&actor_id5, false).await.unwrap();
     
     // Verify deactivated (but still exists as virtual)
-    let (exists, is_active_after, is_virtual) = node.check_virtual_actor_exists(&"virtual-actor-5".to_string()).await;
+    let (exists, is_active_after, is_virtual) = node.check_virtual_actor_exists(&actor_id5).await;
     assert!(exists, "Virtual actor should still exist");
     assert!(is_virtual, "Actor should still be registered as virtual");
     // is_active_after should be false after deactivation
@@ -356,10 +371,12 @@ async fn test_deactivate_actor_manual() {
 async fn test_check_actor_exists() {
     // Test check_virtual_actor_exists method
     let node = NodeBuilder::new("test-node")
-        .build();
+        .build()
+        .await;
 
     // Check non-existent actor
-    let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&"nonexistent".to_string()).await;
+    let nonexistent_id = plexspaces_core::ActorId::from("nonexistent");
+    let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&nonexistent_id).await;
     assert!(!exists, "Non-existent actor should not exist");
     assert!(!is_active, "Non-existent actor should not be active");
     assert!(!is_virtual, "Non-existent actor should not be virtual");
@@ -377,6 +394,7 @@ async fn test_check_actor_exists() {
         Box::new(behavior),
         mailbox,
         "test".to_string(),
+        "default".to_string(),
         None,
     );
 
@@ -384,23 +402,24 @@ async fn test_check_actor_exists() {
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone()));
+    let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone(), 100));
     
     actor
-        .attach_facet(virtual_facet, 100, facet_config)
+        .attach_facet(virtual_facet)
         .await
         .unwrap();
 
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     
     // Check virtual actor (not yet activated)
-    let (exists_va, is_active_va, is_virtual_va) = node.check_virtual_actor_exists(&"virtual-actor-6".to_string()).await;
+    let actor_id6 = plexspaces_core::ActorId::from("virtual-actor-6");
+    let (exists_va, is_active_va, is_virtual_va) = node.check_virtual_actor_exists(&actor_id6).await;
     assert!(exists_va, "Virtual actor should exist");
     assert!(is_virtual_va, "Actor should be registered as virtual");
     
     // Activate and check again
-    node.activate_virtual_actor(&"virtual-actor-6".to_string()).await.unwrap();
-    let (exists_after, is_active_after, is_virtual_after) = node.check_virtual_actor_exists(&"virtual-actor-6".to_string()).await;
+    activate_virtual_actor(&node, &actor_id6).await.unwrap();
+    let (exists_after, is_active_after, is_virtual_after) = node.check_virtual_actor_exists(&actor_id6).await;
     assert!(exists_after, "Actor should still exist");
     assert!(is_active_after, "Actor should be active after activation");
     assert!(is_virtual_after, "Actor should still be registered as virtual");

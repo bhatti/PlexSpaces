@@ -293,11 +293,24 @@ impl TimerFacet {
             #[cfg(feature = "locks")]
             let mut lock_held = if let (Some(ref lock_mgr), Some(node_id_val)) = (lock_manager.as_ref(), node_id.as_ref()) {
                 // Use actor_id as lock key since lock_key was removed from proto
-                let ctx = plexspaces_core::RequestContext::internal();
+                // Use default tenant/namespace for timer locks (timers don't have access to actor context)
+                let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+                // Calculate lease duration: for periodic timers, use 2x interval (min 1 second), for one-time use 60s
+                let lease_secs = if periodic {
+                    let interval_secs = interval.as_secs() as u32;
+                    if interval_secs == 0 {
+                        // For sub-second intervals, use at least 1 second lease
+                        std::cmp::max(1, (interval.as_millis() as u32 / 500).max(1))
+                    } else {
+                        interval_secs * 2
+                    }
+                } else {
+                    60
+                };
                 match lock_mgr.acquire_lock(&ctx, AcquireLockOptions {
                     lock_key: format!("timer:{}", actor_id_for_lock),
                     holder_id: node_id_val.clone(),
-                    lease_duration_secs: if periodic { interval.as_secs() as u32 * 2 } else { 60 }, // 2x interval for periodic, 60s for one-time
+                    lease_duration_secs: lease_secs,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 1000,
                     metadata: Default::default(),
@@ -333,15 +346,25 @@ impl TimerFacet {
                 loop {
                     tokio::time::sleep(interval).await;
                     
-                    // Note: TimerRegistration no longer has lock_key field, so locking is disabled
+                    // Renew lock for periodic timers (if locking is enabled)
                     #[cfg(feature = "locks")]
-                    if false { // Disabled - no lock_key in proto
-                        let ctx = plexspaces_core::RequestContext::internal();
-                        match lock_manager.as_ref().unwrap().renew_lock(&ctx, plexspaces_locks::RenewLockOptions {
-                            lock_key: "".to_string(),
-                            holder_id: node_id.as_ref().unwrap().clone(),
-                            version: "".to_string(),
-                            lease_duration_secs: interval.as_secs() as u32 * 2,
+                    if let (Some(ref lock_mgr), Some(node_id_val), Some(ref lock)) = (lock_manager.as_ref(), node_id.as_ref(), current_lock.as_ref()) {
+                        let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+                        // Calculate lease duration: 2x interval (min 1 second for sub-second intervals)
+                        let lease_secs = {
+                            let interval_secs = interval.as_secs() as u32;
+                            if interval_secs == 0 {
+                                // For sub-second intervals, use at least 1 second lease
+                                std::cmp::max(1, (interval.as_millis() as u32 / 500).max(1))
+                            } else {
+                                interval_secs * 2
+                            }
+                        };
+                        match lock_mgr.renew_lock(&ctx, plexspaces_locks::RenewLockOptions {
+                            lock_key: format!("timer:{}", actor_id_for_lock),
+                            holder_id: node_id_val.clone(),
+                            version: lock.version.clone(),
+                            lease_duration_secs: lease_secs,
                             metadata: Default::default(),
                         }).await {
                             Ok(renewed_lock) => {
@@ -363,14 +386,14 @@ impl TimerFacet {
                 }
             }
             
-            // Note: TimerRegistration no longer has lock_key field, so locking is disabled
+            // Release lock when timer task completes (if locking is enabled)
             #[cfg(feature = "locks")]
-            if false { // Disabled - no lock_key in proto
-                let ctx = plexspaces_core::RequestContext::internal();
-                let _ = lock_manager.as_ref().unwrap().release_lock(&ctx, ReleaseLockOptions {
-                    lock_key: "".to_string(),
-                    holder_id: node_id.as_ref().unwrap().clone(),
-                    version: "".to_string(),
+            if let (Some(ref lock_mgr), Some(node_id_val), Some(ref lock)) = (lock_manager.as_ref(), node_id.as_ref(), current_lock.as_ref()) {
+                let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+                let _ = lock_mgr.release_lock(&ctx, ReleaseLockOptions {
+                    lock_key: format!("timer:{}", actor_id_for_lock),
+                    holder_id: node_id_val.clone(),
+                    version: lock.version.clone(),
                     delete_lock: false,
                 }).await;
             }

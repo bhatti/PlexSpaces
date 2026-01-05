@@ -30,20 +30,27 @@ use plexspaces_channel::{create_channel, Channel};
 use plexspaces_proto::channel::v1::{
     ChannelBackend, ChannelConfig, ChannelMessage, UdpConfig,
 };
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tokio::time::timeout;
 use futures::StreamExt;
 
-    fn create_udp_config(cluster_name: &str, port: u32) -> UdpConfig {
+    // Static counter for generating unique ports per test
+    // Starts from 20000 to avoid conflicts with system ports
+    static PORT_COUNTER: AtomicU32 = AtomicU32::new(20000);
+
+    /// Get a unique port for this test
+    /// Uses atomic counter to ensure no conflicts when tests run in parallel
+    fn get_unique_port() -> u32 {
+        PORT_COUNTER.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn create_udp_config(_cluster_name: &str, port: u32) -> UdpConfig {
         UdpConfig {
             multicast_address: "239.255.0.1".to_string(),
             multicast_port: port,
             bind_address: "0.0.0.0".to_string(),
-            ttl: 1,
-            max_message_size: 1400,
-            unicast_mode: false,
-            cluster_name: cluster_name.to_string(),
-            interface_name: String::new(),
+            message_ttl_seconds: 60,
         }
     }
 
@@ -64,23 +71,21 @@ use futures::StreamExt;
 
     #[tokio::test]
     async fn test_udp_channel_creation() {
-        let channel = create_udp_channel("test-udp-1", "test-cluster", 10001).await;
+        let port = get_unique_port();
+        let channel = create_udp_channel("test-udp-1", "test-cluster", port).await;
         
         assert_eq!(channel.get_config().name, "test-udp-1");
         assert!(!channel.is_closed());
     }
 
     #[tokio::test]
-    async fn test_udp_channel_requires_cluster_name() {
+    async fn test_udp_channel_creation_with_config() {
+        let port = get_unique_port();
         let udp_config = UdpConfig {
             multicast_address: "239.255.0.1".to_string(),
-            multicast_port: 9999,
+            multicast_port: port,
             bind_address: "0.0.0.0".to_string(),
-            ttl: 1,
-            max_message_size: 1400,
-            unicast_mode: false,
-            cluster_name: String::new(), // Empty cluster name
-            interface_name: String::new(),
+            message_ttl_seconds: 60,
         };
 
         let channel_config = ChannelConfig {
@@ -93,20 +98,18 @@ use futures::StreamExt;
             ..Default::default()
         };
 
+        // UDP channel should be created successfully with valid config
+        // (cluster_name is no longer required - cluster membership determined by multicast address/port)
         let result = create_channel(channel_config).await;
-        assert!(result.is_err());
-        // Check error message without requiring Debug on Channel
-        let error_str = match result {
-            Err(e) => e.to_string(),
-            Ok(_) => String::new(),
-        };
-        assert!(error_str.contains("cluster_name") || error_str.contains("cluster"));
+        assert!(result.is_ok(), "UDP channel should be created with valid multicast config");
     }
 
     #[tokio::test]
     async fn test_udp_send_receive() {
-        let channel1 = create_udp_channel("test-udp-2", "test-cluster-2", 10002).await;
-        let channel2 = create_udp_channel("test-udp-2", "test-cluster-2", 10002).await;
+        // Use same port for both channels (they need to share multicast group)
+        let port = get_unique_port();
+        let channel1 = create_udp_channel("test-udp-2", "test-cluster-2", port).await;
+        let channel2 = create_udp_channel("test-udp-2", "test-cluster-2", port).await;
 
         // Send message from channel1
         let msg = ChannelMessage {
@@ -130,8 +133,10 @@ use futures::StreamExt;
 
     #[tokio::test]
     async fn test_udp_publish_subscribe() {
-        let publisher = create_udp_channel("test-udp-3", "test-cluster-3", 10003).await;
-        let subscriber = create_udp_channel("test-udp-3", "test-cluster-3", 10003).await;
+        // Use same port for both channels (they need to share multicast group)
+        let port = get_unique_port();
+        let publisher = create_udp_channel("test-udp-3", "test-cluster-3", port).await;
+        let subscriber = create_udp_channel("test-udp-3", "test-cluster-3", port).await;
 
         // Subscribe
         let mut stream = subscriber.subscribe(None).await.unwrap();
@@ -158,7 +163,8 @@ use futures::StreamExt;
     #[tokio::test]
     async fn test_udp_ack_nack_noop() {
         // UDP channels don't support ACK/NACK (best-effort delivery)
-        let channel = create_udp_channel("test-udp-4", "test-cluster-4", 10004).await;
+        let port = get_unique_port();
+        let channel = create_udp_channel("test-udp-4", "test-cluster-4", port).await;
 
         // ACK should be a no-op
         let result = channel.ack("test-message-id").await;
@@ -171,7 +177,8 @@ use futures::StreamExt;
 
     #[tokio::test]
     async fn test_udp_channel_close() {
-        let channel = create_udp_channel("test-udp-5", "test-cluster-5", 10005).await;
+        let port = get_unique_port();
+        let channel = create_udp_channel("test-udp-5", "test-cluster-5", port).await;
 
         assert!(!channel.is_closed());
         
@@ -182,7 +189,8 @@ use futures::StreamExt;
 
     #[tokio::test]
     async fn test_udp_channel_stats() {
-        let channel = create_udp_channel("test-udp-6", "test-cluster-6", 10006).await;
+        let port = get_unique_port();
+        let channel = create_udp_channel("test-udp-6", "test-cluster-6", port).await;
 
         // Send some messages
         for i in 0..5 {
@@ -201,22 +209,18 @@ use futures::StreamExt;
         assert_eq!(stats.backend, ChannelBackend::ChannelBackendUdp as i32);
         assert!(stats.messages_sent >= 5);
         
-        // Check backend stats include cluster_name
-        assert!(stats.backend_stats.contains_key("cluster_name"));
-        assert_eq!(stats.backend_stats.get("cluster_name").unwrap(), "test-cluster-6");
+        // Check backend stats (cluster_name is no longer in stats, removed from UdpConfig)
+        assert!(stats.backend_stats.contains_key("multicast_address"));
     }
 
     #[tokio::test]
     async fn test_udp_invalid_multicast_address() {
+        let port = get_unique_port();
         let udp_config = UdpConfig {
             multicast_address: "192.168.1.1".to_string(), // Not a multicast address
-            multicast_port: 9999,
+            multicast_port: port,
             bind_address: "0.0.0.0".to_string(),
-            ttl: 1,
-            max_message_size: 1400,
-            unicast_mode: false,
-            cluster_name: "test-cluster".to_string(),
-            interface_name: String::new(),
+            message_ttl_seconds: 60,
         };
 
         let channel_config = ChannelConfig {

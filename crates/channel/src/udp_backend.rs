@@ -181,8 +181,24 @@ impl UdpChannel {
                 Some(socket2::Protocol::UDP),
             )?;
 
-            // Set reuse address
+            // Set reuse address and reuse port for multicast
+            // SO_REUSEADDR: Allows binding to same address/port (required for multicast)
+            // SO_REUSEPORT: Allows multiple sockets to bind to same address/port (required on macOS/Linux)
             socket.set_reuse_address(true)?;
+            #[cfg(unix)]
+            {
+                // SO_REUSEPORT is available on Unix systems (macOS, Linux)
+                // This allows multiple sockets to bind to the same multicast address/port
+                if let Err(e) = socket.set_reuse_port(true) {
+                    // If SO_REUSEPORT is not supported, log warning but continue
+                    // Some systems may not support it, but SO_REUSEADDR should still work
+                    debug!("SO_REUSEPORT not supported: {}, continuing with SO_REUSEADDR only", e);
+                }
+            }
+
+            // CRITICAL: Set socket to non-blocking before binding
+            // Tokio requires non-blocking sockets for async operations
+            socket.set_nonblocking(true)?;
 
             // Bind socket
             socket.bind(&bind_addr_clone.into())?;
@@ -193,7 +209,7 @@ impl UdpChannel {
             // Join multicast group
             socket.join_multicast_v4(&multicast_ip_clone, &Ipv4Addr::new(0, 0, 0, 0))?;
 
-            // Convert to std::net::UdpSocket
+            // Convert to std::net::UdpSocket (now non-blocking)
             Ok(socket.into())
         })
         .await

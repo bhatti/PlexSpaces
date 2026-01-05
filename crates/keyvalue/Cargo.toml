@@ -47,6 +47,8 @@ object_store = "0.10"
 ulid = "1.2"
 # Ensure sqlx with sqlite and "any" feature is available in tests (for blob backend tests)
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
+# Test helpers for checking DynamoDB Local availability
+plexspaces-common = { path = "../common", features = ["test-helpers"] }
 
 [features]
 default = []

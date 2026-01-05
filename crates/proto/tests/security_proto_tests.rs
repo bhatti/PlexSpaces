@@ -50,7 +50,11 @@ mod tests {
     fn test_mtls_config_creation() {
         let config = MtlsConfig {
             enable_mtls: true,
-            ca_certificate: "-----BEGIN CERTIFICATE-----\n...".to_string(),
+            ca_certificate_path: "/path/to/ca.pem".to_string(),
+            server_certificate_path: "/path/to/server.pem".to_string(),
+            server_key_path: "/path/to/server.key".to_string(),
+            auto_generate: false,
+            cert_dir: "/app/certs".to_string(),
             trusted_services: vec!["actor-service".to_string(), "scheduler-service".to_string()],
             certificate_rotation_interval: Some(prost_types::Duration {
                 seconds: 86400 * 30, // 30 days
@@ -59,7 +63,7 @@ mod tests {
         };
 
         assert!(config.enable_mtls);
-        assert!(!config.ca_certificate.is_empty());
+        assert!(!config.ca_certificate_path.is_empty());
         assert_eq!(config.trusted_services.len(), 2);
     }
 
@@ -67,6 +71,7 @@ mod tests {
     fn test_jwt_config_creation() {
         let config = JwtConfig {
             enable_jwt: true,
+            secret: "test-secret".to_string(),
             issuer: "https://auth.example.com".to_string(),
             jwks_url: "https://auth.example.com/.well-known/jwks.json".to_string(),
             allowed_audiences: vec!["plexspaces-api".to_string(), "plexspaces-admin".to_string()],
@@ -74,6 +79,12 @@ mod tests {
                 seconds: 3600, // 1 hour
                 nanos: 0,
             }),
+            refresh_token_ttl: Some(prost_types::Duration {
+                seconds: 604800, // 7 days
+                nanos: 0,
+            }),
+            tenant_id_claim: "tenant_id".to_string(),
+            user_id_claim: "sub".to_string(),
         };
 
         assert!(config.enable_jwt);

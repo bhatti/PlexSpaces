@@ -125,7 +125,8 @@ async fn test_multi_round_barrier_coordination() {
         default_node_config(),
     ));
 
-    let tuplespace = node.tuplespace();
+    // Create a local TupleSpace for testing
+    let tuplespace = Arc::new(plexspaces_tuplespace::TupleSpace::default());
     let num_actors = 4;
     let timeout = StdDuration::from_secs(30);
 

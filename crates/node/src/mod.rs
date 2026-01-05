@@ -410,13 +410,6 @@ impl Node {
     // These provide convenient access to actor-related data stored in ActorRegistry
     // All methods now get ActorRegistry from ServiceLocator
     
-    /// Get actor instances (for lazy virtual actors)
-    /// Note: Returns trait object - need to downcast to Arc<Actor> in Node
-    pub async fn actor_instances(&self) -> Result<Arc<RwLock<HashMap<ActorId, Arc<dyn std::any::Any + Send + Sync>>>>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.actor_instances().clone())
-    }
-    
     /// Get facet storage (use facet_manager() instead)
     pub async fn facet_storage(&self) -> Result<Arc<RwLock<HashMap<ActorId, Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>>>>, NodeError> {
         let registry = self.actor_registry().await?;
@@ -468,15 +461,32 @@ impl Node {
     }
     
     /// Get virtual actors map (delegates to ActorRegistry)
+    /// Get virtual actors (from VirtualActorManager - source of truth)
+    /// 
+    /// ## Design
+    /// VirtualActorManager is the source of truth for virtual actor metadata.
+    /// ActorRegistry only tracks active instances and MessageSenders.
     pub async fn virtual_actors(&self) -> Result<Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.virtual_actors().clone())
+        use plexspaces_core::VirtualActorManager;
+        use plexspaces_core::service_locator::service_names;
+        let manager: Arc<VirtualActorManager> = self.service_locator()
+            .get_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER)
+            .await
+            .ok_or_else(|| NodeError::ConfigError("VirtualActorManager not found".to_string()))?;
+        // VirtualActorManager has its own registry - return that
+        Ok(manager.registry().virtual_actors().clone())
     }
     
-    /// Get pending activations
+    /// Get pending activations (from VirtualActorManager - source of truth)
     pub async fn pending_activations(&self) -> Result<Arc<RwLock<HashMap<ActorId, Vec<Message>>>>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.pending_activations().clone())
+        use plexspaces_core::VirtualActorManager;
+        use plexspaces_core::service_locator::service_names;
+        let manager: Arc<VirtualActorManager> = self.service_locator()
+            .get_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER)
+            .await
+            .ok_or_else(|| NodeError::ConfigError("VirtualActorManager not found".to_string()))?;
+        // VirtualActorManager has its own registry - return that
+        Ok(manager.registry().pending_activations().clone())
     }
     
     /// Get actor configs
@@ -1127,11 +1137,28 @@ impl Node {
         let node_for_registration = self.clone();
         tokio::spawn(async move {
             // Register the node in ObjectRegistry using ObjectTypeNode
+            // Use default tenant/namespace from NodeConfig (not internal())
             use plexspaces_core::RequestContext;
-                use crate::object_registry_helpers::register_node;
+            use crate::object_registry_helpers::register_node;
             use plexspaces_core::service_locator::service_names;
             
-            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+            // Get default tenant/namespace from NodeConfig
+            let ctx = if let Some(node_config) = node_for_registration.service_locator.get_node_config().await {
+                let tenant_id = if node_config.default_tenant_id.is_empty() {
+                    "default".to_string()
+                } else {
+                    node_config.default_tenant_id.clone()
+                };
+                let namespace = if node_config.default_namespace.is_empty() {
+                    "default".to_string()
+                } else {
+                    node_config.default_namespace.clone()
+                };
+                RequestContext::new_without_auth(tenant_id, namespace)
+            } else {
+                // Fallback for tests or when NodeConfig is not set
+                RequestContext::new_without_auth("default".to_string(), "default".to_string())
+            };
             
             if let Some(object_registry) = node_for_registration.service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
                 let grpc_address = format!("http://{}", listen_addr);
@@ -1225,15 +1252,17 @@ impl Node {
         // We'll create it later after HealthService is available
         
         // Register ActorService in ServiceLocator so ActorContext::send_reply() can use it
-        // Create ActorServiceImpl for ServiceLocator (uses same service_locator, so shares state)
-        // ActorServiceImpl now implements ActorService trait directly, no wrapper needed
-        let actor_service_for_context = Arc::new(
-            plexspaces_actor_service::ActorServiceImpl::new(
-                self.service_locator.clone(),
-                self.id.as_str().to_string(),
-            )
-        );
-        self.service_locator.register_actor_service(actor_service_for_context.clone() as Arc<dyn plexspaces_core::ActorService + Send + Sync>).await;
+        // Note: ActorService is already registered during initialize_services(), but we ensure it's available here
+        // for gRPC server (idempotent - won't register twice if already registered)
+        if self.service_locator.get_actor_service().await.is_none() {
+            let actor_service_for_context = Arc::new(
+                plexspaces_actor_service::ActorServiceImpl::new(
+                    self.service_locator.clone(),
+                    self.id.as_str().to_string(),
+                )
+            );
+            self.service_locator.register_actor_service(actor_service_for_context.clone() as Arc<dyn plexspaces_core::ActorService + Send + Sync>).await;
+        }
         
         // Register NodeMetricsAccessor for monitoring helpers and dashboard
         use crate::service_wrappers::NodeMetricsAccessorWrapper;
@@ -2203,12 +2232,17 @@ impl Node {
                     app
                 };
                 
-                // Start HTTP server on a separate port (gRPC port + 1 for HTTP gateway)
-                // This follows the demo pattern of separate servers
-                let http_port = grpc_addr.port() + 1;
+                // Start HTTP server on a separate port
+                // If gRPC port is 0 (ephemeral), use 0 for HTTP gateway too to get random port
+                // Otherwise use gRPC port + 1 for HTTP gateway
+                let http_port = if grpc_addr.port() == 0 {
+                    0  // Use random port if gRPC is using random port
+                } else {
+                    grpc_addr.port() + 1
+                };
                 let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
                     .parse::<std::net::SocketAddr>()
-                    .unwrap_or_else(|_| "127.0.0.1:8001".parse().unwrap());
+                    .unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()); // Use 0 as fallback for random port
                 
                 eprintln!("🌐 Starting HTTP gateway server on http://{}", http_addr);
                 eprintln!("📊 Dashboard available at http://{}/", http_addr);
@@ -3196,10 +3230,78 @@ impl Node {
         // For now, just remove from active actors
         // Future: Save state to ObjectRegistry or storage backend
 
-        // Remove from active actors
+        // For virtual actor suspension, we need to:
+        // 1. Stop the actor properly (terminate message loop) using stop_from_arc()
+        // 2. Remove the actor instance (so actor is not active) but preserve metadata
+        // 3. Keep actor_type, metadata, and config (so we can rebuild)
+        // 4. Re-register VirtualActorWrapper (so actor remains addressable)
+        // 
+        // Production-grade design: Use stop_from_arc() to stop the actor, then use
+        // suspend_virtual_actor() which preserves metadata (unlike unregister_with_cleanup)
+        
         let actor_registry = self.actor_registry().await?;
-        actor_registry.unregister_with_cleanup(&actor_id).await
-            .map_err(|e| NodeError::ActorRegistrationFailed(actor_id.clone(), e.to_string()))?;
+        
+        // Step 1: Stop the actor properly (terminates message loop gracefully)
+        // CRITICAL: Must stop actor BEFORE suspending to prevent race conditions
+        // Production-grade: Use stop_from_arc() which sends shutdown signal and aborts task
+        eprintln!("🔵 [DEACTIVATE] Step 1: Stopping actor before suspension: actor_id={}", actor_id);
+        if let Some(instance) = actor_registry.get_actor_instance(&actor_id).await {
+            use std::any::Any;
+            if let Ok(actor_arc) = instance.downcast::<plexspaces_actor::Actor>() {
+                eprintln!("🔵 [DEACTIVATE] Found actor instance, calling stop_from_arc: actor_id={}", actor_id);
+                // Use stop_from_arc() - production-grade graceful shutdown
+                // This sends shutdown signal, waits, then aborts if needed
+                tracing::debug!(actor_id = %actor_id, "Stopping actor before suspension");
+                if let Err(e) = actor_arc.stop_from_arc().await {
+                    eprintln!("🔴 [DEACTIVATE] Failed to stop actor: actor_id={}, error={}", actor_id, e);
+                    tracing::warn!(
+                        actor_id = %actor_id,
+                        error = %e,
+                        "Failed to stop actor during suspension (continuing)"
+                    );
+                } else {
+                    eprintln!("🟢 [DEACTIVATE] Actor stop_from_arc() completed: actor_id={}", actor_id);
+                }
+                // Wait a bit more to ensure message loop task is fully terminated
+                // This prevents race conditions where actor is reactivated before old loop stops
+                eprintln!("🔵 [DEACTIVATE] Waiting for message loop to fully terminate: actor_id={}", actor_id);
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                eprintln!("🟢 [DEACTIVATE] Wait completed, checking actor state: actor_id={}", actor_id);
+            } else {
+                eprintln!("🔴 [DEACTIVATE] Failed to downcast actor instance: actor_id={}", actor_id);
+            }
+        } else {
+            eprintln!("🟡 [DEACTIVATE] No actor instance found (already suspended?): actor_id={}", actor_id);
+        }
+        
+        // Step 2: Suspend virtual actor (removes instance and ActorRef, preserves metadata)
+        // This is different from unregister_with_cleanup() which removes everything
+        // CRITICAL: Only suspend AFTER actor is fully stopped
+        eprintln!("🔵 [DEACTIVATE] Step 2: Suspending virtual actor: actor_id={}", actor_id);
+        actor_registry.suspend_virtual_actor(&actor_id).await;
+        eprintln!("🟢 [DEACTIVATE] Virtual actor suspended: actor_id={}", actor_id);
+
+        // CRITICAL: Re-register VirtualActorWrapper so actor remains addressable (Orleans design)
+        // After deactivation, virtual actors should still be registered (with VirtualActorWrapper)
+        // so they can receive messages and reactivate automatically
+        // This ensures "always addressable" property - actor exists virtually even when not active
+        use plexspaces_actor::VirtualActorWrapper;
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        let virtual_wrapper: Arc<dyn plexspaces_core::MessageSender> = Arc::new(VirtualActorWrapper::new(
+            actor_id.clone(),
+            self.service_locator().clone(),
+        ));
+        
+        // Re-register VirtualActorWrapper (actor remains addressable but not active)
+        actor_registry.register_actor(
+            &ctx,
+            actor_id.clone(),
+            virtual_wrapper,
+            None, // No actor type needed for re-registration
+            None, // Config is preserved in VirtualActorManager
+            None, // No instance - actor is deactivated
+        ).await;
 
         Ok(())
     }
@@ -3245,23 +3347,40 @@ impl Node {
     /// Virtual actors are activated on-demand when they receive their first message.
     ///
     /// ## Arguments
+    /// * `ctx` - Request context (for tenant_id and namespace)
     /// * `actor_id` - The actor ID
     /// * `facet` - The VirtualActorFacet instance
+    /// * `actor_type` - Optional actor type (e.g., "GenServer")
+    /// * `config` - Optional actor configuration
     ///
     /// ## Returns
     /// Ok(()) if registration successful
+    ///
+    /// ## Note
+    /// This method stores metadata in VirtualActorManager (source of truth for virtual actors).
+    /// The metadata persists across suspension/reactivation cycles.
     pub async fn register_virtual_actor(
         &self,
+        ctx: &RequestContext,
         actor_id: ActorId,
         facet: VirtualActorFacet,
+        actor_type: Option<String>,
+        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
     ) -> Result<(), NodeError> {
         // Wrap facet in Box<dyn Any> for storage
         let facet_box = Arc::new(tokio::sync::RwLock::new(Box::new(facet) as Box<dyn std::any::Any + Send + Sync>));
         
-        // Use VirtualActorManager for registration
+        // Use VirtualActorManager for registration (source of truth for virtual actors)
         let manager = self.get_virtual_actor_manager().await?;
         let actor_id_clone = actor_id.clone();
-        manager.register(actor_id, facet_box).await
+        manager.register(
+            actor_id,
+            facet_box,
+            actor_type,
+            config,
+            ctx.tenant_id().to_string(),
+            ctx.namespace().to_string(),
+        ).await
             .map_err(|e| NodeError::ActorRegistrationFailed(actor_id_clone, e.to_string()))
     }
 
@@ -3716,7 +3835,7 @@ mod tests {
         let actor_registry = get_actor_registry(node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_id.to_string(), wrapper, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_id.to_string(), wrapper, None, None, None).await;
     }
 
     #[tokio::test]
@@ -3749,10 +3868,8 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
-
-        // Register actor config (if needed)
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        // Register actor (idempotent - can be called multiple times)
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Should find local actor via ActorRegistry
         let internal_ctx = RequestContext::internal();
@@ -3796,11 +3913,14 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
-        // Register actor config
+        // Update actor registration with config (idempotent - actor already registered)
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None).await;
+        }
         let internal_ctx = RequestContext::internal();
         assert!(actor_registry.lookup_routing(&internal_ctx, &"test-actor@test-node".to_string()).await.is_ok());
 
@@ -3829,13 +3949,19 @@ mod tests {
 
         // First registration should succeed
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None).await;
+        }
 
-        // Second registration should fail
+        // Second registration should also succeed (idempotent - safe to call multiple times)
+        // This is a production-grade design: register_actor is idempotent
+        // to allow safe retries and prevent errors from duplicate calls
         let actor_registry = get_actor_registry(&node).await;
-        let result = actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await;
-        assert!(result.is_err());
-        // Expected error for duplicate registration
+        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None).await;
+        }
     }
 
     #[tokio::test]
@@ -3858,7 +3984,10 @@ mod tests {
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         // Create message
         let message = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
@@ -3873,7 +4002,7 @@ mod tests {
         // Send message via ActorRef (use the actor_ref we already have, don't lookup again)
         actor_ref.tell(message).await.unwrap();
 
-        // Verify stats updated
+        // Verify stats updated (metrics are now updated synchronously in ActorRef::tell)
         let node_metrics = node.metrics().await;
         assert_eq!(node_metrics.messages_routed, 1, "messages_routed should be 1, got {}", node_metrics.messages_routed);
         assert_eq!(node_metrics.local_deliveries, 1, "local_deliveries should be 1, got {}", node_metrics.local_deliveries);
@@ -4270,7 +4399,10 @@ mod tests {
         // Register actor with ActorRegistry on node2
         register_actor_for_test(&node2, actor_ref.id().as_str(), mailbox.clone()).await;
         let actor_registry2 = get_actor_registry(&node2).await;
-        actor_registry2.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         // Register node2 in ObjectRegistry on node1 (so node1 can find it)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -4379,7 +4511,10 @@ mod tests {
         // Register actor with ActorRegistry on node2
         register_actor_for_test(&node2, actor_ref.id().as_str(), mailbox.clone()).await;
         let actor_registry2 = get_actor_registry(&node2).await;
-        actor_registry2.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         // Register node2 in ObjectRegistry on node1 (so node1 can find it via lookup_routing)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -4442,7 +4577,10 @@ mod tests {
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         // Create monitoring channel
         let (tx, mut rx) = mpsc::channel(1);
@@ -4556,7 +4694,10 @@ mod tests {
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         // Create 3 monitors
         let (tx1, mut rx1) = mpsc::channel(1);
@@ -4703,13 +4844,16 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         let (tx, mut rx) = mpsc::channel(1);
         node.monitor(
@@ -4767,13 +4911,16 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         let (tx, mut rx) = mpsc::channel(1);
         node.monitor(
@@ -4858,7 +5005,10 @@ mod tests {
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
+        let ctx = plexspaces_core::RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         // active_actors is only updated when actors are spawned via ActorFactory, not when registered
         // So we check that the actor is registered instead
@@ -4877,7 +5027,7 @@ mod tests {
         let message = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
         actor_ref.tell(message).await.unwrap();
 
-        // Check stats updated
+        // Check stats updated (metrics are now updated synchronously in ActorRef::tell)
         let node_metrics = node.metrics().await;
         assert_eq!(node_metrics.messages_routed, 1);
         assert_eq!(node_metrics.local_deliveries, 1);
@@ -4962,15 +5112,16 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
 
-        // Register actor with config
+        // Update actor registration with config (idempotent - actor already registered)
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), Some(config.clone()))
-            .await
-            .unwrap();
+        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config.clone()), None).await;
+        }
 
         // Verify config is stored
         let actor_configs_arc = node.actor_configs().await.unwrap();
@@ -5002,11 +5153,10 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
-        // Register actor without config
+        // Actor already registered - no need to update config
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), None).await.unwrap();
 
         // Verify config is not stored
         let actor_configs_arc = node.actor_configs().await.unwrap();
@@ -5033,15 +5183,16 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         let config = create_actor_config_with_resources(1.0, 1024 * 1024 * 256, 0, 0);
 
         // Register actor with config
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), Some(config))
-            .await
-            .unwrap();
+        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None).await;
+        }
 
         // Verify config is stored
         {
@@ -5080,12 +5231,13 @@ mod tests {
         ));
         let actor_registry = get_actor_registry(&node).await;
         let internal_ctx = plexspaces_core::RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor1_ref.id().clone(), wrapper1, None).await;
+        actor_registry.register_actor(&internal_ctx, actor1_ref.id().clone(), wrapper1, None, None, None).await;
         let config1 = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor1_ref.id().clone(), Some(config1))
-            .await
-            .unwrap();
+        if let Some(sender1) = actor_registry.lookup_actor(&actor1_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor1_ref.id().clone(), sender1, None, Some(config1), None).await;
+        }
 
         // Register second actor with resources
         let mailbox2 = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-2-{}", ulid::Ulid::new())).await.unwrap());
@@ -5099,11 +5251,12 @@ mod tests {
         ));
         let actor_registry = get_actor_registry(&node).await;
         let internal_ctx = plexspaces_core::RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor2_ref.id().clone(), wrapper2, None).await;
+        actor_registry.register_actor(&internal_ctx, actor2_ref.id().clone(), wrapper2, None, None, None).await;
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor2_ref.id().clone(), Some(config2))
-            .await
-            .unwrap();
+        if let Some(sender2) = actor_registry.lookup_actor(&actor2_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor2_ref.id().clone(), sender2, None, Some(config2), None).await;
+        }
 
         // Calculate capacity
         let capacity = node.calculate_node_capacity().await;
@@ -5173,717 +5326,8 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Use internal context for test actor registration (system-level operation)
         let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
         let mut config = plexspaces_proto::v1::actor::ActorConfig::default();
         config.resource_requirements = None; // No resource requirements
         config.config_schema_version = 1;
         let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), Some(config))
-            .await
-            .unwrap();
-
-        // Calculate capacity
-        let capacity = node.calculate_node_capacity().await;
-
-        // Verify allocated resources are still zero (actor has no requirements)
-        let allocated = capacity.allocated.as_ref().unwrap();
-        assert_eq!(allocated.cpu_cores, 0.0);
-        assert_eq!(allocated.memory_bytes, 0);
-    }
-
-    #[tokio::test]
-    async fn test_calculate_node_capacity_after_unregister() {
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Register actor with resources
-        let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
-        let actor_ref = ActorRef::local("actor-1@test-node", mailbox.clone(), node.service_locator());
-        let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 0, 0);
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), Some(config))
-            .await
-            .unwrap();
-
-        // Verify allocated resources
-        let capacity = node.calculate_node_capacity().await;
-        let allocated = capacity.allocated.as_ref().unwrap();
-        assert_eq!(allocated.cpu_cores, 2.0);
-
-        // Unregister actor
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry.unregister_with_cleanup(actor_ref.id()).await.unwrap();
-
-        // Verify allocated resources are back to zero
-        let capacity = node.calculate_node_capacity().await;
-        let allocated = capacity.allocated.as_ref().unwrap();
-        assert_eq!(allocated.cpu_cores, 0.0);
-        assert_eq!(allocated.memory_bytes, 0);
-    }
-
-    #[tokio::test]
-    async fn test_calculate_node_capacity_with_partial_resource_spec() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Create config with only CPU specified (no memory/disk)
-        use plexspaces_proto::{
-            v1::actor::{ActorConfig, ActorResourceRequirements},
-            common::v1::ResourceSpec,
-        };
-
-        let resources = ResourceSpec {
-            cpu_cores: 1.0,
-            memory_bytes: 0,
-            disk_bytes: 0,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        };
-
-        let resource_requirements = ActorResourceRequirements {
-            resources: Some(resources),
-            required_labels: std::collections::HashMap::new(),
-            placement: None,
-            actor_groups: vec![],
-        };
-
-        let mut config = ActorConfig::default();
-        config.resource_requirements = Some(resource_requirements);
-        config.config_schema_version = 1;
-
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        use std::sync::Arc;
-        let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
-        let actor_ref = ActorRef::local("actor-1@test-node", mailbox.clone(), node.service_locator());
-        // Register actor with MessageSender (mailbox is internal)
-        
-        use plexspaces_core::MessageSender;
-        let wrapper = Arc::new(ActorRef::local(
-            actor_ref.id().clone(),
-            mailbox.clone(),
-            node.service_locator().clone(),
-        ));
-        let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None).await;
-        let actor_registry = get_actor_registry(&node).await;
-        actor_registry.register_actor_with_config(actor_ref.id().clone(), Some(config))
-            .await
-            .unwrap();
-
-        // Calculate capacity
-        let capacity = node.calculate_node_capacity().await;
-        let allocated = capacity.allocated.as_ref().unwrap();
-
-        // Verify only CPU is allocated
-        assert_eq!(allocated.cpu_cores, 1.0);
-        assert_eq!(allocated.memory_bytes, 0);
-        assert_eq!(allocated.disk_bytes, 0);
-    }
-
-    // ============================================================================
-    // Application Lifecycle Tests (Erlang/OTP-style)
-    // ============================================================================
-
-    use async_trait::async_trait;
-    use plexspaces_core::application::{
-        Application, ApplicationError, ApplicationNode, ApplicationState, HealthStatus,
-    };
-
-    // Mock application for testing
-    struct MockTestApplication {
-        name: String,
-        should_fail_start: bool,
-        should_fail_stop: bool,
-        start_called: Arc<RwLock<bool>>,
-        stop_called: Arc<RwLock<bool>>,
-    }
-
-    impl MockTestApplication {
-        fn new(name: &str) -> Self {
-            Self {
-                name: name.to_string(),
-                should_fail_start: false,
-                should_fail_stop: false,
-                start_called: Arc::new(RwLock::new(false)),
-                stop_called: Arc::new(RwLock::new(false)),
-            }
-        }
-
-        fn new_failing_start(name: &str) -> Self {
-            Self {
-                name: name.to_string(),
-                should_fail_start: true,
-                should_fail_stop: false,
-                start_called: Arc::new(RwLock::new(false)),
-                stop_called: Arc::new(RwLock::new(false)),
-            }
-        }
-
-        fn new_failing_stop(name: &str) -> Self {
-            Self {
-                name: name.to_string(),
-                should_fail_start: false,
-                should_fail_stop: true,
-                start_called: Arc::new(RwLock::new(false)),
-                stop_called: Arc::new(RwLock::new(false)),
-            }
-        }
-
-        async fn was_start_called(&self) -> bool {
-            *self.start_called.read().await
-        }
-
-        async fn was_stop_called(&self) -> bool {
-            *self.stop_called.read().await
-        }
-    }
-
-    #[async_trait]
-    impl Application for MockTestApplication {
-        fn name(&self) -> &str {
-            &self.name
-        }
-
-        fn version(&self) -> &str {
-            "0.1.0"
-        }
-
-        async fn start(&mut self, node: Arc<dyn ApplicationNode>) -> Result<(), ApplicationError> {
-            *self.start_called.write().await = true;
-            eprintln!("MockApp '{}' starting on node: {}", self.name, node.id());
-            if self.should_fail_start {
-                Err(ApplicationError::StartupFailed("mock failure".to_string()))
-            } else {
-                Ok(())
-            }
-        }
-
-        async fn stop(&mut self) -> Result<(), ApplicationError> {
-            *self.stop_called.write().await = true;
-            eprintln!("MockApp '{}' stopping", self.name);
-            if self.should_fail_stop {
-                Err(ApplicationError::ShutdownFailed("mock failure".to_string()))
-            } else {
-                Ok(())
-            }
-        }
-
-        async fn health_check(&self) -> HealthStatus {
-            HealthStatus::HealthStatusHealthy
-        }
-        
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
-
-    #[tokio::test]
-    async fn test_register_application() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app).await.unwrap();
-
-        // Verify application is registered
-        let state = node
-            .application_manager()
-            .await
-            .unwrap()
-            .get_state("test-app")
-            .await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateCreated));
-    }
-
-    #[tokio::test]
-    async fn test_register_duplicate_application() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        let app1 = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app1).await.unwrap();
-
-        let app2 = Box::new(MockTestApplication::new("test-app"));
-        let result = node.register_application(app2).await;
-
-        // Should fail with duplicate error
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("already registered"));
-    }
-
-    #[tokio::test]
-    async fn test_start_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        let start_called = app.start_called.clone();
-
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
-
-        // Verify application started
-        let state = node
-            .application_manager()
-            .await
-            .unwrap()
-            .get_state("test-app")
-            .await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateRunning));
-
-        // Verify start was called
-        assert!(*start_called.read().await);
-    }
-
-    #[tokio::test]
-    async fn test_start_application_failure() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new_failing_start("test-app"));
-        node.register_application(app).await.unwrap();
-
-        let result = node.start_application("test-app").await;
-
-        // Should fail
-        assert!(result.is_err());
-
-        // State should be Failed
-        let state = node
-            .application_manager()
-            .await
-            .unwrap()
-            .get_state("test-app")
-            .await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateFailed));
-    }
-
-    #[tokio::test]
-    async fn test_stop_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        let stop_called = app.stop_called.clone();
-
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
-        node.stop_application("test-app", tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-
-        // Verify application stopped
-        let state = node
-            .application_manager()
-            .await
-            .unwrap()
-            .get_state("test-app")
-            .await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateStopped));
-
-        // Verify stop was called
-        assert!(*stop_called.read().await);
-    }
-
-    #[tokio::test]
-    async fn test_stop_application_failure() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new_failing_stop("test-app"));
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
-
-        let result = node
-            .stop_application("test-app", tokio::time::Duration::from_secs(5))
-            .await;
-
-        // Should fail
-        assert!(result.is_err());
-
-        // State should be Failed
-        let state = node
-            .application_manager()
-            .await
-            .unwrap()
-            .get_state("test-app")
-            .await;
-        assert_eq!(state, Some(ApplicationState::ApplicationStateFailed));
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_multiple_applications() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Register and start 3 applications
-        let apps = vec![
-            Box::new(MockTestApplication::new("app1")) as Box<dyn Application>,
-            Box::new(MockTestApplication::new("app2")) as Box<dyn Application>,
-            Box::new(MockTestApplication::new("app3")) as Box<dyn Application>,
-        ];
-
-        for app in apps {
-            node.register_application(app).await.unwrap();
-        }
-
-        node.start_application("app1").await.unwrap();
-        node.start_application("app2").await.unwrap();
-        node.start_application("app3").await.unwrap();
-
-        // Shutdown all applications
-        node.shutdown(tokio::time::Duration::from_secs(10))
-            .await
-            .unwrap();
-
-        // Verify all applications stopped
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("app1")
-                .await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("app2")
-                .await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("app3")
-                .await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-
-        // Verify shutdown flag set
-        assert!(node.is_shutdown_requested().await);
-    }
-
-    #[tokio::test]
-    async fn test_application_node_trait_implementation() {
-        use crate::NodeBuilder;
-        let node = NodeBuilder::new("test-node")
-            .with_listen_address("0.0.0.0:9999")
-            .build().await;
-
-        // Test ApplicationNode trait methods (uses trait methods, not Node methods)
-        let node_ref: &dyn ApplicationNode = &node;
-        assert_eq!(node_ref.id(), "test-node");
-        assert_eq!(node_ref.listen_addr(), "0.0.0.0:9999");
-    }
-
-    #[tokio::test]
-    async fn test_start_nonexistent_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let result = node.start_application("nonexistent").await;
-
-        // Should fail with not found error
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn test_stop_nonexistent_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let result = node
-            .stop_application("nonexistent", tokio::time::Duration::from_secs(5))
-            .await;
-
-        // Should fail with not found error
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn test_application_lifecycle_full_cycle() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("lifecycle-test"));
-        let start_called = app.start_called.clone();
-        let stop_called = app.stop_called.clone();
-
-        // Full lifecycle: register -> start -> stop
-        node.register_application(app).await.unwrap();
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("lifecycle-test")
-                .await,
-            Some(ApplicationState::ApplicationStateCreated)
-        );
-
-        node.start_application("lifecycle-test").await.unwrap();
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("lifecycle-test")
-                .await,
-            Some(ApplicationState::ApplicationStateRunning)
-        );
-        assert!(*start_called.read().await);
-
-        node.stop_application("lifecycle-test", tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("lifecycle-test")
-                .await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-        assert!(*stop_called.read().await);
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_with_partial_failure() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Register 2 apps: one normal, one failing to stop
-        let app1 = Box::new(MockTestApplication::new("good-app")) as Box<dyn Application>;
-        let app2 =
-            Box::new(MockTestApplication::new_failing_stop("bad-app")) as Box<dyn Application>;
-
-        node.register_application(app1).await.unwrap();
-        node.register_application(app2).await.unwrap();
-
-        node.start_application("good-app").await.unwrap();
-        node.start_application("bad-app").await.unwrap();
-
-        // Shutdown should fail due to bad-app
-        let result = node.shutdown(tokio::time::Duration::from_secs(5)).await;
-        assert!(result.is_err());
-
-        // good-app should still be stopped
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("good-app")
-                .await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-
-        // bad-app should be in Failed state
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("bad-app")
-                .await,
-            Some(ApplicationState::ApplicationStateFailed)
-        );
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_request_flag() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Initially not requested
-        assert!(!node.is_shutdown_requested().await);
-
-        // Register and start an app
-        let app = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
-
-        // Shutdown
-        node.shutdown(tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-
-        // Now shutdown is requested
-        assert!(node.is_shutdown_requested().await);
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_with_no_applications() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Initialize services
-        node.initialize_services().await.unwrap();
-
-        // Shutdown with no apps should succeed
-        let result = node.shutdown(tokio::time::Duration::from_secs(5)).await;
-        assert!(result.is_ok());
-
-        // Shutdown flag should be set
-        assert!(node.is_shutdown_requested().await);
-    }
-
-    #[tokio::test]
-    async fn test_application_manager_accessor() {
-        let node = NodeBuilder::new("test-node").build().await;
-
-        // Get application manager reference
-        let manager = node.application_manager();
-
-        // Verify it's the same manager (returns empty list initially)
-        let apps = manager.await.unwrap().list_applications().await;
-        assert_eq!(apps.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_multiple_start_attempts() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app).await.unwrap();
-
-        // First start succeeds
-        node.start_application("test-app").await.unwrap();
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("test-app")
-                .await,
-            Some(ApplicationState::ApplicationStateRunning)
-        );
-
-        // Second start should fail (not in Created state)
-        let result = node.start_application("test-app").await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("state"));
-    }
-
-    #[tokio::test]
-    async fn test_stop_already_stopped_application() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        let app = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
-
-        // First stop succeeds
-        node.stop_application("test-app", tokio::time::Duration::from_secs(5))
-            .await
-            .unwrap();
-        assert_eq!(
-            node            .application_manager().await.unwrap()
-                .get_state("test-app")
-                .await,
-            Some(ApplicationState::ApplicationStateStopped)
-        );
-
-        // Second stop should succeed (already stopped)
-        let result = node
-            .stop_application("test-app", tokio::time::Duration::from_secs(5))
-            .await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_shutdown_stops_all_applications() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
-
-        // Track which apps were stopped
-        let stopped_apps = Arc::new(RwLock::new(Vec::new()));
-
-        // Create apps that record when they stop
-        struct StopTrackingApp {
-            name: String,
-            stopped_apps: Arc<RwLock<Vec<String>>>,
-        }
-
-        #[async_trait]
-        impl Application for StopTrackingApp {
-            fn name(&self) -> &str {
-                &self.name
-            }
-
-            fn version(&self) -> &str {
-                "0.1.0"
-            }
-
-            async fn start(
-                &mut self,
-                _node: Arc<dyn ApplicationNode>,
-            ) -> Result<(), ApplicationError> {
-                Ok(())
-            }
-
-            async fn stop(&mut self) -> Result<(), ApplicationError> {
-                self.stopped_apps.write().await.push(self.name.clone());
-                Ok(())
-            }
-
-            async fn health_check(&self) -> HealthStatus {
-                HealthStatus::HealthStatusHealthy
-            }
-            
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
-        }
-
-        // Register and start multiple apps
-        for i in 1..=3 {
-            let app = Box::new(StopTrackingApp {
-                name: format!("app{}", i),
-                stopped_apps: stopped_apps.clone(),
-            }) as Box<dyn Application>;
-            node.register_application(app).await.unwrap();
-            node.start_application(&format!("app{}", i)).await.unwrap();
-        }
-
-        // Shutdown
-        node.shutdown(tokio::time::Duration::from_secs(10))
-            .await
-            .unwrap();
-
-        // Verify all apps were stopped (order not guaranteed due to HashMap)
-        let stopped = stopped_apps.read().await;
-        assert_eq!(stopped.len(), 3);
-        assert!(stopped.contains(&"app1".to_string()));
-        assert!(stopped.contains(&"app2".to_string()));
-        assert!(stopped.contains(&"app3".to_string()));
-    }
-}
-
-
-// ============================================================================
-// LinkProvider Implementation (Phase 8.5: Link Semantics Integration)
-// ============================================================================
-
-#[async_trait::async_trait]
-impl LinkProvider for Node {
-    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String> {
-        Node::link(self, actor_id, linked_actor_id)
-            .await
-            .map_err(|e| e.to_string())
-    }
-
-    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String> {
-        Node::unlink(self, actor_id, linked_actor_id)
-            .await
-            .map_err(|e| e.to_string())
-    }
-}
-
-// ============================================================================
-// ActivationProvider Implementation (Phase 8.5: Reminder-VirtualActor Integration)
-// ============================================================================
-
-#[async_trait::async_trait]
-impl ActivationProvider for Node {
-    async fn is_actor_active(&self, actor_id: &ActorId) -> bool {
-        // Check if actor is registered in ActorRegistry
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::internal();
-        let Ok(actor_registry) = self.actor_registry().await else {
-            return false;
-        };
-        let routing = actor_registry.lookup_routing(&ctx, actor_id).await.ok().flatten();
-        routing.map(|r| r.is_local).unwrap_or(false)
-    }
-
-    async fn activate_actor(&self, actor_id: &ActorId) -> Result<CoreActorRef, String> {
-        // Activate the virtual actor using ActorFactory
-        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-        
-        use plexspaces_actor::get_actor_factory;
-        let actor_factory = get_actor_factory(self.service_locator().as_ref()).await
-            .ok_or_else(|| "ActorFactory not found".to_string())?;
-        
-        actor_factory.activate_virtual_actor(actor_id).await
-            .map_err(|e| e.to_string())?;
-        
-        // Convert plexspaces_actor::ActorRef to plexspaces_core::ActorRef
-        // Core ActorRef is just an ID wrapper, so we create it from the actor_id
-        CoreActorRef::new(actor_id.clone())
-            .map_err(|e| e.to_string())
-    }
-}

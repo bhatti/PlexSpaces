@@ -67,6 +67,7 @@ nats-backend = ["async-nats"]
 sqlite-backend = ["sqlx"]
 udp-backend = ["socket2"]
 sqs-backend = ["aws-sdk-sqs", "aws-config", "plexspaces-common", "metrics", "base64"]
+test-helpers = ["plexspaces-common/test-helpers"]
 test-utils = []  # Enable mock_backend for integration tests
 
 [lib]

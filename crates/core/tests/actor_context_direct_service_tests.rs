@@ -62,6 +62,19 @@ impl ObjectRegistry for MockObjectRegistry {
     async fn register(&self, _ctx: &plexspaces_core::RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
+    async fn discover(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        _object_category: Option<String>,
+        _capabilities: Option<Vec<String>>,
+        _labels: Option<Vec<String>>,
+        _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        _offset: usize,
+        _limit: usize,
+    ) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(vec![])
+    }
 }
 
 struct MockTupleSpaceProvider;
@@ -135,20 +148,35 @@ impl FacetService for MockFacetService {
     }
 }
 
-fn create_test_context_with_services(
+async fn create_test_context_with_services(
     actor_service: Arc<dyn ActorService>,
     process_group_service: Arc<dyn ProcessGroupService>,
 ) -> ActorContext {
+    create_test_context_with_services_custom(
+        actor_service,
+        process_group_service,
+        String::new(), // default tenant_id (empty if auth disabled)
+        "test-ns".to_string(), // default namespace
+    ).await
+}
+
+async fn create_test_context_with_services_custom(
+    _actor_service: Arc<dyn ActorService>,
+    _process_group_service: Arc<dyn ProcessGroupService>,
+    tenant_id: String,
+    namespace: String,
+) -> ActorContext {
     use plexspaces_core::ServiceLocator;
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     
     // Register services in ServiceLocator (if needed for tests)
     // For now, just create context with ServiceLocator
     ActorContext::new(
         "test-node".to_string(),
-        String::new(), // tenant_id (empty if auth disabled)
-        "test-ns".to_string(),
+        tenant_id,
+        namespace,
         service_locator,
         None,
     )
@@ -168,7 +196,7 @@ async fn test_reply_using_actor_service() {
         members: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
 
-    let ctx = create_test_context_with_services(actor_service.clone(), process_group_service);
+    let ctx = create_test_context_with_services(actor_service.clone(), process_group_service).await;
     
     // sender_id and correlation_id are in Message, not ActorContext
     let reply_msg = Message::new(vec![1, 2, 3])
@@ -199,13 +227,14 @@ async fn test_join_group_using_process_group_service() {
         sent_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
     });
 
-    let ctx = create_test_context_with_services(actor_service, process_group_service.clone());
+    let ctx = create_test_context_with_services(actor_service, process_group_service.clone()).await;
     
     // Use process_group_service directly instead of ctx.join_group()
     // Services are accessed via service_locator, but for this test we use the service directly
     let tenant = "default";
+    let namespace = ctx.namespace.clone();
     let result = process_group_service
-        .join_group("test-group", tenant, &ctx.namespace, "test-actor")
+        .join_group("test-group", tenant, &namespace, "test-actor")
         .await;
 
     assert!(result.is_ok());
@@ -232,12 +261,13 @@ async fn test_leave_group_using_process_group_service() {
         sent_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
     });
 
-    let ctx = create_test_context_with_services(actor_service, process_group_service.clone());
+    let ctx = create_test_context_with_services(actor_service, process_group_service.clone()).await;
     
     // Use process_group_service directly instead of ctx.leave_group()
     let tenant = "default";
+    let namespace = ctx.namespace.clone();
     let result = process_group_service
-        .leave_group("test-group", tenant, &ctx.namespace, "test-actor")
+        .leave_group("test-group", tenant, &namespace, "test-actor")
         .await;
 
     assert!(result.is_ok());
@@ -265,13 +295,14 @@ async fn test_publish_to_group_using_process_group_service() {
         sent_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
     });
 
-    let ctx = create_test_context_with_services(actor_service, process_group_service.clone());
+    let ctx = create_test_context_with_services(actor_service, process_group_service.clone()).await;
     let message = Message::new(vec![1, 2, 3]);
     
     // Use process_group_service directly instead of ctx.publish_to_group()
     let tenant = "default";
+    let namespace = ctx.namespace.clone();
     let result = process_group_service
-        .publish_to_group("test-group", tenant, &ctx.namespace, message.clone())
+        .publish_to_group("test-group", tenant, &namespace, message.clone())
         .await;
 
     assert!(result.is_ok());
@@ -304,12 +335,13 @@ async fn test_get_group_members_using_process_group_service() {
         sent_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
     });
 
-    let ctx = create_test_context_with_services(actor_service, process_group_service.clone());
+    let ctx = create_test_context_with_services(actor_service, process_group_service.clone()).await;
     
     // Use process_group_service directly instead of ctx.get_group_members()
     let tenant = "default";
+    let namespace = ctx.namespace.clone();
     let result = process_group_service
-        .get_members("test-group", tenant, &ctx.namespace)
+        .get_members("test-group", tenant, &namespace)
         .await;
 
     assert!(result.is_ok());
@@ -333,7 +365,13 @@ async fn test_reply_without_sender_id() {
         members: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
 
-    let ctx = create_test_context_with_services(actor_service.clone(), process_group_service);
+    // Create context with specific tenant_id for this test
+    let ctx = create_test_context_with_services_custom(
+        actor_service.clone(),
+        process_group_service,
+        "tenant-123".to_string(),
+        "test-ns".to_string(),
+    ).await;
     
     // sender_id is in Message, not ActorContext
     // This test verifies the context is created correctly
@@ -343,6 +381,7 @@ async fn test_reply_without_sender_id() {
     // This test just verifies the context structure
     assert_eq!(ctx.node_id, "test-node");
     assert_eq!(ctx.tenant_id, "tenant-123");
+    assert_eq!(ctx.namespace, "test-ns");
     
     // Verify no message was sent
     // (This test verifies the pattern, actual error handling depends on implementation)

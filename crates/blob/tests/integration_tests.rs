@@ -25,32 +25,53 @@ use plexspaces_blob::{BlobService, repository::sql::SqlBlobRepository, repositor
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use plexspaces_core::RequestContext;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::time::timeout;
 
+/// Static variable to cache MinIO availability check
+/// This avoids checking the service for every test, improving test performance
+static MINIO_ENDPOINT: OnceLock<tokio::sync::Mutex<Option<String>>> = OnceLock::new();
+
 /// Get MinIO endpoint (checks which port is available)
+/// Uses a static cache to avoid checking for every test
 async fn get_minio_endpoint() -> Option<String> {
+    let cache = MINIO_ENDPOINT.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut cached = cache.lock().await;
+    
+    if let Some(ref endpoint) = *cached {
+        return Some(endpoint.clone());
+    }
+    
+    // Check service health
     use reqwest::Client;
     
     let client = match Client::builder()
-        .timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(1)) // Reduced timeout for faster skipping
         .build()
     {
         Ok(c) => c,
-        Err(_) => return None,
+        Err(_) => {
+            *cached = None;
+            return None;
+        }
     };
     
     // Try port 9001 first, then 9000
     let ports = ["9001", "9000"];
     for port in &ports {
         let url = format!("http://localhost:{}/minio/health/live", port);
-        match timeout(Duration::from_secs(2), client.get(&url).send()).await {
+        match timeout(Duration::from_secs(1), client.get(&url).send()).await {
             Ok(Ok(resp)) if resp.status().is_success() => {
-                return Some(format!("http://localhost:{}", port));
+                let endpoint = format!("http://localhost:{}", port);
+                *cached = Some(endpoint.clone());
+                return Some(endpoint);
             }
             _ => continue,
         }
     }
+    
+    *cached = None;
     None
 }
 
@@ -65,20 +86,22 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
         }
     };
 
-    // Create SQLite repository using AnyPool (like the node does)
-    // Use temporary file-based database for reliability
+    // Install sqlx::any default drivers before any database operations
+    // This is required for AnyPool to work with sqlite
+    // Note: install_default_drivers is idempotent and safe to call multiple times
+    sqlx::any::install_default_drivers();
+    
+    // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
+    // Not recovery-related, so memory is appropriate
+    // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
     use sqlx::AnyPool;
     use sqlx::any::AnyPoolOptions;
-    use tempfile::NamedTempFile;
     
-    // Use temporary file-based database (more reliable than in-memory)
-    let temp_db = NamedTempFile::new().ok()?;
-    let db_path = temp_db.path().to_str()?;
-    let db_url = format!("sqlite:{}", db_path);
+    let db_url = "sqlite::memory:";
     
     let any_pool = AnyPoolOptions::new()
-        .max_connections(5)
-        .connect(&db_url)
+        .max_connections(1)
+        .connect(db_url)
         .await
         .ok()?;
     
@@ -105,8 +128,7 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
 }
 
 fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
-    RequestContext::new(tenant_id.to_string())
-        .with_namespace(namespace.to_string())
+    RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string())
 }
 
 #[tokio::test]

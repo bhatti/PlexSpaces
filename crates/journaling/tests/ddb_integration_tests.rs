@@ -30,6 +30,18 @@ mod ddb_tests {
     use prost_types;
     use std::time::SystemTime;
 
+    use plexspaces_common::test_helpers::dynamodb_local_available;
+
+    /// Helper to check if DynamoDB simulator is available and skip test with warning if not
+    async fn check_ddb_available() -> bool {
+        if !dynamodb_local_available().await {
+            eprintln!("⚠️  WARNING: DynamoDB Local simulator is not running. Skipping DDB test.");
+            eprintln!("   To run DDB tests, start DynamoDB Local: docker run -p 8000:8000 amazon/dynamodb-local");
+            return false;
+        }
+        true
+    }
+
     /// Helper to create DynamoDB storage for testing
     async fn create_ddb_storage() -> DynamoDBJournalStorage {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
@@ -57,6 +69,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_append_entry() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         let entry = JournalEntry {
@@ -82,6 +97,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_append_batch() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         let entries = vec![
@@ -127,6 +145,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_replay_from() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let actor_id = unique_actor_id("actor");
 
@@ -186,6 +207,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_save_and_get_checkpoint() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         let checkpoint = Checkpoint {
@@ -211,6 +235,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_checkpoint_not_found() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         let result = storage.get_latest_checkpoint("nonexistent").await;
@@ -219,6 +246,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_truncate_to() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         // Append entries
@@ -278,6 +308,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_append_event() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         use plexspaces_proto::journaling::v1::StateChanged;
@@ -303,6 +336,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_replay_events_from() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let actor_id = unique_actor_id("actor");
 
@@ -339,6 +375,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_stats() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let actor_id = unique_actor_id("actor");
 
@@ -368,6 +407,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_flush() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         // Flush should succeed (may be no-op for some backends)

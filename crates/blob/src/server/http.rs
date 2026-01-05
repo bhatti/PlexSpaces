@@ -36,13 +36,12 @@ mod handlers {
     use crate::BlobService;
     use crate::BlobError;
     use plexspaces_core::RequestContext;
-    use http_body_util::Full;
+    use http_body_util::{Full, BodyExt};
     use hyper::body::Bytes;
     use hyper::{Request, Response, StatusCode, Method};
     use multer::Multipart;
     use std::sync::Arc;
     use futures::stream;
-    use tokio_util::io::StreamReader;
 
     /// HTTP handler service for blob operations
     pub struct BlobHttpHandler {
@@ -61,7 +60,7 @@ mod handlers {
         /// 1. `x-tenant-id` header (set by JWT middleware)
         /// 2. Form field `tenant_id` (fallback for multipart uploads)
         /// 3. Error if not found (production should always have JWT)
-        fn extract_context_from_headers(req: &Request<hyper::body::Incoming>) -> Result<RequestContext, BlobError> {
+        fn extract_context_from_headers<B>(req: &Request<B>) -> Result<RequestContext, BlobError> {
             let headers = req.headers();
             
             // Extract tenant_id from headers (set by JWT middleware)
@@ -93,10 +92,14 @@ mod handlers {
         }
 
         /// Handle HTTP request
-        pub async fn handle_request(
+        pub async fn handle_request<B>(
             &self,
-            req: Request<hyper::body::Incoming>,
-        ) -> Result<Response<Full<Bytes>>, BlobError> {
+            req: Request<B>,
+        ) -> Result<Response<Full<Bytes>>, BlobError>
+        where
+            B: hyper::body::Body<Data = Bytes> + Send + 'static,
+            B::Error: std::error::Error + Send + Sync + 'static,
+        {
             let path = req.uri().path();
             let method = req.method();
 
@@ -118,30 +121,151 @@ mod handlers {
         }
 
         /// Handle file upload (multipart/form-data)
-        /// 
-        /// Note: This is a legacy handler. The Axum router handles multipart uploads properly.
-        async fn handle_upload(
+        async fn handle_upload<B>(
             &self,
-            _req: Request<hyper::body::Incoming>,
-        ) -> Result<Response<Full<Bytes>>, BlobError> {
-
-            // Create multipart parser - multer 2.1 uses different API
-            // For now, we'll use a simpler approach with bytes directly
-            // Note: This handler is legacy - the Axum router handles multipart properly
-            // This code path may not be used if Axum router is active
-            // This handler is legacy - the Axum router handles multipart uploads properly
-            // Return NOT_IMPLEMENTED to indicate this path should use Axum router
+            req: Request<B>,
+        ) -> Result<Response<Full<Bytes>>, BlobError>
+        where
+            B: hyper::body::Body<Data = Bytes> + Send + 'static,
+            B::Error: std::error::Error + Send + Sync + 'static,
+        {
+            // Extract content-type header and boundary before moving req
+            let boundary = {
+                let content_type = req.headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .ok_or_else(|| BlobError::InvalidInput("Missing content-type header".to_string()))?;
+                
+                content_type
+                    .strip_prefix("multipart/form-data; boundary=")
+                    .ok_or_else(|| BlobError::InvalidInput("Invalid content-type for multipart".to_string()))?
+                    .to_string()
+            };
+            
+            // Collect request body (now we can move req since we've extracted what we need)
+            let (parts, body) = req.into_parts();
+            let body_bytes = BodyExt::collect(body).await
+                .map_err(|e| BlobError::InternalError(format!("Failed to read request body: {}", e)))?
+                .to_bytes();
+            
+            // Create multipart parser from bytes
+            // multer 2.1 expects a Stream<Item = Result<O, E>>, so we create one from the bytes
+            use futures::stream;
+            use std::io;
+            // Create a stream that yields the bytes as a single chunk
+            let bytes_stream = stream::once(async move { 
+                Ok::<bytes::Bytes, io::Error>(body_bytes) 
+            });
+            let mut multipart = Multipart::new(bytes_stream, boundary.as_str());
+            
+            // Extract form fields
+            let mut file_data: Option<Vec<u8>> = None;
+            let mut file_name: Option<String> = None;
+            let mut tenant_id: Option<String> = None;
+            let mut namespace: Option<String> = None;
+            let mut content_type_field: Option<String> = None;
+            let mut blob_group: Option<String> = None;
+            let mut kind: Option<String> = None;
+            
+            while let Some(field) = multipart.next_field().await
+                .map_err(|e| BlobError::InternalError(format!("Failed to parse multipart: {}", e)))?
+            {
+                let field_name = field.name().unwrap_or("").to_string();
+                
+                match field_name.as_str() {
+                    "file" => {
+                        if let Some(name) = field.file_name() {
+                            file_name = Some(name.to_string());
+                        }
+                        if let Some(ct) = field.content_type() {
+                            if content_type_field.is_none() {
+                                content_type_field = Some(ct.to_string());
+                            }
+                        }
+                        let data = field.bytes().await
+                            .map_err(|e| BlobError::InternalError(format!("Failed to read file data: {}", e)))?;
+                        file_data = Some(data.to_vec());
+                    }
+                    "tenant_id" => {
+                        let value = field.text().await
+                            .map_err(|e| BlobError::InternalError(format!("Failed to read tenant_id: {}", e)))?;
+                        tenant_id = Some(value);
+                    }
+                    "namespace" => {
+                        let value = field.text().await
+                            .map_err(|e| BlobError::InternalError(format!("Failed to read namespace: {}", e)))?;
+                        namespace = Some(value);
+                    }
+                    "content_type" => {
+                        let value = field.text().await
+                            .map_err(|e| BlobError::InternalError(format!("Failed to read content_type: {}", e)))?;
+                        if content_type_field.is_none() {
+                            content_type_field = Some(value);
+                        }
+                    }
+                    "blob_group" => {
+                        let value = field.text().await
+                            .map_err(|e| BlobError::InternalError(format!("Failed to read blob_group: {}", e)))?;
+                        blob_group = Some(value);
+                    }
+                    "kind" => {
+                        let value = field.text().await
+                            .map_err(|e| BlobError::InternalError(format!("Failed to read kind: {}", e)))?;
+                        kind = Some(value);
+                    }
+                    _ => {}
+                }
+            }
+            
+            // Validate required fields
+            let file_data = file_data.ok_or_else(|| BlobError::InvalidInput("Missing file field".to_string()))?;
+            let tenant_id = tenant_id.ok_or_else(|| BlobError::InvalidInput("Missing tenant_id field".to_string()))?;
+            let namespace = namespace.ok_or_else(|| BlobError::InvalidInput("Missing namespace field".to_string()))?;
+            let file_name = file_name.ok_or_else(|| BlobError::InvalidInput("Missing filename".to_string()))?;
+            
+            // Create RequestContext from form fields
+            let ctx = Self::extract_context_from_form(&tenant_id, &namespace);
+            
+            // Upload blob
+            let metadata = self.blob_service.upload_blob(
+                &ctx,
+                &file_name,
+                file_data,
+                content_type_field,
+                blob_group,
+                kind,
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+                None,
+            ).await?;
+            
+            // Return JSON response with metadata
+            let response_json = serde_json::json!({
+                "blob_id": metadata.blob_id,
+                "tenant_id": metadata.tenant_id,
+                "namespace": metadata.namespace,
+                "name": metadata.name,
+                "content_type": metadata.content_type,
+                "content_length": metadata.content_length,
+                "sha256": metadata.sha256,
+            });
+            
             Ok(Response::builder()
-                .status(StatusCode::NOT_IMPLEMENTED)
-                .body(Full::new(Bytes::from("Use Axum router for multipart uploads")))
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(Full::new(Bytes::from(serde_json::to_string(&response_json).unwrap())))
                 .unwrap())
         }
 
         /// Handle raw file download
-        async fn handle_download_raw(
+        async fn handle_download_raw<B>(
             &self,
-            req: Request<hyper::body::Incoming>,
-        ) -> Result<Response<Full<Bytes>>, BlobError> {
+            req: Request<B>,
+        ) -> Result<Response<Full<Bytes>>, BlobError>
+        where
+            B: hyper::body::Body<Data = Bytes> + Send + 'static,
+            B::Error: std::error::Error + Send + Sync + 'static,
+        {
             // Extract RequestContext from headers
             let ctx = Self::extract_context_from_headers(&req)?;
             

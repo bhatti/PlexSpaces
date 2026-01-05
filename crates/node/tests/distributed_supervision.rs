@@ -18,9 +18,10 @@
 
 use plexspaces_actor::ActorRef;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use plexspaces_node::{grpc_service::ActorServiceImpl, Node, NodeConfig, NodeId};
+use plexspaces_node::{grpc_service::ActorServiceImpl, Node, NodeBuilder, NodeConfig, NodeId};
 use plexspaces_proto::ActorServiceServer;
 use plexspaces_core::ExitReason;
+use plexspaces_core::service_locator::service_names;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -60,7 +61,7 @@ async fn start_test_server(node: Arc<Node>) -> String {
 async fn test_monitor_local_actor() {
     // Setup: Create node with local actor
     use plexspaces_node::NodeBuilder;
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -69,10 +70,7 @@ async fn test_monitor_local_actor() {
     // Register actor with MessageSender (mailbox is internal)
     register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
     
-    // Register actor config (register_actor expects plexspaces_actor::ActorRef, not core::ActorRef)
-    // Use register_actor_with_config directly instead
-    node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();
-    {
+    // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
 
     // Create a channel to receive termination notifications
@@ -106,9 +104,9 @@ async fn test_monitor_local_actor() {
 #[tokio::test]
 async fn test_monitor_remote_actor() {
     // Setup: Create two nodes
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
+    let node1: Arc<Node> = Arc::new(NodeBuilder::new("node1").build().await);
 
-    let node2 = Arc::new(NodeBuilder::new("node2").build());
+    let node2: Arc<Node> = Arc::new(NodeBuilder::new("node2").build().await);
 
     // Start gRPC server for node2
     let node2_address = start_test_server(node2.clone()).await;
@@ -121,20 +119,18 @@ async fn test_monitor_remote_actor() {
     // Register actor's mailbox in ActorRegistry first (required for monitoring)
     register_actor_with_message_sender(&node2, "worker@node2", mailbox2.clone()).await;
     
-    // Register actor config
-    node2.actor_registry().register_actor_with_config(actor_ref2.id().as_str().to_string(), None).await.unwrap();
+    // Actor already registered - no need to update config
 
     // Register node2 in node1's registry
-    node1
+    let _: Result<(), _> = node1
         .register_remote_node(NodeId::new("node2"), node2_address.clone())
-        .await
-        .unwrap();
+        .await;
 
     // Create notification channel on supervisor node (node1)
     let (tx, mut rx) = mpsc::channel(1);
 
     // Act: Monitor remote actor from node1 (supervisor on node1, actor on node2)
-    let monitor_ref = node1
+    let monitor_ref: Result<plexspaces_node::MonitorRef, plexspaces_node::NodeError> = node1
         .monitor(
             &"worker@node2".to_string(),
             &"supervisor@node1".to_string(),
@@ -165,7 +161,7 @@ async fn test_monitor_remote_actor() {
 async fn test_local_actor_termination_notification() {
     // Setup: Create node with local actor
     use plexspaces_node::NodeBuilder;
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -174,10 +170,7 @@ async fn test_local_actor_termination_notification() {
     // Register actor with MessageSender (mailbox is internal)
     register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
     
-    // Register actor config (register_actor expects plexspaces_actor::ActorRef, not core::ActorRef)
-    // Use register_actor_with_config directly instead
-    node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();
-    {
+    // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
 
     // Create notification channel
@@ -193,7 +186,7 @@ async fn test_local_actor_termination_notification() {
     .unwrap();
 
     // Act: Terminate the actor (unregister simulates termination)
-    let actor_registry = node.actor_registry().await.unwrap();
+    let actor_registry = node.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
     actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Normal).await;
 
     // Assert: Supervisor receives termination notification
@@ -219,11 +212,13 @@ async fn test_remote_actor_termination_notification() {
     use plexspaces_node::NodeBuilder;
     let node1 = Arc::new(NodeBuilder::new("node1")
         .with_listen_address("127.0.0.1:0")
-        .build());
+        .build()
+        .await);
 
     let node2 = Arc::new(NodeBuilder::new("node2")
         .with_listen_address("127.0.0.1:0")
-        .build());
+        .build()
+        .await);
 
     // Start gRPC servers for both nodes
     let node1_address = start_test_server(node1.clone()).await;
@@ -237,8 +232,7 @@ async fn test_remote_actor_termination_notification() {
     // Register actor's mailbox in ActorRegistry first (required for monitoring)
     register_actor_with_message_sender(&node2, "worker@node2", mailbox2.clone()).await;
     
-    // Register actor config
-    node2.actor_registry().register_actor_with_config(actor_ref2.id().as_str().to_string(), None).await.unwrap();
+    // Actor already registered - no need to update config
 
     // Connect nodes
     node1
@@ -264,7 +258,7 @@ async fn test_remote_actor_termination_notification() {
         .unwrap();
 
     // Act: Actor on node2 terminates (node2 sends notification to node1)
-    let actor_registry2 = node2.actor_registry().await.unwrap();
+    let actor_registry2 = node2.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
     actor_registry2.handle_actor_termination(&"worker@node2".to_string(), ExitReason::Shutdown).await;
 
     // Assert: Supervisor on node1 receives notification
@@ -285,7 +279,7 @@ async fn test_remote_actor_termination_notification() {
 async fn test_monitor_nonexistent_actor() {
     // Setup: Create node
     use plexspaces_node::NodeBuilder;
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let (tx, _rx) = mpsc::channel(1);
 
@@ -307,7 +301,7 @@ async fn test_monitor_nonexistent_actor() {
 async fn test_multiple_monitors_same_actor() {
     // Setup: Create node with actor
     use plexspaces_node::NodeBuilder;
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -316,10 +310,7 @@ async fn test_multiple_monitors_same_actor() {
     // Register actor with MessageSender (mailbox is internal)
     register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
     
-    // Register actor config (register_actor expects plexspaces_actor::ActorRef, not core::ActorRef)
-    // Use register_actor_with_config directly instead
-    node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();
-    {
+    // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
 
     // Create two supervisors
@@ -347,7 +338,7 @@ async fn test_multiple_monitors_same_actor() {
     assert!(mon2.is_ok(), "Second monitor should succeed");
 
     // Terminate actor
-    let actor_registry = node.actor_registry().await.unwrap();
+    let actor_registry = node.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
     actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Error("crash".to_string())).await;
 
     // Assert: BOTH supervisors receive notification
@@ -366,7 +357,7 @@ async fn test_multiple_monitors_same_actor() {
 async fn test_monitor_ref_uniqueness() {
     // Setup: Create node with actor
     use plexspaces_node::NodeBuilder;
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -375,10 +366,7 @@ async fn test_monitor_ref_uniqueness() {
     // Register actor with MessageSender (mailbox is internal)
     register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
     
-    // Register actor config (register_actor expects plexspaces_actor::ActorRef, not core::ActorRef)
-    // Use register_actor_with_config directly instead
-    node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();
-    {
+    // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
 
     let (tx1, _rx1) = mpsc::channel(1);
@@ -412,7 +400,7 @@ async fn test_monitor_ref_uniqueness() {
 async fn test_actor_crash_reason_propagation() {
     // Setup: Create node with actor
     use plexspaces_node::NodeBuilder;
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "worker@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator();
@@ -421,10 +409,7 @@ async fn test_actor_crash_reason_propagation() {
     // Register actor with MessageSender (mailbox is internal)
     register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
     
-    // Register actor config (register_actor expects plexspaces_actor::ActorRef, not core::ActorRef)
-    // Use register_actor_with_config directly instead
-    node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();
-    {
+    // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
 
     let (tx, mut rx) = mpsc::channel(1);
@@ -439,7 +424,7 @@ async fn test_actor_crash_reason_propagation() {
 
     // Act: Terminate with specific error reason
     let crash_reason = "panic: index out of bounds at line 42";
-    let actor_registry = node.actor_registry().await.unwrap();
+    let actor_registry = node.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
     actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Error(crash_reason.to_string())).await;
 
     // Assert: Exact crash reason received

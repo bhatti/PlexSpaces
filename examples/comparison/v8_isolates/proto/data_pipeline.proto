@@ -1,0 +1,200 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// Data Pipeline API
+//
+// ## Purpose
+// Data plane for processing logs/metrics through a pipeline:
+// Ingestion → Filter → Enrich → Transform → Destination
+//
+// ## Architecture Context
+// Part of the v8_isolates comparison example demonstrating high-throughput
+// log/metric processing system (ELK/Splunk/Datadog-like).
+
+syntax = "proto3";
+
+package v8_isolates.pipeline.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// Log entry
+message LogEntry {
+  // Entry ID (ULID)
+  string id = 1;
+  
+  // Timestamp
+  google.protobuf.Timestamp timestamp = 2;
+  
+  // Log level (DEBUG, INFO, WARN, ERROR)
+  string level = 3;
+  
+  // Log message
+  string message = 4;
+  
+  // Structured fields
+  google.protobuf.Struct fields = 5;
+  
+  // Source application
+  string source = 6;
+}
+
+// Metric entry
+message MetricEntry {
+  // Entry ID (ULID)
+  string id = 1;
+  
+  // Timestamp
+  google.protobuf.Timestamp timestamp = 2;
+  
+  // Metric name
+  string name = 3;
+  
+  // Metric value
+  double value = 4;
+  
+  // Metric type (COUNTER, GAUGE, HISTOGRAM)
+  string metric_type = 5;
+  
+  // Tags
+  map<string, string> tags = 6;
+  
+  // Source application
+  string source = 7;
+}
+
+// Pipeline event (union of log and metric)
+message PipelineEvent {
+  oneof event {
+    LogEntry log = 1;
+    MetricEntry metric = 2;
+  }
+  
+  // Processing metadata
+  map<string, string> metadata = 3;
+}
+
+// Pipeline stage result
+message PipelineStageResult {
+  // Processed events
+  repeated PipelineEvent events = 1;
+  
+  // Stage name
+  string stage_name = 2;
+  
+  // Processing time (microseconds)
+  uint64 processing_time_us = 3;
+  
+  // Errors (if any)
+  repeated string errors = 4;
+}
+
+// Destination type
+enum DestinationType {
+  DESTINATION_TYPE_UNSPECIFIED = 0;
+  DESTINATION_TYPE_SPLUNK = 1;
+  DESTINATION_TYPE_DATADOG = 2;
+  DESTINATION_TYPE_KINESIS = 3;
+  DESTINATION_TYPE_S3 = 4;
+  DESTINATION_TYPE_ELASTICSEARCH = 5;
+}
+
+// Send to destination request
+message SendToDestinationRequest {
+  // Destination type
+  DestinationType destination_type = 1;
+  
+  // Destination config (JSON)
+  string destination_config = 2;
+  
+  // Events to send
+  repeated PipelineEvent events = 3;
+}
+
+// Send to destination response
+message SendToDestinationResponse {
+  // Number of events sent
+  uint64 events_sent = 1;
+  
+  // Number of events failed
+  uint64 events_failed = 2;
+  
+  // Errors (if any)
+  repeated string errors = 3;
+}
+
+// Pipeline configuration
+message PipelineConfig {
+  // Pipeline ID
+  string pipeline_id = 1;
+  
+  // Filter function (JavaScript code or built-in name)
+  string filter_function = 2;
+  
+  // Enrichment function (JavaScript code or built-in name)
+  string enrichment_function = 3;
+  
+  // Transformation function (JavaScript code or built-in name)
+  string transform_function = 4;
+  
+  // Destinations
+  repeated DestinationConfig destinations = 5;
+  
+  // Backpressure threshold (max pending events)
+  uint64 backpressure_threshold = 6;
+  
+  // Enable durability
+  bool durability_enabled = 7;
+}
+
+// Destination configuration
+message DestinationConfig {
+  // Destination type
+  DestinationType destination_type = 1;
+  
+  // Destination config (JSON)
+  string config_json = 2;
+  
+  // Retry configuration
+  RetryConfig retry_config = 3;
+}
+
+// Retry configuration
+message RetryConfig {
+  // Max retries
+  uint32 max_retries = 1;
+  
+  // Initial backoff (seconds)
+  uint32 initial_backoff_sec = 2;
+  
+  // Max backoff (seconds)
+  uint32 max_backoff_sec = 3;
+  
+  // Backoff multiplier
+  double backoff_multiplier = 4;
+}
+
+
+
+
+
+
+
+
+
+

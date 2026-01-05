@@ -1,3 +1,21 @@
 [net]
 git-fetch-with-cli = false
 ssl-cert-file = "/Users/sbhatti/workplace/tspaces/archived_docs/cert.pem"
+
+[build]
+# Auto-detect CPU cores for parallel compilation
+# Omit jobs setting to let cargo auto-detect (default behavior)
+# Enable incremental compilation for faster rebuilds
+incremental = true
+# Use sccache if available (set RUSTC_WRAPPER=sccache)
+# rustc-wrapper = "sccache"
+
+[target.'cfg(target_os = "linux")']
+# Optimize compilation flags for faster builds on Linux
+# Use lld linker for faster linking (only available on Linux)
+rustflags = [
+    "-C", "link-arg=-fuse-ld=lld",
+]
+
+# macOS uses the default linker (no special flags needed)
+# Windows uses the default linker (no special flags needed)

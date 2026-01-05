@@ -1,0 +1,39 @@
+# cargo-nextest configuration for faster test execution
+# See: https://nexte.st/book/configuration
+
+[profile.default]
+# Retry failed tests once (helps with flaky tests)
+retries = 1
+# Fail fast on first failure (disable with --no-fail-fast)
+fail-fast = true
+# Test output style
+output = "test"
+# Show test output for failed tests
+failure-output = "immediate"
+# Show test output for successful tests (set to "never" to reduce noise)
+success-output = "never"
+
+[profile.default.junit]
+# Generate JUnit XML reports
+path = "target/nextest/junit.xml"
+
+# Profile for CI (more verbose)
+[profile.ci]
+inherits = "default"
+output = "test"
+failure-output = "immediate"
+success-output = "never"
+
+# Profile for local development (less verbose)
+[profile.local]
+inherits = "default"
+output = "test"
+failure-output = "immediate"
+success-output = "never"
+
+
+
+
+
+
+

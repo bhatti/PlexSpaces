@@ -59,6 +59,19 @@ impl ObjectRegistry for MockObjectRegistry {
     async fn register(&self, _ctx: &plexspaces_core::RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
+    async fn discover(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        _object_category: Option<String>,
+        _capabilities: Option<Vec<String>>,
+        _labels: Option<Vec<String>>,
+        _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        _offset: usize,
+        _limit: usize,
+    ) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(vec![])
+    }
 }
 
 struct MockTupleSpaceProvider;
@@ -107,13 +120,15 @@ impl FacetService for MockFacetService {
     }
 }
 
-fn create_test_context() -> ActorContext {
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+async fn create_test_context() -> ActorContext {
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     ActorContext::new(
         "test-node".to_string(),
-        "test-ns".to_string(),
-        "tenant-123".to_string(),
+        "tenant-123".to_string(),  // tenant_id
+        "test-ns".to_string(),      // namespace
         service_locator,
         None,
     )
@@ -132,25 +147,28 @@ async fn test_actor_context_new_with_config() {
     config.enable_persistence = true;
     let config = Some(config);
     
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "test-ns".to_string(),
-        "tenant-123".to_string(),
+        "tenant-123".to_string(),  // tenant_id
+        "test-ns".to_string(),      // namespace
         service_locator,
         config.clone(),
     );
     
     // actor_id removed from ActorContext
     assert_eq!(ctx.node_id, "test-node");
+    assert_eq!(ctx.tenant_id, "tenant-123");
     assert_eq!(ctx.namespace, "test-ns");
     assert_eq!(ctx.config, config);
 }
 
 #[tokio::test]
 async fn test_actor_context_clone() {
-    let ctx = create_test_context();
+    let ctx = create_test_context().await;
     let ctx_clone = ctx.clone();
     
     // actor_id removed from ActorContext
@@ -160,7 +178,7 @@ async fn test_actor_context_clone() {
 
 #[tokio::test]
 async fn test_actor_context_metadata() {
-    let mut ctx = create_test_context();
+    let mut ctx = create_test_context().await;
     ctx.metadata.insert("key1".to_string(), "value1".to_string());
     ctx.metadata.insert("key2".to_string(), "value2".to_string());
     
@@ -170,7 +188,7 @@ async fn test_actor_context_metadata() {
 
 #[tokio::test]
 async fn test_actor_context_service_access() {
-    let ctx = create_test_context();
+    let ctx = create_test_context().await;
     
     // Services are accessed via service_locator, not directly
     // Test that service_locator is accessible
@@ -180,7 +198,7 @@ async fn test_actor_context_service_access() {
 
 #[tokio::test]
 async fn test_actor_context_convenience_methods() {
-    let ctx = create_test_context();
+    let ctx = create_test_context().await;
     
     // Services are accessed via service_locator
     // This test verifies the context is created correctly

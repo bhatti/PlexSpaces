@@ -76,7 +76,7 @@ use plexspaces_proto::actor::v1::actor_service_client::ActorServiceClient;
 use tonic::transport::Channel;
 
 // Import ActorService and TupleSpaceProvider traits for trait object storage
-use crate::actor_context::{ActorService, TupleSpaceProvider};
+use crate::actor_context::{ActorService, ChannelService, TupleSpaceProvider};
 use crate::monitoring::NodeMetricsAccessor;
 use crate::RequestContext;
 
@@ -231,6 +231,10 @@ pub struct ServiceLocator {
     /// This allows ActorContext::get_tuplespace() to work without unsafe code
     tuplespace_provider: Arc<RwLock<Option<Arc<dyn TupleSpaceProvider + Send + Sync>>>>,
     
+    /// Registered ChannelService (stored separately for type-safe access)
+    /// This allows ActorContext::get_channel_service() to work without unsafe code
+    channel_service: Arc<RwLock<Option<Arc<dyn ChannelService + Send + Sync>>>>,
+    
     /// Registered NodeMetricsAccessor (stored separately for type-safe access)
     /// This allows components to read and update NodeMetrics without depending on Node type
     node_metrics_accessor: Arc<RwLock<Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>>>,
@@ -264,6 +268,7 @@ impl ServiceLocator {
             services: Arc::new(RwLock::new(HashMap::new())),
             actor_service: Arc::new(RwLock::new(None)),
             tuplespace_provider: Arc::new(RwLock::new(None)),
+            channel_service: Arc::new(RwLock::new(None)),
             node_metrics_accessor: Arc::new(RwLock::new(None)),
             actor_factory: Arc::new(RwLock::new(None)),
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
@@ -518,6 +523,32 @@ impl ServiceLocator {
         tuplespace.clone().map(|s| s as Arc<dyn TupleSpaceProvider>)
     }
 
+    /// Register ChannelService as a trait object
+    ///
+    /// ## Purpose
+    /// Allows ChannelService to be retrieved by trait type when the concrete type is unknown.
+    /// This is used by Node to register ChannelService implementations as trait objects.
+    ///
+    /// ## Arguments
+    /// * `service` - ChannelService as a trait object
+    pub async fn register_channel_service(&self, service: Arc<dyn ChannelService + Send + Sync>) {
+        let mut channel_service = self.channel_service.write().await;
+        *channel_service = Some(service);
+    }
+
+    /// Get ChannelService
+    ///
+    /// ## Purpose
+    /// Retrieves ChannelService that was registered as a trait object.
+    /// This allows ActorContext::get_channel_service() to work without unsafe code.
+    ///
+    /// ## Returns
+    /// `Some(Arc<dyn ChannelService>)` if registered, `None` otherwise
+    pub async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {
+        let channel_service = self.channel_service.read().await;
+        channel_service.clone().map(|s| s as Arc<dyn ChannelService>)
+    }
+
     /// Register NodeMetricsAccessor as a trait object
     ///
     /// ## Purpose
@@ -633,8 +664,21 @@ impl ServiceLocator {
             .await
             .ok_or_else(|| "ActorRegistry not registered")?;
 
+        // Create RequestContext using default tenant/namespace from NodeConfig
+        // If NodeConfig is not available, use "default"/"default" as fallback
         use crate::RequestContext;
-        let ctx = RequestContext::internal();
+        let ctx = if let Some(node_config) = self.get_node_config().await {
+            let tenant_id = node_config.default_tenant_id.clone();
+            let namespace = node_config.default_namespace.clone();
+            RequestContext::new_without_auth(
+                if tenant_id.is_empty() { "default".to_string() } else { tenant_id },
+                if namespace.is_empty() { "default".to_string() } else { namespace },
+            )
+        } else {
+            // Fallback for tests or when NodeConfig is not set
+            RequestContext::new_without_auth("default".to_string(), "default".to_string())
+        };
+        
         let node_address = actor_registry
             .lookup_node_address(&ctx, node_id)
             .await

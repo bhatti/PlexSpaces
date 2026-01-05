@@ -6,7 +6,7 @@
 #[cfg(feature = "sql-backend")]
 mod sqlite_tests {
     use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
-    use plexspaces_core::RequestContext;
+    use plexspaces_common::RequestContext;
     use std::time::Duration;
 
     fn tenant1_ctx() -> RequestContext {

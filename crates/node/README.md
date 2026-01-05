@@ -23,22 +23,14 @@ Main node structure managing all system services:
 pub struct Node {
     id: NodeId,
     service_locator: Arc<ServiceLocator>,  // Centralized service registration
-    actors: Arc<RwLock<HashMap<ActorId, ActorRef>>>,
-    actor_instances: Arc<RwLock<HashMap<ActorId, Arc<Actor>>>>,
-    facet_storage: Arc<RwLock<HashMap<ActorId, Arc<RwLock<FacetContainer>>>>>,
-    connections: Arc<RwLock<HashMap<NodeId, NodeConnection>>>,
-    tuplespace: Arc<TupleSpace>,
     config: NodeConfig,
-    stats: Arc<RwLock<NodeStats>>,
-    monitors: Arc<RwLock<HashMap<ActorId, Vec<MonitorLink>>>>,
-    links: Arc<RwLock<HashMap<ActorId, Vec<ActorId>>>>,
-    application_manager: Arc<RwLock<ApplicationManager>>,
-    object_registry: Arc<ObjectRegistry>,
-    process_group_registry: Arc<ProcessGroupRegistry>,
-    virtual_actors: Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>>,
-    wasm_runtime: Arc<RwLock<Option<WasmRuntime>>>,
+    // ... other fields ...
 }
 ```
+
+**Note**: Actor-related data (instances, facets, monitors, links, etc.) is now stored in `ActorRegistry` 
+(accessed via `ServiceLocator`) for better separation of concerns and encapsulation. The `Node` no longer 
+directly exposes internal actor storage maps.
 
 **ServiceLocator Integration**: The `Node` creates and manages a `ServiceLocator` that registers core services (`ActorRegistry`, `ReplyTracker`) and provides gRPC client caching for remote node communication. This enables efficient connection reuse across all `ActorRef`s.
 

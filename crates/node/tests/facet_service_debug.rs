@@ -20,13 +20,11 @@ use test_helpers::{lookup_actor_ref, activate_virtual_actor, spawn_actor_helper}
 struct TestBehavior;
 
 #[async_trait::async_trait]
-#[async_trait::async_trait]
 impl Actor for TestBehavior {
     async fn handle_message(
         &mut self,
         _ctx: &ActorContext,
         _message: Message,
-        _reply: &dyn plexspaces_core::Reply,
     ) -> Result<(), plexspaces_core::BehaviorError> {
         Ok(())
     }
@@ -37,21 +35,22 @@ impl Actor for TestBehavior {
 }
 
 /// Helper to create a test node
-fn create_test_node() -> Node {
+async fn create_test_node() -> Node {
     NodeBuilder::new("test-node")
-        .build()
+        .build().await
 }
 
 /// Test 1: Spawn actor WITHOUT facets - should not hang
 #[tokio::test]
 async fn test_01_spawn_actor_no_facets() {
-    let node = Arc::new(create_test_node());
+    let node = Arc::new(create_test_node().await);
     
     let behavior = Box::new(TestBehavior);
-    let actor = ActorBuilder::new(behavior)
+    let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("test-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Spawn actor without facets
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
@@ -82,7 +81,8 @@ async fn test_02_attach_facet_no_spawn() {
     let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("test-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Attach facet
     let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
@@ -102,13 +102,14 @@ async fn test_02_attach_facet_no_spawn() {
 /// Test 3: Spawn actor WITH facet - isolate where hang occurs
 #[tokio::test]
 async fn test_03_spawn_actor_with_facet() {
-    let node = Arc::new(create_test_node());
+    let node = Arc::new(create_test_node().await);
     
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("test-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Attach facet
     let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
@@ -145,13 +146,14 @@ async fn test_03_spawn_actor_with_facet() {
 /// Test 4: Check facet storage after spawn
 #[tokio::test]
 async fn test_04_facet_storage_after_spawn() {
-    let node = Arc::new(create_test_node());
+    let node = Arc::new(create_test_node().await);
     
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("test-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Attach facet
     let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
@@ -168,7 +170,7 @@ async fn test_04_facet_storage_after_spawn() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     
     // Check if facets are stored
-    let facets = node.clone().get_facets(&actor_id).await;
+    let facets = node.get_facets(&actor_id).await;
     println!("Facets stored: {}", facets.is_some());
     
     if let Some(facets_arc) = facets {

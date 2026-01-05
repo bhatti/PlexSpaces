@@ -7,7 +7,7 @@ mod test_helpers;
 use test_helpers::spawn_actor_helper;
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{ActorBehavior, ActorContext, ActorId};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId};
 use plexspaces_journaling::TimerFacet;
 use plexspaces_mailbox::Message;
 use plexspaces_node::{Node, NodeBuilder};
@@ -18,7 +18,7 @@ use tokio::time::sleep;
 struct TestBehavior;
 
 #[async_trait::async_trait]
-impl ActorBehavior for TestBehavior {
+impl ActorTrait for TestBehavior {
     async fn handle_message(
         &mut self,
         _ctx: &ActorContext,
@@ -34,14 +34,15 @@ impl ActorBehavior for TestBehavior {
 
 #[tokio::test]
 async fn test_facet_storage_direct() {
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     
     // Create actor with TimerFacet
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("test-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Attach TimerFacet
     let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
@@ -57,15 +58,15 @@ async fn test_facet_storage_direct() {
     assert!(facet_types_before.contains(&"timer".to_string()), "TimerFacet should be attached before spawn");
     drop(facets_guard_before);
     
-    // Spawn actor
-    let actor_id = ActorId::from("test-actor@local");
+    // Spawn actor (spawn_actor_helper normalizes the actor ID to include node ID)
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
+    let actor_id = actor_ref.id().clone(); // Use normalized actor ID
     
-    // Wait a bit
+    // Wait a bit for facets to be stored
     sleep(Duration::from_millis(100)).await;
     
-    // Check if facets are stored
-    let facets_arc = node.clone().get_facets(&actor_id).await;
+    // Check if facets are stored (use normalized actor ID)
+    let facets_arc = node.get_facets(&actor_id).await;
     
     if facets_arc.is_none() {
         // Debug: Check what actor_ids are in storage

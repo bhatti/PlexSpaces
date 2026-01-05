@@ -17,12 +17,33 @@ mod firecracker_service_tests {
 
     /// Helper to create a test node
     async fn create_test_node() -> Arc<Node> {
-        Arc::new(NodeBuilder::new("test-node").build())
+        Arc::new(NodeBuilder::new("test-node").build().await)
     }
 
     /// Helper to create Firecracker service
     fn create_service(node: Arc<Node>) -> FirecrackerVmServiceImpl {
         FirecrackerVmServiceImpl::new(node)
+    }
+
+    /// Helper to check if Firecracker is available and skip test with warning if not
+    fn check_firecracker_available() -> bool {
+        use std::path::Path;
+        use std::process::Command;
+        
+        let firecracker_exists = Path::new("/usr/bin/firecracker").exists()
+            || Path::new("/usr/local/bin/firecracker").exists();
+        
+        let firecracker_runnable = Command::new("firecracker")
+            .arg("--version")
+            .output()
+            .is_ok();
+        
+        if !firecracker_exists && !firecracker_runnable {
+            eprintln!("⚠️  WARNING: Firecracker binary is not available. Skipping Firecracker test.");
+            eprintln!("   To run Firecracker tests, install Firecracker: https://github.com/firecracker-microvm/firecracker/releases");
+            return false;
+        }
+        true
     }
 
     /// Test: Create VM with valid configuration
@@ -267,6 +288,9 @@ mod firecracker_service_tests {
     /// Test: Deploy application to nonexistent VM (should create VM)
     #[tokio::test]
     async fn test_deploy_application_creates_vm() {
+        if !check_firecracker_available() {
+            return;
+        }
         let node = create_test_node().await;
         let service = create_service(node);
 
@@ -289,6 +313,9 @@ mod firecracker_service_tests {
     /// Test: Deploy application to existing VM
     #[tokio::test]
     async fn test_deploy_application_to_existing_vm() {
+        if !check_firecracker_available() {
+            return;
+        }
         let node = create_test_node().await;
         let service = create_service(node);
 

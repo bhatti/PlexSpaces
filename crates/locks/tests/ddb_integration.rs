@@ -54,6 +54,18 @@ mod tests {
         format!("{}-{}", prefix, Ulid::new())
     }
 
+    use plexspaces_common::test_helpers::dynamodb_local_available;
+
+    /// Helper to check if DynamoDB simulator is available and skip test with warning if not
+    async fn check_ddb_available() -> bool {
+        if !dynamodb_local_available().await {
+            eprintln!("⚠️  WARNING: DynamoDB Local simulator is not running. Skipping DDB test.");
+            eprintln!("   To run DDB tests, start DynamoDB Local: docker run -p 8000:8000 amazon/dynamodb-local");
+            return false;
+        }
+        true
+    }
+
     /// Create DynamoDB lock manager for testing
     /// Uses DynamoDB Local if available, otherwise requires AWS credentials
     async fn create_manager() -> DynamoDBLockManager {
@@ -76,6 +88,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_acquire_lock() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -110,6 +125,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_acquire_lock_already_held() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -152,6 +170,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_acquire_lock_same_holder() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -193,6 +214,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_renew_lock() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -237,6 +261,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_renew_lock_version_mismatch() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -279,6 +306,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_renew_lock_wrong_holder() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -321,6 +351,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_renew_lock_not_found() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
 
@@ -347,6 +380,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_release_lock() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -386,6 +422,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_release_lock_without_delete() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -428,6 +467,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_release_lock_version_mismatch() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -469,6 +511,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_release_lock_wrong_holder() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -510,6 +555,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_release_lock_not_found() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
 
@@ -535,6 +583,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_get_lock() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -570,6 +621,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_acquire_expired_lock() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -615,6 +669,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_renew_expired_lock() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -661,6 +718,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_lock_metadata() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("test-lock");
@@ -707,6 +767,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_tenant_isolation() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx1 = test_ctx("tenant-1", "namespace-1");
         let ctx2 = test_ctx("tenant-2", "namespace-1");
@@ -762,6 +825,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_namespace_isolation() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx1 = test_ctx("tenant-1", "namespace-1");
         let ctx2 = test_ctx("tenant-1", "namespace-2");
@@ -805,6 +871,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_concurrent_lock_acquisition() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = Arc::new(create_manager().await);
         let ctx = test_ctx("tenant-1", "namespace-1");
         let lock_key = unique_lock_key("concurrent-lock");
@@ -850,6 +919,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddb_multiple_locks() {
+        if !check_ddb_available().await {
+            return;
+        }
         let manager = create_manager().await;
         let ctx = test_ctx("tenant-1", "namespace-1");
 

@@ -127,10 +127,20 @@ impl ApplicationService for ApplicationServiceImpl {
                 merge_release_config(&mut merged_config, release_config);
             }
             
-            // Extract namespace and tenant_id from ApplicationSpec if available
-            // ApplicationSpec doesn't have metadata field, so use defaults for now
-            // TODO: Add namespace/tenant_id fields to ApplicationSpec proto if needed
-            let (namespace, tenant_id) = ("default".to_string(), "internal".to_string());
+            // Get namespace and tenant_id from NodeConfig defaults
+            // This ensures proper tenant isolation instead of using RequestContext::internal()
+            let (namespace, tenant_id) = {
+                let service_locator = self.node.service_locator();
+                if let Some(node_config) = service_locator.get_node_config().await {
+                    (
+                        if node_config.default_namespace.is_empty() { "default".to_string() } else { node_config.default_namespace },
+                        if node_config.default_tenant_id.is_empty() { "default".to_string() } else { node_config.default_tenant_id },
+                    )
+                } else {
+                    // Fallback for tests or when NodeConfig is not set
+                    ("default".to_string(), "default".to_string())
+                }
+            };
             
             // Clone values for observability logging before moving them
             let module_hash_for_log = module_hash.clone();
@@ -153,6 +163,10 @@ impl ApplicationService for ApplicationServiceImpl {
                 "Registering WASM application with ApplicationManager"
             );
             
+            // Clone namespace/tenant_id for object-registry registration (register_with_metadata takes ownership)
+            let namespace_for_registry = namespace.clone();
+            let tenant_id_for_registry = tenant_id.clone();
+            
             // Get ApplicationManager and register with namespace/tenant
             use plexspaces_core::service_locator::service_names;
             if let Some(app_manager) = self.node.service_locator().get_service_by_name::<plexspaces_core::ApplicationManager>(service_names::APPLICATION_MANAGER).await {
@@ -171,18 +185,19 @@ impl ApplicationService for ApplicationServiceImpl {
                 return Err(Status::internal("ApplicationManager not found in ServiceLocator"));
             }
             
-            // Register application with object-registry
+            // Register application with object-registry using proper tenant/namespace
             use crate::object_registry_helpers::register_application;
             use plexspaces_core::RequestContext;
             if let Some(object_registry) = self.node.service_locator().get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
-                let ctx = RequestContext::internal();
+                // Use the same tenant/namespace as used for ApplicationManager registration
+                let ctx = RequestContext::new_without_auth(tenant_id_for_registry.clone(), namespace_for_registry.clone());
                 let node_id = self.node.id().as_str();
                 let listen_addr = self.node.config().listen_addr.as_str();
                 let grpc_address = format!("http://{}", listen_addr);
                 if let Err(e) = register_application(&object_registry, &ctx, &app_name, &req.version, node_id, &grpc_address).await {
                     tracing::warn!(application = %app_name, error = %e, "Failed to register application with object-registry");
                 } else {
-                    tracing::info!(application = %app_name, node_id = %node_id, "Registered application with object-registry");
+                    tracing::info!(application = %app_name, node_id = %node_id, tenant_id = %tenant_id_for_registry, namespace = %namespace_for_registry, "Registered application with object-registry");
                 }
             }
 
@@ -279,19 +294,32 @@ impl ApplicationService for ApplicationServiceImpl {
                 Status::internal(format!("Failed to register application: {}", e))
             })?;
         
-        // Register application with object-registry
+        // Register application with object-registry using proper tenant/namespace
         use crate::object_registry_helpers::register_application;
         use plexspaces_core::RequestContext;
         use plexspaces_core::service_locator::service_names;
         if let Some(object_registry) = self.node.service_locator().get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
-            let ctx = RequestContext::internal();
+            // Get namespace and tenant_id from NodeConfig defaults
+            let (namespace, tenant_id) = {
+                let service_locator = self.node.service_locator();
+                if let Some(node_config) = service_locator.get_node_config().await {
+                    (
+                        if node_config.default_namespace.is_empty() { "default".to_string() } else { node_config.default_namespace },
+                        if node_config.default_tenant_id.is_empty() { "default".to_string() } else { node_config.default_tenant_id },
+                    )
+                } else {
+                    // Fallback for tests or when NodeConfig is not set
+                    ("default".to_string(), "default".to_string())
+                }
+            };
+            let ctx = RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
             let node_id = self.node.id().as_str();
             let listen_addr = self.node.config().listen_addr.as_str();
             let grpc_address = format!("http://{}", listen_addr);
             if let Err(e) = register_application(&object_registry, &ctx, &app_name, &req.version, node_id, &grpc_address).await {
                 tracing::warn!(application = %app_name, error = %e, "Failed to register application with object-registry");
             } else {
-                tracing::info!(application = %app_name, node_id = %node_id, "Registered application with object-registry");
+                tracing::info!(application = %app_name, node_id = %node_id, tenant_id = %tenant_id, namespace = %namespace, "Registered application with object-registry");
             }
         }
 

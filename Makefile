@@ -18,7 +18,8 @@ help:
 	@echo "  make proto            - Generate code from proto files (uses buf)"
 	@echo "  make proto-buf        - Generate proto using buf (RECOMMENDED - handles deps)"
 	@echo "  make proto-build      - Generate proto using tonic-build (no external deps)"
-	@echo "  make build            - Build all Rust crates"
+	@echo "  make build            - Build default crates (faster, excludes optional crates)"
+	@echo "  make build-all        - Build all crates (including wasm-runtime, firecracker, cli, dashboard)"
 	@echo "  make build-examples   - Build all examples"
 	@echo "  make build-wasm       - Build all WASM actors"
 	@echo "  make run-examples     - Run all examples (workspace + standalone)"
@@ -29,6 +30,8 @@ help:
 	@echo ""
 	@echo "🧪 Testing:"
 	@echo "  make test             - Run all tests"
+	@echo "  make test-filter FILTER='pattern' - Run tests matching pattern"
+	@echo "  make test-package PACKAGE='name' - Run tests for specific package"
 	@echo "  make test-examples    - Run all example tests"
 	@echo "  make test-wasm        - Run WASM example tests"
 	@echo "  make test-all-examples - Run all example tests (inc. WASM)"
@@ -54,6 +57,7 @@ help:
 	@echo ""
 	@echo "🧹 Maintenance:"
 	@echo "  make clean            - Clean build artifacts"
+	@echo "  make clean-target    - Clean old target artifacts (keeps incremental cache)"
 	@echo "  make clean-examples   - Clean example artifacts"
 	@echo "  make clean-all        - Clean everything (workspace + examples)"
 	@echo "  make update-deps      - Update dependencies"
@@ -141,15 +145,37 @@ proto-buf:
 # Default proto generation (uses tonic-build via build.rs)
 proto: proto-buf
 
-# Build all crates
+# Build default crates (faster - excludes rarely-changed optional crates)
+# To build all crates including optional ones, use: make build-all
 build:
-	@echo "Building all crates..."
-	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	@echo "Building default crates (excluding rarely-changed optional crates)..."
+	@echo "To build all crates including wasm-runtime, firecracker, cli, dashboard:"
+	@echo "  make build-all"
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
-		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$$VERBOSE" = "0" ]; then \
+		MESSAGE_FORMAT=short; \
 	fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
-	$(CARGO) build --all-features --workspace --jobs $$CARGO_JOBS --message-format=short
+	$(CARGO) build --all-features --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+	@echo "Build complete!"
+
+# Build all crates including optional ones (wasm-runtime, firecracker, cli, dashboard)
+build-all:
+	@echo "Building all crates (including optional crates)..."
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$$VERBOSE" = "0" ]; then \
+		MESSAGE_FORMAT=short; \
+	fi; \
+	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
+	$(CARGO) build --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
 	@echo "Build complete!"
 
 # Build release version
@@ -324,22 +350,26 @@ run-all-standalone-examples:
 	done
 
 # Run all unit tests (excludes integration tests)
-# Optimized for parallel execution - uses limited CPU cores (default: 4, override with CARGO_BUILD_JOBS env var)
+# Optimized for parallel execution - uses all available CPU cores by default
 # Only tuplespace tests need --test-threads=1, so we run them separately
-# Usage: make test                    # Uses 4 cores (default)
-#        CARGO_BUILD_JOBS=8 make test # Uses 8 cores
-#        CARGO_BUILD_JOBS=0 make test # Uses all available cores
+# Usage: make test                    # Uses all available cores (auto-detected)
+#        CARGO_BUILD_JOBS=4 make test # Uses 4 cores (slower but less resource intensive)
+#        VERBOSE=1 make test          # Shows detailed build output
 test:
-	@echo "Running unit tests (excluding integration tests)..."
+	@echo "Running all tests (unit + integration tests)..."
 	@echo "Cleaning up any existing SQLite database files..."
 	@find . -maxdepth 3 -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) ! -path "./target/*" ! -path "./.git/*" -delete 2>/dev/null || true; \
 	if [ -d "data" ]; then \
 		find data -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) -delete 2>/dev/null || true; \
 	fi; \
 	echo "SQLite database files cleaned up."; \
-	CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
-		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$$VERBOSE" = "0" ]; then \
+		MESSAGE_FORMAT=short; \
 	fi; \
 	echo "Configuration: Using $$CARGO_JOBS CPU cores for building (override with CARGO_BUILD_JOBS env var)"; \
 	CERT_FILE=""; \
@@ -353,34 +383,89 @@ test:
 		export CARGO_HTTP_CAINFO="$$CERT_FILE"; \
 		echo "Using SSL certificates from: $$SSL_CERT_FILE"; \
 	fi; \
+	if [ -n "$$RUSTC_WRAPPER" ] && command -v sccache >/dev/null 2>&1; then \
+		echo "Using sccache for compilation caching (RUSTC_WRAPPER=$$RUSTC_WRAPPER)"; \
+		export RUSTC_WRAPPER=sccache; \
+	fi; \
 	echo "Building workspace first for faster test execution (incremental build enabled)..."; \
-	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT || true; \
 	echo ""; \
-	echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..."; \
-	$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS -- --test-threads=1 || exit 1; \
-	echo ""; \
-	echo "Running all other tests with parallel execution..."; \
-	$(CARGO) test --lib --all-features --workspace --jobs $$CARGO_JOBS \
-		-p plexspaces -p plexspaces-proto -p plexspaces-lattice -p plexspaces-mailbox \
-		-p plexspaces-persistence -p plexspaces-journaling -p plexspaces-keyvalue \
-		-p plexspaces-facet -p plexspaces-core -p plexspaces-behavior -p plexspaces-actor \
-		-p plexspaces-supervisor -p plexspaces-node -p plexspaces-wasm-runtime \
-		-p plexspaces-firecracker -p plexspaces-workflow -p plexspaces-process-groups \
-		-p plexspaces-channel -p plexspaces-object-registry -p plexspaces-elastic-pool \
-		-p plexspaces-circuit-breaker -p plexspaces-locks -p plexspaces-scheduler \
-		-p plexspaces-actor-service -p plexspaces-grpc-middleware -p plexspaces-blob \
-		-p plexspaces-tuplespace-service || exit 1; \
-	echo ""; \
-	echo "Running WASM integration tests (offline, no AWS/MinIO required)..."; \
-	$(CARGO) test --package plexspaces-wasm-runtime --test blob_host_functions_integration --jobs $$CARGO_JOBS || exit 1; \
-	$(CARGO) test --package plexspaces-wasm-runtime --test new_host_functions_integration --jobs $$CARGO_JOBS || exit 1; \
-	$(CARGO) test --package plexspaces-wasm-runtime --test durability_host_functions_integration --jobs $$CARGO_JOBS || exit 1; \
-	$(CARGO) test --package plexspaces-wasm-runtime --test messaging_host_functions_integration --jobs $$CARGO_JOBS || exit 1; \
-	$(CARGO) test --package plexspaces-wasm-runtime --test wasm_component_integration --jobs $$CARGO_JOBS || exit 1; \
-	$(CARGO) test --package plexspaces-wasm-runtime --test integration_tests --jobs $$CARGO_JOBS || exit 1; \
-	$(CARGO) test --package plexspaces-wasm-runtime --test grpc_integration --jobs $$CARGO_JOBS || exit 1; \
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		echo "Using cargo-nextest for faster test execution..."; \
+		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..."; \
+		cargo nextest run --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=1 || exit 1; \
+		echo ""; \
+		echo "Running all other tests with parallel execution..."; \
+		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			--exclude plexspaces-tuplespace || exit 1; \
+		echo ""; \
+		echo "Running WASM integration tests (offline, no AWS/MinIO required)..."; \
+		cargo nextest run --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast || exit 1; \
+	else \
+		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..."; \
+		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..."; \
+		$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 || exit 1; \
+		echo ""; \
+		echo "Running all other tests with parallel execution..."; \
+		$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			--exclude plexspaces-tuplespace || exit 1; \
+		echo ""; \
+		echo "Running WASM integration tests (offline, no AWS/MinIO required)..."; \
+		$(CARGO) test --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast || exit 1; \
+	fi; \
 	echo ""; \
 	echo "All unit and integration tests passed!"
+
+# Run tests matching a filter pattern
+# Usage: make test-filter FILTER="test_name_pattern"
+test-filter:
+	@if [ -z "$(FILTER)" ]; then \
+		echo "❌ Error: FILTER is required"; \
+		echo "Usage: make test-filter FILTER='test_pattern'"; \
+		echo "Example: make test-filter FILTER='test_actor'"; \
+		exit 1; \
+	fi; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$$VERBOSE" = "0" ]; then \
+		MESSAGE_FORMAT=short; \
+	fi; \
+	echo "Running tests matching filter: $(FILTER)"; \
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS --filter "$(FILTER)" || exit 1; \
+	else \
+		$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS -- "$(FILTER)" || exit 1; \
+	fi; \
+	echo "Filtered tests completed!"
+
+# Run tests for a specific package
+# Usage: make test-package PACKAGE="plexspaces-actor"
+test-package:
+	@if [ -z "$(PACKAGE)" ]; then \
+		echo "❌ Error: PACKAGE is required"; \
+		echo "Usage: make test-package PACKAGE='plexspaces-actor'"; \
+		echo "Available packages:"; \
+		$(CARGO) metadata --format-version 1 --no-deps | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | grep "^plexspaces-" | sort; \
+		exit 1; \
+	fi; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$$VERBOSE" = "0" ]; then \
+		MESSAGE_FORMAT=short; \
+	fi; \
+	echo "Running tests for package: $(PACKAGE)"; \
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --lib --tests --all-features -p $(PACKAGE) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT || exit 1; \
+	else \
+		$(CARGO) test --lib --tests --all-features -p $(PACKAGE) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT || exit 1; \
+	fi; \
+	echo "Package tests completed!"
 
 # Run all example tests (examples with tests subdirectories)
 # Examples are standalone, so we test them from their directories
@@ -649,6 +734,32 @@ clean:
 	@rm -rf docs/openapi/*.yaml
 	@echo "Clean complete!"
 
+# Clean target directory selectively (keeps incremental compilation cache)
+# This is faster than full clean but removes old artifacts
+# More aggressive: removes artifacts older than 3 days (was 7 days)
+clean-target:
+	@echo "Cleaning target directory (keeping incremental cache)..."
+	@echo "Removing old build artifacts (keeping incremental compilation cache)..."
+	@echo "Removing .rlib files older than 3 days..."
+	@find target/debug -name "*.rlib" -type f -mtime +3 -delete 2>/dev/null || true
+	@find target/release -name "*.rlib" -type f -mtime +3 -delete 2>/dev/null || true
+	@echo "Removing .rmeta files older than 3 days..."
+	@find target/debug -name "*.rmeta" -type f -mtime +3 -delete 2>/dev/null || true
+	@find target/release -name "*.rmeta" -type f -mtime +3 -delete 2>/dev/null || true
+	@echo "Removing .d dependency files older than 3 days..."
+	@find target/debug/deps -name "*.d" -type f -mtime +3 -delete 2>/dev/null || true
+	@find target/release/deps -name "*.d" -type f -mtime +3 -delete 2>/dev/null || true
+	@echo "Removing old incremental compilation artifacts (keeping last 3 days)..."
+	@find target/debug/incremental -mindepth 2 -maxdepth 2 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null || true
+	@find target/release/incremental -mindepth 2 -maxdepth 2 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null || true
+	@echo "Removing old test executables..."
+	@find target/debug/deps -name "test-*" -type f -mtime +3 -delete 2>/dev/null || true
+	@echo "Target cleanup complete (kept recent artifacts for incremental builds)"
+	@echo "For full clean, use: make clean"
+	@echo ""
+	@echo "Target directory size after cleanup:"
+	@du -sh target 2>/dev/null || echo "  (target directory not found)"
+
 # Clean example artifacts
 clean-examples:
 	@echo "Cleaning example artifacts..."
@@ -715,6 +826,11 @@ update-deps:
 	@echo "Updating buf dependencies..."
 	@$(BUF) mod update
 	@echo "Dependencies updated!"
+
+# Check for duplicate dependencies across crates
+check-deps:
+	@echo "Checking for duplicate dependencies..."
+	@./scripts/check-duplicate-deps.sh
 
 # Check dependency licenses
 check-licenses:

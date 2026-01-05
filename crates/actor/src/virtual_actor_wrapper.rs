@@ -19,13 +19,45 @@
 //! Virtual Actor Wrapper - Orleans-inspired automatic activation
 //!
 //! ## Purpose
-//! Wraps virtual actors to provide automatic activation on `tell()` calls.
-//! Checks if actor is activated, activates if needed, then uses ActorRef's tell().
+//! Wraps virtual actors to provide automatic activation on `tell()` and `ask()` calls.
+//! Per Orleans design: virtual actors are always addressable, activation is transparent.
 //!
 //! ## Design (Orleans-Inspired)
-//! - **Always Addressable**: Wrapper is always available in ActorRegistry
-//! - **Automatic Activation**: `tell()` automatically activates actor if needed
-//! - **Simple API**: Just implements Actor trait - activation is transparent
+//! - **Always Addressable**: Wrapper is always available in ActorRegistry (even when actor is not active)
+//! - **Automatic Activation**: `tell()` automatically activates lazy virtual actors on first message
+//! - **Automatic Reactivation**: `tell()` reactivates suspended/passivated virtual actors
+//! - **Simple API**: Just implements MessageSender trait - activation is transparent to caller
+//!
+//! ## Activation Flow (Orleans-Inspired)
+//!
+//! ### Lazy Virtual Actors (First Activation)
+//! ```
+//! 1. Actor registered with VirtualActorWrapper (not active, no message loop running)
+//! 2. First message arrives → VirtualActorWrapper.tell()
+//! 3. VirtualActorWrapper checks is_active() → false
+//! 4. VirtualActorWrapper queues message and calls activate_virtual_actor()
+//! 5. activate_virtual_actor() retrieves actor instance from VirtualActorManager
+//! 6. activate_virtual_actor() calls spawn_built_actor() → actor.start()
+//! 7. actor.start() spawns message loop task (ActorRef replaces VirtualActorWrapper in registry)
+//! 8. Pending messages (including the first one) are sent to ActorRef
+//! 9. Actor is now active and processing messages
+//! ```
+//!
+//! ### Suspended/Passivated Virtual Actors (Reactivation)
+//! ```
+//! 1. Active actor is suspended/passivated (ActorRef unregistered, VirtualActorWrapper re-registered)
+//! 2. Next message arrives → VirtualActorWrapper.tell()
+//! 3. VirtualActorWrapper checks is_active() → false
+//! 4. Same flow as lazy activation (steps 4-9 above)
+//! 5. Actor reactivates and processes message
+//! ```
+//!
+//! ## Key Design Principles (Orleans)
+//!
+//! 1. **Always Addressable**: Virtual actors always exist (virtually) - registered even when not active
+//! 2. **Transparent Activation**: Activation happens automatically - caller doesn't need to know actor state
+//! 3. **Single Activation**: Only one instance exists at a time (per actor ID)
+//! 4. **State Preservation**: State is preserved across activation/deactivation cycles (if DurabilityFacet attached)
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -62,40 +94,131 @@ impl VirtualActorWrapper {
 #[async_trait]
 impl MessageSender for VirtualActorWrapper {
     async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Get VirtualActorManager from ServiceLocator
-        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::VIRTUAL_ACTOR_MANAGER).await
-            .ok_or_else(|| "VirtualActorManager not registered in ServiceLocator".to_string())?;
+        eprintln!("🔵🔵🔵 [VIRTUAL_ACTOR_WRAPPER] tell() called: actor_id={}, message_id={}", self.actor_id, message.id);
+        eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] tell() called: actor_id={}, message_id={}, correlation_id={:?}, sender={:?}, receiver={}", 
+            self.actor_id, message.id, message.correlation_id, message.sender, message.receiver);
         
-        // Check if actor is activated (has mailbox)
-        if !manager.is_active(&self.actor_id).await {
-            // Actor is not activated - activate it
-            tracing::debug!(actor_id = %self.actor_id, "VirtualActorWrapper: Actor not activated, activating now");
-            
-            // Queue message for processing after activation
-            manager.queue_message(&self.actor_id, message).await;
-            
-            // Activate the virtual actor using ActorFactory
-            use crate::actor_factory_impl::ActorFactoryImpl;
-            let factory: Arc<ActorFactoryImpl> = self.service_locator.get_service().await
-                .ok_or_else(|| "ActorFactory not registered in ServiceLocator".to_string())?;
-            
-            factory.activate_virtual_actor(&self.actor_id).await
-                .map_err(|e| format!("Failed to activate virtual actor: {}", e))?;
-            
-            // Message will be processed after activation completes
-            return Ok(());
-        }
-        
-        // Actor is activated - use MessageSender from registry
-        // Get MessageSender (which will be ActorRef for activated actors)
+        // VALIDATION: Check if actor is registered before processing
+        // tell() should fail immediately if actor is not registered (synchronous check)
+        // VirtualActorWrapper should always be in registry for virtual actors
         use plexspaces_core::ActorRegistry;
         let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| "ActorRegistry not registered in ServiceLocator".to_string())?;
         
+        // Check if actor is registered (VirtualActorWrapper should be in registry for virtual actors)
+        if registry.lookup_actor(&self.actor_id).await.is_none() {
+            eprintln!("🔴 [VIRTUAL_ACTOR_WRAPPER] Actor not registered: actor_id={}", self.actor_id);
+            return Err(format!(
+                "Virtual actor {} is not registered - cannot send message. Actor must be registered before tell() can be called.",
+                self.actor_id
+            ).into());
+        }
+        
+        // Get VirtualActorManager from ServiceLocator (reuse registry from above)
+        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::VIRTUAL_ACTOR_MANAGER).await
+            .ok_or_else(|| "VirtualActorManager not registered in ServiceLocator".to_string())?;
+        
+        // ORLEANS DESIGN: Check if actor is activated (has running message loop)
+        // - For lazy virtual actors: false until first message activates them
+        // - For eager virtual actors: true immediately after registration
+        // - For suspended/passivated actors: false until reactivated
+        // This check determines if we need to activate/reactivate the actor
+        let is_active = manager.is_active(&self.actor_id).await;
+        eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] Actor active check: actor_id={}, is_active={}", self.actor_id, is_active);
+        if !is_active {
+            // ORLEANS: Actor is not active - activate/reactivate it
+            // This handles both lazy activation (first message) and reactivation (after suspension)
+            // Actor is not activated - check if activation is in progress
+            // Use VirtualActorFacet's is_activating flag to coordinate concurrent requests
+            let facet_arc = manager.get_facet(&self.actor_id).await
+                .map_err(|e| format!("Failed to get virtual actor facet: {}", e))?;
+            let facet_guard = facet_arc.read().await;
+            
+            // Check if activation is already in progress and try to start activation
+            // This uses the is_activating flag internally to prevent concurrent activations
+            use std::any::Any;
+            use plexspaces_journaling::VirtualActorFacet;
+            let activation_started = if let Some(virtual_facet) = facet_guard.as_ref().downcast_ref::<VirtualActorFacet>() {
+                // Try to start activation (returns false if already activating)
+                virtual_facet.start_activation().await
+            } else {
+                true // If we can't downcast, assume we should activate
+            };
+            drop(facet_guard);
+            
+            if !activation_started {
+                // Activation is in progress - queue message and return
+                // The in-progress activation will send pending messages when it completes
+                tracing::debug!(actor_id = %self.actor_id, "VirtualActorWrapper: Activation in progress, queueing message");
+                manager.queue_message(&self.actor_id, message).await;
+                return Ok(());
+            }
+            
+            // Queue message for processing after activation
+            // IMPORTANT: Message preserves correlation_id and sender for reply routing
+            // This is critical for ask() pattern - the reply must route back via correlation_id
+            eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] Queueing message for activation: id={}, correlation_id={:?}, sender={:?}, receiver={}", 
+                message.id, message.correlation_id, message.sender, message.receiver);
+            tracing::debug!(
+                actor_id = %self.actor_id,
+                message_id = %message.id,
+                correlation_id = ?message.correlation_id,
+                sender = ?message.sender,
+                "VirtualActorWrapper: Queueing message for activation (preserves correlation_id and sender for reply routing)"
+            );
+            manager.queue_message(&self.actor_id, message).await;
+            
+            // Activate the virtual actor using ActorFactory
+            // This is synchronous - it awaits actor.start() which registers the actor
+            use crate::actor_factory_impl::ActorFactoryImpl;
+            let factory: Arc<ActorFactoryImpl> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
+                .ok_or_else(|| "ActorFactory not registered in ServiceLocator".to_string())?;
+            
+            // Activate (synchronous - completes when actor is registered and message loop is running)
+            // mark_activated() in activate_virtual_actor will clear the is_activating flag
+            // activate_virtual_actor will send all pending messages (including this one) after activation
+            // The message's correlation_id and sender are preserved when sent to the ActorRef
+            // CRITICAL: This await ensures activation is synchronous - actor is fully ready when this returns
+            eprintln!("🔵🔵🔵 [VIRTUAL_ACTOR_WRAPPER] Calling activate_virtual_actor (SYNC): actor_id={}", self.actor_id);
+            factory.activate_virtual_actor(&self.actor_id).await
+                .map_err(|e| {
+                    eprintln!("🔴🔴🔴 [VIRTUAL_ACTOR_WRAPPER] Failed to activate virtual actor: actor_id={}, error={}", self.actor_id, e);
+                    format!("Failed to activate virtual actor: {}", e)
+                })?;
+            
+            // Verify actor is now active after synchronous activation
+            let is_active_after = manager.is_active(&self.actor_id).await;
+            eprintln!("🟢🟢🟢 [VIRTUAL_ACTOR_WRAPPER] activate_virtual_actor completed (SYNC): actor_id={}, is_active={}", self.actor_id, is_active_after);
+            
+            if !is_active_after {
+                eprintln!("🔴🔴🔴 [VIRTUAL_ACTOR_WRAPPER] Actor not active after activation: actor_id={}", self.actor_id);
+                return Err(format!("Actor {} is not active after synchronous activation", self.actor_id).into());
+            }
+            
+            // Message was queued and sent by activate_virtual_actor after activation
+            // The message preserves correlation_id and sender, so reply routing will work correctly
+            // No need to forward - activate_virtual_actor handles it
+            return Ok(());
+        }
+        
+        // Actor is activated - use MessageSender from registry
+        // Get MessageSender (which will be ActorRef for activated actors, replacing VirtualActorWrapper)
+        eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] Actor is already active, using MessageSender from registry: actor_id={}", self.actor_id);
+        // Note: registry was already obtained above for registration check, reuse it here (no duplicate import)
         let sender = registry.lookup_actor(&self.actor_id).await
             .ok_or_else(|| format!("Actor not found: {}", self.actor_id))?;
         
-        sender.tell(message).await
-            .map_err(|e| format!("MessageSender.tell() failed: {}", e).into())
+        eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] Found MessageSender, calling tell(): actor_id={}, correlation_id={:?}", 
+            self.actor_id, message.correlation_id);
+        let result = sender.tell(message).await;
+        match &result {
+            Ok(_) => {
+                eprintln!("🟢 [VIRTUAL_ACTOR_WRAPPER] Successfully sent message via MessageSender");
+            }
+            Err(e) => {
+                eprintln!("🔴 [VIRTUAL_ACTOR_WRAPPER] Failed to send message via MessageSender: {}", e);
+            }
+        }
+        result.map_err(|e| format!("MessageSender.tell() failed: {}", e).into())
     }
 }

@@ -19,15 +19,17 @@ mod sqlite_tests {
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
-        })
+        });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
+        value
     }
 
     /// Test 1: Basic append_entry and replay_from
@@ -457,7 +459,7 @@ mod sqlite_tests {
         let actor_id = "test-actor-detach-reattach";
 
         // First facet: create entries
-        let mut facet1 = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet1 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet1.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Process 3 messages
@@ -477,7 +479,7 @@ mod sqlite_tests {
         assert_eq!(entries.len(), 6, "Should have 6 entries after detach");
 
         // Reattach with new facet
-        let mut facet2 = DurabilityFacet::new(storage.clone(), config);
+        let mut facet2 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet2.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Process one more message
@@ -509,7 +511,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-replay-scenario";
 
         // Attach with replay enabled

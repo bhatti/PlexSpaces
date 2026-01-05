@@ -45,6 +45,8 @@ prost = "0.12"
 tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
 tempfile = { workspace = true }
+# Test helpers for checking DynamoDB Local availability
+plexspaces-common = { path = "../common", features = ["test-helpers"] }
 
 [features]
 default = []

@@ -97,7 +97,7 @@ async fn test_application_start_failure() {
 async fn test_application_stop_failure() {
     let mut app = TestApplication {
         name: "test-app".to_string(),
-        stop_fails: false,
+        stop_fails: true,  // Set to true to test stop failure
         version: "0.1.0".to_string(),
         start_fails: false,
         health_status: HealthStatus::HealthStatusHealthy,

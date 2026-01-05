@@ -24,7 +24,7 @@
 #[cfg(feature = "blob-backend")]
 mod tests {
     use plexspaces_keyvalue::{KeyValueStore, blob::{BlobKVStore, BlobKVConfig}};
-    use plexspaces_core::RequestContext;
+    use plexspaces_common::RequestContext;
     use object_store::local::LocalFileSystem;
     use std::sync::Arc;
     use std::time::Duration;

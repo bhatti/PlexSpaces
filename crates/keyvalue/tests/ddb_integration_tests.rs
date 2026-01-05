@@ -46,6 +46,18 @@ mod ddb_tests {
         RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string())
     }
 
+    use plexspaces_common::test_helpers::dynamodb_local_available;
+
+    /// Helper to check if DynamoDB simulator is available and skip test with warning if not
+    async fn check_ddb_available() -> bool {
+        if !dynamodb_local_available().await {
+            eprintln!("⚠️  WARNING: DynamoDB Local simulator is not running. Skipping DDB test.");
+            eprintln!("   To run DDB tests, start DynamoDB Local: docker run -p 8000:8000 amazon/dynamodb-local");
+            return false;
+        }
+        true
+    }
+
     /// Helper to create DynamoDB KV store for testing
     /// Uses DynamoDB Local endpoint if available
     async fn create_ddb_store() -> DynamoDBKVStore {
@@ -68,6 +80,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_put_and_get() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -81,6 +96,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_nonexistent_key() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -90,6 +108,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_put_overwrites_existing() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -102,6 +123,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_delete() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -114,6 +138,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_delete_nonexistent_key() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -123,6 +150,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_exists() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -139,6 +169,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_prefix() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
         let test_id = Ulid::new().to_string();
@@ -160,6 +193,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_empty_prefix() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
         let test_id = Ulid::new().to_string();
@@ -177,6 +213,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_multi_get() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -197,6 +236,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_multi_put() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -222,6 +264,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_put_with_ttl() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -244,6 +289,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_ttl() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -262,6 +310,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_refresh_ttl() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -281,6 +332,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_refresh_ttl_nonexistent_key() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -294,6 +348,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_cas_create() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
         let test_key = format!("cas-create-{}", Ulid::new());
@@ -318,6 +375,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_cas_update() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -342,6 +402,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_increment() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
         let counter_key = format!("counter-{}", ulid::Ulid::new());
@@ -359,6 +422,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_decrement() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
         let counter_key = format!("counter-{}", ulid::Ulid::new());
@@ -381,6 +447,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_tenant_isolation() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx1 = tenant1_ctx();
         let ctx2 = tenant2_ctx();
@@ -401,6 +470,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_namespace_isolation() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx1 = namespace1_ctx();
         let ctx2 = namespace2_ctx();
@@ -416,6 +488,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_tenant_isolation_list() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx1 = tenant1_ctx();
         let ctx2 = tenant2_ctx();
@@ -442,6 +517,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_namespace_isolation_list() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx1 = namespace1_ctx();
         let ctx2 = namespace2_ctx();
@@ -468,6 +546,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_clear_prefix() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
         let test_id = Ulid::new().to_string();
@@ -491,6 +572,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_count_prefix() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
         let test_id = Ulid::new().to_string();
@@ -510,6 +594,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_stats() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -527,6 +614,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_concurrent_puts() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
@@ -556,6 +646,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_concurrent_cas() {
+        if !check_ddb_available().await {
+            return;
+        }
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 

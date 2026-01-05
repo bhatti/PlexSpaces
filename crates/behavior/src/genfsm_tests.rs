@@ -76,8 +76,8 @@ mod tests {
         let service_locator = Arc::new(ServiceLocator::new());
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
-            "test-ns".to_string(),
             String::new(), // tenant_id (empty if auth disabled)
+            "test-ns".to_string(), // namespace
             service_locator,
             None,
         ));

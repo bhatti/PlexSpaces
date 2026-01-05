@@ -22,7 +22,8 @@ mod sqlite_tests {
         serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
+            // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+            // DurabilityFacet will use a default if not provided
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
@@ -111,7 +112,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet1 = DurabilityFacet::new(storage1.clone(), config1);
+        let mut facet1 = DurabilityFacet::new(storage1.clone(), config_to_value(&config1), 50);
         let actor_id1 = "debug-no-replay";
 
         facet1.on_attach(actor_id1, serde_json::json!({})).await.unwrap();
@@ -136,7 +137,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet2 = DurabilityFacet::new(storage2.clone(), config2);
+        let mut facet2 = DurabilityFacet::new(storage2.clone(), config_to_value(&config2), 50);
         let actor_id2 = "debug-with-replay";
 
         facet2.on_attach(actor_id2, serde_json::json!({})).await.unwrap();

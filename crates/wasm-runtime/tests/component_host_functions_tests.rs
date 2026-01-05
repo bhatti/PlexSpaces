@@ -11,7 +11,14 @@ mod tests {
     use plexspaces_wasm_runtime::component_host::{
         LoggingImpl, MessagingImpl, TuplespaceImpl, ChannelsImpl, DurabilityImpl,
     };
-    use plexspaces_wasm_runtime::component_host::plexspaces::actor::types::{Context, SpawnOptions};
+    use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
+        logging::Host as LoggingHost,
+        messaging::Host as MessagingHost,
+        tuplespace::Host as TuplespaceHost,
+        channels::Host as ChannelsHost,
+        durability::Host as DurabilityHost,
+        types::{Context, SpawnOptions},
+    };
     use plexspaces_core::ActorId;
     use std::sync::Arc;
     use plexspaces_wasm_runtime::HostFunctions;
@@ -177,13 +184,69 @@ mod tests {
                     Ok(format!("reply:{}", String::from_utf8_lossy(&payload)).into_bytes())
                 }
             }
+
+            async fn spawn_actor(
+                &self,
+                _from: &str,
+                _module_ref: &str,
+                _initial_state: Vec<u8>,
+                _actor_id: Option<String>,
+                _labels: Vec<(String, String)>,
+                _durable: bool,
+            ) -> Result<String, String> {
+                Ok("spawned-actor".to_string())
+            }
+
+            async fn stop_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _timeout_ms: u64,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn link_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _linked_actor_id: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn unlink_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _linked_actor_id: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn monitor_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+            ) -> Result<u64, String> {
+                Ok(1)
+            }
+
+            async fn demonitor_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _monitor_ref: u64,
+            ) -> Result<(), String> {
+                Ok(())
+            }
         }
 
         let mock_sender = MockMessageSender {
             replies: Arc::new(RwLock::new(HashMap::new())),
         };
         let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_message_sender(
-            Box::new(mock_sender),
+            Arc::new(mock_sender),
         ));
         let actor_id = ActorId::from("test-actor".to_string());
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
@@ -232,10 +295,66 @@ mod tests {
                     Ok(b"reply".to_vec())
                 }
             }
+
+            async fn spawn_actor(
+                &self,
+                _from: &str,
+                _module_ref: &str,
+                _initial_state: Vec<u8>,
+                _actor_id: Option<String>,
+                _labels: Vec<(String, String)>,
+                _durable: bool,
+            ) -> Result<String, String> {
+                Ok("spawned-actor".to_string())
+            }
+
+            async fn stop_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _timeout_ms: u64,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn link_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _linked_actor_id: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn unlink_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _linked_actor_id: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn monitor_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+            ) -> Result<u64, String> {
+                Ok(1)
+            }
+
+            async fn demonitor_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _monitor_ref: u64,
+            ) -> Result<(), String> {
+                Ok(())
+            }
         }
 
         let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_message_sender(
-            Box::new(TimeoutMessageSender),
+            Arc::new(TimeoutMessageSender),
         ));
         let actor_id = ActorId::from("test-actor".to_string());
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
@@ -255,7 +374,7 @@ mod tests {
     #[tokio::test]
     async fn test_tuplespace_impl_placeholders() {
         // ARRANGE
-        let mut tuplespace = TuplespaceImpl;
+        let mut tuplespace = TuplespaceImpl::new(None, "test-actor".to_string());
 
         // ACT & ASSERT: Placeholder implementations should not panic
         let write_result = tuplespace.write(test_context("", ""), vec![]).await;
@@ -274,9 +393,7 @@ mod tests {
     async fn test_channels_impl_send_to_queue() {
         // ARRANGE
         let host_functions = create_test_host_functions();
-        let mut channels = ChannelsImpl {
-            host_functions: host_functions.clone(),
-        };
+        let mut channels = ChannelsImpl::new(host_functions);
 
         // ACT: Test send_to_queue
         let result = channels.send_to_queue(
@@ -294,9 +411,7 @@ mod tests {
     async fn test_channels_impl_receive_from_queue() {
         // ARRANGE
         let host_functions = create_test_host_functions();
-        let mut channels = ChannelsImpl {
-            host_functions: host_functions.clone(),
-        };
+        let mut channels = ChannelsImpl::new(host_functions);
 
         // ACT: Test receive_from_queue (with timeout 0 = poll immediately)
         let result = channels.receive_from_queue(test_context("", ""), "test-queue".to_string(), 0).await;
@@ -310,9 +425,7 @@ mod tests {
     async fn test_channels_impl_publish_to_topic() {
         // ARRANGE
         let host_functions = create_test_host_functions();
-        let mut channels = ChannelsImpl {
-            host_functions,
-        };
+        let mut channels = ChannelsImpl::new(host_functions);
 
         // ACT: Test publish_to_topic
         let result = channels.publish_to_topic(
@@ -329,7 +442,8 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_placeholders() {
         // ARRANGE
-        let mut durability = DurabilityImpl;
+        let host_functions = Arc::new(HostFunctions::new());
+        let mut durability = DurabilityImpl::new("test-actor".to_string(), host_functions);
 
         // ACT & ASSERT: Placeholder implementations should not panic
         let persist_result = durability.persist(test_context("", ""), "test-event".to_string(), vec![]).await;
@@ -441,10 +555,45 @@ mod tests {
                     Ok(())
                 }
             }
+
+            async fn link_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _linked_actor_id: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn unlink_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _linked_actor_id: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn monitor_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+            ) -> Result<u64, String> {
+                Ok(1)
+            }
+
+            async fn demonitor_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _monitor_ref: u64,
+            ) -> Result<(), String> {
+                Ok(())
+            }
         }
 
         let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_message_sender(
-            Box::new(MockSpawnSender),
+            Arc::new(MockSpawnSender),
         ));
         let actor_id = ActorId::from("test-actor".to_string());
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
@@ -532,10 +681,45 @@ mod tests {
                 }
                 Ok(())
             }
+
+            async fn link_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _linked_actor_id: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn unlink_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _linked_actor_id: &str,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn monitor_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+            ) -> Result<u64, String> {
+                Ok(1)
+            }
+
+            async fn demonitor_actor(
+                &self,
+                _from: &str,
+                _actor_id: &str,
+                _monitor_ref: u64,
+            ) -> Result<(), String> {
+                Ok(())
+            }
         }
 
         let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_message_sender(
-            Box::new(MockStopSender),
+            Arc::new(MockStopSender),
         ));
         let actor_id = ActorId::from("test-actor".to_string());
         let mut messaging = MessagingImpl::new(actor_id, host_functions);

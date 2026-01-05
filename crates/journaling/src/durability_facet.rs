@@ -502,8 +502,8 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
                     let service_locator = Arc::new(ServiceLocator::new());
                     let dummy_context = ActorContext::new(
                         "local".to_string(),
-                        internal_ctx.namespace().to_string(),
-                        internal_ctx.tenant_id().to_string(),
+                        internal_ctx.tenant_id().to_string(),  // tenant_id
+                        internal_ctx.namespace().to_string(),  // namespace
                         service_locator,
                         None,
                     );

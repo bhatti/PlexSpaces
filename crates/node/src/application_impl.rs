@@ -257,38 +257,99 @@ impl SpecApplication {
             let actor_id_parsed = actor_id.parse()
                 .map_err(|e| ApplicationError::StartupFailed(format!("Invalid actor ID '{}': {}", actor_id, e)))?;
             
-            match actor_factory.spawn_actor(
-                &ctx,
-                &actor_id_parsed,
-                &actor_type, // Use child.id as actor_type
-                vec![], // initial_state
-                None, // config
-                child.args.clone(), // labels (using args as labels for now)
-                facets, // facets from ChildSpec
-            ).await {
-                Ok(_message_sender) => {
+            // Check if this child is a supervisor - if so, recursively spawn its children
+            use plexspaces_proto::application::v1::ChildType as ProtoChildType;
+            let child_type = ProtoChildType::try_from(child.r#type())
+                .unwrap_or(ProtoChildType::ChildTypeUnspecified);
+            
+            if child_type == ProtoChildType::ChildTypeSupervisor {
+                // Spawn the supervisor actor first
+                match actor_factory.spawn_actor(
+                    &ctx,
+                    &actor_id_parsed,
+                    &actor_type, // Use child.id as actor_type
+                    vec![], // initial_state
+                    None, // config
+                    child.args.clone(), // labels (using args as labels for now)
+                    facets, // facets from ChildSpec
+                ).await {
+                    Ok(_message_sender) => {
+                        debug!(
+                            application = %self.spec.name,
+                            child_id = %child.id,
+                            actor_type = %actor_type,
+                            actor_id = %actor_id,
+                            facet_count = child.facets.len(),
+                            "Spawned supervisor actor"
+                        );
+                        actor_ids.push(actor_id);
+                    }
+                    Err(e) => {
+                        error!(
+                            application = %self.spec.name,
+                            child_id = %child.id,
+                            actor_type = %actor_type,
+                            error = %e,
+                            "Failed to spawn supervisor actor"
+                        );
+                        return Err(ApplicationError::StartupFailed(format!(
+                            "Failed to spawn supervisor actor '{}': {}",
+                            child.id, e
+                        )));
+                    }
+                }
+                
+                // Recursively spawn children of nested supervisor
+                if let Some(ref nested_supervisor_spec) = child.supervisor {
                     debug!(
                         application = %self.spec.name,
-                        child_id = %child.id,
-                        actor_type = %actor_type,
-                        actor_id = %actor_id,
-                        facet_count = child.facets.len(),
-                        "Spawned actor with facets"
+                        supervisor_id = %child.id,
+                        nested_children_count = nested_supervisor_spec.children.len(),
+                        "Recursively spawning nested supervisor children"
                     );
-                    actor_ids.push(actor_id);
+                    // Box the recursive call to avoid E0733 (recursion in async fn requires boxing)
+                    let nested_actor_ids = Box::pin(self.initialize_supervisor_tree(
+                        node.clone(),
+                        service_locator.clone(),
+                        nested_supervisor_spec
+                    )).await?;
+                    actor_ids.extend(nested_actor_ids);
                 }
-                Err(e) => {
-                    error!(
-                        application = %self.spec.name,
-                        child_id = %child.id,
-                        actor_type = %actor_type,
-                        error = %e,
-                        "Failed to spawn actor"
-                    );
-                    return Err(ApplicationError::StartupFailed(format!(
-                        "Failed to spawn actor '{}': {}",
-                        child.id, e
-                    )));
+            } else {
+                // Regular worker - spawn normally
+                match actor_factory.spawn_actor(
+                    &ctx,
+                    &actor_id_parsed,
+                    &actor_type, // Use child.id as actor_type
+                    vec![], // initial_state
+                    None, // config
+                    child.args.clone(), // labels (using args as labels for now)
+                    facets, // facets from ChildSpec
+                ).await {
+                    Ok(_message_sender) => {
+                        debug!(
+                            application = %self.spec.name,
+                            child_id = %child.id,
+                            actor_type = %actor_type,
+                            actor_id = %actor_id,
+                            facet_count = child.facets.len(),
+                            "Spawned actor with facets"
+                        );
+                        actor_ids.push(actor_id);
+                    }
+                    Err(e) => {
+                        error!(
+                            application = %self.spec.name,
+                            child_id = %child.id,
+                            actor_type = %actor_type,
+                            error = %e,
+                            "Failed to spawn actor"
+                        );
+                        return Err(ApplicationError::StartupFailed(format!(
+                            "Failed to spawn actor '{}': {}",
+                            child.id, e
+                        )));
+                    }
                 }
             }
         }
@@ -480,18 +541,28 @@ impl Application for SpecApplication {
         // 2. Calls actor.on_facets_detaching()
         // 3. Calls actor.terminate()
         // 4. Calls facet.on_detach() for all facets (reverse priority order)
-        if let Some(ref root_supervisor) = *self.root_supervisor.read().await {
-            let mut supervisor_guard = root_supervisor.write().await;
-            
+        // CRITICAL: Clone Arc before acquiring write lock to prevent deadlock
+        let root_supervisor_arc = {
+            let root_supervisor = self.root_supervisor.read().await;
+            root_supervisor.clone()
+        };
+        
+        if let Some(root_supervisor) = root_supervisor_arc {
             // OBSERVABILITY: Record metrics for supervisor hierarchy shutdown
             let supervisor_shutdown_start = std::time::Instant::now();
             metrics::counter!("plexspaces_application_supervisor_shutdown_total",
                 "application" => self.spec.name.clone()
             ).increment(1);
             
+            // CRITICAL: Release application lock before supervisor shutdown to prevent deadlock
+            let shutdown_result = {
+                let mut supervisor_guard = root_supervisor.write().await;
+                supervisor_guard.shutdown().await
+            };
+            
             // Call Supervisor::shutdown() for top-down cascading shutdown
             // This will trigger facet lifecycle hooks for all child actors
-            if let Err(e) = supervisor_guard.shutdown().await {
+            if let Err(e) = shutdown_result {
                 error!(
                     application = %self.spec.name,
                     error = %e,
@@ -513,7 +584,6 @@ impl Application for SpecApplication {
                     "Supervisor hierarchy shutdown completed (all facet lifecycle hooks executed)"
                 );
             }
-            drop(supervisor_guard);
         }
         
         // Abort supervisor handle if still running

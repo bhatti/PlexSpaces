@@ -78,8 +78,7 @@ pub struct ActorBuilder {
     tenant_id: String,
     namespace: String,
     mailbox_config: Option<MailboxConfig>,
-    // TODO: Facets will be added after design decisions are made
-    // facets: Vec<Box<dyn Facet>>,
+    facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     resource_profile: Option<ResourceProfile>,
     config: Option<ActorConfig>,
     node_id: Option<String>,
@@ -102,7 +101,7 @@ impl ActorBuilder {
             tenant_id: String::new(), // Empty if auth disabled
             namespace: String::new(), // Must be set via with_namespace()
             mailbox_config: None,
-            // facets: Vec::new(), // TODO: Add after design decisions
+            facets: Vec::new(),
             resource_profile: None,
             config: None,
             node_id: None,
@@ -242,6 +241,37 @@ impl ActorBuilder {
             },
         );
         self.config = Some(config);
+        self
+    }
+
+    /// Attach a facet to this actor
+    ///
+    /// ## Purpose
+    /// Adds a facet (e.g., DurabilityFacet, VirtualActorFacet) to the actor.
+    /// Facets will be attached after the actor is built but before spawning.
+    ///
+    /// ## Arguments
+    /// * `facet` - The facet to attach (e.g., DurabilityFacet, VirtualActorFacet)
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// use plexspaces_journaling::{DurabilityFacet, MemoryJournalStorage};
+    ///
+    /// let storage = MemoryJournalStorage::new();
+    /// let durability_facet = Box::new(DurabilityFacet::new(
+    ///     storage,
+    ///     serde_json::json!({}),
+    ///     50,
+    /// ));
+    ///
+    /// let actor = ActorBuilder::new(MyBehavior::new())
+    ///     .with_id("my-actor@node1")
+    ///     .with_facet(durability_facet)
+    ///     .build()
+    ///     .await?;
+    /// ```
+    pub fn with_facet(mut self, facet: Box<dyn plexspaces_facet::Facet>) -> Self {
+        self.facets.push(facet);
         self
     }
 
@@ -620,8 +650,16 @@ impl ActorBuilder {
             actor = actor.with_resource_profile(profile);
         }
 
-        // TODO: Apply facets after design decisions are made
-        // See UNIFIED_ACTOR_DESIGN_DECISIONS.md
+        // Attach facets after building
+        for mut facet in self.facets {
+            actor.attach_facet(facet).await
+                .map_err(|e| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to attach facet: {}", e)
+                    )
+                })?;
+        }
 
         Ok(actor)
     }
@@ -647,7 +685,7 @@ impl ActorBuilder {
         mut self,
         ctx: &plexspaces_core::RequestContext,
         service_locator: Arc<plexspaces_core::ServiceLocator>,
-    ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<crate::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         // Use tenant_id and namespace from RequestContext
         // If auth is disabled, tenant_id will be empty string
         self.tenant_id = ctx.tenant_id().to_string();
@@ -663,11 +701,12 @@ impl ActorBuilder {
             plexspaces_core::BehaviorType::Custom(s) => s,
         };
         
-        // Build the actor
+        // Build the actor (facets are attached during build)
         let actor = self.build().await?;
         
-        // Extract actor ID before spawning (needed for ActorRef creation)
+        // Extract actor ID and mailbox before spawning (needed for ActorRef creation)
         let actor_id = actor.id().clone();
+        let mailbox = actor.mailbox().clone();
         
         // Get ActorFactory from ServiceLocator as trait object to avoid TypeId mismatch
         // Using trait objects (Arc<dyn ActorFactory>) instead of concrete types (Arc<ActorFactoryImpl>)
@@ -689,11 +728,11 @@ impl ActorBuilder {
         ).await
             .map_err(|e| format!("Failed to spawn actor via ActorFactory: {}", e))?;
         
-        // Create ActorRef from the actor ID
+        // Create ActorRef from the actor ID and mailbox
         // Note: spawn_built_actor returns MessageSender, but we need ActorRef for compatibility
-        // We can create ActorRef from the actor_id since the actor is registered
-        plexspaces_core::ActorRef::new(actor_id.clone())
-            .map_err(|e| format!("Failed to create ActorRef for {}: {}", actor_id, e).into())
+        // We create ActorRef using the mailbox we extracted before spawning
+        use crate::ActorRef;
+        Ok(ActorRef::local(actor_id, mailbox, service_locator))
     }
 }
 

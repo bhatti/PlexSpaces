@@ -22,6 +22,7 @@
 //! are available before running integration tests.
 
 use std::process::Command;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -50,17 +51,71 @@ pub fn docker_compose_available() -> bool {
         .is_ok()
 }
 
+/// Static variables to cache service availability checks
+/// This avoids checking services for every test, improving test performance
+static DDB_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
+static SQS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
+static REDIS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
+
 /// Check if DynamoDB Local is running on the default port
+/// Uses a static cache to avoid checking for every test
+/// Fast timeout (500ms) for quick failure when service is not available
 pub async fn dynamodb_local_available() -> bool {
-    check_service_health("http://localhost:8000", Duration::from_secs(2)).await
+    let cache = DDB_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut cached = cache.lock().await;
+    
+    if let Some(available) = *cached {
+        return available;
+    }
+    
+    // Fast timeout for quick failure when service is not available
+    let available = check_service_health("http://localhost:8000", Duration::from_millis(500)).await;
+    *cached = Some(available);
+    available
 }
 
-/// Check if LocalStack is running on the default port
+/// Check if LocalStack (SQS simulator) is running on the default port
+/// Uses a static cache to avoid checking for every test
+/// Fast timeout (500ms) for quick failure when service is not available
 pub async fn localstack_available() -> bool {
-    check_service_health("http://localhost:4566/_localstack/health", Duration::from_secs(2)).await
+    let cache = SQS_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut cached = cache.lock().await;
+    
+    if let Some(available) = *cached {
+        return available;
+    }
+    
+    // Fast timeout for quick failure when service is not available
+    let available = check_service_health("http://localhost:4566/_localstack/health", Duration::from_millis(500)).await;
+    *cached = Some(available);
+    available
+}
+
+/// Check if SQS simulator (LocalStack) is available
+/// Alias for localstack_available() for clarity
+pub async fn sqs_simulator_available() -> bool {
+    localstack_available().await
+}
+
+/// Check if Redis is running on the default port (6379)
+/// Uses a static cache to avoid checking for every test
+/// Fast timeout (500ms) for quick failure when service is not available
+pub async fn redis_available() -> bool {
+    let cache = REDIS_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut cached = cache.lock().await;
+    
+    if let Some(available) = *cached {
+        return available;
+    }
+    
+    // Fast async Redis check using TCP connection
+    let available = check_redis_port("localhost:6379", Duration::from_millis(500)).await;
+    *cached = Some(available);
+    available
 }
 
 /// Check if a service is available by making an HTTP request
+/// Fast timeout for quick failure when service is not available
 async fn check_service_health(url: &str, timeout_duration: Duration) -> bool {
     let client = match reqwest::Client::builder()
         .timeout(timeout_duration)
@@ -72,6 +127,17 @@ async fn check_service_health(url: &str, timeout_duration: Duration) -> bool {
 
     match timeout(timeout_duration, client.get(url).send()).await {
         Ok(Ok(resp)) => resp.status().is_success(),
+        _ => false,
+    }
+}
+
+/// Check if Redis is available by attempting a TCP connection
+/// Fast timeout for quick failure when service is not available
+async fn check_redis_port(addr: &str, timeout_duration: Duration) -> bool {
+    use tokio::net::TcpStream;
+    
+    match timeout(timeout_duration, TcpStream::connect(addr)).await {
+        Ok(Ok(_)) => true,
         _ => false,
     }
 }

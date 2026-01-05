@@ -28,7 +28,7 @@ mod sqlite_integration_tests {
         SqliteJournalStorage::new(":memory:").await.unwrap()
     }
 
-    #[cfg(feature = "postgres-backend")]
+    #[cfg(all(feature = "postgres-backend", not(feature = "sqlite-backend")))]
     async fn create_test_storage() -> PostgresJournalStorage {
         let db_url = std::env::var("TEST_POSTGRES_URL")
             .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/plexspaces_test".to_string());
@@ -59,15 +59,17 @@ mod sqlite_integration_tests {
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> Value {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
-        })
+        });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
+        value
     }
 
     /// Test actor: Simple counter
@@ -193,7 +195,7 @@ mod sqlite_integration_tests {
     async fn test_full_replay_no_checkpoint() {
         let storage = create_test_storage().await;
         let config = create_durability_config(1000, true); // No checkpointing
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-1";
 
         // Phase 1: Normal execution
@@ -246,7 +248,7 @@ mod sqlite_integration_tests {
     async fn test_checkpoint_delta_replay() {
         let storage = create_test_storage().await;
         let config = create_durability_config(50, true); // Checkpoint every 50 messages
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-2";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -320,7 +322,7 @@ mod sqlite_integration_tests {
         let mut config = create_durability_config(100, true);
         config.state_schema_version = 1; // Actor uses version 1
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-3";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -362,7 +364,7 @@ mod sqlite_integration_tests {
     async fn test_empty_journal_new_actor() {
         let storage = create_test_storage().await;
         let config = create_durability_config(100, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config);
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "new-actor";
 
         // Attach to new actor (no journal entries)
@@ -385,7 +387,7 @@ mod sqlite_integration_tests {
     async fn test_automatic_state_loading() {
         let storage = create_test_storage().await;
         let config = create_durability_config(100, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-4";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -429,7 +431,7 @@ mod sqlite_integration_tests {
     async fn test_manual_state_loading() {
         let storage = create_test_storage().await;
         let config = create_durability_config(100, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-5";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -473,7 +475,7 @@ mod sqlite_integration_tests {
     async fn test_side_effect_caching() {
         let storage = create_test_storage().await;
         let config = create_durability_config(1000, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "actor-with-side-effects";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -545,7 +547,7 @@ mod sqlite_integration_tests {
     async fn test_missing_checkpoint_replay_from_beginning() {
         let storage = create_test_storage().await;
         let config = create_durability_config(100, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-6";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -589,7 +591,7 @@ mod sqlite_integration_tests {
     async fn test_multiple_checkpoints_use_latest() {
         let storage = create_test_storage().await;
         let config = create_durability_config(10, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-7";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -632,7 +634,7 @@ mod sqlite_integration_tests {
     async fn test_replay_without_handler_legacy_mode() {
         let storage = create_test_storage().await;
         let config = create_durability_config(100, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-8";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();

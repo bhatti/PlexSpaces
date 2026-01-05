@@ -911,30 +911,27 @@ impl JournalStorage for SqliteJournalStorage {
         from_sequence: u64,
         page_request: &PageRequest,
     ) -> JournalResult<(Vec<ActorEvent>, PageResponse)> {
-        // Decode page_token to get starting sequence
-        let start_sequence = if page_request.offset == 0 {
-            from_sequence
-        } else {
-            from_sequence.max((page_request.offset.max(0)) as u64)
-        };
+        // offset is the number of events to skip (not a sequence number)
+        let skip_count = page_request.offset.max(0) as i64;
 
         // Validate and clamp page_size (1-1000)
         let page_size = page_request.limit.max(1).min(1000) as i64;
 
         // Fetch page_size + 1 to check if there's more
+        // First filter by from_sequence, then skip offset events, then take page_size + 1
         let rows = sqlx::query(
             r#"
             SELECT id, actor_id, sequence, event_type, event_data, timestamp, caused_by, metadata
             FROM actor_events
-            WHERE actor_id = ? AND sequence >= ? AND sequence >= ?
+            WHERE actor_id = ? AND sequence >= ?
             ORDER BY sequence ASC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             "#,
         )
         .bind(actor_id)
-        .bind(start_sequence.max(from_sequence) as i64)
         .bind(from_sequence as i64)
         .bind(page_size + 1)
+        .bind(skip_count)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| JournalError::Storage(e.to_string()))?;
@@ -960,9 +957,12 @@ impl JournalStorage for SqliteJournalStorage {
             });
         }
 
+        // Calculate next offset: current offset + number of events returned
+        let next_offset = skip_count + events.len() as i64;
+
         let page_response = PageResponse {
             total_size: 0, // Total size not available without full scan (expensive)
-            offset: start_sequence as i32,
+            offset: next_offset as i32,
             limit: page_size as i32,
             has_next: has_more,
         };
@@ -1031,8 +1031,8 @@ impl JournalStorage for SqliteJournalStorage {
         actor_id: &str,
         page_request: &PageRequest,
     ) -> JournalResult<ActorHistory> {
-        // Use offset to get starting sequence
-        let start_sequence = page_request.offset.max(0) as u64;
+        // offset is the number of events to skip (not a sequence number)
+        let skip_count = page_request.offset.max(0) as i64;
 
         // Validate and clamp limit (1-1000)
         let page_size = page_request.limit.max(1).min(1000) as i64;
@@ -1067,18 +1067,19 @@ impl JournalStorage for SqliteJournalStorage {
             .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now())));
 
         // Fetch page_size + 1 to check if there's more
+        // Use OFFSET for skip count pagination
         let rows = sqlx::query(
             r#"
             SELECT id, actor_id, sequence, event_type, event_data, timestamp, caused_by, metadata
             FROM actor_events
-            WHERE actor_id = ? AND sequence >= ?
+            WHERE actor_id = ?
             ORDER BY sequence ASC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             "#,
         )
         .bind(actor_id)
-        .bind(start_sequence as i64)
         .bind(page_size + 1)
+        .bind(skip_count)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| JournalError::Storage(e.to_string()))?;
@@ -1104,9 +1105,12 @@ impl JournalStorage for SqliteJournalStorage {
             });
         }
 
+        // Calculate next offset: current offset + number of events returned
+        let next_offset = skip_count + events.len() as i64;
+
         let page_response = PageResponse {
             total_size: 0, // Total size not available without full scan (expensive)
-            offset: start_sequence as i32,
+            offset: next_offset as i32,
             limit: page_size as i32,
             has_next: has_more,
         };
@@ -1990,30 +1994,27 @@ impl JournalStorage for PostgresJournalStorage {
         from_sequence: u64,
         page_request: &PageRequest,
     ) -> JournalResult<(Vec<ActorEvent>, PageResponse)> {
-        // Decode page_token to get starting sequence
-        let start_sequence = if page_request.offset == 0 {
-            from_sequence
-        } else {
-            from_sequence.max((page_request.offset.max(0)) as u64)
-        };
+        // offset is the number of events to skip (not a sequence number)
+        let skip_count = page_request.offset.max(0) as i64;
 
         // Validate and clamp page_size (1-1000)
         let page_size = page_request.limit.max(1).min(1000) as i64;
 
         // Fetch page_size + 1 to check if there's more
+        // First filter by from_sequence, then skip offset events, then take page_size + 1
         let rows = sqlx::query(
             r#"
             SELECT id, actor_id, sequence, event_type, event_data, timestamp, caused_by, metadata
             FROM actor_events
-            WHERE actor_id = $1 AND sequence >= $2 AND sequence >= $3
+            WHERE actor_id = $1 AND sequence >= $2
             ORDER BY sequence ASC
-            LIMIT $4
+            LIMIT $3 OFFSET $4
             "#,
         )
         .bind(actor_id)
-        .bind(start_sequence.max(from_sequence) as i64)
         .bind(from_sequence as i64)
         .bind(page_size + 1)
+        .bind(skip_count)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| JournalError::Storage(e.to_string()))?;
@@ -2045,9 +2046,12 @@ impl JournalStorage for PostgresJournalStorage {
             });
         }
 
+        // Calculate next offset: current offset + number of events returned
+        let next_offset = skip_count + events.len() as i64;
+
         let page_response = PageResponse {
             total_size: 0, // Total size not available without full scan (expensive)
-            offset: start_sequence as i32,
+            offset: next_offset as i32,
             limit: page_size as i32,
             has_next: has_more,
         };
@@ -2121,8 +2125,8 @@ impl JournalStorage for PostgresJournalStorage {
         actor_id: &str,
         page_request: &PageRequest,
     ) -> JournalResult<ActorHistory> {
-        // Use offset to get starting sequence
-        let start_sequence = page_request.offset.max(0) as u64;
+        // offset is the number of events to skip (not a sequence number)
+        let skip_count = page_request.offset.max(0) as i64;
 
         // Validate and clamp limit (1-1000)
         let page_size = page_request.limit.max(1).min(1000) as i64;
@@ -2171,18 +2175,19 @@ impl JournalStorage for PostgresJournalStorage {
             .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now())));
 
         // Fetch page_size + 1 to check if there's more
+        // Use OFFSET for skip count pagination
         let rows = sqlx::query(
             r#"
             SELECT id, actor_id, sequence, event_type, event_data, timestamp, caused_by, metadata
             FROM actor_events
-            WHERE actor_id = $1 AND sequence >= $2
+            WHERE actor_id = $1
             ORDER BY sequence ASC
-            LIMIT $3
+            LIMIT $2 OFFSET $3
             "#,
         )
         .bind(actor_id)
-        .bind(start_sequence as i64)
         .bind(page_size + 1)
+        .bind(skip_count)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| JournalError::Storage(e.to_string()))?;
@@ -2214,9 +2219,12 @@ impl JournalStorage for PostgresJournalStorage {
             });
         }
 
+        // Calculate next offset: current offset + number of events returned
+        let next_offset = skip_count + events.len() as i64;
+
         let page_response = PageResponse {
             total_size: 0, // Total size not available without full scan (expensive)
-            offset: start_sequence as i32,
+            offset: next_offset as i32,
             limit: page_size as i32,
             has_next: has_more,
         };

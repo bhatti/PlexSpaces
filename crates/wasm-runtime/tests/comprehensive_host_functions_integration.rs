@@ -11,7 +11,14 @@ mod tests {
     use plexspaces_wasm_runtime::component_host::{
         LoggingImpl, MessagingImpl, TuplespaceImpl, ChannelsImpl, DurabilityImpl,
     };
-    use plexspaces_wasm_runtime::component_host::plexspaces::actor::types::{Context, SpawnOptions};
+    use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
+        logging::Host as LoggingHost,
+        messaging::Host as MessagingHost,
+        tuplespace::Host as TuplespaceHost,
+        channels::Host as ChannelsHost,
+        durability::Host as DurabilityHost,
+        types::{Context, SpawnOptions},
+    };
     use plexspaces_core::ActorId;
     use std::sync::Arc;
     use plexspaces_wasm_runtime::HostFunctions;
@@ -31,6 +38,7 @@ mod tests {
     /// Test that all messaging functions are accessible
     #[tokio::test]
     async fn test_messaging_functions_accessible() {
+        use MessagingHost;
         let actor_id = ActorId::from("test-actor".to_string());
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
@@ -42,18 +50,19 @@ mod tests {
         let now = messaging.now().await;
         assert!(now > 0);
 
-        let parent_id = messaging.parent_id().await;
+        let parent_id: Option<String> = messaging.parent_id().await;
         assert!(parent_id.is_none()); // No parent in test
 
         // Test tell (should work even without message sender)
         let _ = messaging.tell("target".to_string(), "msg".to_string(), vec![]).await;
 
         // Test ask (should return error without message sender, but function exists)
-        let ask_result = messaging.ask("target".to_string(), "msg".to_string(), vec![], 1000).await;
+        use plexspaces_wasm_runtime::component_host::plexspaces::actor::types::ActorError;
+        let ask_result: Result<Vec<u8>, ActorError> = messaging.ask("target".to_string(), "msg".to_string(), vec![], 1000).await;
         assert!(ask_result.is_err()); // Expected without message sender
 
         // Test reply
-        let reply_result = messaging.reply("corr-123".to_string(), vec![]).await;
+        let reply_result: Result<(), ActorError> = messaging.reply("corr-123".to_string(), vec![]).await;
         assert!(reply_result.is_ok()); // Reply always succeeds (routing handled by system)
 
         // Test spawn (should return error without message sender)
@@ -64,7 +73,7 @@ mod tests {
             durable: false,
             supervisor: None,
         };
-        let spawn_result = messaging.spawn("module@1.0.0".to_string(), vec![], spawn_options).await;
+        let spawn_result: Result<String, ActorError> = messaging.spawn("module@1.0.0".to_string(), vec![], spawn_options).await;
         assert!(spawn_result.is_err()); // Expected without message sender
 
         // Test stop (should return error without message sender)
@@ -91,10 +100,9 @@ mod tests {
     /// Test that all channel functions are accessible
     #[tokio::test]
     async fn test_channel_functions_accessible() {
+        use ChannelsHost;
         let host_functions = create_test_host_functions();
-        let mut channels = ChannelsImpl {
-            host_functions: host_functions.clone(),
-        };
+        let mut channels = ChannelsImpl::new(host_functions.clone());
 
         // Test send_to_queue
         let _ = channels.send_to_queue(test_context("", ""), "queue".to_string(), "msg".to_string(), vec![]).await;
@@ -117,6 +125,7 @@ mod tests {
     /// Test that all tuplespace functions are accessible
     #[tokio::test]
     async fn test_tuplespace_functions_accessible() {
+        use TuplespaceHost;
         let actor_id = ActorId::from("test-actor".to_string());
         let mut tuplespace = TuplespaceImpl::new(None, actor_id);
 
@@ -135,7 +144,10 @@ mod tests {
     /// Test that all durability functions are accessible
     #[tokio::test]
     async fn test_durability_functions_accessible() {
-        let mut durability = DurabilityImpl;
+        use DurabilityHost;
+        let actor_id = ActorId::from("test-actor".to_string());
+        let host_functions = create_test_host_functions();
+        let mut durability = DurabilityImpl::new(actor_id, host_functions);
 
         // All durability functions should be accessible
         let _ = durability.persist(test_context("", ""), "event".to_string(), vec![]).await;
@@ -153,6 +165,7 @@ mod tests {
     /// Test that all logging functions are accessible
     #[tokio::test]
     async fn test_logging_functions_accessible() {
+        use LoggingHost;
         let actor_id = ActorId::from("test-actor".to_string());
         let mut logging = LoggingImpl { actor_id };
 

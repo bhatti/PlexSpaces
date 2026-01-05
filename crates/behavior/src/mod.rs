@@ -243,6 +243,12 @@ pub trait GenServer: Actor {
         
         match msg_type {
             MessageType::Call => {
+                // DEBUG: Check if sender is temporary sender
+                let sender_is_temp = msg.sender.as_ref()
+                    .map(|s| s.starts_with("ask-") && s.contains('@'))
+                    .unwrap_or(false);
+                eprintln!("🔵🔵🔵 [ROUTE_MESSAGE] CALL: Routing to handle_request: message_id={}, sender={:?}, is_temporary_sender={}, target_actor_id={}, correlation_id={:?}",
+                    msg.id, msg.sender, sender_is_temp, target_actor_id, msg.correlation_id);
                 tracing::debug!(
                     "🟡 [ROUTE_MESSAGE] CALL: Routing to handle_request: message_id={}, sender={:?}, target_actor_id={}, correlation_id={:?}",
                     msg.id, msg.sender, target_actor_id, msg.correlation_id
@@ -253,14 +259,21 @@ pub trait GenServer: Actor {
                 let sender_id = msg.sender.clone();
                 let correlation_id = msg.correlation_id.clone();
                 
+                eprintln!("🔵🔵🔵 [ROUTE_MESSAGE] CALLING handle_request: message_id={}, sender={:?}, is_temporary_sender={}, target_actor_id={}, correlation_id={:?}",
+                    message_id, sender_id, sender_is_temp, target_actor_id, correlation_id);
                 tracing::debug!(
                     "🟡 [ROUTE_MESSAGE] CALLING handle_request: message_id={}, sender={:?}, target_actor_id={}, correlation_id={:?}",
                     message_id, sender_id, target_actor_id, correlation_id
                 );
                 
                 // Call handle_request with Message (handler will use ActorService::send() to send reply)
-                self.handle_request(ctx, msg).await?;
+                let result = self.handle_request(ctx, msg).await;
+                eprintln!("🟢🟢🟢 [ROUTE_MESSAGE] handle_request returned: message_id={}, target_actor_id={}, correlation_id={:?}, result={:?}",
+                    message_id, target_actor_id, correlation_id, result.is_ok());
+                result?;
                 
+                eprintln!("🟢🟢🟢 [ROUTE_MESSAGE] handle_request COMPLETED: message_id={}, target_actor_id={}, correlation_id={:?}",
+                    message_id, target_actor_id, correlation_id);
                 tracing::debug!(
                     "🟡 [ROUTE_MESSAGE] handle_request COMPLETED: message_id={}, target_actor_id={}, correlation_id={:?}",
                     message_id, target_actor_id, correlation_id
@@ -921,8 +934,8 @@ mod tests {
         let service_locator = Arc::new(ServiceLocator::new());
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
-            "test-ns".to_string(),
             String::new(), // tenant_id (empty if auth disabled)
+            "test-ns".to_string(), // namespace
             service_locator,
             None,
         ));

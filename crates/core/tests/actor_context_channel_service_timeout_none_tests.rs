@@ -14,6 +14,8 @@ struct MockChannelService {
     return_none: bool,
 }
 
+impl plexspaces_core::Service for MockChannelService {}
+
 #[async_trait]
 impl ChannelService for MockChannelService {
     async fn publish_to_topic(
@@ -65,9 +67,10 @@ async fn test_channel_service_receive_from_queue_no_timeout() {
     let channel_service = Arc::new(MockChannelService { return_none: false });
     
     // Create context with service locator and register channel service
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
-    service_locator.register_service(channel_service.clone()).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    let service_locator = Arc::new(ServiceLocator::new());
+    service_locator.register_channel_service(channel_service.clone()).await;
     let context = ActorContext::new(
         "node1".to_string(),
         "test-tenant".to_string(),
@@ -88,9 +91,10 @@ async fn test_channel_service_receive_from_queue_no_timeout_returns_none() {
     let channel_service = Arc::new(MockChannelService { return_none: true });
     
     // Create context with service locator and register channel service
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
-    service_locator.register_service(channel_service.clone()).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    let service_locator = Arc::new(ServiceLocator::new());
+    service_locator.register_channel_service(channel_service.clone()).await;
     let context = ActorContext::new(
         "node1".to_string(),
         "test-tenant".to_string(),

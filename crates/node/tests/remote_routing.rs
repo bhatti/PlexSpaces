@@ -18,12 +18,11 @@
 use plexspaces_actor::ActorRef;
 use plexspaces_core::{Message, MessageSender};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use plexspaces_node::{grpc_service::ActorServiceImpl, Node, NodeId, default_node_config};
+use plexspaces_node::{grpc_service::ActorServiceImpl, Node, NodeBuilder, NodeId};
 use plexspaces_proto::ActorServiceServer;
 use std::sync::Arc;
 use tonic::transport::Server;
 
-#[path = "test_helpers.rs"]
 #[path = "test_helpers.rs"]
 mod test_helpers;
 use test_helpers::lookup_actor_ref;
@@ -44,22 +43,20 @@ async fn start_test_server(node: Arc<Node>) -> String {
             .expect("Server failed");
     });
 
-    // Wait for server to be ready - use a future that checks server readiness
-    let server_ready = async {
-        // Give server a moment to start
-        tokio::task::yield_now().await;
-    };
-    tokio::time::timeout(tokio::time::Duration::from_secs(1), server_ready)
-        .await
-        .expect("Server should start quickly");
-    format!("http://{}", bound_addr)
+    // Wait for server to be ready - give it more time to fully start
+    tokio::task::yield_now().await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    
+    // Extract just the host:port (remove http:// prefix if present)
+    let addr_str = bound_addr.to_string();
+    addr_str
 }
 
 /// Test: Node routes local messages via mailbox (existing behavior)
 #[tokio::test]
 async fn test_node_route_local_message() {
     // Setup: Create node with local actor
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     // Use larger mailbox capacity to avoid "Mailbox is full" errors
     let mut mailbox_config = MailboxConfig::default();
@@ -76,14 +73,15 @@ async fn test_node_route_local_message() {
         mailbox.clone(),
         service_locator.clone(),
     ));
-    node.actor_registry().register_actor("test-actor@node1".to_string(), wrapper, None, None, None).await;
+    let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+        .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())).unwrap();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    actor_registry.register_actor(&ctx, "test-actor@node1".to_string(), wrapper, None, None, None).await;
     
-    // Register actor config
-    node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();
+    // Actor already registered - no need to update config
 
-    // Act: Send message via ActorRef
+    // Act: Send message via ActorRef (use the one we already created)
     let message = Message::new(vec![1, 2, 3]);
-    let actor_ref = lookup_actor_ref(&node, &"test-actor@node1".to_string()).await.unwrap().unwrap();
     let result = actor_ref.tell(message).await;
 
     // Assert: Message delivered to local mailbox
@@ -96,9 +94,9 @@ async fn test_node_route_local_message() {
 #[tokio::test]
 async fn test_node_route_remote_message() {
     // Setup: Create two nodes
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
+    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
 
-    let node2 = Arc::new(NodeBuilder::new("node2").build());
+    let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
     // Start gRPC server for node2
     let node2_address = start_test_server(node2.clone()).await;
@@ -118,25 +116,56 @@ async fn test_node_route_remote_message() {
         mailbox2.clone(),
         service_locator2.clone(),
     ));
-    node2.actor_registry().register_actor("remote-actor@node2".to_string(), wrapper2, None, None, None).await;
+    let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+        .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())).unwrap();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    actor_registry2.register_actor(&ctx, "remote-actor@node2".to_string(), wrapper2, None, None, None).await;
     
-    let core_actor_ref2 = plexspaces_core::ActorRef::new(actor_ref2.id().as_str().to_string()).unwrap();
-    // Register actor config
-    node2.actor_registry().register_actor_with_config(actor_ref2.id().as_str().to_string(), None).await.unwrap();
+    // Register actor config - use the actual actor_ref2 which implements MessageSender
+    let ctx = plexspaces_core::RequestContext::internal();
+    let actor_id = actor_ref2.id().clone();
+    let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
+    actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
     // Register node2 in node1's registry
-    node1
-        .register_remote_node(NodeId::new("node2"), node2_address)
-        .await
-        .unwrap();
+    let _: Result<(), _> = node1
+        .register_remote_node(NodeId::new("node2"), node2_address.clone())
+        .await;
+
+    // Also register node2 in ObjectRegistry (required for ActorRef::remote to find the node)
+    // Use the same tenant/namespace that get_node_client will use (from NodeConfig defaults: "internal"/"system")
+    use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+    let object_registry = node1.object_registry().await.unwrap();
+    // NodeConfig defaults are "internal"/"system" (not "default"/"default")
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+    // Ensure address format is correct (host:port, not http://host:port)
+    let grpc_address = if node2_address.starts_with("http://") {
+        node2_address.strip_prefix("http://").unwrap().to_string()
+    } else {
+        node2_address.clone()
+    };
+    let node_registration = ObjectRegistration {
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_id: "node2".to_string(),
+        grpc_address,
+        object_category: "Node".to_string(),
+        ..Default::default()
+    };
+    object_registry.register(&ctx, node_registration).await.unwrap();
+    
+    // Give ObjectRegistry a moment to process the registration
+    tokio::task::yield_now().await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     // Act: Send message from node1 to actor on node2 via ActorRef
+    // Create remote ActorRef for node1 to send to node2
+    let service_locator1 = node1.service_locator().clone();
+    let remote_actor_ref = ActorRef::remote("remote-actor@node2".to_string(), "node2".to_string(), service_locator1);
     let message = Message::new(vec![4, 5, 6]);
-    let actor_ref = lookup_actor_ref(&node1, &"remote-actor@node2".to_string()).await.unwrap().unwrap();
-    let result = actor_ref.tell(message).await;
+    let result = remote_actor_ref.tell(message).await;
 
     // Assert: Message delivered via gRPC
-    assert!(result.is_ok(), "Remote routing should succeed");
+    assert!(result.is_ok(), "Remote routing should succeed, got error: {:?}", result.err());
 
     // Verify message arrived at node2's actor mailbox
     // Wait for message to arrive using dequeue_with_timeout instead of sleep
@@ -150,7 +179,7 @@ async fn test_node_route_remote_message() {
 #[tokio::test]
 async fn test_node_route_to_unregistered_remote() {
     // Setup: Create node
-    let node = Arc::new(NodeBuilder::new("node1").build());
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     // Act: Try to send to actor on unregistered remote node
     let message = Message::new(vec![7, 8, 9]);
@@ -180,9 +209,9 @@ async fn test_node_route_to_unregistered_remote() {
 #[tokio::test]
 async fn test_connection_pooling() {
     // Setup: Create two nodes
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
+    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
 
-    let node2 = Arc::new(NodeBuilder::new("node2").build());
+    let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
     let node2_address = start_test_server(node2.clone()).await;
 
@@ -202,25 +231,56 @@ async fn test_connection_pooling() {
         mailbox2.clone(),
         service_locator2.clone(),
     ));
-    node2.actor_registry().register_actor("pooled-actor@node2".to_string(), wrapper_pooled, None, None, None).await;
+    let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+        .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())).unwrap();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    actor_registry2.register_actor(&ctx, "pooled-actor@node2".to_string(), wrapper_pooled, None, None, None).await;
     
-    let core_actor_ref2 = plexspaces_core::ActorRef::new(actor_ref2.id().as_str().to_string()).unwrap();
-    // Register actor config
-    node2.actor_registry().register_actor_with_config(actor_ref2.id().as_str().to_string(), None).await.unwrap();
+    // Register actor config - use the actual actor_ref2 which implements MessageSender
+    let ctx = plexspaces_core::RequestContext::internal();
+    let actor_id = actor_ref2.id().clone();
+    let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
+    actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
     // Register node2 in node1's registry
-    node1
-        .register_remote_node(NodeId::new("node2"), node2_address)
-        .await
-        .unwrap();
+    let _: Result<(), _> = node1
+        .register_remote_node(NodeId::new("node2"), node2_address.clone())
+        .await;
+
+    // Also register node2 in ObjectRegistry (required for ActorRef::remote to find the node)
+    // Use the same tenant/namespace that get_node_client will use (from NodeConfig defaults: "internal"/"system")
+    use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+    let object_registry = node1.object_registry().await.unwrap();
+    // NodeConfig defaults are "internal"/"system" (not "default"/"default")
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+    // Ensure address format is correct (host:port, not http://host:port)
+    let grpc_address = if node2_address.starts_with("http://") {
+        node2_address.strip_prefix("http://").unwrap().to_string()
+    } else {
+        node2_address.clone()
+    };
+    let node_registration = ObjectRegistration {
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_id: "node2".to_string(),
+        grpc_address,
+        object_category: "Node".to_string(),
+        ..Default::default()
+    };
+    object_registry.register(&ctx, node_registration).await.unwrap();
+    
+    // Give ObjectRegistry a moment to process the registration
+    tokio::task::yield_now().await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     // Act: Send multiple messages (should reuse connection)
-    let actor_ref = lookup_actor_ref(&node1, &"pooled-actor@node2".to_string()).await.unwrap().unwrap();
+    // Create remote ActorRef for node1 to send to node2
+    let service_locator1 = node1.service_locator().clone();
+    let remote_actor_ref = ActorRef::remote("pooled-actor@node2".to_string(), "node2".to_string(), service_locator1);
 
     for i in 0..5 {
         let message = Message::new(vec![i]);
-        let result = actor_ref.tell(message).await;
-        assert!(result.is_ok(), "Message {} should succeed", i);
+        let result = remote_actor_ref.tell(message).await;
+        assert!(result.is_ok(), "Message {} should succeed, got error: {:?}", i, result.err());
     }
 
     // Assert: All 5 messages delivered (connection pooling worked)
@@ -238,20 +298,19 @@ async fn test_connection_pooling() {
 #[tokio::test]
 async fn test_node_discovery() {
     // Setup: Create two nodes
-    let node1 = Arc::new(NodeBuilder::new("node1").build());
+    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
 
-    let node2 = Arc::new(NodeBuilder::new("node2").build());
+    let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
     let node2_address = start_test_server(node2.clone()).await;
 
     // Act: Register node2 as remote node
-    node1
+    let _: Result<(), _> = node1
         .register_remote_node(NodeId::new("node2"), node2_address)
-        .await
-        .unwrap();
+        .await;
 
     // Assert: node1 knows about node2
-    let connected_nodes = node1.connected_nodes().await;
+    let connected_nodes: Vec<NodeId> = node1.connected_nodes().await;
     assert!(
         connected_nodes.contains(&NodeId::new("node2")),
         "node2 should be in connected nodes"

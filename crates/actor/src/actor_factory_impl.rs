@@ -92,10 +92,17 @@ impl ActorFactoryImpl {
     }
     
     /// Watch actor termination and handle cleanup
+    /// Watch actor termination and handle cleanup
+    /// 
+    /// ## Arguments
+    /// * `actor_id` - ID of the actor being watched
+    /// * `join_handle` - JoinHandle for the actor's task
+    /// * `exit_reason_arc` - Arc to the actor's exit_reason field (for EXIT message propagation)
     async fn watch_actor_termination(
         &self,
         actor_id: ActorId,
         join_handle: JoinHandle<()>,
+        exit_reason_arc: Arc<tokio::sync::RwLock<Option<ExitReason>>>,
     ) {
         let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
             .unwrap_or_else(|| panic!("ActorRegistry not registered in ServiceLocator"));
@@ -105,27 +112,87 @@ impl ActorFactoryImpl {
             // Wait for actor task to complete
             let result = join_handle.await;
             
+            // Check if actor stored an exit reason (e.g., from EXIT message)
+            let stored_exit_reason = {
+                let stored = exit_reason_arc.read().await;
+                let cloned = stored.clone();
+                if cloned.is_some() {
+                    tracing::debug!(
+                        actor_id = %actor_id_clone,
+                        stored_reason = ?cloned,
+                        "Found stored exit reason in actor (terminated due to EXIT)"
+                    );
+                } else {
+                    tracing::debug!(
+                        actor_id = %actor_id_clone,
+                        "No stored exit reason (normal termination)"
+                    );
+                }
+                cloned
+            };
+            
             // Determine termination reason and create lifecycle event
             let (reason, lifecycle_event) = match result {
                 Ok(_) => {
-                    // Graceful shutdown
-                    let reason = "normal".to_string();
-                    let now = chrono::Utc::now();
-                    let event = ActorLifecycleEvent {
-                        actor_id: actor_id_clone.clone(),
-                        timestamp: Some(Timestamp {
-                            seconds: now.timestamp(),
-                            nanos: now.timestamp_subsec_nanos() as i32,
-                        }),
-                        event_type: Some(
-                            plexspaces_proto::actor_lifecycle_event::EventType::Terminated(
-                                plexspaces_proto::v1::actor::ActorTerminated {
-                                    reason: reason.clone(),
-                                },
+                    // Check if actor terminated due to EXIT (stored exit reason)
+                    if let Some(ref exit_reason) = stored_exit_reason {
+                        // Actor terminated due to EXIT - use the stored reason
+                        tracing::debug!(
+                            actor_id = %actor_id_clone,
+                            exit_reason = ?exit_reason,
+                            "Actor terminated due to EXIT, using stored exit reason"
+                        );
+                        let reason_str = match exit_reason {
+                            ExitReason::Normal => "normal".to_string(),
+                            ExitReason::Shutdown => "shutdown".to_string(),
+                            ExitReason::Killed => "killed".to_string(),
+                            ExitReason::Error(msg) => msg.clone(),
+                            ExitReason::Linked { actor_id, reason } => {
+                                format!("linked:{}:{}", actor_id, match reason.as_ref() {
+                                    ExitReason::Normal => "normal",
+                                    ExitReason::Shutdown => "shutdown",
+                                    ExitReason::Killed => "killed",
+                                    ExitReason::Error(msg) => msg,
+                                    ExitReason::Linked { .. } => "linked",
+                                })
+                            }
+                        };
+                        let now = chrono::Utc::now();
+                        let event = ActorLifecycleEvent {
+                            actor_id: actor_id_clone.clone(),
+                            timestamp: Some(Timestamp {
+                                seconds: now.timestamp(),
+                                nanos: now.timestamp_subsec_nanos() as i32,
+                            }),
+                            event_type: Some(
+                                plexspaces_proto::actor_lifecycle_event::EventType::Terminated(
+                                    plexspaces_proto::v1::actor::ActorTerminated {
+                                        reason: reason_str.clone(),
+                                    },
+                                ),
                             ),
-                        ),
-                    };
-                    (reason, event)
+                        };
+                        (reason_str, event)
+                    } else {
+                        // Graceful shutdown (no stored exit reason)
+                        let reason = "normal".to_string();
+                        let now = chrono::Utc::now();
+                        let event = ActorLifecycleEvent {
+                            actor_id: actor_id_clone.clone(),
+                            timestamp: Some(Timestamp {
+                                seconds: now.timestamp(),
+                                nanos: now.timestamp_subsec_nanos() as i32,
+                            }),
+                            event_type: Some(
+                                plexspaces_proto::actor_lifecycle_event::EventType::Terminated(
+                                    plexspaces_proto::v1::actor::ActorTerminated {
+                                        reason: reason.clone(),
+                                    },
+                                ),
+                            ),
+                        };
+                        (reason, event)
+                    }
                 }
                 Err(e) if e.is_panic() => {
                     // Actor panicked - extract panic message
@@ -206,14 +273,45 @@ impl ActorFactoryImpl {
             registry.publish_lifecycle_event(lifecycle_event).await;
             
             // Phase 6: Handle actor termination - notify monitors and propagate to links
-            // Convert reason string to ExitReason
-            let exit_reason = match reason.as_str() {
-                "normal" => ExitReason::Normal,
-                "shutdown" => ExitReason::Shutdown,
-                "killed" => ExitReason::Killed,
-                _ => ExitReason::Error(reason.clone()),
+            // Convert reason string to ExitReason, or use stored exit reason if available
+            let exit_reason = if let Some(stored) = &stored_exit_reason {
+                tracing::debug!(
+                    actor_id = %actor_id_clone,
+                    exit_reason = ?stored,
+                    "Using stored exit reason for handle_actor_termination (will propagate to links)"
+                );
+                stored.clone()
+            } else {
+                // Parse reason string - handle linked reasons properly
+                let converted = if reason.starts_with("linked:") {
+                    // Use ExitReason::from_str to parse linked reasons correctly
+                    ExitReason::from_str(&reason)
+                } else {
+                    match reason.as_str() {
+                        "normal" => ExitReason::Normal,
+                        "shutdown" => ExitReason::Shutdown,
+                        "killed" => ExitReason::Killed,
+                        _ => ExitReason::Error(reason.clone()),
+                    }
+                };
+                tracing::debug!(
+                    actor_id = %actor_id_clone,
+                    exit_reason = ?converted,
+                    reason_str = %reason,
+                    "Using converted exit reason for handle_actor_termination"
+                );
+                converted
             };
+            tracing::debug!(
+                actor_id = %actor_id_clone,
+                exit_reason = ?exit_reason,
+                "Calling handle_actor_termination (will propagate to links if error)"
+            );
             registry.handle_actor_termination(&actor_id_clone, exit_reason).await;
+            tracing::debug!(
+                actor_id = %actor_id_clone,
+                "handle_actor_termination completed"
+            );
             
             // CRITICAL: Unregister actor to prevent memory leaks
             // This ensures all registry entries are cleaned up on termination
@@ -238,6 +336,7 @@ impl ActorFactoryImpl {
 #[async_trait]
 impl ActorFactory for ActorFactoryImpl {
     async fn activate_virtual_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        eprintln!("🔵 [ACTOR_FACTORY] activate_virtual_actor called: actor_id={}", actor_id);
         // Get services from ServiceLocator
         let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
@@ -250,37 +349,293 @@ impl ActorFactory for ActorFactoryImpl {
         
         // Check if actor is virtual
         if !manager.is_virtual(&actor_id).await {
+            eprintln!("🔴 [ACTOR_FACTORY] Actor is not virtual: actor_id={}", actor_id);
             return Err(format!("Actor {} is not a virtual actor", actor_id).into());
         }
         
         // Check if already active
         if manager.is_active(&actor_id).await {
+            eprintln!("🟢 [ACTOR_FACTORY] Actor is already active: actor_id={}", actor_id);
             return Ok(()); // Already active
         }
         
-        // Get actor instance (for lazy virtual actors)
-        if let Some(actor_any) = manager.get_actor_instance(&actor_id).await {
-            // Actor instance exists - spawn it
-            // Downcast to Actor
+        eprintln!("🔵 [ACTOR_FACTORY] Getting actor instance: actor_id={}", actor_id);
+        // Get actor instance (for lazy virtual actors) - use ActorRegistry directly
+        // VirtualActorManager doesn't store actor instances - ActorRegistry does
+        // For lazy activation, we need to:
+        // 1. Get the stored actor instance
+        // 2. Unregister the actor (removes instance from registry, allowing Arc unwrap)
+        // 3. Unwrap Arc to get Actor
+        // 4. Spawn it (which re-registers it with ActorRef)
+        // For suspended actors (no instance), we need to rebuild from scratch using spawn_actor
+        if let Some(actor_any) = registry.get_actor_instance(&actor_id).await {
+            eprintln!("🟢 [ACTOR_FACTORY] Found actor instance, spawning: actor_id={}", actor_id);
+            // Actor instance exists - get it before unregistering
+            // Downcast to Actor Arc
             let actor_arc = actor_any.downcast::<Actor>()
                 .map_err(|_| "Failed to downcast actor instance to Actor")?;
             
-            // Remove from actor_instances before spawning (to allow unwrapping)
-            manager.remove_actor_instance(&actor_id).await;
+            // Get actor's context before unregistering (needed for re-registration)
+            let actor_context = actor_arc.context();
+            let activation_ctx = RequestContext::new_without_auth(
+                actor_context.tenant_id.clone(),
+                actor_context.namespace.clone(),
+            );
             
-            // Spawn the actor (use internal context for virtual actor activation)
-            let internal_ctx = RequestContext::internal();
-            let _actor_ref = self.spawn_built_actor(&internal_ctx, actor_arc, None).await?;
+            // CRITICAL: Unregister actor to remove instance from registry
+            // This removes the instance from the registry map, but we still have our Arc reference
+            // Use unregister_with_cleanup which removes the instance (and facets, but we'll re-register with facets)
+            // After unregister, only our local Arc reference exists, so we can pass it to spawn_built_actor
+            // spawn_built_actor will re-register the actor with ActorRef (not instance)
+            registry.unregister_with_cleanup(&actor_id).await
+                .map_err(|e| format!("Failed to unregister actor before activation: {}", e))?;
             
-            // Process pending messages
+            // Spawn the actor (use actor's context for virtual actor activation)
+            // spawn_built_actor is synchronous - it awaits actor.start() which:
+            // 1. Calls init() and waits for it
+            // 2. Calls register_in_registry() and waits for it (registers ActorRef, replacing VirtualActorWrapper)
+            // 3. Spawns message processing task and returns JoinHandle
+            // Actor is fully registered and message loop is running when start().await returns
+            // IMPORTANT: After activation, virtual actors behave exactly like regular actors
+            // Note: spawn_built_actor takes Arc<Actor>, so we pass actor_arc directly (no unwrap needed)
+            eprintln!("🔵 [ACTOR_FACTORY] Activating lazy virtual actor: actor_id={}", actor_id);
+            // For lazy activation, we need to start the actor directly (not through spawn_built_actor's lazy path)
+            // Unwrap Arc to get mut Actor for start()
+            let mut actor = Arc::try_unwrap(actor_arc)
+                .map_err(|_| "Actor Arc has multiple references - cannot unwrap for activation")?;
+            
+            // CRITICAL: Check actor state before calling start() to ensure we only call it once
+            // start() can only be called when state is Creating or Terminated
+            use crate::ActorState;
+            let current_state = actor.state().await;
+            eprintln!("🔵🔵🔵 [ACTOR_FACTORY] Actor state before start(): actor_id={}, state={:?}", actor_id, current_state);
+            
+            // Verify actor is in correct state for start() (Creating or Terminated)
+            if current_state != ActorState::Creating && current_state != ActorState::Terminated {
+                eprintln!("🔴🔴🔴 [ACTOR_FACTORY] Actor in invalid state for start(): actor_id={}, state={:?}", actor_id, current_state);
+                return Err(format!("Actor {} is in invalid state {:?} for start() - can only start from Creating or Terminated", actor_id, current_state).into());
+            }
+            
+            // Start the actor (calls init() internally, then registers in ActorRegistry)
+            // This is synchronous - waits for actor to become Active
+            // start() already registers the ActorRef in the registry, so we don't need to register again
+            eprintln!("🔵🔵🔵 [ACTOR_FACTORY] About to call start() on lazy virtual actor: actor_id={}, state={:?}", actor_id, current_state);
+            let join_handle = actor.start().await
+                .map_err(|e| {
+                    eprintln!("🔴🔴🔴 [ACTOR_FACTORY] Failed to start lazy virtual actor: actor_id={}, error={}", actor_id, e);
+                    format!("Failed to start lazy virtual actor: {}", e)
+                })?;
+            
+            // Verify actor reached Active state after start()
+            let state_after_start = actor.state().await;
+            eprintln!("🟢🟢🟢 [ACTOR_FACTORY] Actor start() completed: actor_id={}, state={:?}, join_handle exists={}", actor_id, state_after_start, !join_handle.is_finished());
+            
+            if state_after_start != ActorState::Active {
+                eprintln!("🔴🔴🔴 [ACTOR_FACTORY] Actor did not reach Active state after start(): actor_id={}, state={:?}", actor_id, state_after_start);
+                return Err(format!("Actor {} did not reach Active state after start(), current state: {:?}", actor_id, state_after_start).into());
+            }
+            
+            // Wrap in Arc after starting
+            let actor_arc = Arc::new(actor);
+            
+            // Store facets after activation (unregister_with_cleanup may have removed them)
+            let facet_manager_wrapper = self.service_locator.get_service_by_name::<plexspaces_core::FacetManagerServiceWrapper>(service_names::FACET_MANAGER).await
+                .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
+            let facet_manager = facet_manager_wrapper.inner_clone();
+            let facets_clone = actor_arc.facets();
+            facet_manager.store_facets(actor_id.clone(), facets_clone).await;
+            
+            // Get mailbox for ActorRef
+            let mailbox = actor_arc.mailbox().clone();
+            
+            // Create ActorRef (already registered by start())
+            let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+                actor_id.clone(),
+                mailbox.clone(),
+                self.service_locator.clone(),
+            ));
+            
+            // Update registration with config and instance (idempotent - ActorRef already registered in Actor::start())
+            // This ensures config and instance are stored for resource tracking and ask() pattern
+            registry.register_actor(
+                &activation_ctx,
+                actor_id.clone(),
+                actor_ref.clone(),
+                None, // actor_type already set
+                actor_arc.context().config.clone(), // Config for resource tracking
+                Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
+            ).await;
+            
+            // Watch termination
+            let exit_reason_arc = actor_arc.exit_reason();
+            self.watch_actor_termination(actor_id.clone(), join_handle, exit_reason_arc).await;
+            
+            eprintln!("🟢 [ACTOR_FACTORY] Lazy virtual actor activated: actor_id={}", actor_id);
+            
+            // Actor is now registered (ActorRef replaced VirtualActorWrapper) and message loop is running
+            // Mark as activated in VirtualActorManager and clear is_activating flag in VirtualActorFacet
+            manager.mark_activated(&actor_id).await
+                .map_err(|e| format!("Failed to mark actor as activated: {}", e))?;
+            
+            // Clear is_activating flag in VirtualActorFacet (mark_activated in VirtualActorManager doesn't do this due to circular dependency)
+            let facet_arc = manager.get_facet(&actor_id).await
+                .map_err(|e| format!("Failed to get virtual actor facet: {}", e))?;
+            {
+                let facet_guard = facet_arc.read().await;
+                use std::any::Any;
+                use plexspaces_journaling::VirtualActorFacet;
+                if let Some(virtual_facet) = facet_guard.as_ref().downcast_ref::<VirtualActorFacet>() {
+                    virtual_facet.mark_activated().await;
+                }
+            }
+            
+            // Process pending messages - send them to the now-activated actor
+            // Use the ActorRef returned by spawn_built_actor (it's already registered and ready)
+            // Messages are sent synchronously - actor is ready to process them immediately
+            // IMPORTANT: Messages preserve correlation_id and sender for reply routing
             let pending_messages = manager.take_pending_messages(&actor_id).await;
-            // TODO: Send pending messages to actor
-            // For now, messages are queued and will be processed when actor starts
+            eprintln!("🔵 [ACTOR_FACTORY] Pending messages count: {}", pending_messages.len());
+            tracing::debug!(
+                actor_id = %actor_id,
+                pending_count = pending_messages.len(),
+                "Sending {} pending messages to activated virtual actor",
+                pending_messages.len()
+            );
+            for message in pending_messages {
+                eprintln!("🔵 [ACTOR_FACTORY] Sending pending message: id={}, correlation_id={:?}, sender={:?}, receiver={}", 
+                    message.id, message.correlation_id, message.sender, message.receiver);
+                tracing::debug!(
+                    actor_id = %actor_id,
+                    message_id = %message.id,
+                    correlation_id = ?message.correlation_id,
+                    sender = ?message.sender,
+                    "Sending pending message to activated virtual actor"
+                );
+                // Send message to actor's mailbox - message loop is already running
+                // Message preserves correlation_id and sender for reply routing
+                if let Err(e) = actor_ref.tell(message).await {
+                    eprintln!("🔴 [ACTOR_FACTORY] Failed to send pending message: {}", e);
+                    tracing::warn!(
+                        actor_id = %actor_id,
+                        error = %e,
+                        "Failed to send pending message to activated virtual actor"
+                    );
+                } else {
+                    eprintln!("🟢 [ACTOR_FACTORY] Successfully sent pending message");
+                }
+            }
             
             return Ok(());
+        } else {
+            // No actor instance - actor was suspended/passivated
+            // Need to rebuild from scratch using spawn_actor
+            // Get actor metadata from VirtualActorManager (source of truth for virtual actors)
+            eprintln!("🔵 [ACTOR_FACTORY] No actor instance found - actor was suspended, rebuilding: actor_id={}", actor_id);
+            
+            // Get metadata from VirtualActorManager (clean design: VirtualActorManager is source of truth)
+            let metadata = manager.get_metadata(&actor_id).await
+                .ok_or_else(|| format!("Virtual actor {} not found - cannot activate. Actor was suspended but metadata is missing from VirtualActorManager", actor_id))?;
+            
+            // Extract metadata needed for rebuilding
+            let actor_type = metadata.actor_type
+                .ok_or_else(|| format!("Virtual actor {} was suspended but actor_type is missing. Cannot rebuild without actor_type.", actor_id))?;
+            let config = metadata.config;
+            let tenant_id = metadata.tenant_id;
+            let namespace = metadata.namespace;
+            
+            // Create context for spawn_actor
+            let ctx = RequestContext::new_without_auth(tenant_id, namespace);
+            
+            // CRITICAL: For virtual actors, we need to recreate the VirtualActorFacet
+            // spawn_built_actor only detects virtual actors if they already have the facet attached
+            // Since we're rebuilding a suspended actor, we need to recreate the facet
+            // Get the facet from VirtualActorManager metadata to recreate it
+            let facet_arc = metadata.facet.clone();
+            let facet_guard = facet_arc.read().await;
+            use std::any::Any;
+            use plexspaces_journaling::VirtualActorFacet;
+            // facet_guard is RwLockReadGuard<Box<dyn Any + Send + Sync>>
+            // We need to access the inner Box and downcast it
+            let virtual_facet = facet_guard.as_ref().downcast_ref::<VirtualActorFacet>();
+            let activation_strategy = if let Some(vf) = virtual_facet {
+                Some(vf.get_activation_strategy().await)
+            } else {
+                None
+            };
+            drop(facet_guard);
+            
+            // Recreate VirtualActorFacet with same config
+            let mut facets_to_attach = vec![];
+            if let Some(activation_strategy) = activation_strategy {
+                let facet_config = serde_json::json!({
+                    "idle_timeout": "5m",
+                    "activation_strategy": match activation_strategy {
+                        plexspaces_journaling::ActivationStrategy::Eager => "eager",
+                        plexspaces_journaling::ActivationStrategy::Prewarm => "prewarm",
+                        _ => "lazy"
+                    }
+                });
+                let virtual_facet_new = Box::new(VirtualActorFacet::new(facet_config, 100));
+                facets_to_attach.push(virtual_facet_new as Box<dyn plexspaces_facet::Facet>);
+                eprintln!("🔵 [ACTOR_FACTORY] Recreated VirtualActorFacet for suspended actor: actor_id={}, strategy={:?}", actor_id, activation_strategy);
+            }
+            
+            // Rebuild actor using spawn_actor with stored actor_type and recreated VirtualActorFacet
+            // This will use BehaviorFactory to create the behavior, or fall back to SimpleBehavior
+            // CRITICAL: actor_type must match the registered behavior name in BehaviorRegistry
+            // For tests, behaviors should be registered before suspending actors
+            eprintln!("🟢 [ACTOR_FACTORY] Rebuilding suspended actor: actor_id={}, actor_type={}, facets_count={}", actor_id, actor_type, facets_to_attach.len());
+            eprintln!("🔵 [ACTOR_FACTORY] Using actor_type='{}' to create behavior via BehaviorFactory", actor_type);
+            let actor_ref = self.spawn_actor(
+                &ctx,
+                &actor_id,
+                &actor_type, // This must match the registered behavior name in BehaviorRegistry
+                vec![], // No initial state (state should be loaded from durability facet if present)
+                config,
+                HashMap::new(), // No labels
+                facets_to_attach, // Recreated VirtualActorFacet (and other facets from FacetManager if needed)
+            ).await
+            .map_err(|e| {
+                eprintln!("🔴 [ACTOR_FACTORY] Failed to rebuild suspended actor: actor_id={}, actor_type={}, error={}", actor_id, actor_type, e);
+                format!("Failed to rebuild suspended actor {}: {}", actor_id, e)
+            })?;
+            eprintln!("🟢 [ACTOR_FACTORY] Successfully rebuilt suspended actor: actor_id={}, actor_type={}", actor_id, actor_type);
+            
+            // Mark as activated
+            manager.mark_activated(&actor_id).await
+                .map_err(|e| format!("Failed to mark rebuilt actor as activated: {}", e))?;
+            
+            // Process pending messages - send them to the now-reactivated actor
+            // CRITICAL: Pending messages must be processed after reactivation
+            // This handles messages that were queued while the actor was suspended
+            let pending_messages = manager.take_pending_messages(&actor_id).await;
+            eprintln!("🔵 [ACTOR_FACTORY] Rebuilt suspended actor - pending messages count: {}", pending_messages.len());
+            if !pending_messages.is_empty() {
+                tracing::debug!(
+                    actor_id = %actor_id,
+                    pending_count = pending_messages.len(),
+                    "Sending {} pending messages to reactivated virtual actor",
+                    pending_messages.len()
+                );
+                for message in pending_messages {
+                    eprintln!("🔵 [ACTOR_FACTORY] Sending pending message to reactivated actor: id={}, correlation_id={:?}", 
+                        message.id, message.correlation_id);
+                    if let Err(e) = actor_ref.tell(message).await {
+                        eprintln!("🔴 [ACTOR_FACTORY] Failed to send pending message to reactivated actor: {}", e);
+                        tracing::warn!(
+                            actor_id = %actor_id,
+                            error = %e,
+                            "Failed to send pending message to reactivated virtual actor"
+                        );
+                    } else {
+                        eprintln!("🟢 [ACTOR_FACTORY] Successfully sent pending message to reactivated actor");
+                    }
+                }
+            }
+            
+            eprintln!("🟢 [ACTOR_FACTORY] Suspended actor rebuilt and activated: actor_id={}", actor_id);
+            Ok(())
         }
-        
-        Err(format!("Virtual actor {} not found - cannot activate", actor_id).into())
     }
     
     async fn spawn_actor(
@@ -412,6 +767,7 @@ impl ActorFactory for ActorFactoryImpl {
         
         // Add observability logging
         let actor_id_before_unwrap = actor.id().clone();
+        eprintln!("🔵🔵🔵 [SPAWN_BUILT_ACTOR] Starting: actor_id={}, actor_type={:?}", actor_id_before_unwrap, actor_type);
         tracing::info!(
             actor_id = %actor_id_before_unwrap,
             actor_type = ?actor_type,
@@ -421,6 +777,7 @@ impl ActorFactory for ActorFactoryImpl {
         // Unwrap the Arc to get the Actor
         let mut actor = Arc::try_unwrap(actor)
             .map_err(|_| "Actor Arc has multiple references - cannot unwrap")?;
+        eprintln!("🔵🔵🔵 [SPAWN_BUILT_ACTOR] Arc unwrapped: actor_id={}", actor_id_before_unwrap);
         
         // Get services from ServiceLocator
         let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(service_names::ACTOR_REGISTRY).await
@@ -505,8 +862,10 @@ impl ActorFactory for ActorFactoryImpl {
         // Check if actor has VirtualActorFacet
         let facets = actor.list_facets().await;
         let is_virtual = facets.contains(&"virtual_actor".to_string());
+        eprintln!("🔵🔵🔵 [SPAWN_BUILT_ACTOR] Actor facets check: actor_id={}, is_virtual={}, facets={:?}", actor_id, is_virtual, facets);
         
         if is_virtual {
+            eprintln!("🔵🔵🔵 [SPAWN_BUILT_ACTOR] Virtual actor detected: actor_id={}", actor_id);
             // Virtual actor handling
             let actor_facets = actor.facets();
             let facets_guard = actor_facets.read().await;
@@ -523,6 +882,7 @@ impl ActorFactory for ActorFactoryImpl {
             // Check activation strategy
             let activation_strategy = virtual_facet.get_activation_strategy().await;
             let should_activate_eagerly = matches!(activation_strategy, plexspaces_journaling::ActivationStrategy::Eager);
+            eprintln!("🔵🔵🔵 [SPAWN_BUILT_ACTOR] Activation strategy: actor_id={}, strategy={:?}, should_activate_eagerly={}", actor_id, activation_strategy, should_activate_eagerly);
             
             // Create new facet for registration
             drop(virtual_facet_guard);
@@ -539,12 +899,30 @@ impl ActorFactory for ActorFactoryImpl {
             let virtual_facet_for_reg = VirtualActorFacet::new(facet_config, 100); // VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY
             
             // Register as virtual actor (only if not already registered)
+            // Store metadata in VirtualActorManager (source of truth for virtual actors)
             if !manager.is_virtual(&actor_id).await {
                 let facet_box = Arc::new(tokio::sync::RwLock::new(
                     Box::new(virtual_facet_for_reg) as Box<dyn std::any::Any + Send + Sync>
                 ));
-                manager.register(actor_id.clone(), facet_box).await
+                // Register with full metadata (actor_type, config, tenant_id, namespace)
+                // This metadata persists across suspension and is used to rebuild actors
+                manager.register(
+                    actor_id.clone(),
+                    facet_box,
+                    actor_type.clone(),
+                    actor_config.clone(),
+                    ctx.tenant_id().to_string(),
+                    ctx.namespace().to_string(),
+                ).await
                     .map_err(|e| format!("Failed to register virtual actor: {}", e))?;
+            } else {
+                // Actor already registered - update metadata if we have new info
+                manager.update_metadata(
+                    &actor_id,
+                    actor_type.clone(),
+                    actor_config.clone(),
+                ).await
+                    .map_err(|e| format!("Failed to update virtual actor metadata: {}", e))?;
             }
             
             // Get mailbox (for creating ActorRef)
@@ -558,22 +936,12 @@ impl ActorFactory for ActorFactoryImpl {
                 self.service_locator.clone(),
             ));
             
-            // Register for lazy virtual actors (they're registered but not started)
-            // For eager activation, registration happens in Actor::start() after init()
-            if !should_activate_eagerly {
-                registry.register_actor(&ctx, actor_id.clone(), virtual_wrapper.clone(), actor_type.clone()).await;
-            }
-            
-            // Create ActorRef
+            // Create ActorRef (for return value - not used for lazy virtual actors)
             let actor_ref = ActorRef::local(
                 actor_id.clone(),
                 mailbox.clone(),
                 self.service_locator.clone(),
             );
-            
-            // Register actor with config
-            registry.register_actor_with_config(actor_id.clone(), actor_config.clone()).await
-                .map_err(|e| format!("Failed to register actor config: {}", e))?;
             
             // Handle eager vs lazy activation
             if should_activate_eagerly {
@@ -588,10 +956,17 @@ impl ActorFactory for ActorFactoryImpl {
                     self.service_locator.clone(),
                 ));
                 
+                // CRITICAL: Check actor state before calling start() to ensure we only call it once
+                use crate::ActorState;
+                let current_state = actor.state().await;
+                eprintln!("🔵🔵🔵 [ACTOR_FACTORY] Eager virtual actor state before start(): actor_id={}, state={:?}", actor_id, current_state);
+                
                 // Start the actor (calls init() internally, then registers in ActorRegistry)
                 // If init() fails, actor is not registered (prevents memory leaks)
+                eprintln!("🔵🔵🔵 [ACTOR_FACTORY] About to call start() on eager virtual actor: actor_id={}, state={:?}", actor_id, current_state);
                 let join_handle = actor.start().await
                     .map_err(|e| {
+                        eprintln!("🔴🔴🔴 [ACTOR_FACTORY] Failed to start eager virtual actor: actor_id={}, error={}", actor_id, e);
                         tracing::warn!(
                             actor_id = %actor_id,
                             error = %e,
@@ -600,51 +975,111 @@ impl ActorFactory for ActorFactoryImpl {
                         format!("Failed to start actor: {}", e)
                     })?;
                 
+                // Verify actor reached Active state
+                let state_after_start = actor.state().await;
+                eprintln!("🟢🟢🟢 [ACTOR_FACTORY] Eager virtual actor start() completed: actor_id={}, state={:?}", actor_id, state_after_start);
+                
+                if state_after_start != ActorState::Active {
+                    eprintln!("🔴🔴🔴 [ACTOR_FACTORY] Eager virtual actor did not reach Active state: actor_id={}, state={:?}", actor_id, state_after_start);
+                    return Err(format!("Eager virtual actor {} did not reach Active state after start(), current state: {:?}", actor_id, state_after_start).into());
+                }
+                
                 // Actor is now registered (registration happened inside Actor::start() after init() succeeded)
                 
                 // Wrap in Arc after starting
                 let actor_arc = Arc::new(actor);
                 
+                // Clone exit_reason before wrapping in Arc (needed for watch_actor_termination)
+                let exit_reason_arc = actor_arc.exit_reason();
+                
                 // Mark as activated
                 manager.mark_activated(&actor_id).await
                     .map_err(|e| format!("Failed to mark actor as activated: {}", e))?;
-                
-                // Store actor instance
-                {
-                    let mut actor_instances = registry.actor_instances().write().await;
-                    actor_instances.insert(actor_id.clone(), actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>);
-                }
                 
                 // Store facets
                 let facets_clone = actor_arc.facets();
                 facet_manager.store_facets(actor_id.clone(), facets_clone).await;
                 
-                // Watch termination
-                self.watch_actor_termination(actor_id.clone(), join_handle).await;
+                // Update registration with config and instance (idempotent - ActorRef already registered in Actor::start())
+                // This ensures config and instance are stored for resource tracking and ask() pattern
+                registry.register_actor(
+                    &ctx,
+                    actor_id.clone(),
+                    actor_ref.clone(),
+                    actor_type.clone(),
+                    actor_config.clone(), // Config for resource tracking
+                    Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
+                ).await;
+                
+                // Watch termination (with exit_reason for proper propagation)
+                self.watch_actor_termination(actor_id.clone(), join_handle, exit_reason_arc).await;
+                
+                // Process pending messages - send them to the now-activated actor
+                // IMPORTANT: For eager virtual actors, pending messages must be processed after activation
+                // This handles the case where messages were queued before the actor was activated
+                let pending_messages = manager.take_pending_messages(&actor_id).await;
+                eprintln!("🔵 [ACTOR_FACTORY] Eager virtual actor - pending messages count: {}", pending_messages.len());
+                if !pending_messages.is_empty() {
+                    tracing::debug!(
+                        actor_id = %actor_id,
+                        pending_count = pending_messages.len(),
+                        "Sending {} pending messages to activated eager virtual actor",
+                        pending_messages.len()
+                    );
+                    for message in pending_messages {
+                        eprintln!("🔵 [ACTOR_FACTORY] Sending pending message to eager actor: id={}, correlation_id={:?}", 
+                            message.id, message.correlation_id);
+                        if let Err(e) = actor_ref.tell(message).await {
+                            eprintln!("🔴 [ACTOR_FACTORY] Failed to send pending message to eager actor: {}", e);
+                            tracing::warn!(
+                                actor_id = %actor_id,
+                                error = %e,
+                                "Failed to send pending message to activated eager virtual actor"
+                            );
+                        } else {
+                            eprintln!("🟢 [ACTOR_FACTORY] Successfully sent pending message to eager actor");
+                        }
+                    }
+                }
                 
                 tracing::debug!(actor_id = %actor_id, "Virtual actor started with eager activation");
             } else {
                 // Lazy activation - store actor Arc but don't start
+                eprintln!("🔵🔵🔵 [SPAWN_BUILT_ACTOR] Lazy activation path: actor_id={}, NOT calling start()", actor_id);
                 tracing::debug!(actor_id = %actor_id, "Virtual actor with lazy activation - will activate on first message");
                 
                 let actor_arc = Arc::new(actor);
-                {
-                    let mut actor_instances = registry.actor_instances().write().await;
-                    actor_instances.insert(actor_id.clone(), actor_arc as Arc<dyn std::any::Any + Send + Sync>);
-                }
-                // Note: Facets NOT stored here - will be stored after activation
+                eprintln!("🔵🔵🔵 [SPAWN_BUILT_ACTOR] Lazy actor Arc created: actor_id={}, state={:?}", actor_id, actor_arc.state().await);
+                
+                // Store facets even for lazy virtual actors (they'll be activated later)
+                // This ensures facets are available when the actor is activated
+                let facets_clone = actor_arc.facets();
+                facet_manager.store_facets(actor_id.clone(), facets_clone).await;
+                
+                // Register actor with consolidated method (config included, NO instance for lazy actors)
+                // Per Orleans design: virtual actors are always registered (even when not active)
+                // For lazy activation: VirtualActorWrapper is registered (will be replaced by ActorRef when activated)
+                // Store instance for lazy activation (needed by activate_virtual_actor to retrieve and spawn)
+                // is_active() checks actor state (ActorState::Active) to distinguish lazy (not Active) from active (Active)
+                // ActorState matches proto: CREATING -> ACTIVATING -> ACTIVE -> DEACTIVATING -> INACTIVE
+                eprintln!("🔵🔵🔵 [SPAWN_BUILT_ACTOR] Registering lazy virtual actor: actor_id={}, with VirtualActorWrapper", actor_id);
+                registry.register_actor(
+                    &ctx,
+                    actor_id.clone(),
+                    virtual_wrapper.clone(),
+                    actor_type.clone(),
+                    actor_config.clone(), // Config for resource tracking
+                    Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for lazy activation
+                ).await;
+                eprintln!("🟢🟢🟢 [SPAWN_BUILT_ACTOR] Lazy virtual actor registered: actor_id={}, state={:?}", actor_id, actor_arc.state().await);
             }
             
-            // Create ActorRef for lazy virtual actor (implements MessageSender)
-            // Note: For lazy virtual actors, registration happens on first activation
+            // Create ActorRef for return value (for lazy virtual actors, VirtualActorWrapper is already registered)
             let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
                 actor_id.clone(),
                 mailbox.clone(),
                 self.service_locator.clone(),
             ));
-            
-            // Register ActorRef for lazy virtual actors (they're registered but not started)
-            registry.register_actor(&ctx, actor_id.clone(), actor_ref.clone(), actor_type.clone()).await;
             
             return Ok(actor_ref);
         }
@@ -667,10 +1102,17 @@ impl ActorFactory for ActorFactoryImpl {
             self.service_locator.clone(),
         ));
         
+        // CRITICAL: Check actor state before calling start() to ensure we only call it once
+        use crate::ActorState;
+        let current_state = actor.state().await;
+        eprintln!("🔵🔵🔵 [ACTOR_FACTORY] Regular actor state before start(): actor_id={}, state={:?}", actor_id, current_state);
+        
         // Start actor (calls init() internally, then registers in ActorRegistry)
         // If init() fails, actor is not registered (prevents memory leaks)
+        eprintln!("🔵🔵🔵 [ACTOR_FACTORY] About to call start() on regular actor: actor_id={}, state={:?}", actor_id, current_state);
         let join_handle = actor.start().await
             .map_err(|e| {
+                eprintln!("🔴🔴🔴 [ACTOR_FACTORY] Regular actor start() failed: actor_id={}, error={}", actor_id, e);
                 // OBSERVABILITY: Log start failure due to init() error
                 tracing::warn!(
                     actor_id = %actor_id,
@@ -680,21 +1122,38 @@ impl ActorFactory for ActorFactoryImpl {
                 format!("Failed to start actor: {}", e)
             })?;
         
+        // Verify actor reached Active state
+        let state_after_start = actor.state().await;
+        eprintln!("🟢🟢🟢 [ACTOR_FACTORY] Regular actor start() completed: actor_id={}, state={:?}", actor_id, state_after_start);
+        
+        if state_after_start != ActorState::Active {
+            eprintln!("🔴🔴🔴 [ACTOR_FACTORY] Regular actor did not reach Active state: actor_id={}, state={:?}", actor_id, state_after_start);
+            return Err(format!("Regular actor {} did not reach Active state after start(), current state: {:?}", actor_id, state_after_start).into());
+        }
+        
         // Actor is now registered (registration happened inside Actor::start() after init() succeeded)
-        // However, we need to ensure the ActorRef we return is registered in the actors map
+        // Store actor in Arc after starting
+        let actor_arc = Arc::new(actor);
+        
         // Create ActorRef (implements MessageSender) - this is what will be returned
+        // Note: The ActorRef was already registered in Actor::start() via register_in_registry()
+        // We just need to ensure config and instance are stored (idempotent update)
         let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
             actor_id.clone(),
             mailbox.clone(),
             self.service_locator.clone(),
         ));
         
-        // Explicitly register the ActorRef in the actors map (in case register_in_registry didn't work)
-        // This ensures lookup_actor() will find it
-        registry.register_actor(&ctx, actor_id.clone(), actor_ref.clone(), actor_type.clone()).await;
-        
-        // Store actor in Arc after starting
-        let actor_arc = Arc::new(actor);
+        // Update registration with config and instance (idempotent - ActorRef already registered)
+        // This ensures config and instance are stored for resource tracking and ask() pattern
+        registry.register_actor(
+            &ctx,
+            actor_id.clone(),
+            actor_ref.clone(),
+            actor_type.clone(),
+            actor_config.clone(), // Config for resource tracking
+            Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
+        ).await;
         
         // Emit Activated event
         registry.publish_lifecycle_event(ActorLifecycleEvent {
@@ -710,20 +1169,9 @@ impl ActorFactory for ActorFactoryImpl {
             ),
         }).await;
         
-        // Setup facets (skipped - requires journaling crate)
-        // TODO: Call FacetSetupService if available
-        
-        // Register actor with config
-        let _ = registry.register_actor_with_config(actor_id.clone(), actor_config.clone()).await;
-        
-        // Store actor instance
-        {
-            let mut actor_instances = registry.actor_instances().write().await;
-            actor_instances.insert(actor_id.clone(), actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>);
-        }
-        
-        // Watch termination
-        self.watch_actor_termination(actor_id.clone(), join_handle).await;
+        // Watch termination (with exit_reason_arc so stored exit reasons can be read)
+        let exit_reason_arc = actor_arc.exit_reason();
+        self.watch_actor_termination(actor_id.clone(), join_handle, exit_reason_arc).await;
         
         // Return ActorRef (implements MessageSender)
         Ok(actor_ref)
@@ -736,30 +1184,30 @@ impl ActorFactory for ActorFactoryImpl {
         
         let local_node_id = registry.local_node_id();
         
-        // Check if actor exists and is local
-        // Use internal context for lookup (actor routing is system-level)
-        let internal_ctx = RequestContext::internal();
-        let routing = registry.lookup_routing(&internal_ctx, actor_id).await
-            .map_err(|e| format!("Failed to lookup actor routing: {}", e))?;
+        // Get actor metadata (tenant_id, namespace) for proper tenant isolation
+        // This avoids needing to access actor instance just to get context
+        let (actor_ctx, namespace): (Option<RequestContext>, String) = {
+            if let Some((tenant_id, namespace)) = registry.get_actor_metadata(actor_id).await {
+                let ctx = RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
+                (Some(ctx), namespace)
+            } else {
+                // Fallback: use default context for routing lookup (system-level operation)
+                let default_ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+                (Some(default_ctx), "default".to_string())
+            }
+        };
+        
+        // Check routing to ensure actor is local
+        let routing = if let Some(ref ctx) = actor_ctx {
+            registry.lookup_routing(ctx, actor_id).await
+                .map_err(|e| format!("Failed to lookup actor routing: {}", e))?
+        } else {
+            return Err(format!("Failed to get actor context: {}", actor_id).into());
+        };
         
         if routing.is_none() || !routing.as_ref().unwrap().is_local {
             return Err(format!("Actor not found or not local: {}", actor_id).into());
         }
-        
-        // Get namespace for observability (try to get from actor instance or use default)
-        let namespace = {
-            let instances = registry.actor_instances().read().await;
-            if let Some(instance) = instances.get(actor_id) {
-                // Try to downcast to Actor to get namespace from context
-                if let Some(actor) = instance.downcast_ref::<Actor>() {
-                    actor.context().namespace.clone()
-                } else {
-                    "default".to_string()
-                }
-            } else {
-                "default".to_string()
-            }
-        };
         
         // OBSERVABILITY: Log actor stop attempt
         tracing::info!(
@@ -769,11 +1217,27 @@ impl ActorFactory for ActorFactoryImpl {
             "Stopping actor"
         );
         
+        // CRITICAL: Get actor instance and stop it BEFORE unregistering
+        // This ensures the message loop is stopped before we remove the instance
+        // Production-grade: Use stop_from_arc() which properly stops the message loop
+        if let Some(instance) = registry.get_actor_instance(actor_id).await {
+            if let Ok(actor_arc) = instance.downcast::<Actor>() {
+                // Stop actor gracefully (sends shutdown signal, waits, then aborts if needed)
+                if let Err(e) = actor_arc.stop_from_arc().await {
+                    tracing::warn!(
+                        actor_id = %actor_id,
+                        error = %e,
+                        "Failed to stop actor from Arc (continuing with unregister)"
+                    );
+                }
+            }
+        }
+        
         // OBSERVABILITY: Update ActorMetrics before stopping
         // Note: unregister_with_cleanup will also decrement active, but we track here for explicit observability
         {
             use plexspaces_core::message_metrics::ActorMetricsExt;
-            let mut actor_metrics = registry.actor_metrics().write().await;
+            let _actor_metrics = registry.actor_metrics().write().await;
             // Active count will be decremented by unregister_with_cleanup, but we track here for observability
             // This ensures metrics are updated even if unregister_with_cleanup fails
         }
@@ -795,6 +1259,8 @@ impl ActorFactory for ActorFactoryImpl {
         }).await;
         
         // Unregister from ActorRegistry (this handles cleanup and decrements active in ActorMetrics)
+        // Note: This removes the instance, but the message loop might still be running
+        // The message loop should exit when it tries to access actor state that's been dropped
         registry.unregister_with_cleanup(actor_id).await
             .map_err(|e| format!("Failed to unregister actor: {}", e))?;
         

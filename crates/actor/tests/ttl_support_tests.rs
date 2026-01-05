@@ -87,11 +87,22 @@ async fn test_message_ttl_preserved_in_proto_conversion() {
 
 #[tokio::test]
 async fn test_actor_ref_tell_with_ttl_message() {
-    // Create actor ref and mailbox
-    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "test@node1".to_string()).await.unwrap());
+    // Create actor ref and mailbox with sufficient capacity
+    let mut mailbox_config = MailboxConfig::default();
+    mailbox_config.capacity = 1000; // Large capacity to prevent "Mailbox is full" errors
+    let mailbox = Arc::new(Mailbox::new(mailbox_config, "test@node1".to_string()).await.unwrap());
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let actor_ref = ActorRef::local("test@node1".to_string(), Arc::clone(&mailbox), service_locator);
+    let actor_ref = ActorRef::local("test@node1".to_string(), Arc::clone(&mailbox), service_locator.clone());
+    
+    // Register actor before calling tell()
+    use plexspaces_core::{ActorRegistry, RequestContext};
+    if let Some(registry) = service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
+        let ctx = RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+    }
     
     // Create message with TTL
     let message = Message::new(b"test".to_vec()).with_ttl(Duration::from_secs(1));

@@ -25,7 +25,12 @@ async fn test_event_sourcing_full_workflow() {
     };
 
     // Create facet
-    let mut facet = EventSourcingFacet::new(storage.clone(), config);
+    let config_value = serde_json::json!({
+        "event_log_enabled": config.event_log_enabled,
+        "snapshot_interval": config.snapshot_interval,
+        "time_travel_enabled": config.time_travel_enabled,
+    });
+    let mut facet = EventSourcingFacet::new(storage.clone(), config_value, 50);
     facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
 
     // Process multiple state changes
@@ -81,7 +86,12 @@ async fn test_event_sourcing_replay_on_activation() {
         max_page_size: 1000,
     };
 
-    let mut facet = EventSourcingFacet::new(storage.clone(), config);
+    let config_value = serde_json::json!({
+        "event_log_enabled": config.event_log_enabled,
+        "snapshot_interval": config.snapshot_interval,
+        "time_travel_enabled": config.time_travel_enabled,
+    });
+    let mut facet = EventSourcingFacet::new(storage.clone(), config_value, 50);
 
     // On attach, should replay events
     facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
@@ -207,17 +217,23 @@ async fn test_event_sourcing_with_durability_facet() {
     };
 
     // Both facets share the same storage
-    let durability_config_value = serde_json::json!({
+    let mut durability_config_value = serde_json::json!({
         "backend": durability_config.backend,
         "checkpoint_interval": durability_config.checkpoint_interval,
-        "checkpoint_timeout": durability_config.checkpoint_timeout,
         "replay_on_activation": durability_config.replay_on_activation,
         "cache_side_effects": durability_config.cache_side_effects,
         "compression": durability_config.compression,
         "state_schema_version": durability_config.state_schema_version,
     });
+    // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+    // Skip it - DurabilityFacet will use default if not provided
     let durability_facet = DurabilityFacet::new((*storage).clone(), durability_config_value, 50);
-    let event_sourcing_facet = EventSourcingFacet::new(storage.clone(), event_sourcing_config);
+    let event_sourcing_config_value = serde_json::json!({
+        "event_log_enabled": event_sourcing_config.event_log_enabled,
+        "snapshot_interval": event_sourcing_config.snapshot_interval,
+        "time_travel_enabled": event_sourcing_config.time_travel_enabled,
+    });
+    let event_sourcing_facet = EventSourcingFacet::new(storage.clone(), event_sourcing_config_value, 50);
 
     // Both facets can work together
     // DurabilityFacet journals messages
@@ -248,8 +264,8 @@ async fn test_event_sourcing_large_event_log() {
 
     // Test pagination with large event log
     let page_request = PageRequest {
-        page_size: 100,
-        page_token: String::new(),
+        offset: 0,
+        limit: 100,
         filter: String::new(),
         order_by: String::new(),
     };
@@ -263,8 +279,9 @@ async fn test_event_sourcing_large_event_log() {
     assert!(page_response.has_next);
 
     // Verify we can get all events through pagination
+    // page_response.offset is already the next offset to use
     let mut total = 100;
-    let mut current_offset = page_response.offset + page_response.limit;
+    let mut current_offset = page_response.offset;
 
     for _ in 0..9 {
         // 9 more pages to get all 1000 events
@@ -284,7 +301,8 @@ async fn test_event_sourcing_large_event_log() {
         if !page_response.has_next {
             break;
         }
-        current_offset = page_response.offset + page_response.limit;
+        // page_response.offset is already the next offset
+        current_offset = page_response.offset;
     }
 
     assert_eq!(total, 1000);

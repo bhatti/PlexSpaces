@@ -248,6 +248,14 @@ async fn test_send_to_queue_host_function() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         Some(channel_service),
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -294,6 +302,14 @@ async fn test_publish_to_topic_host_function() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         Some(channel_service),
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -336,7 +352,15 @@ async fn test_send_to_queue_without_channel_service() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
-        None, // No ChannelService
+        None, // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");

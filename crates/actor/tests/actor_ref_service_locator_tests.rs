@@ -51,6 +51,23 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
+
+    async fn discover(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: Option<ObjectType>,
+        object_category: Option<String>,
+        capabilities: Option<Vec<String>>,
+        labels: Option<Vec<String>>,
+        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .discover(ctx, object_type, object_category, capabilities, labels, health_status, limit, offset)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
 #[tokio::test]
@@ -95,7 +112,6 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let node_registration = ObjectRegistration {
         object_id: "remote-node".to_string(),
-        object_type: ObjectType::ObjectTypeNode as i32,
         object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:9999".to_string(),
@@ -146,7 +162,6 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     let node_registration = ObjectRegistration {
         object_id: "remote-node".to_string(),
         object_type: ObjectType::ObjectTypeNode as i32,
-        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:9999".to_string(),
         ..Default::default()
@@ -186,10 +201,19 @@ async fn test_actor_ref_local_unchanged() {
     let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let actor_ref = ActorRef::local("test-actor", mailbox.clone(), service_locator);
+    let actor_ref = ActorRef::local("test-actor", mailbox.clone(), service_locator.clone());
     
     assert!(actor_ref.is_local());
     assert_eq!(actor_ref.id(), "test-actor");
+    
+    // Register actor before calling tell()
+    use plexspaces_core::{ActorRegistry, RequestContext};
+    if let Some(registry) = service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
+        let ctx = RequestContext::internal();
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+    }
     
     // Send message should work
     let message = Message::new(b"test".to_vec());

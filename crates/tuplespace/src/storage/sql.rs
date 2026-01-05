@@ -439,8 +439,9 @@ impl SqlStorage {
                 return Ok(stored_tuples.into_iter().map(|s| s.tuple).collect());
             }
 
-            // Calculate remaining time
-            let remaining = timeout_duration - start.elapsed();
+            // Calculate remaining time (use saturating_sub to avoid overflow)
+            let elapsed = start.elapsed();
+            let remaining = timeout_duration.saturating_sub(elapsed);
             let sleep_duration = Duration::from_millis(poll_interval_ms.min(remaining.as_millis() as u64));
 
             // Sleep before next poll
@@ -473,8 +474,9 @@ impl SqlStorage {
                 return Ok(stored_tuples.into_iter().map(|s| s.tuple).collect());
             }
 
-            // Calculate remaining time
-            let remaining = timeout_duration - start.elapsed();
+            // Calculate remaining time (use saturating_sub to avoid overflow)
+            let elapsed = start.elapsed();
+            let remaining = timeout_duration.saturating_sub(elapsed);
             let sleep_duration = Duration::from_millis(poll_interval_ms.min(remaining.as_millis() as u64));
 
             // Sleep before next poll

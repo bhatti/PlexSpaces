@@ -38,9 +38,35 @@ mod tests {
         ChannelBackend, ChannelConfig, ChannelMessage, DeliveryGuarantee,
         OrderingGuarantee,
     };
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::time::sleep;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Check if SQS simulator (LocalStack) is available
+    /// Uses cached check from test_helpers for fast availability check
+    async fn check_sqs_available() -> bool {
+        #[cfg(feature = "test-helpers")]
+        {
+            plexspaces_common::test_helpers::sqs_simulator_available().await
+        }
+        #[cfg(not(feature = "test-helpers"))]
+        {
+            // Fallback: check LocalStack health endpoint directly
+            use tokio::time::timeout;
+            use std::time::Duration;
+            let client = match reqwest::Client::builder()
+                .timeout(Duration::from_millis(500))
+                .build()
+            {
+                Ok(c) => c,
+                Err(_) => return false,
+            };
+            match timeout(Duration::from_millis(500), client.get("http://localhost:4566/_localstack/health").send()).await {
+                Ok(Ok(resp)) => resp.status().is_success(),
+                _ => false,
+            }
+        }
+    }
 
     /// Create SQS channel for testing
     /// Uses SQS Local if available, otherwise requires AWS credentials
@@ -79,6 +105,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_send_receive() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-send-receive").await;
 
         // Send message
@@ -103,6 +134,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_send_multiple_receive() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-multiple").await;
 
         // Send multiple messages
@@ -128,6 +164,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_ack() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-ack").await;
 
         // Send and receive
@@ -153,6 +194,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_nack_requeue() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-nack-requeue").await;
 
         // Send message
@@ -183,6 +229,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_nack_dlq() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-nack-dlq").await;
 
         // Send message
@@ -212,6 +263,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_visibility_timeout() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-visibility").await;
 
         // Send message
@@ -243,6 +299,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_try_receive() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-try-receive").await;
 
         // Try receive when empty
@@ -268,6 +329,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_concurrent_send_receive() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = Arc::new(create_channel("test-concurrent").await);
         let mut handles = vec![];
 
@@ -308,6 +374,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_get_stats() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-stats").await;
 
         // Send some messages
@@ -328,6 +399,11 @@ use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_sqs_close() {
+        if !check_sqs_available().await {
+            eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
+            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            return;
+        }
         let channel = create_channel("test-close").await;
 
         // Send message before closing

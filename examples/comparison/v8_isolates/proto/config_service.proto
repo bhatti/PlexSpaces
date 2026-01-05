@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// Config Service API
+//
+// ## Purpose
+// Control plane service for managing worker configurations.
+// Tracks config versions and notifies workers when new configs are available.
+// Workers pull configs from this service.
+//
+// ## Architecture Context
+// Part of the v8_isolates comparison example demonstrating high-throughput
+// log/metric processing system (ELK/Splunk/Datadog-like).
+
+syntax = "proto3";
+
+package v8_isolates.config.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Worker configuration
+message WorkerConfig {
+  // Config version (monotonically increasing)
+  uint64 version = 1;
+  
+  // Config content (JSON)
+  string config_json = 2;
+  
+  // Timestamp when config was created
+  google.protobuf.Timestamp created_at = 3;
+  
+  // Config metadata
+  map<string, string> metadata = 4;
+}
+
+// Register worker request
+message RegisterWorkerRequest {
+  // Worker ID (unique per worker)
+  string worker_id = 1;
+  
+  // Worker node ID
+  string node_id = 2;
+  
+  // Current config version (0 if first registration)
+  uint64 current_version = 3;
+}
+
+// Register worker response
+message RegisterWorkerResponse {
+  // Latest config version
+  uint64 latest_version = 1;
+  
+  // Config if version is newer
+  WorkerConfig config = 2;
+}
+
+// Get config request
+message GetConfigRequest {
+  // Worker ID
+  string worker_id = 1;
+  
+  // Config version to fetch (0 for latest)
+  uint64 version = 2;
+}
+
+// Get config response
+message GetConfigResponse {
+  // Config
+  WorkerConfig config = 1;
+}
+
+// Notify config change request
+message NotifyConfigChangeRequest {
+  // New config version
+  uint64 version = 1;
+  
+  // Config
+  WorkerConfig config = 2;
+}
+
+// Notify config change response
+message NotifyConfigChangeResponse {
+  // Number of workers notified
+  uint64 workers_notified = 1;
+}
+
+// Config service
+service ConfigService {
+  // Register worker and get latest config
+  rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
+  
+  // Get config by version
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  
+  // Notify workers of config change (internal)
+  rpc NotifyConfigChange(NotifyConfigChangeRequest) returns (NotifyConfigChangeResponse);
+}
+
+
+
+
+
+
+
+
+
+

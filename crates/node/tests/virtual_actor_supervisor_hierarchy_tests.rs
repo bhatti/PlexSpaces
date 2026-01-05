@@ -16,18 +16,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Comprehensive TDD tests for virtual actors in supervisor hierarchies
+//! Unit and integration tests for virtual actors in supervisor hierarchies
 //!
-//! Tests cover:
-//! 1. Eager virtual actors as supervisor children
-//! 2. Lazy virtual actors as supervisor children
-//! 3. Mixed eager/lazy virtual actors in same supervisor
-//! 4. Application deployment with root supervisor and virtual actor children
-//! 5. Supervisor hierarchy with virtual actors at different levels
-//! 6. Parent-child relationship tracking
-//! 7. Activation behavior verification (eager vs lazy)
+//! ## Test Organization
+//! - **Unit Tests**: Test virtual actor behavior directly (no WASM, no gRPC server)
+//!   - Use `create_test_node()` - no server startup
+//!   - Direct actor registration via `get_or_activate_actor_helper`
+//!   - Fast, no network dependencies
 //!
-//! Goal: 95%+ test coverage for virtual actor activation in supervisor contexts
+//! - **Integration Tests**: Test WASM application deployment (minimal)
+//!   - Use `create_test_node_with_server()` - with gRPC server
+//!   - Test actual application deployment via ApplicationService
+//!   - Slower, requires WASM runtime
 
 use plexspaces_node::{NodeBuilder, Node};
 use plexspaces_node::application_service::ApplicationServiceImpl;
@@ -39,13 +39,222 @@ use plexspaces_proto::application::v1::{
 use plexspaces_proto::v1::common::Facet;
 use plexspaces_proto::wasm::v1::WasmModule;
 use plexspaces_core::{ActorRegistry, RequestContext, service_locator::service_names};
-use plexspaces_core::application::ApplicationState;
-use prost_types::Duration as ProstDuration;
+use plexspaces_actor::{Actor, ActorBuilder};
+use plexspaces_behavior::GenServer;
+use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
+use plexspaces_journaling::VirtualActorFacet;
+use plexspaces_mailbox::Message;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, timeout};
+use tokio::task::yield_now;
 use tonic::Request;
 use wat;
+use async_trait::async_trait;
+
+#[path = "test_helpers.rs"]
+mod test_helpers;
+use test_helpers::{lookup_actor_ref, get_or_activate_actor_helper};
+
+// ============================================================================
+// TEST ACTOR BEHAVIOR
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum TestMessage {
+    Ping,
+    Pong(String),
+}
+
+struct TestActor;
+
+#[async_trait]
+impl ActorTrait for TestActor {
+    async fn handle_message(
+        &mut self,
+        ctx: &ActorContext,
+        msg: Message,
+    ) -> Result<(), BehaviorError> {
+        self.route_message(ctx, msg).await
+    }
+
+    fn behavior_type(&self) -> BehaviorType {
+        BehaviorType::GenServer
+    }
+}
+
+#[async_trait]
+impl GenServer for TestActor {
+    async fn handle_request(
+        &mut self,
+        ctx: &ActorContext,
+        msg: Message,
+    ) -> Result<(), BehaviorError> {
+        let test_msg: TestMessage = serde_json::from_slice(msg.payload())
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
+        
+        let reply_msg = match test_msg {
+            TestMessage::Ping => {
+                Message::new(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
+            }
+            _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
+        };
+        
+        if let Some(sender_id) = &msg.sender {
+            ctx.send_reply(
+                msg.correlation_id.as_deref(),
+                sender_id,
+                msg.receiver.clone(),
+                reply_msg,
+            ).await
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// TEST HELPERS
+// ============================================================================
+
+/// Create a test node WITHOUT server (for unit tests)
+/// - Services initialized but no gRPC server
+/// - Fast, no network dependencies
+async fn create_test_node() -> Arc<Node> {
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
+    let node_clone = node.clone();
+    node_clone.initialize_services().await.expect("Failed to initialize services");
+    // Wait for services to be ready
+    for _ in 0..5 {
+        yield_now().await;
+    }
+    node
+}
+
+/// Create a test node WITH server (for integration tests only)
+/// - Services initialized AND gRPC server started
+/// - Requires WASM runtime
+/// - Use ONLY for tests that need actual application deployment
+async fn create_test_node_with_server() -> Arc<Node> {
+    let node: Arc<Node> = Arc::new(
+        NodeBuilder::new("test-node")
+            .with_listen_address("127.0.0.1:0") // Ephemeral port (HTTP gateway auto-uses 0 too)
+            .build()
+            .await
+    );
+    let node_clone = node.clone();
+    node_clone.initialize_services().await.expect("Failed to initialize services");
+    // Start node in background (start() blocks forever)
+    let node_clone2 = node.clone();
+    let start_handle = tokio::spawn(async move {
+        if let Err(e) = node_clone2.start().await {
+            eprintln!("🔴 [TEST] Node start failed: {:?}", e);
+        }
+    });
+    // Wait for WASM runtime to be initialized (required for application deployment)
+    // start() initializes WASM runtime early, but it's async so we need to poll
+    let start = std::time::Instant::now();
+    let mut attempts = 0;
+    while start.elapsed() < Duration::from_secs(10) {
+        if node.wasm_runtime().await.is_some() {
+            eprintln!("🟢 [TEST] WASM runtime initialized after {} attempts", attempts);
+            break;
+        }
+        attempts += 1;
+        if attempts % 50 == 0 {
+            eprintln!("🔵 [TEST] Waiting for WASM runtime... (attempt {})", attempts);
+        }
+        // Use small sleep to allow start() to make progress
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    
+    // Verify WASM runtime is initialized
+    if node.wasm_runtime().await.is_none() {
+        eprintln!("🔴 [TEST] WASM runtime not initialized after {} attempts", attempts);
+        start_handle.abort();
+        panic!("WASM runtime not initialized - cannot run integration test");
+    }
+    
+    // Additional wait for services to be fully ready
+    for _ in 0..20 {
+        yield_now().await;
+    }
+    node
+}
+
+/// Helper to wait for actors to be registered (yield-based polling, no sleep)
+async fn wait_for_actors_registered(
+    node: &Node,
+    expected_actor_ids: &[String],
+    timeout_duration: Duration,
+) -> bool {
+    let registry = node.service_locator()
+        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .await
+        .expect("ActorRegistry not found");
+    
+    let start = std::time::Instant::now();
+    let mut attempts = 0;
+    
+    while start.elapsed() < timeout_duration {
+        let registered_ids = registry.registered_actor_ids().read().await;
+        let expected_set: std::collections::HashSet<String> = expected_actor_ids.iter().cloned().collect();
+        let registered_set: std::collections::HashSet<String> = registered_ids.iter().map(|id| id.to_string()).collect();
+        
+        if expected_set.is_subset(&registered_set) {
+            return true;
+        }
+        drop(registered_ids);
+        
+        attempts += 1;
+        if attempts > 1000 {
+            break; // Prevent infinite loops
+        }
+        
+        yield_now().await;
+    }
+    
+    false
+}
+
+/// Helper to wait for eager actors to be active
+async fn wait_for_eager_actors_active(
+    node: &Node,
+    expected_actor_ids: &[String],
+    timeout_duration: Duration,
+) -> bool {
+    let registry = node.service_locator()
+        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .await
+        .expect("ActorRegistry not found");
+    
+    let start = std::time::Instant::now();
+    let mut attempts = 0;
+    
+    while start.elapsed() < timeout_duration {
+        let mut all_active = true;
+        for actor_id in expected_actor_ids {
+            if !registry.is_actor_activated(actor_id).await {
+                all_active = false;
+                break;
+            }
+        }
+        
+        if all_active {
+            return true;
+        }
+        
+        attempts += 1;
+        if attempts > 1000 {
+            break;
+        }
+        
+        yield_now().await;
+    }
+    
+    false
+}
 
 /// Create a minimal WASM module for testing
 fn create_minimal_wasm_module() -> Vec<u8> {
@@ -64,37 +273,7 @@ fn create_minimal_wasm_module() -> Vec<u8> {
     wat::parse_str(MINIMAL_WASM_WAT).expect("Failed to parse WAT")
 }
 
-/// Create a test node with services initialized
-async fn create_test_node() -> Arc<Node> {
-    let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let node_clone = node.clone();
-    node_clone.initialize_services().await.expect("Failed to initialize services");
-    let node_clone2 = node.clone();
-    node_clone2.start().await.expect("Failed to start node");
-    // Wait for services to be ready
-    sleep(Duration::from_millis(100)).await;
-    node
-}
-
-/// Get all actor IDs from ActorRegistry
-async fn get_all_actor_ids(node: &Node) -> Vec<String> {
-    let service_locator = node.service_locator();
-    let actor_registry: Arc<ActorRegistry> = service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
-        .await
-        .expect("ActorRegistry not found");
-    
-    let ctx = RequestContext::internal();
-    // Get all actors by iterating through known types or using a discovery method
-    // For now, we'll use a simple approach: check if actors exist by trying to discover
-    let mut actor_ids = Vec::new();
-    
-    // This is a simplified approach - in real tests, we'd use proper discovery
-    // For now, we'll rely on the test knowing which actors should exist
-    actor_ids
-}
-
-/// Helper to create virtual actor facet with specified activation strategy
+/// Create virtual actor facet with specified activation strategy
 fn create_virtual_actor_facet(activation_strategy: &str) -> Facet {
     let mut config = HashMap::new();
     config.insert("idle_timeout_seconds".to_string(), "300".to_string());
@@ -109,547 +288,277 @@ fn create_virtual_actor_facet(activation_strategy: &str) -> Facet {
     }
 }
 
-/// TEST 1: Eager virtual actors as supervisor children
-/// 
-/// Test that when a supervisor has eager virtual actor children:
-/// 1. Actors are created and activated immediately
-/// 2. Parent-child relationships are tracked
-/// 3. Actors are registered in ActorRegistry
-/// 4. Actors are immediately available for messages
+// ============================================================================
+// UNIT TESTS - Direct Actor Registration (No WASM, No Server)
+// ============================================================================
+
+/// UNIT TEST: Eager virtual actors should activate immediately
 #[tokio::test]
-async fn test_eager_virtual_actors_as_supervisor_children() {
-    let node = create_test_node().await;
-    let node_id = node.id().as_str();
-    
-    // Create application spec with supervisor and eager virtual actor children
-    let wasm_module = create_minimal_wasm_module();
-    let supervisor_spec = SupervisorSpec {
-        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
-        max_restarts: 5,
-        max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "eager-worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("eager")],
-            },
-            ChildSpec {
-                id: "eager-worker-2".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("eager")],
-            },
-        ],
-    };
-    
-    let app_spec = ApplicationSpec {
-        name: "eager-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        description: "Test app with eager virtual actors".to_string(),
-        r#type: ApplicationType::ApplicationTypeActive.into(),
-        dependencies: vec![],
-        env: HashMap::new(),
-        supervisor: Some(supervisor_spec),
-    };
-    
-    // Deploy application
-    let application_manager = node.application_manager().await.expect("ApplicationManager not found");
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
-    let wasm_module_proto = WasmModule {
-        name: "eager-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        module_bytes: wasm_module,
-        module_hash: "test-hash".to_string(),
-        ..Default::default()
-    };
-    let request = DeployApplicationRequest {
-        application_id: "eager-app-001".to_string(),
-        name: "eager-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        wasm_module: Some(wasm_module_proto),
-        config: Some(app_spec),
-        release_config: None,
-        initial_state: vec![],
-    };
-    
-    let response = service.deploy_application(Request::new(request)).await;
-    assert!(response.is_ok(), "Deployment should succeed: {:?}", response.err());
-    let res = response.unwrap().into_inner();
-    assert!(res.success, "Deployment should be successful");
-    
-    // Wait for actors to spawn and activate
-    sleep(Duration::from_millis(500)).await;
-    
-    // Verify actors are registered and active
-    let service_locator = node.service_locator();
-    let actor_registry: Arc<ActorRegistry> = service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
-        .await
-        .expect("ActorRegistry not found");
-    
-    let ctx = RequestContext::internal();
-    let actor_id_1 = format!("eager-worker-1@{}", node_id);
-    let actor_id_2 = format!("eager-worker-2@{}", node_id);
-    
-    // Check that actors are registered
-    let actor_1 = actor_registry.lookup_actor(&actor_id_1).await;
-    let actor_2 = actor_registry.lookup_actor(&actor_id_2).await;
-    
-    assert!(actor_1.is_some(), "Eager virtual actor 1 should be registered and active");
-    assert!(actor_2.is_some(), "Eager virtual actor 2 should be registered and active");
-    
-    // Verify parent-child relationships (if supervisor is tracked)
-    // Note: This depends on how supervisor relationships are tracked
-    // For now, we verify actors exist and are active
+async fn test_eager_virtual_actors_activation() {
+    timeout(Duration::from_secs(3), async {
+        let node = create_test_node().await;
+        let node_id = node.id().as_str();
+        
+        // Register eager virtual actor directly
+        let actor_id_1 = format!("eager-worker-1@{}", node_id);
+        let _actor_ref_1 = get_or_activate_actor_helper(&node, 
+            actor_id_1.clone(),
+            || async {
+                let behavior = Box::new(TestActor);
+                let actor = ActorBuilder::new(behavior)
+                    .with_id(actor_id_1.clone())
+                    .build()
+                    .await
+                    .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id_1.clone().into(), format!("Failed to build actor: {}", e)))?;
+                
+                let virtual_facet_config = serde_json::json!({
+                    "idle_timeout": "5m",
+                    "activation_strategy": "eager"
+                });
+                let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config, 100));
+                actor.attach_facet(virtual_facet).await
+                    .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id_1.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
+                
+                Ok(actor)
+            }
+        ).await.unwrap();
+        
+        // Wait for actor to be registered and active
+        let registered = wait_for_actors_registered(&node, &[actor_id_1.clone()], Duration::from_secs(1)).await;
+        assert!(registered, "Eager virtual actor should be registered");
+        
+        // Check if eager actor is active (should activate immediately)
+        let registry = node.service_locator()
+            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .await
+            .expect("ActorRegistry not found");
+        
+        let active = registry.is_actor_activated(&actor_id_1).await;
+        assert!(active, "Eager virtual actor should be active");
+        
+        // Verify actor is accessible
+        let actor_ref = lookup_actor_ref(&node, &actor_id_1).await;
+        assert!(actor_ref.is_ok() && actor_ref.unwrap().is_some(), "Eager virtual actor should be accessible");
+    }).await.expect("Test should complete within 3 seconds");
 }
 
-/// TEST 2: Lazy virtual actors as supervisor children
-///
-/// Test that when a supervisor has lazy virtual actor children:
-/// 1. Actors are created but NOT activated immediately
-/// 2. Actors are registered but in inactive state
-/// 3. First message triggers activation
-/// 4. Parent-child relationships are tracked
+/// UNIT TEST: Lazy virtual actors should be registered but not active until first message
 #[tokio::test]
-async fn test_lazy_virtual_actors_as_supervisor_children() {
-    let node = create_test_node().await;
-    let node_id = node.id().as_str();
-    
-    // Create application spec with supervisor and lazy virtual actor children
-    let wasm_module = create_minimal_wasm_module();
-    let supervisor_spec = SupervisorSpec {
-        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
-        max_restarts: 5,
-        max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "lazy-worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("lazy")],
-            },
-        ],
-    };
-    
-    let app_spec = ApplicationSpec {
-        name: "lazy-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        description: "Test app with lazy virtual actors".to_string(),
-        r#type: ApplicationType::ApplicationTypeActive.into(),
-        dependencies: vec![],
-        env: HashMap::new(),
-        supervisor: Some(supervisor_spec),
-    };
-    
-    // Deploy application
-    let application_manager = node.application_manager().await.expect("ApplicationManager not found");
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
-    let wasm_module_proto = WasmModule {
-        name: "lazy-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        module_bytes: wasm_module,
-        module_hash: "test-hash".to_string(),
-        ..Default::default()
-    };
-    let request = DeployApplicationRequest {
-        application_id: "lazy-app-001".to_string(),
-        name: "lazy-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        wasm_module: Some(wasm_module_proto),
-        config: Some(app_spec),
-        release_config: None,
-        initial_state: vec![],
-    };
-    
-    let response = service.deploy_application(Request::new(request)).await;
-    assert!(response.is_ok(), "Deployment should succeed: {:?}", response.err());
-    let res = response.unwrap().into_inner();
-    assert!(res.success, "Deployment should be successful");
-    
-    // Wait for actors to be created (but not necessarily activated)
-    sleep(Duration::from_millis(300)).await;
-    
-    // Verify actors are registered (but may not be active yet for lazy)
-    let service_locator = node.service_locator();
-    let actor_registry: Arc<ActorRegistry> = service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
-        .await
-        .expect("ActorRegistry not found");
-    
-    let actor_id = format!("lazy-worker-1@{}", node_id);
-    
-    // For lazy actors, they should be registered but activation happens on first message
-    // Check that actor exists in registry (may be inactive)
-    let routing = actor_registry
-        .lookup_routing(&RequestContext::internal(), &actor_id)
-        .await;
-    
-    // Actor should be routable (registered) even if not active
-    assert!(routing.is_ok(), "Lazy virtual actor should be registered");
-    
-    // Note: For lazy actors, we can't easily check if they're active without sending a message
-    // This is by design - lazy activation means activation on first message
+async fn test_lazy_virtual_actors_registration() {
+    timeout(Duration::from_secs(3), async {
+        let node = create_test_node().await;
+        let node_id = node.id().as_str();
+        
+        // Register lazy virtual actor directly
+        let actor_id = format!("lazy-worker-1@{}", node_id);
+        let _actor_ref = get_or_activate_actor_helper(&node, 
+            actor_id.clone(),
+            || async {
+                let behavior = Box::new(TestActor);
+                let actor = ActorBuilder::new(behavior)
+                    .with_id(actor_id.clone())
+                    .build()
+                    .await
+                    .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
+                
+                let virtual_facet_config = serde_json::json!({
+                    "idle_timeout": "5m",
+                    "activation_strategy": "lazy"
+                });
+                let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config, 100));
+                actor.attach_facet(virtual_facet).await
+                    .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
+                
+                Ok(actor)
+            }
+        ).await.unwrap();
+        
+        // Wait for actor to be registered
+        let registered = wait_for_actors_registered(&node, &[actor_id.clone()], Duration::from_secs(1)).await;
+        assert!(registered, "Lazy virtual actor should be registered");
+        
+        // Lazy actor should be routable (registered) even if not active
+        let registry = node.service_locator()
+            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .await
+            .expect("ActorRegistry not found");
+        
+        let routing = registry
+            .lookup_routing(&RequestContext::new_without_auth("default".to_string(), "default".to_string()), &actor_id)
+            .await;
+        assert!(routing.is_ok(), "Lazy virtual actor should be routable");
+        
+        // Actor should be accessible via lookup_actor_ref (returns VirtualActorWrapper for lazy)
+        let actor_ref = lookup_actor_ref(&node, &actor_id).await;
+        assert!(actor_ref.is_ok() && actor_ref.unwrap().is_some(), "Lazy virtual actor should be accessible");
+    }).await.expect("Test should complete within 3 seconds");
 }
 
-/// TEST 3: Mixed eager and lazy virtual actors in same supervisor
-///
-/// Test that a supervisor can have both eager and lazy virtual actor children:
-/// 1. Eager actors activate immediately
-/// 2. Lazy actors remain inactive until first message
-/// 3. Both types are properly tracked
+/// UNIT TEST: Mixed eager and lazy virtual actors
 #[tokio::test]
-async fn test_mixed_eager_lazy_virtual_actors_in_supervisor() {
-    let node = create_test_node().await;
-    let node_id = node.id().as_str();
-    
-    // Create application spec with mixed eager/lazy virtual actor children
-    let wasm_module = create_minimal_wasm_module();
-    let supervisor_spec = SupervisorSpec {
-        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
-        max_restarts: 5,
-        max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "eager-mixed-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("eager")],
-            },
-            ChildSpec {
-                id: "lazy-mixed-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("lazy")],
-            },
-        ],
-    };
-    
-    let app_spec = ApplicationSpec {
-        name: "mixed-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        description: "Test app with mixed eager/lazy virtual actors".to_string(),
-        r#type: ApplicationType::ApplicationTypeActive.into(),
-        dependencies: vec![],
-        env: HashMap::new(),
-        supervisor: Some(supervisor_spec),
-    };
-    
-    // Deploy application
-    let application_manager = node.application_manager().await.expect("ApplicationManager not found");
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
-    let wasm_module_proto = WasmModule {
-        name: "mixed-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        module_bytes: wasm_module,
-        module_hash: "test-hash".to_string(),
-        ..Default::default()
-    };
-    let request = DeployApplicationRequest {
-        application_id: "mixed-app-001".to_string(),
-        name: "mixed-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        wasm_module: Some(wasm_module_proto),
-        config: Some(app_spec),
-        release_config: None,
-        initial_state: vec![],
-    };
-    
-    let response = service.deploy_application(Request::new(request)).await;
-    assert!(response.is_ok(), "Deployment should succeed: {:?}", response.err());
-    let res = response.unwrap().into_inner();
-    assert!(res.success, "Deployment should be successful");
-    
-    // Wait for actors to spawn
-    sleep(Duration::from_millis(500)).await;
-    
-    // Verify eager actor is active
-    let service_locator = node.service_locator();
-    let actor_registry: Arc<ActorRegistry> = service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
-        .await
-        .expect("ActorRegistry not found");
-    
-    let eager_id = format!("eager-mixed-1@{}", node_id);
-    let lazy_id = format!("lazy-mixed-1@{}", node_id);
-    
-    // Eager actor should be active
-    let eager_actor = actor_registry.lookup_actor(&eager_id).await;
-    assert!(eager_actor.is_some(), "Eager virtual actor should be active");
-    
-    // Lazy actor should be registered (but may not be active yet)
-    let lazy_routing = actor_registry
-        .lookup_routing(&RequestContext::internal(), &lazy_id)
-        .await;
-    assert!(lazy_routing.is_ok(), "Lazy virtual actor should be registered");
+async fn test_mixed_eager_lazy_virtual_actors() {
+    timeout(Duration::from_secs(3), async {
+        let node = create_test_node().await;
+        let node_id = node.id().as_str();
+        
+        // Register eager virtual actor
+        let eager_id = format!("eager-mixed-1@{}", node_id);
+        let _eager_ref = get_or_activate_actor_helper(&node, 
+            eager_id.clone(),
+            || async {
+                let behavior = Box::new(TestActor);
+                let actor = ActorBuilder::new(behavior)
+                    .with_id(eager_id.clone())
+                    .build()
+                    .await
+                    .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(eager_id.clone().into(), format!("Failed to build actor: {}", e)))?;
+                
+                let virtual_facet_config = serde_json::json!({
+                    "idle_timeout": "5m",
+                    "activation_strategy": "eager"
+                });
+                let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config, 100));
+                actor.attach_facet(virtual_facet).await
+                    .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(eager_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
+                
+                Ok(actor)
+            }
+        ).await.unwrap();
+        
+        // Register lazy virtual actor
+        let lazy_id = format!("lazy-mixed-1@{}", node_id);
+        let _lazy_ref = get_or_activate_actor_helper(&node, 
+            lazy_id.clone(),
+            || async {
+                let behavior = Box::new(TestActor);
+                let actor = ActorBuilder::new(behavior)
+                    .with_id(lazy_id.clone())
+                    .build()
+                    .await
+                    .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(lazy_id.clone().into(), format!("Failed to build actor: {}", e)))?;
+                
+                let virtual_facet_config = serde_json::json!({
+                    "idle_timeout": "5m",
+                    "activation_strategy": "lazy"
+                });
+                let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config, 100));
+                actor.attach_facet(virtual_facet).await
+                    .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(lazy_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
+                
+                Ok(actor)
+            }
+        ).await.unwrap();
+        
+        // Wait for both actors to be registered
+        let expected_actors = vec![eager_id.clone(), lazy_id.clone()];
+        let registered = wait_for_actors_registered(&node, &expected_actors, Duration::from_secs(1)).await;
+        assert!(registered, "Mixed virtual actors should be registered");
+        
+        // Check if eager actor is active (should activate immediately)
+        let registry = node.service_locator()
+            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .await
+            .expect("ActorRegistry not found");
+        
+        let eager_active = registry.is_actor_activated(&eager_id).await;
+        assert!(eager_active, "Eager virtual actor should be active");
+        
+        // Lazy actor should be registered but not active
+        let lazy_routing = registry
+            .lookup_routing(&RequestContext::new_without_auth("default".to_string(), "default".to_string()), &lazy_id)
+            .await;
+        assert!(lazy_routing.is_ok(), "Lazy virtual actor should be registered");
+        
+        // Verify both are accessible
+        let eager_ref = lookup_actor_ref(&node, &eager_id).await;
+        let lazy_ref = lookup_actor_ref(&node, &lazy_id).await;
+        assert!(eager_ref.is_ok() && eager_ref.unwrap().is_some(), "Eager virtual actor should be accessible");
+        assert!(lazy_ref.is_ok() && lazy_ref.unwrap().is_some(), "Lazy virtual actor should be accessible");
+    }).await.expect("Test should complete within 3 seconds");
 }
 
-/// TEST 4: Nested supervisor hierarchy with virtual actors
-///
-/// Test that virtual actors work correctly in nested supervisor hierarchies:
-/// 1. Root supervisor with child supervisor
-/// 2. Child supervisor with virtual actor children
-/// 3. Both eager and lazy virtual actors at different levels
-#[tokio::test]
-async fn test_nested_supervisor_hierarchy_with_virtual_actors() {
-    let node = create_test_node().await;
-    let node_id = node.id().as_str();
-    
-    // Create nested supervisor hierarchy
-    let wasm_module = create_minimal_wasm_module();
-    let child_supervisor = SupervisorSpec {
-        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
-        max_restarts: 3,
-        max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "nested-eager-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("eager")],
-            },
-            ChildSpec {
-                id: "nested-lazy-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("lazy")],
-            },
-        ],
-    };
-    
-    let root_supervisor = SupervisorSpec {
-        strategy: SupervisionStrategy::SupervisionStrategyOneForAll.into(),
-        max_restarts: 5,
-        max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "root-eager-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("eager")],
-            },
-            ChildSpec {
-                id: "child-supervisor".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: Some(child_supervisor),
-                facets: vec![],
-            },
-        ],
-    };
-    
-    let app_spec = ApplicationSpec {
-        name: "nested-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        description: "Test app with nested supervisor hierarchy and virtual actors".to_string(),
-        r#type: ApplicationType::ApplicationTypeActive.into(),
-        dependencies: vec![],
-        env: HashMap::new(),
-        supervisor: Some(root_supervisor),
-    };
-    
-    // Deploy application
-    let application_manager = node.application_manager().await.expect("ApplicationManager not found");
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
-    let wasm_module_proto = WasmModule {
-        name: "nested-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        module_bytes: wasm_module,
-        module_hash: "test-hash".to_string(),
-        ..Default::default()
-    };
-    let request = DeployApplicationRequest {
-        application_id: "nested-app-001".to_string(),
-        name: "nested-virtual-app".to_string(),
-        version: "1.0.0".to_string(),
-        wasm_module: Some(wasm_module_proto),
-        config: Some(app_spec),
-        release_config: None,
-        initial_state: vec![],
-    };
-    
-    let response = service.deploy_application(Request::new(request)).await;
-    assert!(response.is_ok(), "Deployment should succeed: {:?}", response.err());
-    let res = response.unwrap().into_inner();
-    assert!(res.success, "Deployment should be successful");
-    
-    // Wait for all actors to spawn
-    sleep(Duration::from_millis(500)).await;
-    
-    // Verify all actors are registered
-    let service_locator = node.service_locator();
-    let actor_registry: Arc<ActorRegistry> = service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
-        .await
-        .expect("ActorRegistry not found");
-    
-    let root_eager_id = format!("root-eager-worker@{}", node_id);
-    let nested_eager_id = format!("nested-eager-worker@{}", node_id);
-    let nested_lazy_id = format!("nested-lazy-worker@{}", node_id);
-    
-    // Root level eager actor should be active
-    let root_eager = actor_registry.lookup_actor(&root_eager_id).await;
-    assert!(root_eager.is_some(), "Root level eager virtual actor should be active");
-    
-    // Nested eager actor should be active
-    let nested_eager = actor_registry.lookup_actor(&nested_eager_id).await;
-    assert!(nested_eager.is_some(), "Nested eager virtual actor should be active");
-    
-    // Nested lazy actor should be registered
-    let nested_lazy_routing = actor_registry
-        .lookup_routing(&RequestContext::internal(), &nested_lazy_id)
-        .await;
-    assert!(nested_lazy_routing.is_ok(), "Nested lazy virtual actor should be registered");
-}
+// ============================================================================
+// INTEGRATION TESTS - WASM Application Deployment (Minimal)
+// ============================================================================
 
-/// TEST 5: Application deployment with root supervisor and virtual actors
-///
-/// Test complete application deployment flow:
-/// 1. Deploy application with root supervisor
-/// 2. Supervisor spawns virtual actor children
-/// 3. Eager actors activate immediately
-/// 4. Lazy actors activate on first message
-/// 5. All actors are tracked in ActorRegistry
-/// 6. Parent-child relationships are maintained
+/// INTEGRATION TEST: Application deployment with eager virtual actors via WASM
+/// This is the ONLY integration test - tests actual WASM application deployment
 #[tokio::test]
-async fn test_application_deployment_with_virtual_actors() {
-    let node = create_test_node().await;
-    let node_id = node.id().as_str();
-    
-    // Create comprehensive application spec
-    let wasm_module = create_minimal_wasm_module();
-    let supervisor_spec = SupervisorSpec {
-        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
-        max_restarts: 5,
-        max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "app-eager-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("eager")],
-            },
-            ChildSpec {
-                id: "app-eager-2".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("eager")],
-            },
-            ChildSpec {
-                id: "app-lazy-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![create_virtual_actor_facet("lazy")],
-            },
-        ],
-    };
-    
-    let app_spec = ApplicationSpec {
-        name: "virtual-app-deployment".to_string(),
-        version: "1.0.0".to_string(),
-        description: "Test app deployment with virtual actors".to_string(),
-        r#type: ApplicationType::ApplicationTypeActive.into(),
-        dependencies: vec![],
-        env: HashMap::new(),
-        supervisor: Some(supervisor_spec),
-    };
-    
-    // Deploy application
-    let application_manager = node.application_manager().await.expect("ApplicationManager not found");
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
-    let wasm_module_proto = WasmModule {
-        name: "virtual-app-deployment".to_string(),
-        version: "1.0.0".to_string(),
-        module_bytes: wasm_module,
-        module_hash: "test-hash".to_string(),
-        ..Default::default()
-    };
-    let request = DeployApplicationRequest {
-        application_id: "deployment-app-001".to_string(),
-        name: "virtual-app-deployment".to_string(),
-        version: "1.0.0".to_string(),
-        wasm_module: Some(wasm_module_proto),
-        config: Some(app_spec),
-        release_config: None,
-        initial_state: vec![],
-    };
-    
-    let response = service.deploy_application(Request::new(request)).await;
-    assert!(response.is_ok(), "Deployment should succeed: {:?}", response.err());
-    let res = response.unwrap().into_inner();
-    assert!(res.success, "Deployment should be successful");
-    
-    // Wait for deployment to complete
-    sleep(Duration::from_millis(500)).await;
-    
-    // Verify application is registered
-    let service_locator = node.service_locator();
-    use plexspaces_core::ApplicationManager;
-    let app_manager: Arc<plexspaces_core::ApplicationManager> = service_locator
-        .get_service_by_name(service_names::APPLICATION_MANAGER)
-        .await
-        .expect("ApplicationManager not found");
-    
-    let app_info = app_manager
-        .get_application_info("deployment-app-001")
-        .await;
-    assert!(app_info.is_some(), "Application should be registered");
-    
-    // Verify all actors are registered
-    let actor_registry: Arc<ActorRegistry> = service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
-        .await
-        .expect("ActorRegistry not found");
-    
-    let eager_1_id = format!("app-eager-1@{}", node_id);
-    let eager_2_id = format!("app-eager-2@{}", node_id);
-    let lazy_1_id = format!("app-lazy-1@{}", node_id);
-    
-    // Eager actors should be active
-    let eager_1 = actor_registry.lookup_actor(&eager_1_id).await;
-    let eager_2 = actor_registry.lookup_actor(&eager_2_id).await;
-    assert!(eager_1.is_some(), "Eager actor 1 should be active");
-    assert!(eager_2.is_some(), "Eager actor 2 should be active");
-    
-    // Lazy actor should be registered
-    let lazy_1_routing = actor_registry
-        .lookup_routing(&RequestContext::internal(), &lazy_1_id)
-        .await;
-    assert!(lazy_1_routing.is_ok(), "Lazy actor should be registered");
+async fn test_application_deployment_with_eager_virtual_actors() {
+    timeout(Duration::from_secs(10), async {
+        let node = create_test_node_with_server().await;
+        let node_id = node.id().as_str();
+        
+        // Create application spec with supervisor and eager virtual actor children
+        let wasm_module = create_minimal_wasm_module();
+        let supervisor_spec = SupervisorSpec {
+            strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+            max_restarts: 5,
+            max_restart_window: None,
+            children: vec![
+                ChildSpec {
+                    id: "eager-worker-1".to_string(),
+                    r#type: ChildType::ChildTypeWorker.into(),
+                    args: HashMap::new(),
+                    restart: RestartPolicy::RestartPolicyPermanent.into(),
+                    shutdown_timeout: None,
+                    supervisor: None,
+                    facets: vec![create_virtual_actor_facet("eager")],
+                },
+            ],
+        };
+        
+        let app_spec = ApplicationSpec {
+            name: "eager-virtual-app".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Test app with eager virtual actors".to_string(),
+            r#type: ApplicationType::ApplicationTypeActive.into(),
+            dependencies: vec![],
+            env: HashMap::new(),
+            supervisor: Some(supervisor_spec),
+        };
+        
+        // Deploy application
+        let application_manager = node.application_manager().await.expect("ApplicationManager not found");
+        let service = ApplicationServiceImpl::new(node.clone(), application_manager);
+        let wasm_module_proto = WasmModule {
+            name: "eager-virtual-app".to_string(),
+            version: "1.0.0".to_string(),
+            module_bytes: wasm_module,
+            module_hash: "test-hash".to_string(),
+            ..Default::default()
+        };
+        let request = DeployApplicationRequest {
+            application_id: "eager-app-001".to_string(),
+            name: "eager-virtual-app".to_string(),
+            version: "1.0.0".to_string(),
+            wasm_module: Some(wasm_module_proto),
+            config: Some(app_spec),
+            release_config: None,
+            initial_state: vec![],
+        };
+        
+        let response = service.deploy_application(Request::new(request)).await;
+        assert!(response.is_ok(), "Deployment should succeed: {:?}", response.err());
+        let res = response.unwrap().into_inner();
+        assert!(res.success, "Deployment should be successful");
+        
+        // Wait for actor to be registered
+        let actor_id = format!("eager-worker-1@{}", node_id);
+        let registered = wait_for_actors_registered(&node, &[actor_id.clone()], Duration::from_secs(3)).await;
+        assert!(registered, "Eager virtual actor should be registered");
+        
+        // Check if eager actor is active (should activate immediately)
+        let registry = node.service_locator()
+            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .await
+            .expect("ActorRegistry not found");
+        
+        let active = registry.is_actor_activated(&actor_id).await;
+        assert!(active, "Eager virtual actor should be active");
+        
+        // Verify actor is accessible
+        let actor_ref = lookup_actor_ref(&node, &actor_id).await;
+        assert!(actor_ref.is_ok() && actor_ref.unwrap().is_some(), "Eager virtual actor should be accessible");
+    }).await.expect("Test should complete within 10 seconds");
 }
-

@@ -9,12 +9,14 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_behavior_context_creation() {
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "default".to_string(),
-        "test-tenant".to_string(),
+        "test-tenant".to_string(),  // tenant_id
+        "default".to_string(),       // namespace
         service_locator,
         None,
     );
@@ -41,12 +43,14 @@ async fn test_behavior_context_with_sender() {
     use plexspaces_core::ActorRef;
     use plexspaces_mailbox::{Mailbox, mailbox_config_default};
 
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    use plexspaces_core::ServiceLocator;
+    use std::sync::Arc;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "default".to_string(),
-        "test-tenant".to_string(),
+        "test-tenant".to_string(),  // tenant_id
+        "default".to_string(),       // namespace
         service_locator,
         None,
     );

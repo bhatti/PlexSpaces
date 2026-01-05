@@ -94,3 +94,5 @@ full = ["all-backends", "all-compression"]
 [dev-dependencies]
 tokio-test = "0.4"
 plexspaces-actor = { path = "../actor" }
+# Test helpers for checking DynamoDB Local availability
+plexspaces-common = { path = "../common", features = ["test-helpers"] }

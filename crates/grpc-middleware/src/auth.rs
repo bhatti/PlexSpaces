@@ -417,12 +417,19 @@ impl AuthInterceptor {
         
         // Now set them ONLY from JWT claims (not from incoming headers)
         // This ensures security: users cannot spoof tenant_id/user_id via headers
+        // Only add headers if they have values (remove empty ones)
         if !claims.tenant_id.is_empty() {
             modified_headers.insert("x-tenant-id".to_string(), claims.tenant_id.clone());
+        } else {
+            // Remove the header if tenant_id is empty (don't include it in modified_headers)
+            modified_headers.remove("x-tenant-id");
         }
         modified_headers.insert("x-user-id".to_string(), claims.sub.clone());
         if !claims.roles.is_empty() {
             modified_headers.insert("x-user-roles".to_string(), claims.roles.join(","));
+        } else {
+            // Remove the header if roles is empty (don't include it in modified_headers)
+            modified_headers.remove("x-user-roles");
         }
 
         // Authentication and authorization successful

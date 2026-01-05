@@ -31,7 +31,7 @@
 //! - Error handling (invalid patterns, not found, etc.)
 
 use plexspaces_node::tuplespace_service::TuplePlexSpaceServiceImpl;
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::{common::v1::Empty, tuplespace::v1::*, TuplePlexSpaceService};
 use plexspaces_tuplespace::{
     Pattern, PatternField, Tuple as InternalTuple, TupleField as InternalTupleField,
@@ -97,7 +97,7 @@ fn create_exact_pattern(values: Vec<tuple_field::Value>) -> ProtoTuple {
 #[tokio::test]
 async fn test_write_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-1").build());
+    let node = Arc::new(NodeBuilder::new("test-node-1").build().await);
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
     // Create write request
@@ -122,21 +122,23 @@ async fn test_write_tuple_via_grpc() {
         PatternField::Exact(InternalTupleField::Integer(2)),
         PatternField::Exact(InternalTupleField::Integer(3)),
     ]);
-    let found = node.tuplespace().read(pattern).await.unwrap();
-    assert!(found.is_some());
+    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let found: Vec<InternalTuple> = tuplespace.read(&pattern).await.unwrap();
+    assert!(!found.is_empty());
 }
 
 #[tokio::test]
 async fn test_read_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-2").build());
+    let node = Arc::new(NodeBuilder::new("test-node-2").build().await);
 
     // Write tuple directly
     let tuple = InternalTuple::new(vec![
         InternalTupleField::Integer(10),
         InternalTupleField::String("test".to_string()),
     ]);
-    node.tuplespace().write(tuple).await.unwrap();
+    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let _: Result<(), _> = tuplespace.write(tuple).await;
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -170,20 +172,22 @@ async fn test_read_tuple_via_grpc() {
         PatternField::Exact(InternalTupleField::Integer(10)),
         PatternField::Wildcard,
     ]);
-    let still_there = node.tuplespace().read(verify_pattern).await.unwrap();
-    assert!(still_there.is_some());
+    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let still_there: Vec<InternalTuple> = tuplespace.read(&verify_pattern).await.unwrap();
+    assert!(!still_there.is_empty());
 }
 
 #[tokio::test]
 async fn test_take_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-3").build());
+    let node = Arc::new(NodeBuilder::new("test-node-3").build().await);
 
     let tuple = InternalTuple::new(vec![
         InternalTupleField::Integer(20),
         InternalTupleField::String("remove-me".to_string()),
     ]);
-    node.tuplespace().write(tuple).await.unwrap();
+    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let _: Result<(), _> = tuplespace.write(tuple).await;
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -216,14 +220,15 @@ async fn test_take_tuple_via_grpc() {
         PatternField::Exact(InternalTupleField::Integer(20)),
         PatternField::Wildcard,
     ]);
-    let remaining = node.tuplespace().read(verify_pattern).await.unwrap();
-    assert!(remaining.is_none());
+    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let remaining: Vec<InternalTuple> = tuplespace.read(&verify_pattern).await.unwrap();
+    assert!(remaining.is_empty());
 }
 
 #[tokio::test]
 async fn test_count_tuples_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-4").build());
+    let node = Arc::new(NodeBuilder::new("test-node-4").build().await);
 
     // Write multiple tuples
     for i in 0..5 {
@@ -231,7 +236,8 @@ async fn test_count_tuples_via_grpc() {
             InternalTupleField::String("sensor".to_string()),
             InternalTupleField::Integer(i),
         ]);
-        node.tuplespace().write(tuple).await.unwrap();
+        let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let _: Result<(), _> = tuplespace.write(tuple).await;
     }
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
@@ -260,14 +266,15 @@ async fn test_count_tuples_via_grpc() {
 #[tokio::test]
 async fn test_exists_tuples_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-5").build());
+    let node = Arc::new(NodeBuilder::new("test-node-5").build().await);
 
     let tuple = InternalTuple::new(vec![
         InternalTupleField::String("config".to_string()),
         InternalTupleField::String("timeout".to_string()),
         InternalTupleField::Integer(30),
     ]);
-    node.tuplespace().write(tuple).await.unwrap();
+    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let _: Result<(), _> = tuplespace.write(tuple).await;
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -309,26 +316,25 @@ async fn test_exists_tuples_via_grpc() {
 #[tokio::test]
 async fn test_read_with_wildcard_pattern() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-6").build());
+    let node = Arc::new(NodeBuilder::new("test-node-6").build().await);
 
     // Write tuples
-    node.tuplespace()
+    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let _: Result<(), _> = tuplespace
         .write(InternalTuple::new(vec![
             InternalTupleField::String("user".to_string()),
             InternalTupleField::Integer(1),
             InternalTupleField::String("login".to_string()),
         ]))
-        .await
-        .unwrap();
+        .await;
 
-    node.tuplespace()
+    let _: Result<(), _> = tuplespace
         .write(InternalTuple::new(vec![
             InternalTupleField::String("user".to_string()),
             InternalTupleField::Integer(2),
             InternalTupleField::String("logout".to_string()),
         ]))
-        .await
-        .unwrap();
+        .await;
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -368,7 +374,7 @@ async fn test_read_with_wildcard_pattern() {
 #[tokio::test]
 async fn test_read_no_match() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-7").build());
+    let node = Arc::new(NodeBuilder::new("test-node-7").build().await);
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -398,7 +404,7 @@ async fn test_read_no_match() {
 #[tokio::test]
 async fn test_write_multiple_tuples() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-8").build());
+    let node = Arc::new(NodeBuilder::new("test-node-8").build().await);
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -429,7 +435,7 @@ async fn test_write_multiple_tuples() {
 #[tokio::test]
 async fn test_write_with_missing_template() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-9").build());
+    let node = Arc::new(NodeBuilder::new("test-node-9").build().await);
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -457,7 +463,7 @@ async fn test_write_with_missing_template() {
 #[tokio::test]
 async fn test_take_with_missing_template() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-10a").build());
+    let node = Arc::new(NodeBuilder::new("test-node-10a").build().await);
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -485,7 +491,7 @@ async fn test_take_with_missing_template() {
 #[tokio::test]
 async fn test_count_with_missing_template() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-10b").build());
+    let node = Arc::new(NodeBuilder::new("test-node-10b").build().await);
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -509,7 +515,7 @@ async fn test_count_with_missing_template() {
 #[tokio::test]
 async fn test_exists_with_missing_template() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-10c").build());
+    let node = Arc::new(NodeBuilder::new("test-node-10c").build().await);
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
 
@@ -532,14 +538,14 @@ async fn test_exists_with_missing_template() {
 #[tokio::test]
 async fn test_clear_tuplespace() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-10").build());
+    let node = Arc::new(NodeBuilder::new("test-node-10").build().await);
 
     // Write tuples
+    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
     for i in 0..3 {
-        node.tuplespace()
+        let _: Result<(), _> = tuplespace
             .write(InternalTuple::new(vec![InternalTupleField::Integer(i)]))
-            .await
-            .unwrap();
+            .await;
     }
 
     let service = TuplePlexSpaceServiceImpl::new(node.clone());
@@ -553,8 +559,8 @@ async fn test_clear_tuplespace() {
 
     // Verify all tuples removed
     let pattern = Pattern::new(vec![PatternField::Wildcard]);
-    let remaining = node.tuplespace().read(pattern).await.unwrap();
-    assert!(remaining.is_none());
+    let remaining: Vec<InternalTuple> = tuplespace.read(&pattern).await.unwrap();
+    assert!(remaining.is_empty());
 }
 
 

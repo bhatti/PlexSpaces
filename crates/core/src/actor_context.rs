@@ -149,44 +149,6 @@ pub trait ActorService: Send + Sync {
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Send a reply message to the sender of the original message
-    ///
-    /// ## Purpose
-    /// Unified method for sending replies that handles:
-    /// - Temporary sender IDs (from ask() called outside actor context)
-    /// - Local and remote reply routing
-    /// - Self-messaging validation
-    /// - Correlation ID routing
-    ///
-    /// ## Arguments
-    /// * `correlation_id` - Correlation ID from the original message (optional)
-    /// * `sender_id` - ID of the actor that sent the original message (or temporary sender ID)
-    /// * `target_actor_id` - ID of the actor sending the reply (usually `msg.receiver`)
-    /// * `reply_message` - The reply message to send
-    ///
-    /// ## Returns
-    /// Ok(()) if reply was sent successfully
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// // In actor's handle_message or handle_request:
-    /// if let Some(sender_id) = &msg.sender {
-    ///     let reply = Message::new(b"response".to_vec());
-    ///     actor_service.send_reply(
-    ///         msg.correlation_id.as_deref(),
-    ///         sender_id,
-    ///         msg.receiver.clone(),
-    ///         reply,
-    ///     ).await?;
-    /// }
-    /// ```
-    async fn send_reply(
-        &self,
-        correlation_id: Option<&str>,
-        sender_id: &ActorId,
-        target_actor_id: ActorId,
-        reply_message: Message,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// Trait for facet service operations (accessing facets from actors)
@@ -467,7 +429,6 @@ pub trait ProcessGroupService: Send + Sync {
 /// - **Static**: No transient fields (actor_id, sender_id, correlation_id moved out)
 /// - **Reusable**: Can be reused across multiple message processing calls
 /// - **Message-specific data**: Now in Envelope (sender_id, correlation_id, target_id/actor_id)
-/// - **Actor ID**: Removed - actors should get their ID from Envelope.target_id or Actor.id field
 #[derive(Clone)]
 pub struct ActorContext {
     /// Reference to the node for distribution (static, set once)
@@ -613,13 +574,31 @@ impl ActorContext {
         correlation_id: Option<&str>,
         sender_id: &ActorId,
         target_actor_id: ActorId,
-        reply_message: Message,
+        mut reply_message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Use unified ActorService::send_reply() which handles all routing logic
+        let target_actor_id_clone = target_actor_id.clone();
+        eprintln!("🔵 [ACTOR_CONTEXT::send_reply] START: sender_id={}, target_actor_id={}, correlation_id={:?}, reply_message_id={}", 
+            sender_id, target_actor_id_clone, correlation_id, reply_message.id);
+        
+        // SIMPLIFIED: Use send() method - temporary sender behaves like normal actor
+        // Set message fields: receiver=target_actor_id (where reply goes), sender=current_actor, correlation_id
+        reply_message.receiver = target_actor_id.clone();
+        reply_message.sender = Some(sender_id.clone());
+        if let Some(corr_id) = correlation_id {
+            reply_message.correlation_id = Some(corr_id.to_string());
+        }
+        
+        // Use send() method - it will route to temporary sender just like any other actor
+        // ActorRef::tell() will detect temporary sender and route to ReplyWaiter automatically
         let actor_service = self.get_actor_service().await
             .ok_or_else(|| "ActorService not available in ServiceLocator".to_string())?;
         
-        actor_service.send_reply(correlation_id, sender_id, target_actor_id, reply_message).await
+        let result = actor_service.send(&target_actor_id, reply_message).await
+            .map(|_| ()); // Ignore message_id return value
+        
+        eprintln!("🟢 [ACTOR_CONTEXT::send_reply] END: sender_id={}, target_actor_id={}, result={:?}", 
+            sender_id, target_actor_id_clone, result.is_ok());
+        result
     }
 
 
@@ -640,10 +619,18 @@ impl ActorContext {
 
     /// Get ChannelService from ServiceLocator
     ///
+    /// ## Returns
+    /// `Some(Arc<dyn ChannelService>)` if registered, `None` otherwise
+    ///
     /// ## Note
-    /// See `get_actor_service()` for limitations and workarounds.
+    /// Uses ServiceLocator's generic service lookup. The service must be registered
+    /// via `service_locator.register_service(channel_service).await`.
+    /// 
+    /// ## Implementation
+    /// Since ChannelService is a trait, we need to look it up by type name.
+    /// The service must be registered as a concrete type that implements ChannelService.
     pub async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {
-        None
+        self.service_locator.get_channel_service().await
     }
 
     /// Get ObjectRegistry from ServiceLocator
@@ -742,15 +729,6 @@ impl ActorService for StubActorService {
         Err("StubActorService: send not implemented".into())
     }
 
-    async fn send_reply(
-        &self,
-        _correlation_id: Option<&str>,
-        _sender_id: &ActorId,
-        _target_actor_id: ActorId,
-        _reply_message: Message,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Err("StubActorService: send_reply not implemented".into())
-    }
 
 }
 

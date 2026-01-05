@@ -112,7 +112,7 @@ fn test_exit_reason_to_proto_details() {
     assert!(details.is_some());
     let details = details.unwrap();
     assert_eq!(details.linked_actor_id, "actor1");
-    assert!(details.linked_reason.is_some());
+    assert_ne!(details.linked_reason, 0); // 0 means no linked reason
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn test_exit_reason_from_proto() {
     let details = Some(ExitReasonDetails {
         error_message: "test error".to_string(),
         linked_actor_id: String::new(),
-        linked_reason: None,
+        linked_reason: 0, // 0 means no linked reason
     });
     let reason = ExitReason::from_proto(proto, details.as_ref());
     assert_eq!(reason, ExitReason::Error("test error".to_string()));
@@ -142,7 +142,7 @@ fn test_exit_reason_from_proto() {
     let details = Some(ExitReasonDetails {
         error_message: String::new(),
         linked_actor_id: "actor1".to_string(),
-        linked_reason: Some(ProtoExitReason::ExitReasonError as i32),
+        linked_reason: ProtoExitReason::ExitReasonError as i32,
     });
     let reason = ExitReason::from_proto(proto, details.as_ref());
     match reason {

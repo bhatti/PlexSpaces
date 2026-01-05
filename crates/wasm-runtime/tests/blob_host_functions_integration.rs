@@ -20,10 +20,10 @@ mod tests {
     use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
     use std::sync::Arc;
     use plexspaces_wasm_runtime::HostFunctions;
-    use tempfile::{TempDir, NamedTempFile};
+    use tempfile::TempDir;
     use object_store::local::LocalFileSystem;
 
-    async fn create_test_blob_service() -> (Arc<BlobService>, TempDir, NamedTempFile) {
+    async fn create_test_blob_service() -> (Arc<BlobService>, TempDir) {
         // Install sqlx::any default drivers before any database operations
         // This is required for AnyPool to work with sqlite
         sqlx::any::install_default_drivers();
@@ -32,21 +32,17 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
 
-        // Create SQLite repository - use temporary file-based database for reliability
-        // This is more production-grade than in-memory and works correctly with connection pools
+        // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
+        // Not recovery-related, so memory is appropriate
+        // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
         use sqlx::AnyPool;
         use sqlx::any::AnyPoolOptions;
-        use tempfile::NamedTempFile;
         
-        // Create a temporary file for the SQLite database
-        let temp_db = NamedTempFile::new().unwrap();
-        let db_path = temp_db.path().to_str().unwrap();
-        let db_url = format!("sqlite:{}", db_path);
+        let db_url = "sqlite::memory:";
         
-        // Create pool with reasonable connection limit
         let any_pool = AnyPoolOptions::new()
-            .max_connections(5)
-            .connect(&db_url)
+            .max_connections(1)
+            .connect(db_url)
             .await
             .unwrap();
         
@@ -71,7 +67,7 @@ mod tests {
 
         // Create service with custom object store (for testing)
         let service = BlobService::with_object_store(config, local_store, repository);
-        (Arc::new(service), temp_dir, temp_db)
+        (Arc::new(service), temp_dir)
     }
 
     fn create_test_host_functions_with_blob(blob_service: Arc<BlobService>) -> Arc<HostFunctions> {
@@ -104,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_upload() {
-        let (_service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (_service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(_service);
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -130,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_download() {
-        let (service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(service.clone());
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -164,7 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_delete() {
-        let (service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(service.clone());
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -208,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_exists() {
-        let (service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(service.clone());
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -254,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_list_blobs() {
-        let (service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(service.clone());
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -314,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_metadata() {
-        let (service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(service.clone());
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -352,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_copy() {
-        let (service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(service.clone());
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -425,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_download_nonexistent() {
-        let (service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(service);
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -444,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blob_list_empty() {
-        let (service, _temp_dir, _temp_db) = create_test_blob_service().await;
+        let (service, _temp_dir) = create_test_blob_service().await;
         let host_functions = create_test_host_functions_with_blob(service);
         let mut blob_impl = create_test_blob_impl(host_functions);
 

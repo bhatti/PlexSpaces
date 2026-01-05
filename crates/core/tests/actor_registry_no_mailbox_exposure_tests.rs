@@ -29,6 +29,10 @@ use plexspaces_keyvalue::InMemoryKVStore;
 use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
 use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Atomic counter for generating unique test IDs
+static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Simple MessageSender implementation for testing
 struct TestMessageSender {
@@ -76,6 +80,23 @@ impl ObjectRegistry for ObjectRegistryAdapter {
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
+    async fn discover(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        name_pattern: Option<String>,
+        tags: Option<Vec<String>>,
+        metadata: Option<Vec<String>>,
+        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .discover(ctx, object_type, name_pattern, tags, metadata, health_status, offset, limit)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
     async fn register(
         &self,
         ctx: &plexspaces_core::RequestContext,
@@ -98,6 +119,16 @@ fn create_test_registry() -> Arc<ActorRegistry> {
     Arc::new(ActorRegistry::new(object_registry, "test-node".to_string()))
 }
 
+/// Helper to create test RequestContext with proper tenant/namespace isolation
+/// Generates unique tenant/namespace per test to allow concurrent test execution
+fn create_test_context() -> plexspaces_core::RequestContext {
+    let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    plexspaces_core::RequestContext::new_without_auth(
+        format!("test-tenant-{}", test_id),
+        format!("test-namespace-{}", test_id),
+    )
+}
+
 #[tokio::test]
 async fn test_register_actor_with_message_sender() {
     let registry = create_test_registry();
@@ -113,8 +144,8 @@ async fn test_register_actor_with_message_sender() {
     });
     
     // Register actor with MessageSender
-    let ctx = plexspaces_core::RequestContext::internal();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
+    let ctx = create_test_context();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
     
     // Verify actor is registered
     let found = registry.lookup_actor(&actor_id).await;
@@ -139,8 +170,8 @@ async fn test_register_actor_mailbox_not_exposed() {
     });
     
     // Register actor
-    let ctx = plexspaces_core::RequestContext::internal();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
+    let ctx = create_test_context();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
     
     // Verify we can send messages via MessageSender
     let sender = registry.lookup_actor(&actor_id).await.unwrap();
@@ -169,8 +200,8 @@ async fn test_unregister_actor_removes_message_sender() {
         actor_id: actor_id.clone(),
         mailbox: mailbox.clone(),
     });
-    let ctx = plexspaces_core::RequestContext::internal();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
+    let ctx = create_test_context();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
     
     // Verify registered
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -197,8 +228,8 @@ async fn test_is_actor_activated_checks_message_sender() {
         actor_id: actor_id.clone(),
         mailbox: mailbox.clone(),
     });
-    let ctx = plexspaces_core::RequestContext::internal();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
+    let ctx = create_test_context();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
     
     // Now activated
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -216,8 +247,8 @@ async fn test_multiple_actors_registration() {
             actor_id: actor_id.clone(),
             mailbox: mailbox.clone(),
         });
-        let ctx = plexspaces_core::RequestContext::internal();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None).await;
+        let ctx = create_test_context();
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
     }
     
     // Verify all are registered

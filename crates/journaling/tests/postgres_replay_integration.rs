@@ -46,15 +46,17 @@ mod postgres_integration_tests {
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> JsonValue {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
-        })
+        });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
+        value
     }
 
     /// Test actor: Simple counter
@@ -135,7 +137,7 @@ mod postgres_integration_tests {
     async fn test_full_replay_no_checkpoint() {
         let storage = create_test_storage().await;
         let config = create_durability_config(1000, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-1";
 
         facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
@@ -174,7 +176,7 @@ mod postgres_integration_tests {
     async fn test_checkpoint_delta_replay() {
         let storage = create_test_storage().await;
         let config = create_durability_config(50, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-2";
 
         facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
@@ -229,7 +231,7 @@ mod postgres_integration_tests {
         let mut config = create_durability_config(100, true);
         config.state_schema_version = 1;
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-3";
 
         facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
@@ -264,7 +266,7 @@ mod postgres_integration_tests {
     async fn test_automatic_state_loading() {
         let storage = create_test_storage().await;
         let config = create_durability_config(100, true);
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-4";
 
         facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();

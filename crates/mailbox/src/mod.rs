@@ -201,6 +201,15 @@ pub struct Message {
 }
 
 impl Message {
+    /// Check if receiver is unset (empty or "unknown")
+    /// 
+    /// ## Purpose
+    /// "unknown" is used as a sentinel value to indicate the receiver is not set.
+    /// This helper provides a consistent way to check if receiver needs to be set.
+    pub fn is_receiver_unset(&self) -> bool {
+        self.receiver.is_empty() || self.receiver == "unknown"
+    }
+    
     /// Create a new message
     pub fn new(payload: Vec<u8>) -> Self {
         Message {
@@ -211,7 +220,7 @@ impl Message {
             correlation_id: None,
             reply_to: None,
             sender: None,
-            receiver: String::from("unknown"),
+            receiver: String::from("unknown"), // Sentinel value indicating receiver not set
             message_type: String::new(),
             ttl: None,
             created_at: std::time::Instant::now(),

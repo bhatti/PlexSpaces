@@ -350,9 +350,31 @@ async fn test_dashboard_wasm_deployment_flow() {
     
     eprintln!("✅ Deployment successful");
     
-    // Wait for deployment to complete and application to be registered
-    // Poll with retries to handle async registration
-    let mut apps = dashboard_service.get_applications(Request::new(GetApplicationsRequest {
+    // Wait for deployment to complete by checking ApplicationManager directly
+    // This is more reliable than polling the dashboard service
+    use plexspaces_core::ApplicationManager;
+    use plexspaces_core::service_locator::service_names;
+    let service_locator = node.service_locator();
+    let app_manager: Arc<ApplicationManager> = service_locator
+        .get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER)
+        .await
+        .expect("ApplicationManager should be available");
+    
+    // Wait for application to be registered (deployment is async)
+    let mut retries = 0;
+    while !app_manager.list_applications().await.contains(&"calculator".to_string()) && retries < 20 {
+        tokio::task::yield_now().await; // Yield to allow async operations to complete
+        retries += 1;
+    }
+    
+    // Verify application is registered
+    assert!(
+        app_manager.list_applications().await.contains(&"calculator".to_string()),
+        "Application 'calculator' should be registered after deployment"
+    );
+    
+    // Now check dashboard service
+    let apps = dashboard_service.get_applications(Request::new(GetApplicationsRequest {
         node_id: "test-node".to_string(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -360,24 +382,12 @@ async fn test_dashboard_wasm_deployment_flow() {
         page: None,
     })).await.unwrap().into_inner();
     
-    let mut retries = 0;
-    while apps.applications.len() == initial_app_count && retries < 10 {
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        apps = dashboard_service.get_applications(Request::new(GetApplicationsRequest {
-            node_id: "test-node".to_string(),
-            tenant_id: String::new(),
-            namespace: String::new(),
-            name_pattern: String::new(),
-            page: None,
-        })).await.unwrap().into_inner();
-        retries += 1;
-    }
-    
     assert_eq!(apps.applications.len(), initial_app_count + 1, 
         "Should have one more application after deployment");
     
+    // ApplicationInfo uses name as application_id (see ApplicationManager::get_application_info)
     let deployed_app = apps.applications.iter()
-        .find(|app| app.application_id == "calculator-app");
+        .find(|app| app.application_id == "calculator" || app.name == "calculator");
     assert!(deployed_app.is_some(), "Deployed application should be in list");
     let app = deployed_app.unwrap();
     assert_eq!(app.name, "calculator", "Application name should match");

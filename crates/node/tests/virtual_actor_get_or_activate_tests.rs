@@ -6,7 +6,7 @@ use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_mailbox::{Message, mailbox_config_default, Mailbox};
-use plexspaces_node::{Node, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeConfig, NodeId, NodeBuilder};
 use plexspaces_node::default_node_config;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -40,9 +40,8 @@ impl ActorTrait for TestActor {
         &mut self,
         ctx: &ActorContext,
         msg: Message,
-        reply: &dyn plexspaces_core::Reply,
     ) -> Result<(), BehaviorError> {
-        self.route_message(ctx, msg, reply).await
+        self.route_message(ctx, msg).await
     }
 
     fn behavior_type(&self) -> BehaviorType {
@@ -54,10 +53,9 @@ impl ActorTrait for TestActor {
 impl GenServer for TestActor {
     async fn handle_request(
         &mut self,
-        _ctx: &ActorContext,
-        envelope: plexspaces_core::Envelope,
+        ctx: &ActorContext,
+        msg: Message,
     ) -> Result<(), BehaviorError> {
-        let msg = &envelope.message;
         let test_msg: TestMessage = serde_json::from_slice(msg.payload())
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
@@ -68,9 +66,16 @@ impl GenServer for TestActor {
             _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         };
         
-        // Correlation_id is automatically preserved by envelope.send_reply()
-        envelope.send_reply(reply_msg).await
-            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+        // Send reply using ActorContext
+        if let Some(sender_id) = &msg.sender {
+            ctx.send_reply(
+                msg.correlation_id.as_deref(),
+                sender_id,
+                msg.receiver.clone(),
+                reply_msg,
+            ).await
+                .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+        }
         Ok(())
     }
 }
@@ -78,7 +83,7 @@ impl GenServer for TestActor {
 #[tokio::test]
 async fn test_get_or_activate_with_virtual_facet_eager() {
     // Test: get_or_activate_actor with VirtualActorFacet (eager activation) should work with ask()
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
     // Get or activate actor with VirtualActorFacet (eager)
@@ -89,16 +94,17 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             // Attach VirtualActorFacet with eager activation
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "eager"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -135,7 +141,7 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
 #[tokio::test]
 async fn test_get_or_activate_with_virtual_facet_lazy() {
     // Test: get_or_activate_actor with VirtualActorFacet (lazy activation) should activate on first message
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "test-actor-lazy@test-node".to_string();
     
     // Get or activate actor with VirtualActorFacet (lazy)
@@ -146,16 +152,17 @@ async fn test_get_or_activate_with_virtual_facet_lazy() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             // Attach VirtualActorFacet with lazy activation
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             

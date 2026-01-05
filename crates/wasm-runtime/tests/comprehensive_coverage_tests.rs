@@ -253,7 +253,15 @@ async fn test_handle_request_error() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
-        None,
+        None, // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -305,7 +313,15 @@ async fn test_handle_event_error() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
-        None,
+        None, // channel_service
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");
@@ -381,6 +397,14 @@ async fn test_channel_host_function_error_handling() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         Some(channel_service),
+        None, // message_sender
+        None, // tuplespace_provider
+        None, // keyvalue_store
+        None, // process_group_registry
+        None, // lock_manager
+        None, // object_registry
+        None, // journal_storage
+        None, // blob_service
     )
     .await
     .expect("Failed to create instance");

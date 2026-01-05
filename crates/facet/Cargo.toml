@@ -45,6 +45,8 @@ ddb-backend = ["aws-sdk-dynamodb", "aws-config"]
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
+# Test helpers for checking DynamoDB Local availability
+plexspaces-common = { path = "../common", features = ["test-helpers"] }
 
 [lib]
 name = "plexspaces_facet"

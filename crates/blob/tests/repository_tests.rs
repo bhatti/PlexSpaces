@@ -26,22 +26,34 @@ mod sql_tests {
     use plexspaces_core::RequestContext;
     use chrono::Utc;
     use std::sync::Arc;
-    use tempfile::NamedTempFile;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
+    fn init_sqlx_drivers() {
+        INIT.call_once(|| {
+            // Install sqlx::any default drivers before any database operations
+            // This is required for AnyPool to work with sqlite
+            // Using Once ensures it's only called once, even in parallel test scenarios
+            sqlx::any::install_default_drivers();
+        });
+    }
 
     async fn create_test_repository() -> Arc<SqlBlobRepository> {
+        // Ensure sqlx drivers are installed (idempotent, safe for parallel tests)
+        init_sqlx_drivers();
+        
         use sqlx::AnyPool;
         use sqlx::any::AnyPoolOptions;
-        use tempfile::NamedTempFile;
         
-        // Use temporary file-based database for reliability
-        // This is more production-grade than in-memory and works correctly with connection pools
-        let temp_db = NamedTempFile::new().unwrap();
-        let db_path = temp_db.path().to_str().unwrap();
-        let db_url = format!("sqlite:{}", db_path);
+        // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
+        // Not recovery-related, so memory is appropriate
+        // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
+        let db_url = "sqlite::memory:";
         
         let any_pool = AnyPoolOptions::new()
-            .max_connections(5)
-            .connect(&db_url)
+            .max_connections(1)
+            .connect(db_url)
             .await
             .unwrap();
         

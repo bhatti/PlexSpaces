@@ -26,6 +26,18 @@ mod ddb_tests {
     use plexspaces_facet::capabilities::keyvalue::{KeyValueStore, DynamoDBStore};
     use plexspaces_common::RequestContext;
 
+    use plexspaces_common::test_helpers::dynamodb_local_available;
+
+    /// Helper to check if DynamoDB simulator is available and skip test with warning if not
+    async fn check_ddb_available() -> bool {
+        if !dynamodb_local_available().await {
+            eprintln!("⚠️  WARNING: DynamoDB Local simulator is not running. Skipping DDB test.");
+            eprintln!("   To run DDB tests, start DynamoDB Local: docker run -p 8000:8000 amazon/dynamodb-local");
+            return false;
+        }
+        true
+    }
+
     /// Helper to create DynamoDB store for testing
     async fn create_ddb_store() -> DynamoDBStore {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
@@ -43,6 +55,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_and_set() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx = RequestContext::internal();
 
@@ -56,6 +71,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_nonexistent() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx = RequestContext::internal();
 
@@ -65,6 +83,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_set_overwrites() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx = RequestContext::internal();
 
@@ -77,6 +98,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_delete() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx = RequestContext::internal();
 
@@ -90,6 +114,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_delete_nonexistent() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx = RequestContext::internal();
 
@@ -99,6 +126,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_exists() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx = RequestContext::internal();
 
@@ -111,6 +141,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_keys() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx = RequestContext::internal();
 
@@ -126,6 +159,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_set_with_ttl() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx = RequestContext::internal();
 
@@ -143,6 +179,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_tenant_isolation() {
+        if !check_ddb_available().await {
+            return;
+        }
         let store = create_ddb_store().await;
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "default".to_string());
         let ctx2 = RequestContext::new_without_auth("tenant2".to_string(), "default".to_string());

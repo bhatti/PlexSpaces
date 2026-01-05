@@ -47,6 +47,7 @@ plexspaces-object-registry = { path = "../object-registry" }
 plexspaces-node = { path = "../node" }
 plexspaces-behavior = { path = "../behavior" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-stream = { workspace = true }
 
 [lib]
 name = "plexspaces_actor"

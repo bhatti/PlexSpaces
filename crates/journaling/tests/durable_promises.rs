@@ -16,15 +16,17 @@ mod sqlite_tests {
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
-        })
+        });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
+        value
     }
 
     #[tokio::test]
@@ -170,7 +172,7 @@ mod sqlite_tests {
         let actor_id = "test-actor-3";
 
         // Phase 1: Create promise and detach
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         let promise_id = "promise-3";
@@ -183,7 +185,7 @@ mod sqlite_tests {
         facet.on_detach(actor_id).await.unwrap();
 
         // Phase 2: Restart and verify promise can be queried
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Query for pending promises (should find the one we created)
@@ -209,7 +211,7 @@ mod sqlite_tests {
         let actor_id = "test-actor-4";
 
         // Phase 1: Create and resolve promise, then detach
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         let promise_id = "promise-4";
@@ -228,7 +230,7 @@ mod sqlite_tests {
         facet.on_detach(actor_id).await.unwrap();
 
         // Phase 2: Restart and verify promise is marked as resolved
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // After replay, completed promises should not be in pending list
@@ -322,7 +324,7 @@ mod sqlite_tests {
         };
 
         let actor_id = "test-actor-6";
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         // Create multiple promises
@@ -353,7 +355,7 @@ mod sqlite_tests {
         facet.on_detach(actor_id).await.unwrap();
 
         // Restart and verify state
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config);
+        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
 
         let pending_promises = new_facet.get_pending_promises().await.unwrap();

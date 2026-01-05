@@ -25,10 +25,12 @@
 
 use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder, ActorFactory, actor_factory_impl::ActorFactoryImpl, ActorRef};
-use plexspaces_core::{ActorId, ActorRegistry, ServiceLocator, VirtualActorManager, FacetManager, Actor as ActorTrait, BehaviorType, BehaviorError, ActorContext, actor_context::ObjectRegistry};
+use plexspaces_core::{ActorId, ActorRegistry, ServiceLocator, VirtualActorManager, FacetManagerServiceWrapper, Actor as ActorTrait, BehaviorType, BehaviorError, ActorContext, actor_context::ObjectRegistry, RequestContext};
+use plexspaces_facet::FacetManager;
 use plexspaces_keyvalue::InMemoryKVStore;
 use plexspaces_mailbox::Message;
 use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
+use plexspaces_proto::object_registry::v1::{ObjectType, ObjectRegistration, HealthStatus};
 use std::sync::Arc;
 
 // Adapter to convert ObjectRegistryImpl to ObjectRegistry trait
@@ -45,11 +47,24 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         self.inner
-            .lookup(&ctx, obj_type, object_id)
+            .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+    
+    async fn discover(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: Option<ObjectType>,
+        _object_category: Option<String>,
+        _capabilities: Option<Vec<String>>,
+        _labels: Option<Vec<String>>,
+        _health_status: Option<HealthStatus>,
+        _limit: usize,
+        _offset: usize,
+    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Vec::new())
     }
 
     async fn lookup_full(
@@ -113,9 +128,10 @@ async fn create_test_service_locator() -> Arc<ServiceLocator> {
     let manager = Arc::new(VirtualActorManager::new(registry.clone()));
     service_locator.register_service(manager.clone()).await;
     
-    // Register FacetManager
+    // Register FacetManager (wrapped in FacetManagerServiceWrapper to implement Service trait)
     let facet_manager = Arc::new(FacetManager::new());
-    service_locator.register_service(facet_manager.clone()).await;
+    let facet_manager_wrapper = Arc::new(FacetManagerServiceWrapper::new(facet_manager.clone()));
+    service_locator.register_service(facet_manager_wrapper).await;
     
     service_locator
 }

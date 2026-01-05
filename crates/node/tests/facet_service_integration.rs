@@ -46,7 +46,6 @@ impl Actor for TestBehavior {
         &mut self,
         _ctx: &ActorContext,
         _message: Message,
-        _reply: &dyn plexspaces_core::Reply,
     ) -> Result<(), plexspaces_core::BehaviorError> {
         Ok(())
     }
@@ -57,14 +56,15 @@ impl Actor for TestBehavior {
 }
 
 /// Helper to create a test node
-fn create_test_node() -> Node {
+async fn create_test_node() -> Node {
     NodeBuilder::new("test-node")
         .build()
+        .await
 }
 
 #[tokio::test]
 async fn test_facet_service_get_facet_normal_actor() {
-    let node = Arc::new(create_test_node());
+    let node = Arc::new(create_test_node().await);
     // Note: We don't call node.start() in tests because it blocks forever (starts gRPC server)
     // For tests, we only need facet storage, which is available without starting the node
     
@@ -73,7 +73,8 @@ async fn test_facet_service_get_facet_normal_actor() {
     let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("test-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Attach TimerFacet
     let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
@@ -83,12 +84,13 @@ async fn test_facet_service_get_facet_normal_actor() {
         .unwrap();
     
     // Spawn actor (normal actor)
-    let actor_id_before = ActorId::from("test-actor@local");
+    // Note: spawn_actor_helper normalizes the actor ID to include the node ID
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
-    // Verify actor_id matches
-    assert_eq!(actor_id, actor_id_before, "Actor ID should match");
+    // Verify actor_id includes the node ID (spawn_actor_helper normalizes it)
+    assert!(actor_id.as_str().contains("test-actor"), "Actor ID should contain 'test-actor'");
+    assert!(actor_id.as_str().contains("@"), "Actor ID should contain '@'");
     
     // IMPORTANT: Check facets IMMEDIATELY after spawning, before actor can terminate
     // The actor might terminate quickly in tests, so we need to check facets right away
@@ -105,7 +107,7 @@ async fn test_facet_service_get_facet_normal_actor() {
 
 #[tokio::test]
 async fn test_facet_service_get_facet_virtual_actor() {
-    let node = Arc::new(create_test_node());
+    let node = Arc::new(create_test_node().await);
     // Note: We don't call node.start() in tests because it blocks forever (starts gRPC server)
     
     // Create actor with TimerFacet and VirtualActorFacet
@@ -113,7 +115,8 @@ async fn test_facet_service_get_facet_virtual_actor() {
     let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("virtual-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Attach VirtualActorFacet (makes it a virtual actor)
     use plexspaces_journaling::VirtualActorFacet;
@@ -134,22 +137,43 @@ async fn test_facet_service_get_facet_virtual_actor() {
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
     
-    // Wait for actor to be fully initialized
-    sleep(Duration::from_millis(200)).await;
+    // Virtual actors with lazy activation need to be activated before facets are stored
+    // Send a message to trigger activation
+    use plexspaces_mailbox::Message;
+    let message = Message::new(b"activate".to_vec());
+    actor_ref.tell(message).await.unwrap();
     
-    // Get facet via FacetService (should work for virtual actors too)
-    let facets = node.clone().get_facets(&actor_id).await;
-    assert!(facets.is_some(), "Facets should be stored for virtual actor");
+    // Wait for actor to be fully initialized and activated
+    // For lazy virtual actors, activation happens asynchronously when message is received
+    // We need to wait for the activation to complete and facets to be stored
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(5);
+    let mut facets = None;
+    while start.elapsed() < timeout {
+        tokio::task::yield_now().await;
+        // Check if actor is activated
+        let (exists, is_active, _) = node.check_virtual_actor_exists(&actor_id).await;
+        if exists && is_active {
+            // Actor is activated, check for facets
+            facets = node.clone().get_facets(&actor_id).await;
+            if facets.is_some() {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    
+    assert!(facets.is_some(), "Facets should be stored for virtual actor after activation (actor_id={:?})", actor_id);
     
     let facets_arc = facets.unwrap();
     let facets_guard = facets_arc.read().await;
     let timer_facet_arc = facets_guard.get_facet("timer");
-    assert!(timer_facet_arc.is_some(), "TimerFacet should be retrievable");
+    assert!(timer_facet_arc.is_some(), "TimerFacet should be retrievable for virtual actor");
 }
 
 #[tokio::test]
 async fn test_facet_service_get_facet_not_found() {
-    let node = Arc::new(create_test_node());
+    let node = Arc::new(create_test_node().await);
     // Note: We don't call node.start() in tests because it blocks forever (starts gRPC server)
     
     // Create actor without TimerFacet
@@ -157,7 +181,8 @@ async fn test_facet_service_get_facet_not_found() {
     let actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("no-facet-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Spawn actor
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
@@ -177,7 +202,7 @@ async fn test_facet_service_get_facet_not_found() {
 
 #[tokio::test]
 async fn test_facet_service_facets_cleaned_up_on_unregister() {
-    let node = Arc::new(create_test_node());
+    let node = Arc::new(create_test_node().await);
     // Note: We don't call node.start() in tests because it blocks forever (starts gRPC server)
     
     // Create actor with TimerFacet
@@ -185,7 +210,8 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
     let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("cleanup-actor@local"))
         .build()
-        .await;
+        .await
+        .unwrap();
     
     // Attach TimerFacet
     let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
@@ -204,7 +230,9 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
     assert!(facets.is_some(), "Facets should be stored");
     
     // Unregister actor
-    node.clone().unregister_actor(&actor_id).await.unwrap();
+    use plexspaces_core::service_locator::service_names;
+    let actor_registry = node.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
+    actor_registry.unregister_with_cleanup(&actor_id).await.unwrap();
     
     // Verify facets are cleaned up
     let facets_after = node.clone().get_facets(&actor_id).await;
@@ -216,7 +244,7 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
 async fn test_facet_service_with_sqlite_backend() {
     // This test verifies FacetService works with SQLite backend
     // (when Node uses SQLite for state storage)
-    let node = Arc::new(create_test_node());
+    let node = Arc::new(create_test_node().await);
     // Note: We don't call node.start() in tests because it blocks forever (starts gRPC server)
     
     // Create actor with TimerFacet

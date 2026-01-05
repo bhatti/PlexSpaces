@@ -6,7 +6,7 @@ use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_mailbox::Message;
-use plexspaces_node::{Node, NodeId};
+use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_node::default_node_config;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use tokio::time::sleep;
 
 #[path = "test_helpers.rs"]
 mod test_helpers;
-use test_helpers::{spawn_actor_helper, find_actor_helper, unregister_actor_helper, lookup_actor_ref, get_or_activate_actor_helper, activate_virtual_actor};
+use test_helpers::{spawn_actor_helper, find_actor_helper, unregister_actor_helper, lookup_actor_ref, get_or_activate_actor_helper, activate_virtual_actor, wait_for_virtual_actor_activation};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum TestMessage {
@@ -47,9 +47,8 @@ impl ActorTrait for CounterActor {
         &mut self,
         ctx: &ActorContext,
         msg: Message,
-        reply: &dyn plexspaces_core::Reply,
     ) -> Result<(), BehaviorError> {
-        self.route_message(ctx, msg, reply).await
+        self.route_message(ctx, msg).await
     }
 
     fn behavior_type(&self) -> BehaviorType {
@@ -61,10 +60,9 @@ impl ActorTrait for CounterActor {
 impl GenServer for CounterActor {
     async fn handle_request(
         &mut self,
-        _ctx: &ActorContext,
-        envelope: plexspaces_core::Envelope,
+        ctx: &ActorContext,
+        msg: Message,
     ) -> Result<(), BehaviorError> {
-        let msg = &envelope.message;
         let test_msg: TestMessage = serde_json::from_slice(msg.payload())
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
@@ -91,9 +89,28 @@ impl GenServer for CounterActor {
             _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         };
         
-        // Correlation_id is automatically preserved by envelope.send_reply()
-        envelope.send_reply(reply_msg).await
-            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+        // Send reply using ActorContext
+        if let Some(sender_id) = &msg.sender {
+            eprintln!("🔵 [COUNTER_ACTOR] Sending reply: correlation_id={:?}, sender_id={}, target_actor_id={}", 
+                msg.correlation_id, sender_id, msg.receiver);
+            let result = ctx.send_reply(
+                msg.correlation_id.as_deref(),
+                sender_id,
+                msg.receiver.clone(),
+                reply_msg,
+            ).await;
+            match &result {
+                Ok(_) => {
+                    eprintln!("🟢 [COUNTER_ACTOR] Successfully sent reply");
+                }
+                Err(e) => {
+                    eprintln!("🔴 [COUNTER_ACTOR] Failed to send reply: {}", e);
+                }
+            }
+            result.map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+        } else {
+            eprintln!("🔴 [COUNTER_ACTOR] No sender_id in message, cannot send reply");
+        }
         Ok(())
     }
 }
@@ -105,7 +122,7 @@ impl GenServer for CounterActor {
 #[tokio::test]
 async fn test_lazy_activation_concurrent_requests() {
     // Test: Multiple concurrent activation requests should only activate once
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-concurrent@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -115,15 +132,16 @@ async fn test_lazy_activation_concurrent_requests() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -188,7 +206,7 @@ async fn test_lazy_activation_concurrent_requests() {
 #[tokio::test]
 async fn test_lazy_activation_pending_messages_processed() {
     // Test: Messages sent during activation should be queued and processed after activation
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-pending@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -198,15 +216,16 @@ async fn test_lazy_activation_pending_messages_processed() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -214,10 +233,9 @@ async fn test_lazy_activation_pending_messages_processed() {
         }
     ).await.unwrap();
     
-    sleep(Duration::from_millis(100)).await;
-    
     // Send multiple messages rapidly - should queue during activation
     // Send messages via ActorRef to trigger activation
+    // Activation is synchronous (VirtualActorWrapper.tell() awaits activate_virtual_actor())
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     for _ in 0..5 {
         let msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
@@ -225,8 +243,8 @@ async fn test_lazy_activation_pending_messages_processed() {
         let _ = actor_ref.tell(msg).await;
     }
     
-    // Wait for activation and processing
-    sleep(Duration::from_millis(500)).await;
+    // Activation is synchronous - no need to wait
+    // Messages are queued and sent after activation completes
     
     // Verify all messages were processed
     let actor_ref = lookup_actor_ref(&node, &actor_id)
@@ -244,7 +262,7 @@ async fn test_lazy_activation_pending_messages_processed() {
 async fn test_lazy_activation_activation_failure_handling() {
     // Test: If activation fails, subsequent messages should retry activation
     // Note: This is a simplified test - actual activation failures are rare
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-fail@test-node".to_string();
     
     // Create actor but don't register it yet
@@ -252,15 +270,16 @@ async fn test_lazy_activation_activation_failure_handling() {
     let mut actor = ActorBuilder::new(behavior)
         .with_id(actor_id.clone())
         .build()
-        .await;
+        .await
+        .unwrap();
     
     let virtual_facet_config = serde_json::json!({
         "idle_timeout": "5m",
         "activation_strategy": "lazy"
     });
-    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
     actor
-        .attach_facet(virtual_facet, 100, virtual_facet_config)
+        .attach_facet(virtual_facet)
         .await
         .unwrap();
     
@@ -279,9 +298,7 @@ async fn test_lazy_activation_activation_failure_handling() {
     let result = actor_ref.tell(activate_msg).await;
     assert!(result.is_ok(), "Activation should succeed");
     
-    // Wait for activation
-    sleep(Duration::from_millis(500)).await;
-    
+    // Activation is synchronous - VirtualActorWrapper.tell() awaits activate_virtual_actor()
     // Now use ActorRef for ask() pattern
     let actor_ref = lookup_actor_ref(&node, &actor_id)
         .await
@@ -295,9 +312,49 @@ async fn test_lazy_activation_activation_failure_handling() {
 }
 
 #[tokio::test]
+async fn test_regular_actor_tell_then_ask() {
+    // Test: Regular actor tell() followed by ask() - baseline test
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
+    let actor_id: ActorId = "counter-regular@test-node".to_string();
+    
+    // Spawn regular actor (no virtual facet)
+    let behavior = Box::new(CounterActor::new());
+    let mut actor = ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
+        .build()
+        .await
+        .unwrap();
+    
+    // Register and start actor
+    let _core_ref = get_or_activate_actor_helper(&node, 
+        actor_id.clone(),
+        || async { Ok(actor) }
+    ).await.unwrap();
+    
+    // Get ActorRef
+    let actor_ref = lookup_actor_ref(&node, &actor_id)
+        .await
+        .unwrap()
+        .unwrap();
+    
+    // Send tell()
+    let tell_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+        .with_message_type("cast".to_string());
+    actor_ref.tell(tell_msg).await.unwrap();
+    
+    // Send ask() - should work
+    let ask_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+        .with_message_type("call".to_string());
+    let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await.unwrap();
+    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    assert!(matches!(reply, TestMessage::Count(1)));
+}
+
+#[tokio::test]
 async fn test_lazy_activation_tell_then_ask() {
     // Test: tell() followed by ask() - both should work
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    // Virtual actor behavior should be same as regular actor except for lazy activation
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-tell-ask@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -307,15 +364,16 @@ async fn test_lazy_activation_tell_then_ask() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -323,29 +381,45 @@ async fn test_lazy_activation_tell_then_ask() {
         }
     ).await.unwrap();
     
-    sleep(Duration::from_millis(200)).await;
-    
+    // Get ActorRef (will be VirtualActorWrapper for lazy virtual actors)
     let actor_ref = lookup_actor_ref(&node, &actor_id)
         .await
         .unwrap()
         .unwrap();
     
-    let actor_ref = lookup_actor_ref(&node, &actor_id)
-        .await
-        .unwrap()
-        .unwrap();
-    
-    // Send tell() - should activate
+    // Send tell() - should activate synchronously
+    // VirtualActorWrapper.tell() awaits activate_virtual_actor() which is synchronous
+    // After activation, VirtualActorWrapper is replaced by ActorRef in registry
     let tell_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
         .with_message_type("cast".to_string());
+    eprintln!("🔵 [TEST] Sending tell() message: actor_id={}, message_type={}", actor_id, tell_msg.message_type_str());
     actor_ref.tell(tell_msg).await.unwrap();
+    eprintln!("🟢 [TEST] tell() completed: actor_id={}", actor_id);
     
-    sleep(Duration::from_millis(300)).await;
+    // Activation is synchronous - actor is ready immediately after tell() returns
+    // VirtualActorWrapper is replaced by ActorRef in registry after activation
+    // Get fresh ActorRef from registry (will be ActorRef, not VirtualActorWrapper)
+    let actor_ref = lookup_actor_ref(&node, &actor_id)
+        .await
+        .unwrap()
+        .unwrap();
+    eprintln!("🟢 [TEST] Got fresh ActorRef after tell(): actor_id={}", actor_id);
     
-    // Send ask() - should work (actor already activated)
+    // Verify actor is active
+    let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&actor_id).await;
+    eprintln!("🔵 [TEST] Actor status after tell(): exists={}, is_active={}, is_virtual={}", exists, is_active, is_virtual);
+    assert!(exists, "Actor should exist");
+    assert!(is_active, "Actor should be active after tell()");
+    
+    // Send ask() - should work (actor already activated, using ActorRef directly)
+    // Behavior should be identical to regular actor
     let ask_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
-    let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await.unwrap();
+    eprintln!("🔵 [TEST] Sending ask() message: actor_id={}, message_type={}, correlation_id={:?}", 
+        actor_id, ask_msg.message_type_str(), ask_msg.correlation_id);
+    let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await;
+    eprintln!("🟢 [TEST] ask() completed: actor_id={}, result={:?}", actor_id, result.as_ref().map(|_| "Ok").unwrap_or("Err"));
+    let result = result.unwrap();
     let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
     assert!(matches!(reply, TestMessage::Count(1)));
 }
@@ -357,25 +431,26 @@ async fn test_lazy_activation_tell_then_ask() {
 #[tokio::test]
 async fn test_eager_activation_immediate_availability() {
     // Test: Eager actor should be immediately available after creation
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-eager-immediate@test-node".to_string();
     
-    let _core_ref = get_or_activate_actor_helper(&node, 
+    let actor_ref = get_or_activate_actor_helper(&node, 
         actor_id.clone(),
         || async {
             let behavior = Box::new(CounterActor::new());
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "eager"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -383,20 +458,8 @@ async fn test_eager_activation_immediate_availability() {
         }
     ).await.unwrap();
     
-    // Wait for eager activation
-    sleep(Duration::from_millis(500)).await;
-    
-    let actor_ref = lookup_actor_ref(&node, &actor_id)
-        .await
-        .unwrap()
-        .unwrap();
-    
-    let actor_ref = lookup_actor_ref(&node, &actor_id)
-        .await
-        .unwrap()
-        .unwrap();
-    
-    // Should be immediately available
+    // Registration is synchronous - actor should be immediately available
+    // ask() will automatically set message.receiver to actor_ref.id() if unset (empty or "unknown")
     let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(msg, Duration::from_secs(1)).await;
@@ -406,7 +469,7 @@ async fn test_eager_activation_immediate_availability() {
 #[tokio::test]
 async fn test_eager_activation_multiple_actors() {
     // Test: Multiple eager actors should all activate immediately
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     
     let mut handles = Vec::new();
     for i in 0..5 {
@@ -420,15 +483,16 @@ async fn test_eager_activation_multiple_actors() {
                     let mut actor = ActorBuilder::new(behavior)
                         .with_id(actor_id.clone())
                         .build()
-                        .await;
+                        .await
+                        .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
                     
                     let virtual_facet_config = serde_json::json!({
                         "idle_timeout": "5m",
                         "activation_strategy": "eager"
                     });
-                    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+                    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
                     actor
-                        .attach_facet(virtual_facet, 100, virtual_facet_config)
+                        .attach_facet(virtual_facet)
                         .await
                         .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
                     
@@ -445,6 +509,7 @@ async fn test_eager_activation_multiple_actors() {
             
             let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
                 .with_message_type("call".to_string());
+            // ask() will automatically set message.receiver to actor_ref.id() if empty
             actor_ref.ask(msg, Duration::from_secs(1)).await
         });
         handles.push(handle);
@@ -464,7 +529,7 @@ async fn test_eager_activation_multiple_actors() {
 #[tokio::test]
 async fn test_passivation_idle_timeout_expiration() {
     // Test: Actor should be deactivated after idle timeout
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-idle@test-node".to_string();
     
     // Start idle timeout monitor
@@ -477,16 +542,17 @@ async fn test_passivation_idle_timeout_expiration() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             // Short idle timeout for testing
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "2s",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -521,7 +587,7 @@ async fn test_passivation_idle_timeout_expiration() {
 #[tokio::test]
 async fn test_passivation_reactivation_after_timeout() {
     // Test: Actor should reactivate after passivation when message arrives
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-reactivate@test-node".to_string();
     
     node.start_idle_timeout_monitor();
@@ -533,15 +599,16 @@ async fn test_passivation_reactivation_after_timeout() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "2s",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -605,7 +672,7 @@ async fn test_passivation_reactivation_after_timeout() {
 #[tokio::test]
 async fn test_passivation_message_resets_idle_timer() {
     // Test: Messages should reset idle timer, preventing passivation
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-reset@test-node".to_string();
     
     node.start_idle_timeout_monitor();
@@ -617,15 +684,16 @@ async fn test_passivation_message_resets_idle_timer() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "3s",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -663,7 +731,7 @@ async fn test_passivation_message_resets_idle_timer() {
 #[tokio::test]
 async fn test_mixed_lazy_eager_actors() {
     // Test: Mix of lazy and eager actors should work correctly
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     
     // Create lazy actor
     let lazy_id: ActorId = "counter-lazy-mixed@test-node".to_string();
@@ -674,15 +742,16 @@ async fn test_mixed_lazy_eager_actors() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(lazy_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(lazy_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(lazy_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -699,15 +768,16 @@ async fn test_mixed_lazy_eager_actors() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(eager_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(eager_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "eager"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(eager_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -738,7 +808,7 @@ async fn test_mixed_lazy_eager_actors() {
 #[tokio::test]
 async fn test_virtual_actor_state_preservation() {
     // Test: Actor state should be preserved across activation/deactivation cycles
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-state@test-node".to_string();
     
     node.start_idle_timeout_monitor();
@@ -750,15 +820,16 @@ async fn test_virtual_actor_state_preservation() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "2s",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -816,7 +887,7 @@ async fn test_virtual_actor_state_preservation() {
 #[tokio::test]
 async fn test_virtual_actor_not_found_error() {
     // Test: Accessing non-existent virtual actor should return appropriate error
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "nonexistent@test-node".to_string();
     
     // Check that actor doesn't exist
@@ -835,7 +906,7 @@ async fn test_virtual_actor_not_found_error() {
 #[tokio::test]
 async fn test_virtual_actor_manual_deactivation() {
     // Test: Manual deactivation should work
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-manual-deact@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -845,15 +916,16 @@ async fn test_virtual_actor_manual_deactivation() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -891,7 +963,7 @@ async fn test_virtual_actor_manual_deactivation() {
 #[tokio::test]
 async fn test_virtual_actor_full_lifecycle() {
     // Test: Complete lifecycle - create, activate, use, passivate, reactivate
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-lifecycle@test-node".to_string();
     
     node.start_idle_timeout_monitor();
@@ -904,15 +976,16 @@ async fn test_virtual_actor_full_lifecycle() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "2s",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             
@@ -974,7 +1047,7 @@ async fn test_virtual_actor_full_lifecycle() {
 #[tokio::test]
 async fn test_virtual_actor_high_throughput() {
     // Test: High throughput scenario with many messages
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id: ActorId = "counter-throughput@test-node".to_string();
     
     let _core_ref = get_or_activate_actor_helper(&node, 
@@ -984,15 +1057,16 @@ async fn test_virtual_actor_high_throughput() {
             let mut actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()
-                .await;
+                .await
+                .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to build actor: {}", e)))?;
             
             let virtual_facet_config = serde_json::json!({
                 "idle_timeout": "5m",
                 "activation_strategy": "lazy"
             });
-            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone()));
+            let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
             actor
-                .attach_facet(virtual_facet, 100, virtual_facet_config)
+                .attach_facet(virtual_facet)
                 .await
                 .map_err(|e| plexspaces_node::NodeError::ActorRegistrationFailed(actor_id.clone().into(), format!("Failed to attach VirtualActorFacet: {}", e)))?;
             

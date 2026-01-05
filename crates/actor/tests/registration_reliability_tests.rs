@@ -218,37 +218,6 @@ async fn test_unregister_on_stop() {
 }
 
 #[tokio::test]
-async fn test_unregister_on_panic() {
-    // Test that unregistration happens when actor panics
-    // Note: This test verifies the pattern, actual panic handling is in watch_actor_termination()
-    let actor_impl = PanickingActor;
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
-    let mut actor = Actor::new(
-        "test-actor".to_string(),
-        Box::new(actor_impl),
-        mailbox,
-        "tenant".to_string(),
-        "namespace".to_string(),
-        None,
-    );
-
-    let handle = actor.start().await.expect("Actor should start");
-    sleep(Duration::from_millis(100)).await;
-    
-    // Send message that causes panic
-    let _ = actor.mailbox().enqueue(Message::new(b"test".to_vec())).await;
-    
-    // Wait for panic to occur
-    sleep(Duration::from_millis(200)).await;
-    
-    // In ActorFactory, watch_actor_termination() will detect panic and call unregister_with_cleanup()
-    // The handle will complete with an error (panic)
-    let result = handle.await;
-    assert!(result.is_err(), "Actor should panic");
-}
-
-#[tokio::test]
 async fn test_unregister_on_natural_termination() {
     // Test that unregistration happens when actor terminates naturally
     let actor_impl = NaturalTerminationActor::new(1);

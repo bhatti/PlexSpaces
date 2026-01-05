@@ -3,24 +3,24 @@
 //
 // Tests for ActorContext::new() to improve coverage
 
-use plexspaces_core::ActorContext;
-use plexspaces_node::create_default_service_locator;
+use plexspaces_core::{ActorContext, ServiceLocator};
 use std::sync::Arc;
 
 #[tokio::test]
 async fn test_actor_context_new() {
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "test-ns".to_string(),
-        "tenant-123".to_string(),
+        "tenant-123".to_string(),  // tenant_id
+        "test-ns".to_string(),      // namespace
         service_locator,
         None,
     );
 
     assert_eq!(ctx.node_id, "test-node");
-    assert_eq!(ctx.namespace, "test-ns");
     assert_eq!(ctx.tenant_id, "tenant-123");
+    assert_eq!(ctx.namespace, "test-ns");
     assert!(ctx.metadata.is_empty());
     assert_eq!(ctx.config, None);
 }
@@ -29,7 +29,8 @@ async fn test_actor_context_new() {
 async fn test_actor_context_new_with_config() {
     use plexspaces_proto::v1::actor::ActorConfig;
 
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let mut config = ActorConfig::default();
     config.max_mailbox_size = 5000;
     config.enable_persistence = true;
@@ -37,8 +38,8 @@ async fn test_actor_context_new_with_config() {
 
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "test-ns".to_string(),
-        "tenant-123".to_string(),
+        "tenant-123".to_string(),  // tenant_id
+        "test-ns".to_string(),      // namespace
         service_locator,
         config.clone(),
     );
@@ -47,15 +48,17 @@ async fn test_actor_context_new_with_config() {
     assert_eq!(ctx.config.as_ref().unwrap().max_mailbox_size, 5000);
     assert_eq!(ctx.config.as_ref().unwrap().enable_persistence, true);
     assert_eq!(ctx.tenant_id, "tenant-123");
+    assert_eq!(ctx.namespace, "test-ns");
 }
 
 #[tokio::test]
 async fn test_actor_context_new_with_metadata() {
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    // Create a minimal ServiceLocator for testing (without node dependency)
+    let service_locator = Arc::new(ServiceLocator::new());
     let mut ctx = ActorContext::new(
         "test-node".to_string(),
-        "test-ns".to_string(),
-        "tenant-123".to_string(),
+        "tenant-123".to_string(),  // tenant_id
+        "test-ns".to_string(),      // namespace
         service_locator,
         None,
     );
@@ -67,5 +70,6 @@ async fn test_actor_context_new_with_metadata() {
     assert_eq!(ctx.metadata.get("key2"), Some(&"value2".to_string()));
     assert_eq!(ctx.metadata.len(), 2);
     assert_eq!(ctx.tenant_id, "tenant-123");
+    assert_eq!(ctx.namespace, "test-ns");
 }
 

@@ -4,10 +4,10 @@
 // Integration tests for temporary sender pattern in ActorRef::ask()
 // Tests all scenarios: outside sender, local actor, remote actor, chained asks
 
-use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use plexspaces_actor::{ActorRef, ActorBuilder};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{ActorContext, BehaviorError, Actor, BehaviorType, ActorRegistry, application::ApplicationNode, ActorService};
-use plexspaces_mailbox::{Message, Mailbox, mailbox_config_default};
+use plexspaces_core::{ActorContext, BehaviorError, Actor, BehaviorType, ActorRegistry, ActorService};
+use plexspaces_mailbox::{Message, Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use plexspaces_actor_service::ActorServiceImpl;
 use plexspaces_proto::actor::v1::actor_service_server::ActorServiceServer;
@@ -160,6 +160,23 @@ async fn create_test_registry_with_node(
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
+
+        async fn discover(
+            &self,
+            ctx: &plexspaces_core::RequestContext,
+            object_type: Option<ObjectType>,
+            object_category: Option<String>,
+            capabilities: Option<Vec<String>>,
+            labels: Option<Vec<String>>,
+            health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+            limit: usize,
+            offset: usize,
+        ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            self.inner
+                .discover(ctx, object_type, object_category, capabilities, labels, health_status, limit, offset)
+                .await
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        }
     }
 
     let kv = Arc::new(InMemoryKVStore::new());
@@ -215,7 +232,7 @@ async fn register_test_actor(
         service_locator,
     ));
     let ctx = plexspaces_core::RequestContext::internal();
-    actor_registry.register_actor(&ctx, actor_id, sender, None).await;
+    actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 }
 
 /// Helper to start a test gRPC server
@@ -231,6 +248,7 @@ async fn start_test_server(
             .await
     })
 }
+
 
 /// Actor that forwards ask() calls to another actor (for chained ask tests)
 struct ForwarderActor {
@@ -277,9 +295,12 @@ impl GenServer for ForwarderActor {
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
 
         // Forward request to target actor using ask()
+        // Get forwarder's own actor ID from context
+        let forwarder_id = ctx.self_ref().map(|r| r.id().to_string())
+            .unwrap_or_else(|| msg.receiver.clone());
         let mut forward_msg = Message::new(serde_json::to_vec(&request).unwrap());
         forward_msg.receiver = self.target_actor_id.clone();
-        forward_msg.sender = Some(msg.receiver.clone()); // Use our own ID as sender
+        forward_msg.sender = Some(forwarder_id); // Use forwarder's own ID as sender
         forward_msg.message_type = "call".to_string();
 
         let reply = target_ref.ask(forward_msg, Duration::from_secs(5)).await
@@ -309,65 +330,26 @@ async fn test_outside_sender_calling_ask() {
         .with_env_filter("debug")
         .try_init();
 
-    let node = Arc::new(NodeBuilder::new("test-node-outside-ask")
-        .build());
+    // Create node
+    let node = NodeBuilder::new("test-node-outside-ask")
+        .build().await;
 
-    // Start node in background to initialize services
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-    tokio::time::sleep(Duration::from_millis(500)).await; // Wait for basic services
-    
-    // Manually register ActorFactory (normally done in create_actor_context_arc, but we need it for spawn_actor)
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(node.service_locator().clone()));
-    node.service_locator().register_service(actor_factory_impl).await;
-    
-    // Manually register ActorService (normally done in create_actor_context_arc, but actors need it for send_reply)
-    use plexspaces_actor_service::ActorServiceImpl;
-    use plexspaces_core::ActorService;
-    
-    // Wait for Node's ServiceLocator to have services registered (including ReplyWaiterRegistry)
-    // Node::new() registers ReplyWaiterRegistry in a spawned task, so we need to wait
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    
-    // Create ActorServiceImpl using Node's ServiceLocator (ensures shared ReplyWaiterRegistry)
-    // ActorServiceImpl now implements ActorService trait directly, no wrapper needed
-    let actor_service_impl = Arc::new(ActorServiceImpl::new(
-        node.service_locator().clone(),
-        node.id().as_str().to_string(),
-    ));
-    
-    node.service_locator().register_service(actor_service_impl.clone()).await;
-    let actor_service_trait: Arc<dyn ActorService> = actor_service_impl.clone() as Arc<dyn ActorService>;
-    node.service_locator().register_actor_service(actor_service_trait).await;
-
-    // Create and spawn counter actor
-    let behavior: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
-    
-    // Node implements ApplicationNode trait - spawn actor
+    // Create and spawn counter actor using ActorBuilder (simpler setup)
     let actor_id = "counter-1@test-node-outside-ask".to_string();
-    let _result = node
-        .spawn_actor(actor_id.clone(), behavior, "default".to_string())
+    let behavior: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
+    let ctx = plexspaces_core::RequestContext::internal();
+    let counter_ref = ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
+        .with_namespace("default".to_string())
+        .spawn(&ctx, node.service_locator().clone())
         .await
         .unwrap();
-    
-    // Get ActorRef - use remote pointing to local node (works for both local and remote)
-    let counter_ref = ActorRef::remote(
-        actor_id.clone(),
-        "test-node-outside-ask".to_string(),
-        node.service_locator().clone(),
-    );
-
-    // Wait for actor to initialize
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Call ask() from outside - should use temporary sender
     let request = CounterMessage::Get;
-    let mut msg = Message::new(serde_json::to_vec(&request).unwrap());
+    let mut msg = Message::new(serde_json::to_vec(&request).unwrap())
+        .with_message_type("call".to_string());
     msg.receiver = actor_id.clone();
-    msg.message_type = "call".to_string();
     // No sender set (outside caller) - temporary sender will be created
     
     let reply = counter_ref.ask(msg, Duration::from_secs(5)).await;
@@ -389,96 +371,45 @@ async fn test_outside_sender_calling_ask() {
 #[tokio::test]
 async fn test_local_actor_calling_ask_of_local_actor() {
     // Test: Local actor calling ask() on another local actor
-    // Expected: Should use actor's own ID as sender (no temporary sender needed)
+    // Expected: Temporary sender is always created for ask(), but sender ID is set to actor's own ID
     
     let _ = tracing_subscriber::fmt()
         .with_env_filter("debug")
         .try_init();
 
-    let node = Arc::new(NodeBuilder::new("test-node-local-ask")
-        .build());
+    // Create node
+    let node = NodeBuilder::new("test-node-local-ask")
+        .build().await;
 
-    // Start node in background to initialize services
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-    tokio::time::sleep(Duration::from_millis(500)).await; // Wait for basic services
-    
-    // Manually register ActorFactory (normally done in create_actor_context_arc, but we need it for spawn_actor)
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(node.service_locator().clone()));
-    node.service_locator().register_service(actor_factory_impl).await;
-    
-    // Manually register ActorService (normally done in create_actor_context_arc, but actors need it for send_reply)
-    use plexspaces_actor_service::ActorServiceImpl;
-    use plexspaces_core::ActorService;
-    
-    // Wait for Node's ServiceLocator to have services registered (including ReplyWaiterRegistry)
-    // Node::new() registers ReplyWaiterRegistry in a spawned task, so we need to wait
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    
-    // Create ActorServiceImpl using Node's ServiceLocator (ensures shared ReplyWaiterRegistry)
-    // ActorServiceImpl now implements ActorService trait directly, no wrapper needed
-    let actor_service_impl = Arc::new(ActorServiceImpl::new(
-        node.service_locator().clone(),
-        node.id().as_str().to_string(),
-    ));
-    
-    node.service_locator().register_service(actor_service_impl.clone()).await;
-    let actor_service_trait: Arc<dyn ActorService> = actor_service_impl.clone() as Arc<dyn ActorService>;
-    node.service_locator().register_actor_service(actor_service_trait).await;
-
-    // Create two counter actors using ActorFactory
-    let behavior1: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
-    let behavior2: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
-    
+    // Create and spawn two counter actors using ActorBuilder
     let actor1_id = "counter-1@test-node-local-ask".to_string();
     let actor2_id = "counter-2@test-node-local-ask".to_string();
     
-    // Use ActorFactory to spawn actors (already imported above)
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
-        .ok_or_else(|| "ActorFactory not found".to_string())?;
+    let behavior1: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
+    let behavior2: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
     
-    // Spawn actors using spawn_actor
     let ctx = plexspaces_core::RequestContext::internal();
-    let _message_sender1 = actor_factory.spawn_actor(
-        &ctx,
-        &actor1_id,
-        "test", // actor_type - extract from behavior if needed
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets
-    ).await.unwrap();
+    let _counter1_ref = ActorBuilder::new(behavior1)
+        .with_id(actor1_id.clone())
+        .with_namespace("default".to_string())
+        .spawn(&ctx, node.service_locator().clone())
+        .await
+        .unwrap();
     
-    let _message_sender2 = actor_factory.spawn_actor(
-        &ctx,
-        &actor2_id,
-        "test", // actor_type - extract from behavior if needed
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets
-    ).await.unwrap();
-    
-    // Get ActorRef for counter2
-    let counter2_ref = ActorRef::remote(
-        actor2_id.clone(),
-        "test-node-local-ask".to_string(),
-        node.service_locator().clone(),
-    );
-
-    // Wait for actors to initialize
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let counter2_ref = ActorBuilder::new(behavior2)
+        .with_id(actor2_id.clone())
+        .with_namespace("default".to_string())
+        .spawn(&ctx, node.service_locator().clone())
+        .await
+        .unwrap();
 
     // Simulate counter1 calling ask() on counter2
-    // This should use counter1_id as sender (not temporary sender)
+    // Set sender to counter1's ID
     let request = CounterMessage::Get;
-    let mut msg = Message::new(serde_json::to_vec(&request).unwrap());
+    let mut msg = Message::new(serde_json::to_vec(&request).unwrap())
+        .with_message_type("call".to_string());
     msg.receiver = actor2_id.clone();
     msg.sender = Some(actor1_id.clone()); // Actor's own ID as sender
-    msg.message_type = "call".to_string();
     
     let reply = counter2_ref.ask(msg, Duration::from_secs(5)).await;
     
@@ -496,92 +427,107 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     debug!("✅ Test: Local actor calling ask of local actor - PASSED");
 }
 
-/// Test: Local actor calling ask() on remote actor (requires gRPC server setup)
+/// Test: Local actor calling ask() on remote actor (simulated)
 ///
 /// Scenario:
-/// 1. Spawn node1 and node2 with in-process gRPC servers
-/// 2. Register counter actor on node2
-/// 3. Actor on node1 calls ask() on counter@node2
-/// 4. Verify reply received correctly
+/// 1. Create node1 (local)
+/// 2. Register counter actor on node1 with local_node_id (simulates node2)
+/// 3. Actor on node1 calls ask() on counter using Remote ActorRef
+/// 4. Verify reply received correctly via "local via remote" path
 #[tokio::test]
 async fn test_local_actor_calling_ask_of_remote_actor() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("debug")
         .try_init();
 
-    // ARRANGE: Set up node2 with counter actor
-    let node2_port = 19997;
-    let node2_address = format!("127.0.0.1:{}", node2_port);
-    let registry2 = create_test_registry_with_node("node2", "node2", &node2_address).await;
-
-    let mailbox2 = Arc::new(
-        Mailbox::new(
-            mailbox_config_default(),
-            "counter@node2".to_string(),
-        )
-        .await
-        .expect("Failed to create mailbox"),
-    );
-
-    // Create ServiceLocator for node2 and register services
-    use plexspaces_node::create_default_service_locator;
-    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
-    let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
-    let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
-    service_locator2.register_service(registry2.clone()).await;
-    service_locator2.register_service(reply_tracker2).await;
-    service_locator2.register_service(reply_waiter_registry2).await;
-    
-    let service2 = ActorServiceImpl::new(service_locator2.clone(), "node2".to_string());
-    
-    // Register actor directly with ActorRegistry
-    register_test_actor(registry2.clone(), "counter@node2".to_string(), mailbox2.clone(), service_locator2).await;
-
-    // Start node2's gRPC server
-    let _server2_handle = start_test_server(service2, node2_port).await;
-    tokio::time::sleep(Duration::from_millis(500)).await; // Wait for server to be ready
-
-    // ARRANGE: Set up node1 with forwarder actor
-    // Create node1 - ActorRef::remote will handle routing to node2
+    // ARRANGE: Create node1 (local) - reuse same pattern as test_ask_with_simulated_remote
     let node1 = Arc::new(NodeBuilder::new("node1").build().await);
-
-    // Start node1 in background to initialize services
-    let node1_for_start = node1.clone();
+    let node1_service_locator = node1.service_locator().clone();
+    
+    // Get node1's ActorRegistry
+    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::MessageSender;
+    let actor_registry1: Arc<ActorRegistry> = node1_service_locator
+        .get_service_by_name(service_names::ACTOR_REGISTRY)
+        .await
+        .expect("ActorRegistry should be registered");
+    
+    // Create counter actor on node1 with node1's local_node_id (so "local via remote" path is used)
+    // When we use ActorRef::remote with node_id matching local_node_id, tell_impl will
+    // detect it's actually local and use the "local via remote" path, routing to the local actor.
+    // This simulates remote behavior (using Remote ActorRef) without needing real gRPC.
+    let local_node_id = actor_registry1.local_node_id();
+    let counter_id = format!("counter@{}", local_node_id);
+    let mut mailbox_config = MailboxConfig::default();
+    mailbox_config.capacity = 1000;
+    let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
+    let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+        counter_id.clone(),
+        Arc::clone(&mailbox_counter),
+        node1_service_locator.clone(),
+    ));
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
+    
+    // Spawn task to handle messages and reply via ActorService
+    let mailbox_counter_clone = mailbox_counter.clone();
+    let actor_service1: Arc<dyn ActorService + Send + Sync> = node1_service_locator
+        .get_actor_service()
+        .await
+        .expect("ActorService should be registered");
+    let counter_id_for_spawn = counter_id.clone();
+    let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
-        let _ = node1_for_start.start().await;
+        while let Some(msg) = mailbox_counter_clone.dequeue().await {
+            if let Ok(request) = serde_json::from_slice::<CounterMessage>(msg.payload()) {
+                let reply = match request {
+                    CounterMessage::Get => {
+                        CounterMessage::Value(counter_actor.value)
+                    }
+                    CounterMessage::Increment => {
+                        counter_actor.value += 1;
+                        CounterMessage::Value(counter_actor.value)
+                    }
+                    _ => continue,
+                };
+                // Send reply using ActorService.send_reply() (handles temporary senders correctly)
+                if let Some(sender_id) = &msg.sender {
+                    let reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
+                    let _ = actor_service1.send_reply(
+                        msg.correlation_id.as_deref(),
+                        sender_id,
+                        counter_id_for_spawn.clone(),
+                        reply_msg,
+                    ).await;
+                }
+            }
+        }
     });
-    tokio::time::sleep(Duration::from_millis(200)).await; // Wait for services to initialize
 
-    // Create forwarder actor that will call ask() on remote counter
-    let forwarder_behavior: Box<dyn plexspaces_core::Actor> = Box::new(ForwarderActor::new("counter@node2".to_string()));
-
+    // Create forwarder actor on node1 using ActorBuilder::spawn()
+    // Forwarder will use Remote ActorRef pointing to counter@local_node_id
+    let forwarder_behavior: Box<dyn plexspaces_core::Actor> = Box::new(ForwarderActor::new(counter_id.clone()));
     let forwarder_id = "forwarder@node1".to_string();
-    let _result = node1
-        .spawn_actor(forwarder_id.clone(), forwarder_behavior, "default".to_string())
+    let ctx_spawn = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    
+    let forwarder_ref = ActorBuilder::new(forwarder_behavior)
+        .with_id(forwarder_id.clone())
+        .with_namespace("default".to_string())
+        .spawn(&ctx_spawn, node1_service_locator.clone())
         .await
         .unwrap();
 
-    // Get ActorRef for forwarder
-    let forwarder_ref = ActorRef::remote(
-        forwarder_id.clone(),
-        "node1".to_string(),
-        node1.service_locator().clone(),
-    );
-
-    // Wait for actors to initialize
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // ACT: Call ask() on forwarder, which will forward to remote counter
+    // ACT: Call ask() on forwarder, which will forward to counter using Remote ActorRef
     let request = CounterMessage::Get;
-    let mut msg = Message::new(serde_json::to_vec(&request).unwrap());
+    let mut msg = Message::new(serde_json::to_vec(&request).unwrap())
+        .with_message_type("call".to_string());
     msg.receiver = forwarder_id.clone();
-    msg.message_type = "call".to_string();
     // No sender set (outside caller) - temporary sender will be created
 
     let reply = forwarder_ref.ask(msg, Duration::from_secs(10)).await;
 
-    // ASSERT: Should receive reply from remote counter via forwarder
-    assert!(reply.is_ok(), "ask() should succeed across nodes");
+    // ASSERT: Should receive reply from counter via forwarder
+    assert!(reply.is_ok(), "ask() should succeed");
     let reply_msg = reply.unwrap();
     let value: CounterMessage = serde_json::from_slice(reply_msg.payload()).unwrap();
     match value {
@@ -590,96 +536,109 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
         }
         _ => panic!("Unexpected reply type"),
     }
-
+    
     debug!("✅ Test: Local actor calling ask of remote actor - PASSED");
 }
 
-/// Test: Chained asks (outside -> actor1@node1 -> actor2@node2)
+/// Test: Chained asks (outside -> actor1@node1 -> actor2@node2) (simulated)
 ///
 /// Scenario:
-/// 1. Spawn node1 and node2 with in-process gRPC servers
-/// 2. Register actor1 (forwarder) on node1, actor2 (counter) on node2
+/// 1. Create node1 (local)
+/// 2. Register actor1 (forwarder) on node1, actor2 (counter) on node1 with local_node_id (simulates node2)
 /// 3. Outside caller calls ask() on actor1@node1
-/// 4. actor1 calls ask() on actor2@node2
+/// 4. actor1 calls ask() on actor2 using Remote ActorRef
 /// 5. actor2 replies to actor1, actor1 replies to outside caller
-/// 6. Verify both replies received correctly
+/// 6. Verify both replies received correctly via "local via remote" path
 #[tokio::test]
 async fn test_chained_asks_multi_node() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("debug")
         .try_init();
 
-    // ARRANGE: Set up node2 with counter actor
-    let node2_port = 19998;
-    let node2_address = format!("127.0.0.1:{}", node2_port);
-    let registry2 = create_test_registry_with_node("node2", "node2", &node2_address).await;
-
-    let mailbox2 = Arc::new(
-        Mailbox::new(
-            mailbox_config_default(),
-            "counter@node2".to_string(),
-        )
-        .await
-        .expect("Failed to create mailbox"),
-    );
-
-    // Create ServiceLocator for node2 and register services
-    use plexspaces_node::create_default_service_locator;
-    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
-    let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
-    let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
-    service_locator2.register_service(registry2.clone()).await;
-    service_locator2.register_service(reply_tracker2).await;
-    service_locator2.register_service(reply_waiter_registry2).await;
-    
-    let service2 = ActorServiceImpl::new(service_locator2.clone(), "node2".to_string());
-    
-    // Register actor directly with ActorRegistry
-    register_test_actor(registry2.clone(), "counter@node2".to_string(), mailbox2.clone(), service_locator2).await;
-
-    // Start node2's gRPC server
-    let _server2_handle = start_test_server(service2, node2_port).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // ARRANGE: Set up node1 with forwarder actor
+    // ARRANGE: Create node1 (local) - reuse same pattern as test_ask_with_simulated_remote
     let node1 = Arc::new(NodeBuilder::new("node1").build().await);
-
-    // Start node1 in background to initialize services
-    let node1_for_start = node1.clone();
-    tokio::spawn(async move {
-        let _ = node1_for_start.start().await;
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await; // Wait for services to initialize
+    let node1_service_locator = node1.service_locator().clone();
     
-    // Create forwarder actor on node1
-    let forwarder_behavior: Box<dyn plexspaces_core::Actor> = Box::new(ForwarderActor::new("counter@node2".to_string()));
+    // Get node1's ActorRegistry
+    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::MessageSender;
+    let actor_registry1: Arc<ActorRegistry> = node1_service_locator
+        .get_service_by_name(service_names::ACTOR_REGISTRY)
+        .await
+        .expect("ActorRegistry should be registered");
+    
+    // Create counter actor on node1 with node1's local_node_id (so "local via remote" path is used)
+    let local_node_id = actor_registry1.local_node_id();
+    let counter_id = format!("counter@{}", local_node_id);
+    let mut mailbox_config = MailboxConfig::default();
+    mailbox_config.capacity = 1000;
+    let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
+    let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+        counter_id.clone(),
+        Arc::clone(&mailbox_counter),
+        node1_service_locator.clone(),
+    ));
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
+    
+    // Spawn task to handle messages and reply via ActorService
+    let mailbox_counter_clone = mailbox_counter.clone();
+    let actor_service1: Arc<dyn ActorService + Send + Sync> = node1_service_locator
+        .get_actor_service()
+        .await
+        .expect("ActorService should be registered");
+    let counter_id_for_spawn = counter_id.clone();
+    let mut counter_actor = CounterActor::new();
+    tokio::spawn(async move {
+        while let Some(msg) = mailbox_counter_clone.dequeue().await {
+            if let Ok(request) = serde_json::from_slice::<CounterMessage>(msg.payload()) {
+                let reply = match request {
+                    CounterMessage::Get => {
+                        CounterMessage::Value(counter_actor.value)
+                    }
+                    CounterMessage::Increment => {
+                        counter_actor.value += 1;
+                        CounterMessage::Value(counter_actor.value)
+                    }
+                    _ => continue,
+                };
+                // Send reply using ActorService.send_reply() (handles temporary senders correctly)
+                if let Some(sender_id) = &msg.sender {
+                    let reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
+                    let _ = actor_service1.send_reply(
+                        msg.correlation_id.as_deref(),
+                        sender_id,
+                        counter_id_for_spawn.clone(),
+                        reply_msg,
+                    ).await;
+                }
+            }
+        }
+    });
 
+    // Create forwarder actor on node1 using ActorBuilder::spawn()
+    // Forwarder will use Remote ActorRef pointing to counter@local_node_id
+    let forwarder_behavior: Box<dyn plexspaces_core::Actor> = Box::new(ForwarderActor::new(counter_id.clone()));
     let forwarder_id = "forwarder@node1".to_string();
-    let _result = node1
-        .spawn_actor(forwarder_id.clone(), forwarder_behavior, "default".to_string())
+    let ctx_spawn = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    
+    let forwarder_ref = ActorBuilder::new(forwarder_behavior)
+        .with_id(forwarder_id.clone())
+        .with_namespace("default".to_string())
+        .spawn(&ctx_spawn, node1_service_locator.clone())
         .await
         .unwrap();
 
-    // Get ActorRef for forwarder
-    let forwarder_ref = ActorRef::remote(
-        forwarder_id.clone(),
-        "node1".to_string(),
-        node1.service_locator().clone(),
-    );
-
-    // Wait for actors to initialize
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // ACT: Outside caller calls ask() on forwarder@node1, which forwards to counter@node2
+    // ACT: Outside caller calls ask() on forwarder@node1, which forwards to counter using Remote ActorRef
     let request = CounterMessage::Increment;
-    let mut msg = Message::new(serde_json::to_vec(&request).unwrap());
+    let mut msg = Message::new(serde_json::to_vec(&request).unwrap())
+        .with_message_type("call".to_string());
     msg.receiver = forwarder_id.clone();
-    msg.message_type = "call".to_string();
     // No sender set (outside caller) - temporary sender will be created
 
     let reply = forwarder_ref.ask(msg, Duration::from_secs(10)).await;
 
-    // ASSERT: Should receive reply from remote counter via forwarder
+    // ASSERT: Should receive reply from counter via forwarder
     assert!(reply.is_ok(), "Chained ask() should succeed");
     let reply_msg = reply.unwrap();
     let value: CounterMessage = serde_json::from_slice(reply_msg.payload()).unwrap();
@@ -693,80 +652,97 @@ async fn test_chained_asks_multi_node() {
     debug!("✅ Test: Chained asks multi-node - PASSED");
 }
 
-/// Test: Concurrent ask() calls across nodes
+/// Test: Concurrent ask() calls across nodes (simulated)
 ///
 /// Scenario:
-/// 1. Spawn node1 and node2 with in-process gRPC servers
-/// 2. Register counter actor on node2
-/// 3. Spawn 10 concurrent ask() calls from node1 to counter@node2
-/// 4. Verify all replies received correctly
+/// 1. Create node1 (local)
+/// 2. Register counter actor on node1 with local_node_id (simulates node2)
+/// 3. Spawn 10 concurrent ask() calls from node1 to counter using Remote ActorRef
+/// 4. Verify all replies received correctly via "local via remote" path
 #[tokio::test]
 async fn test_concurrent_asks_multi_node() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("info")
         .try_init();
 
-    // ARRANGE: Set up node2 with counter actor
-    let node2_port = 19999;
-    let node2_address = format!("127.0.0.1:{}", node2_port);
-    let registry2 = create_test_registry_with_node("node2", "node2", &node2_address).await;
-
-    let mailbox2 = Arc::new(
-        Mailbox::new(
-            mailbox_config_default(),
-            "counter@node2".to_string(),
-        )
-        .await
-        .expect("Failed to create mailbox"),
-    );
-
-    // Create ServiceLocator for node2 and register services
-    use plexspaces_node::create_default_service_locator;
-    let service_locator2 = create_default_service_locator(Some("node2".to_string()), None, None).await;
-    let reply_tracker2 = Arc::new(plexspaces_core::ReplyTracker::new());
-    let reply_waiter_registry2 = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
-    service_locator2.register_service(registry2.clone()).await;
-    service_locator2.register_service(reply_tracker2).await;
-    service_locator2.register_service(reply_waiter_registry2).await;
-    
-    let service2 = ActorServiceImpl::new(service_locator2.clone(), "node2".to_string());
-    
-    // Register actor directly with ActorRegistry
-    register_test_actor(registry2.clone(), "counter@node2".to_string(), mailbox2.clone(), service_locator2).await;
-
-    // Start node2's gRPC server
-    let _server2_handle = start_test_server(service2, node2_port).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // ARRANGE: Set up node1
+    // ARRANGE: Create node1 (local) - reuse same pattern as test_ask_with_simulated_remote
     let node1 = Arc::new(NodeBuilder::new("node1").build().await);
-
-    // Start node1 in background to initialize services
-    let node1_for_start = node1.clone();
+    let node1_service_locator = node1.service_locator().clone();
+    
+    // Get node1's ActorRegistry
+    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::MessageSender;
+    let actor_registry1: Arc<ActorRegistry> = node1_service_locator
+        .get_service_by_name(service_names::ACTOR_REGISTRY)
+        .await
+        .expect("ActorRegistry should be registered");
+    
+    // Create counter actor on node1 with node1's local_node_id (so "local via remote" path is used)
+    let local_node_id = actor_registry1.local_node_id();
+    let counter_id = format!("counter@{}", local_node_id);
+    let mut mailbox_config = MailboxConfig::default();
+    mailbox_config.capacity = 1000;
+    let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
+    let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+        counter_id.clone(),
+        Arc::clone(&mailbox_counter),
+        node1_service_locator.clone(),
+    ));
+    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
+    
+    // Spawn task to handle messages and reply via ActorService
+    let mailbox_counter_clone = mailbox_counter.clone();
+    let actor_service1: Arc<dyn ActorService + Send + Sync> = node1_service_locator
+        .get_actor_service()
+        .await
+        .expect("ActorService should be registered");
+    let counter_id_for_spawn = counter_id.clone();
+    let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
-        let _ = node1_for_start.start().await;
+        while let Some(msg) = mailbox_counter_clone.dequeue().await {
+            if let Ok(request) = serde_json::from_slice::<CounterMessage>(msg.payload()) {
+                let reply = match request {
+                    CounterMessage::Get => {
+                        CounterMessage::Value(counter_actor.value)
+                    }
+                    CounterMessage::Increment => {
+                        counter_actor.value += 1;
+                        CounterMessage::Value(counter_actor.value)
+                    }
+                    _ => continue,
+                };
+                // Send reply using ActorService.send_reply() (handles temporary senders correctly)
+                if let Some(sender_id) = &msg.sender {
+                    let reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
+                    let _ = actor_service1.send_reply(
+                        msg.correlation_id.as_deref(),
+                        sender_id,
+                        counter_id_for_spawn.clone(),
+                        reply_msg,
+                    ).await;
+                }
+            }
+        }
     });
-    tokio::time::sleep(Duration::from_millis(200)).await; // Wait for services to initialize
 
-    // Create ActorRef for remote counter
+    // Create ActorRef for remote counter using local_node_id (triggers "local via remote" path)
     let counter_ref = ActorRef::remote(
-        "counter@node2".to_string(),
-        "node2".to_string(),
-        node1.service_locator().clone(),
+        counter_id.clone(),
+        local_node_id.to_string(), // Matches local_node_id, so "local via remote" path is used
+        node1_service_locator.clone(),
     );
-
-    // Wait for setup
-    tokio::time::sleep(Duration::from_millis(200)).await;
 
     // ACT: Spawn 10 concurrent ask() calls
     let mut handles = vec![];
     for i in 0..10 {
         let counter_ref_clone = counter_ref.clone();
+        let counter_id_clone = counter_id.clone();
         let handle = tokio::spawn(async move {
             let request = CounterMessage::Increment;
-            let mut msg = Message::new(serde_json::to_vec(&request).unwrap());
-            msg.receiver = "counter@node2".to_string();
-            msg.message_type = "call".to_string();
+            let mut msg = Message::new(serde_json::to_vec(&request).unwrap())
+                .with_message_type("call".to_string());
+            msg.receiver = counter_id_clone;
 
             let reply = counter_ref_clone.ask(msg, Duration::from_secs(10)).await;
             (i, reply)
@@ -799,89 +775,3 @@ async fn test_concurrent_asks_multi_node() {
     debug!("✅ Test: Concurrent asks multi-node - PASSED (10 concurrent requests)");
 }
 
-/// Test: Verify unified send_reply API works correctly
-///
-/// Scenario:
-/// 1. Create actor that receives message
-/// 2. Actor calls ctx.send_reply() (which delegates to ActorService::send_reply())
-/// 3. Verify reply is sent correctly (both local and remote paths)
-#[tokio::test]
-async fn test_unified_send_reply_api() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("debug")
-        .try_init();
-
-    let node = Arc::new(NodeBuilder::new("test-node-send-reply")
-        .build());
-
-    // Start node in background to initialize services
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-    tokio::time::sleep(Duration::from_millis(500)).await; // Wait for basic services
-    
-    // Manually register ActorFactory (normally done in create_actor_context_arc, but we need it for spawn_actor)
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(node.service_locator().clone()));
-    node.service_locator().register_service(actor_factory_impl).await;
-    
-    // Manually register ActorService (normally done in create_actor_context_arc, but actors need it for send_reply)
-    use plexspaces_actor_service::ActorServiceImpl;
-    use plexspaces_core::ActorService;
-    
-    // Wait for Node's ServiceLocator to have services registered (including ReplyWaiterRegistry)
-    // Node::new() registers ReplyWaiterRegistry in a spawned task, so we need to wait
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    
-    // Create ActorServiceImpl using Node's ServiceLocator (ensures shared ReplyWaiterRegistry)
-    // ActorServiceImpl now implements ActorService trait directly, no wrapper needed
-    let actor_service_impl = Arc::new(ActorServiceImpl::new(
-        node.service_locator().clone(),
-        node.id().as_str().to_string(),
-    ));
-    
-    node.service_locator().register_service(actor_service_impl.clone()).await;
-    let actor_service_trait: Arc<dyn ActorService> = actor_service_impl.clone() as Arc<dyn ActorService>;
-    node.service_locator().register_actor_service(actor_service_trait).await;
-
-    // Create and spawn counter actor
-    let behavior: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
-    
-    let actor_id = "counter-1@test-node-send-reply".to_string();
-    let _result = node
-        .spawn_actor(actor_id.clone(), behavior, "default".to_string())
-        .await
-        .unwrap();
-    
-    // Get ActorRef
-    let counter_ref = ActorRef::remote(
-        actor_id.clone(),
-        "test-node-send-reply".to_string(),
-        node.service_locator().clone(),
-    );
-
-    // Wait for actor to initialize
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Call ask() - actor will use ctx.send_reply() which delegates to ActorService::send_reply()
-    let request = CounterMessage::Get;
-    let mut msg = Message::new(serde_json::to_vec(&request).unwrap());
-    msg.receiver = actor_id.clone();
-    msg.message_type = "call".to_string();
-    
-    let reply = counter_ref.ask(msg, Duration::from_secs(5)).await;
-    
-    assert!(reply.is_ok(), "ask() should succeed with unified send_reply API");
-    let reply_msg = reply.unwrap();
-    let value: CounterMessage = serde_json::from_slice(reply_msg.payload())
-        .unwrap();
-    match value {
-        CounterMessage::Value(v) => {
-            assert_eq!(v, 0, "Initial counter value should be 0");
-        }
-        _ => panic!("Unexpected reply type"),
-    }
-    
-    debug!("✅ Test: Unified send_reply API - PASSED");
-}

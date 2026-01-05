@@ -71,7 +71,15 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         use plexspaces_node::create_default_service_locator;
         let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-        let actor_ref = ActorRef::local("test@node1".to_string(), Arc::clone(&mailbox), service_locator);
+        let actor_ref = ActorRef::local("test@node1".to_string(), Arc::clone(&mailbox), service_locator.clone());
+        
+        // Register actor before calling tell()
+        use plexspaces_core::{ActorRegistry, RequestContext};
+        if let Some(registry) = service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
+            let ctx = RequestContext::internal();
+            let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+            registry.register_actor(&ctx, "test@node1".to_string(), sender, None, None, None).await;
+        }
         
         let ttl = Duration::from_millis(10);
         let message = Message::new(b"test".to_vec()).with_ttl(ttl);

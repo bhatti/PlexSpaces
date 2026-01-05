@@ -27,6 +27,17 @@ mod ddb_tests {
     use plexspaces_core::RequestContext;
     use plexspaces_proto::storage::v1::BlobMetadata;
     use prost_types::Timestamp;
+    use plexspaces_common::test_helpers::dynamodb_local_available;
+
+    /// Helper to check if DynamoDB simulator is available and skip test with warning if not
+    async fn check_ddb_available() -> bool {
+        if !dynamodb_local_available().await {
+            eprintln!("⚠️  WARNING: DynamoDB Local simulator is not running. Skipping DDB test.");
+            eprintln!("   To run DDB tests, start DynamoDB Local: docker run -p 8000:8000 amazon/dynamodb-local");
+            return false;
+        }
+        true
+    }
 
     /// Helper to create DynamoDB repository for testing
     async fn create_ddb_repository() -> DynamoDBBlobRepository {
@@ -88,6 +99,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_save_and_get() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -103,6 +117,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_nonexistent() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -112,6 +129,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_by_sha256() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -125,6 +145,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_update() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -140,6 +163,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_delete() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -158,6 +184,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -173,6 +202,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_with_name_prefix() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -195,6 +227,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_with_blob_group() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -217,6 +252,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_find_expired() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx = tenant1_ctx();
 
@@ -245,6 +283,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_tenant_isolation() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx1 = tenant1_ctx();
         let ctx2 = tenant2_ctx();
@@ -272,6 +313,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_tenant_isolation_delete() {
+        if !check_ddb_available().await {
+            return;
+        }
         let repo = create_ddb_repository().await;
         let ctx1 = tenant1_ctx();
         let ctx2 = tenant2_ctx();

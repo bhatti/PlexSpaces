@@ -17,15 +17,17 @@ mod sqlite_tests {
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
-        })
+        });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
+        value
     }
 
     /// Simple protobuf message for testing
@@ -202,7 +204,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-side-effect";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -316,7 +318,7 @@ mod sqlite_tests {
             state_schema_version: 1,
         };
 
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-multiple-side-effects";
 
         facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();

@@ -3,7 +3,7 @@
 //
 //! Integration tests for gRPC Health and Metrics endpoints
 
-use plexspaces_node::{Node, NodeId, default_node_config};
+use plexspaces_node::{Node, NodeId, NodeBuilder, default_node_config};
 use plexspaces_proto::system::v1::ServingStatus;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
@@ -328,7 +328,7 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
     use plexspaces_node::grpc_service::ActorServiceImpl;
     use plexspaces_proto::v1::actor::actor_service_server::ActorService;
     
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let health_reporter = create_health_reporter();
     health_reporter.mark_startup_complete(None).await;
     
@@ -343,6 +343,7 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
+        namespace: "default".to_string(),
     });
     
     let result = actor_service.create_actor(request).await;
@@ -360,7 +361,7 @@ async fn test_grpc_service_accepts_requests_when_serving() {
     use plexspaces_node::grpc_service::ActorServiceImpl;
     use plexspaces_proto::v1::actor::actor_service_server::ActorService;
     
-    let node = Arc::new(NodeBuilder::new("test-node").build());
+    let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let health_reporter = create_health_reporter();
     health_reporter.mark_startup_complete(None).await;
     
@@ -372,6 +373,7 @@ async fn test_grpc_service_accepts_requests_when_serving() {
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
+        namespace: "default".to_string(),
     });
     
     let result = actor_service.create_actor(request).await;

@@ -30,6 +30,18 @@ mod ddb_tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use plexspaces_common::test_helpers::dynamodb_local_available;
+
+    /// Helper to check if DynamoDB simulator is available and skip test with warning if not
+    async fn check_ddb_available() -> bool {
+        if !dynamodb_local_available().await {
+            eprintln!("⚠️  WARNING: DynamoDB Local simulator is not running. Skipping DDB test.");
+            eprintln!("   To run DDB tests, start DynamoDB Local: docker run -p 8000:8000 amazon/dynamodb-local");
+            return false;
+        }
+        true
+    }
+
     /// Helper to create DynamoDB storage for testing
     async fn create_ddb_storage() -> DynamoDBWorkflowStorage {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
@@ -71,6 +83,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_save_and_get_definition() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -92,6 +107,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_save_definition_overwrites() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -114,6 +132,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_definition_not_found() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -124,6 +145,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_definitions() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -152,6 +176,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_definitions_with_prefix() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -181,6 +208,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_delete_definition() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -205,6 +235,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_create_and_get_execution() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -235,6 +268,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_create_execution_with_node() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -265,6 +301,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_update_execution_status() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -291,6 +330,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_update_execution_status_with_version() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -324,6 +366,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_update_execution_output() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -352,6 +397,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_transfer_ownership() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -387,6 +435,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_update_heartbeat() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -445,6 +496,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_create_and_get_step_execution() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -477,6 +531,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_complete_step_execution() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -517,6 +574,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_get_step_execution_history() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -554,6 +614,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_send_and_check_signal() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -591,6 +654,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_executions_by_status() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -633,6 +699,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_list_stale_executions() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx = tenant1_ctx();
 
@@ -686,6 +755,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_tenant_isolation_definitions() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx1 = tenant1_ctx();
         let ctx2 = tenant2_ctx();
@@ -723,6 +795,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_tenant_isolation_executions() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let ctx1 = tenant1_ctx();
         let ctx2 = tenant2_ctx();

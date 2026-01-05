@@ -131,10 +131,28 @@ where
             self.remove(&key);
         }
     }
+
+    fn remove_matching<F>(&mut self, predicate: F) -> usize
+    where
+        F: Fn(&K) -> bool,
+    {
+        let matching_keys: Vec<K> = self
+            .map
+            .keys()
+            .filter(|key| predicate(key))
+            .cloned()
+            .collect();
+        
+        let count = matching_keys.len();
+        for key in matching_keys {
+            self.remove(&key);
+        }
+        count
+    }
 }
 
 /// Global discovery cache (shared across all discovery operations)
-/// Cache key format: "{object_type}:{category}" (e.g., "node:", "application:myapp", "workflow:def1")
+/// Cache key format: "{object_type}:{category}:{tenant_id}:{namespace}" (e.g., "node:internal:system", "application:myapp:internal:system")
 type CacheKey = String;
 static DISCOVERY_CACHE: once_cell::sync::Lazy<Arc<RwLock<DiscoveryCache<CacheKey, Vec<ObjectRegistration>>>>> =
     once_cell::sync::Lazy::new(|| {
@@ -143,6 +161,15 @@ static DISCOVERY_CACHE: once_cell::sync::Lazy<Arc<RwLock<DiscoveryCache<CacheKey
             Duration::from_secs(60), // 60 second TTL
         )))
     });
+
+/// Clear the discovery cache (test-only helper)
+/// This is useful for tests to ensure clean state between test runs
+/// Note: This function is public for use in integration tests but should not be used in production code
+pub async fn clear_discovery_cache() {
+    let mut cache = DISCOVERY_CACHE.write().await;
+    cache.map.clear();
+    cache.queue.clear();
+}
 
 /// Register a node in object-registry
 ///
@@ -186,10 +213,10 @@ pub async fn register_node<T: ObjectRegistryTrait + ?Sized>(
         ..Default::default()
     };
     
-    // Invalidate cache for nodes
-    let cache_key = format!("node:");
+    // Invalidate all node cache entries for this tenant/namespace to prevent stale data
+    let tenant_ns_pattern = format!("node:{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
-    cache.remove(&cache_key);
+    cache.remove_matching(|key| key.starts_with(&tenant_ns_pattern));
     
     object_registry.register(ctx, registration).await
 }
@@ -238,10 +265,11 @@ pub async fn register_application<T: ObjectRegistryTrait + ?Sized>(
         ..Default::default()
     };
     
-    // Invalidate cache for this application
-    let cache_key = format!("application:{}", app_name);
+    // Invalidate all application cache entries for this tenant/namespace to prevent stale data
+    // Cache key format: "application:{app_name}:{tenant_id}:{namespace}"
+    let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
-    cache.remove(&cache_key);
+    cache.remove_matching(|key| key.starts_with("application:") && key.ends_with(&tenant_ns_suffix));
     
     object_registry.register(ctx, registration).await
 }
@@ -265,10 +293,11 @@ pub async fn unregister_application(
     let object_id = format!("{}@{}", app_name, node_id);
     // Use lookup_full to get the registration, then we'd need to call unregister
     // For now, this is a placeholder - unregister would need to be added to the trait
-    // Invalidate cache
-    let cache_key = format!("application:{}", app_name);
+    // Invalidate all application cache entries for this tenant/namespace to prevent stale data
+    // Cache key format: "application:{app_name}:{tenant_id}:{namespace}"
+    let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
-    cache.remove(&cache_key);
+    cache.remove_matching(|key| key.starts_with("application:") && key.ends_with(&tenant_ns_suffix));
     
     Err(Box::new(std::io::Error::new(std::io::ErrorKind::Unsupported, "Unregister not yet implemented via trait")))
 }
@@ -316,10 +345,11 @@ pub async fn register_workflow<T: ObjectRegistryTrait + ?Sized>(
         ..Default::default()
     };
     
-    // Invalidate cache for this workflow definition
-    let cache_key = format!("workflow:{}", definition_id);
+    // Invalidate all workflow cache entries for this tenant/namespace to prevent stale data
+    // Cache key format: "workflow:{definition_id}:{tenant_id}:{namespace}"
+    let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
-    cache.remove(&cache_key);
+    cache.remove_matching(|key| key.starts_with("workflow:") && key.ends_with(&tenant_ns_suffix));
     
     object_registry.register(ctx, registration).await
 }
@@ -339,7 +369,8 @@ pub async fn discover_nodes<T: ObjectRegistryTrait + ?Sized>(
     object_registry: &Arc<T>,
     ctx: &RequestContext,
 ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-    let cache_key = "node:".to_string();
+    // Tenant-aware cache key to ensure proper isolation
+    let cache_key = format!("node:{}:{}", ctx.tenant_id(), ctx.namespace());
     
     // Check cache first
     {
@@ -387,7 +418,8 @@ pub async fn discover_application_nodes<T: ObjectRegistryTrait + ?Sized>(
     ctx: &RequestContext,
     app_name: &str,
 ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-    let cache_key = format!("application:{}", app_name);
+    // Tenant-aware cache key to ensure proper isolation
+    let cache_key = format!("application:{}:{}:{}", app_name, ctx.tenant_id(), ctx.namespace());
     
     // Check cache first
     {
@@ -435,7 +467,8 @@ pub async fn discover_workflow_nodes<T: ObjectRegistryTrait + ?Sized>(
     ctx: &RequestContext,
     definition_id: &str,
 ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-    let cache_key = format!("workflow:{}", definition_id);
+    // Tenant-aware cache key to ensure proper isolation
+    let cache_key = format!("workflow:{}:{}:{}", definition_id, ctx.tenant_id(), ctx.namespace());
     
     // Check cache first
     {

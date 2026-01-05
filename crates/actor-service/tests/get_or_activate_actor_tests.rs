@@ -176,7 +176,8 @@ async fn test_get_or_activate_existing_active_actor() {
 
     // Create an actor first
     let actor_id = "counter@node1".to_string();
-    let ctx = RequestContext::internal();
+    // Use proper RequestContext with default tenant/namespace (not internal - violates tenant isolation)
+    let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let behavior = CounterActor::new();
     let _actor_ref = ActorBuilder::new(Box::new(behavior))
         .with_id(actor_id.clone())
@@ -184,8 +185,7 @@ async fn test_get_or_activate_existing_active_actor() {
         .await
         .expect("Failed to spawn actor");
 
-    // Wait a bit for actor to be fully registered
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // Actor registration is synchronous - no wait needed
 
     // Call get_or_activate_actor
     let request = GetOrActivateActorRequest {
@@ -348,7 +348,8 @@ async fn test_get_or_activate_force_activation() {
 
     // Create an actor first
     let actor_id = "counter-force@node1".to_string();
-    let ctx = RequestContext::internal();
+    // Use proper RequestContext with default tenant/namespace (not internal - violates tenant isolation)
+    let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let behavior = CounterActor::new();
     let _actor_ref = ActorBuilder::new(Box::new(behavior))
         .with_id(actor_id.clone())
@@ -356,8 +357,7 @@ async fn test_get_or_activate_force_activation() {
         .await
         .expect("Failed to spawn actor");
 
-    // Wait a bit for actor to be fully registered
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // Actor registration is synchronous - no wait needed
 
     // Call with force_activation = true
     let request = GetOrActivateActorRequest {

@@ -53,7 +53,7 @@ async fn create_test_node() -> Arc<Node> {
     use plexspaces_node::NodeBuilder;
     Arc::new(NodeBuilder::new("test-node")
         .with_listen_address("127.0.0.1:0")
-        .build())
+        .build().await)
 }
 
 async fn create_test_node_with_service() -> (Arc<Node>, String) {
@@ -156,9 +156,7 @@ async fn test_deploy_wasm_application_success() {
     sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService using node's application_manager
-    let application_manager = Arc::new(
-        node.application_manager().read().await.clone()
-    );
+    let application_manager = node.application_manager().await.unwrap();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager);
 
     // Create WASM module
@@ -211,9 +209,7 @@ async fn test_deploy_wasm_application_invalid_module() {
     sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService using node's application_manager
-    let application_manager = Arc::new(
-        node.application_manager().read().await.clone()
-    );
+    let application_manager = node.application_manager().await.unwrap();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager);
 
     // Create invalid WASM module (empty bytes)
@@ -265,9 +261,7 @@ async fn test_deploy_wasm_application_missing_fields() {
     sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService using node's application_manager
-    let application_manager = Arc::new(
-        node.application_manager().read().await.clone()
-    );
+    let application_manager = node.application_manager().await.unwrap();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager);
 
     // Test missing application_id
@@ -315,9 +309,7 @@ async fn test_get_wasm_application_status() {
     sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService - use same instance for deploy and status
-    let application_manager = Arc::new(
-        node.application_manager().read().await.clone()
-    );
+    let application_manager = node.application_manager().await.unwrap();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager.clone());
 
     // Deploy application first
@@ -387,9 +379,7 @@ async fn test_list_wasm_applications() {
     sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService
-    let application_manager = Arc::new(
-        node.application_manager().read().await.clone()
-    );
+    let application_manager = node.application_manager().await.unwrap();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager.clone());
 
     // Deploy multiple applications
@@ -455,9 +445,7 @@ async fn test_get_nonexistent_wasm_application_status() {
     sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService using node's application_manager
-    let application_manager = Arc::new(
-        node.application_manager().read().await.clone()
-    );
+    let application_manager = node.application_manager().await.unwrap();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager);
 
     // Get status for non-existent application
@@ -486,9 +474,7 @@ async fn test_deploy_wasm_application_with_supervisor_tree() {
     // Test deploying WASM application with supervisor tree from ApplicationSpec
     let (node, _) = create_test_node_with_service().await;
     
-    let application_manager = Arc::new(
-        node.application_manager().read().await.clone()
-    );
+    let application_manager = node.application_manager().await.unwrap();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager);
 
     // Create WASM module with supervisor spec
@@ -516,9 +502,8 @@ async fn test_deploy_wasm_application_with_supervisor_tree() {
     sleep(Duration::from_millis(500)).await;
 
     // Verify application is running
-    let app_manager = node.application_manager();
-    let app_manager_guard = app_manager.read().await;
-    let app_state = app_manager_guard.get_state("test-app").await;
+    let app_manager = node.application_manager().await.unwrap();
+    let app_state = app_manager.get_state("test-app").await;
     assert!(app_state.is_some());
     assert_eq!(
         app_state.unwrap(),
@@ -531,9 +516,7 @@ async fn test_undeploy_wasm_application_with_supervisor_tree() {
     // Test undeploying WASM application with supervisor tree (graceful shutdown)
     let (node, _) = create_test_node_with_service().await;
     
-    let application_manager = Arc::new(
-        node.application_manager().read().await.clone()
-    );
+    let application_manager = node.application_manager().await.unwrap();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager);
 
     // Deploy application with supervisor tree
@@ -574,9 +557,8 @@ async fn test_undeploy_wasm_application_with_supervisor_tree() {
     sleep(Duration::from_millis(500)).await;
 
     // Verify application is stopped
-    let app_manager = node.application_manager();
-    let app_manager_guard = app_manager.read().await;
-    let app_state = app_manager_guard.get_state("shutdown-app").await;
+    let app_manager = node.application_manager().await.unwrap();
+    let app_state = app_manager.get_state("shutdown-app").await;
     assert!(app_state.is_some());
     assert_eq!(
         app_state.unwrap(),

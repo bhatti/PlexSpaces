@@ -156,6 +156,10 @@ pub struct Supervisor {
     /// ServiceLocator for creating ActorRefs with service access
     /// Required for creating ActorRefs (both local and remote need ServiceLocator)
     service_locator: Option<Arc<ServiceLocator>>,
+    /// Default shutdown timeout for "infinity" shutdowns (prevents deadlocks)
+    /// None = use default (1 second), Some(duration) = use custom timeout
+    /// This is configurable for testing purposes
+    default_shutdown_timeout: Option<Duration>,
 }
 
 /// Supervised actor wrapper
@@ -336,6 +340,7 @@ impl Supervisor {
             _shutdown_rx: Some(shutdown_rx),
             node: None, // No Node by default (standalone mode)
             service_locator: None, // No ServiceLocator by default
+            default_shutdown_timeout: None, // Use default 1 second for tests
         };
 
         (supervisor, event_rx)
@@ -762,16 +767,59 @@ impl Supervisor {
     }
 
     /// Handle child failure
+    /// 
+    /// ## Arguments
+    /// * `id` - Actor ID that failed
+    /// * `reason` - Failure reason (string, for backward compatibility)
+    /// * `exit_reason` - Exit reason (None if unknown, will be parsed from reason string)
     #[instrument(skip(self), fields(supervisor_id = %self.id, child_id = %id, reason = %reason))]
     pub async fn handle_failure(
         &self,
         id: &ActorId,
         reason: String,
+        exit_reason: Option<plexspaces_core::ExitReason>,
     ) -> Result<(), SupervisorError> {
+        // Parse exit_reason from reason string if not provided
+        let exit_reason = exit_reason.or_else(|| {
+            // Try to parse from reason string
+            if reason == "normal" {
+                Some(plexspaces_core::ExitReason::Normal)
+            } else if reason == "shutdown" {
+                Some(plexspaces_core::ExitReason::Shutdown)
+            } else if reason == "killed" {
+                Some(plexspaces_core::ExitReason::Killed)
+            } else if reason.starts_with("linked:") {
+                // Parse linked reason (format: "linked:actor_id:reason")
+                let parts: Vec<&str> = reason.splitn(3, ':').collect();
+                if parts.len() == 3 {
+                    let linked_id = parts[1].to_string();
+                    let linked_reason_str = parts[2];
+                    let linked_reason = if linked_reason_str == "normal" {
+                        plexspaces_core::ExitReason::Normal
+                    } else if linked_reason_str == "shutdown" {
+                        plexspaces_core::ExitReason::Shutdown
+                    } else if linked_reason_str == "killed" {
+                        plexspaces_core::ExitReason::Killed
+                    } else {
+                        plexspaces_core::ExitReason::Error(linked_reason_str.to_string())
+                    };
+                    Some(plexspaces_core::ExitReason::Linked {
+                        actor_id: linked_id.into(),
+                        reason: Box::new(linked_reason),
+                    })
+                } else {
+                    None
+                }
+            } else {
+                Some(plexspaces_core::ExitReason::Error(reason.clone()))
+            }
+        });
+        
         warn!(
             supervisor_id = %self.id,
             child_id = %id,
             reason = %reason,
+            exit_reason = ?exit_reason,
             "Handling child failure"
         );
         // Record failure pattern (in a separate scope to release lock immediately)
@@ -803,19 +851,19 @@ impl Supervisor {
                 max_restarts,
                 within_seconds,
             } => {
-                self.restart_one(id, max_restarts, within_seconds).await?;
+                self.restart_one(id, max_restarts, within_seconds, exit_reason).await?;
             }
             SupervisionStrategy::OneForAll {
                 max_restarts,
                 within_seconds,
             } => {
-                self.restart_all(max_restarts, within_seconds).await?;
+                self.restart_all(max_restarts, within_seconds, exit_reason.clone()).await?;
             }
             SupervisionStrategy::RestForOne {
                 max_restarts,
                 within_seconds,
             } => {
-                self.restart_rest_for_one(id, max_restarts, within_seconds)
+                self.restart_rest_for_one(id, max_restarts, within_seconds, exit_reason.clone())
                     .await?;
             }
             SupervisionStrategy::Adaptive {
@@ -884,6 +932,7 @@ impl Supervisor {
                         .handle_failure(
                             &self.id,
                             format!("Child supervisor {} exceeded max restarts", supervisor_id),
+                            Some(plexspaces_core::ExitReason::Error(format!("Max restarts exceeded"))),
                         )
                         .await;
                 }
@@ -901,8 +950,12 @@ impl Supervisor {
                         .await?;
                 }
                 RestartPolicy::Transient => {
-                    // Only restart on abnormal exit
-                    // TODO: Check if exit was abnormal
+                    // Erlang/OTP semantics: Only restart on abnormal exit
+                    // For supervisor restarts, we don't have exit_reason in this context
+                    // Since supervisor restarts are typically from child failures (abnormal),
+                    // we restart by default. If we need to track exit reasons for supervisors,
+                    // we would need to pass exit_reason to restart_supervisor().
+                    // For now, restart on supervisor termination (conservative approach)
                     self.perform_supervisor_restart(supervised_supervisor)
                         .await?;
                 }
@@ -978,11 +1031,18 @@ impl Supervisor {
     }
 
     /// Restart a single actor (one-for-one)
+    /// 
+    /// ## Arguments
+    /// * `id` - Actor ID to restart
+    /// * `max_restarts` - Maximum number of restarts allowed
+    /// * `within_seconds` - Time window for max_restarts
+    /// * `exit_reason` - Exit reason for the termination (None if unknown)
     async fn restart_one(
         &self,
         id: &ActorId,
         max_restarts: u32,
         within_seconds: u64,
+        exit_reason: Option<plexspaces_core::ExitReason>,
     ) -> Result<(), SupervisorError> {
         let mut children = self.children.write().await;
         let mut stats = self.stats.write().await;
@@ -1020,12 +1080,58 @@ impl Supervisor {
             // Apply restart policy
             match child.spec.restart {
                 RestartPolicy::Permanent => {
+                    // Always restart (regardless of exit reason)
                     self.perform_restart(child, &mut stats).await?;
                 }
                 RestartPolicy::Transient => {
-                    // Only restart on abnormal exit
-                    // TODO: Check if exit was abnormal
-                    self.perform_restart(child, &mut stats).await?;
+                    // Erlang/OTP semantics: Only restart on abnormal exit
+                    // Normal exits: Normal, Shutdown
+                    // Abnormal exits: Error, Killed, Linked(abnormal)
+                    let should_restart = match &exit_reason {
+                        Some(reason) => {
+                            // Check if exit was abnormal
+                            match reason {
+                                plexspaces_core::ExitReason::Normal | plexspaces_core::ExitReason::Shutdown => {
+                                    // Normal termination - don't restart
+                                    false
+                                }
+                                plexspaces_core::ExitReason::Error(_) | plexspaces_core::ExitReason::Killed => {
+                                    // Abnormal termination - restart
+                                    true
+                                }
+                                plexspaces_core::ExitReason::Linked { reason: linked_reason, .. } => {
+                                    // Linked actor died - check if the linked reason was abnormal
+                                    // If linked actor died with normal/shutdown, this is still normal
+                                    // If linked actor died with error/killed, this is abnormal
+                                    matches!(linked_reason.as_ref(), 
+                                        plexspaces_core::ExitReason::Error(_) | plexspaces_core::ExitReason::Killed)
+                                }
+                            }
+                        }
+                        None => {
+                            // If exit reason is unknown, assume abnormal (conservative approach)
+                            // This ensures we restart if we can't determine the reason
+                            warn!(
+                                supervisor_id = %self.id,
+                                child_id = %id,
+                                "Exit reason unknown for Transient actor, assuming abnormal (restarting)"
+                            );
+                            true
+                        }
+                    };
+                    
+                    if should_restart {
+                        self.perform_restart(child, &mut stats).await?;
+                    } else {
+                        info!(
+                            supervisor_id = %self.id,
+                            child_id = %id,
+                            exit_reason = ?exit_reason,
+                            "Transient actor terminated normally (Normal/Shutdown), not restarting"
+                        );
+                        // Don't restart - actor terminated normally (Erlang/OTP semantics)
+                        return Ok(());
+                    }
                 }
                 RestartPolicy::Temporary => {
                     // Don't restart
@@ -1074,13 +1180,14 @@ impl Supervisor {
         &self,
         max_restarts: u32,
         within_seconds: u64,
+        exit_reason: Option<plexspaces_core::ExitReason>,
     ) -> Result<(), SupervisorError> {
         let children = self.children.read().await;
         let ids: Vec<ActorId> = children.keys().cloned().collect();
         drop(children);
 
         for id in ids {
-            self.restart_one(&id, max_restarts, within_seconds).await?;
+            self.restart_one(&id, max_restarts, within_seconds, exit_reason.clone()).await?;
         }
 
         Ok(())
@@ -1092,6 +1199,7 @@ impl Supervisor {
         failed_id: &ActorId,
         max_restarts: u32,
         within_seconds: u64,
+        exit_reason: Option<plexspaces_core::ExitReason>,
     ) -> Result<(), SupervisorError> {
         // IndexMap preserves insertion order, so we can find position of failed actor
         // and restart all actors from that position onwards
@@ -1119,7 +1227,7 @@ impl Supervisor {
 
         // Restart all actors in order (failed + rest)
         for id in ids_to_restart {
-            self.restart_one(&id, max_restarts, within_seconds).await?;
+            self.restart_one(&id, max_restarts, within_seconds, exit_reason.clone()).await?;
         }
 
         Ok(())
@@ -1194,19 +1302,19 @@ impl Supervisor {
                 max_restarts,
                 within_seconds,
             } => {
-                self.restart_one(id, max_restarts, within_seconds).await?;
+                self.restart_one(id, max_restarts, within_seconds, None).await?;
             }
             SupervisionStrategy::OneForAll {
                 max_restarts,
                 within_seconds,
             } => {
-                self.restart_all(max_restarts, within_seconds).await?;
+                self.restart_all(max_restarts, within_seconds, None).await?;
             }
             SupervisionStrategy::RestForOne {
                 max_restarts,
                 within_seconds,
             } => {
-                self.restart_rest_for_one(id, max_restarts, within_seconds)
+                self.restart_rest_for_one(id, max_restarts, within_seconds, None)
                     .await?;
             }
             _ => {
@@ -1216,7 +1324,7 @@ impl Supervisor {
                     within_seconds,
                 } = initial_strategy
                 {
-                    self.restart_one(id, *max_restarts, *within_seconds).await?;
+                    self.restart_one(id, *max_restarts, *within_seconds, None).await?;
                 }
             }
         }
@@ -1384,48 +1492,80 @@ impl Supervisor {
     pub async fn shutdown(&mut self) -> Result<(), SupervisorError> {
         info!(
             supervisor_id = %self.id,
-            "Starting supervisor shutdown"
+            "Starting supervisor shutdown (Erlang/OTP-style cascading shutdown)"
         );
+        
         // Phase 1: Shutdown child supervisors first (they shutdown their children recursively)
         // Reverse order to shutdown in opposite order of start (Erlang/OTP convention)
-        let mut child_supervisors = self.child_supervisors.write().await;
-
-        // Collect IDs in reverse order
-        let supervisor_ids: Vec<String> = child_supervisors.keys().rev().cloned().collect();
-
-        for id in supervisor_ids {
-            if let Some(mut supervised_supervisor) = child_supervisors.shift_remove(&id) {
-                // Phase 3: Unregister parent-child relationship in ActorRegistry
-                if let Some(service_locator) = &self.service_locator {
-                    if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
-                        let supervisor_id = ActorId::from(self.id.clone());
-                        let child_supervisor_id = ActorId::from(id.clone());
-                        registry.unregister_parent_child(&supervisor_id, &child_supervisor_id).await;
-                    }
+        // CRITICAL: Collect all supervisor info first, then release lock before recursive calls
+        //
+        // Expected Behavior:
+        // 1. Child supervisors are shut down first (in reverse start order)
+        //    - Each child supervisor recursively shuts down its own children
+        //    - Parent-child relationships are unregistered from ActorRegistry
+        //    - Supervisor task handles are aborted
+        // 2. Then child actors are shut down (in reverse start order)
+        //    - Shutdown timeout is enforced per actor (BrutalKill, Timeout, Infinity)
+        //    - Facet lifecycle hooks are executed (on_terminate_start, on_detach)
+        //    - Parent-child relationships are unregistered
+        // 3. All children are removed from internal maps
+        // 4. Supervisor enters stopped state
+        //
+        // Deadlock Prevention:
+        // - All child info is collected BEFORE any await points
+        // - Locks are released BEFORE recursive shutdown() calls
+        // - This prevents deadlocks when children try to acquire their own locks
+        let mut supervisor_info: Vec<(String, Arc<RwLock<Supervisor>>, Option<tokio::task::JoinHandle<()>>, Option<u64>)> = {
+            let mut child_supervisors = self.child_supervisors.write().await;
+            let mut info = Vec::new();
+            let ids: Vec<String> = child_supervisors.keys().rev().cloned().collect();
+            for id in ids {
+                if let Some(mut supervised) = child_supervisors.shift_remove(&id) {
+                    let handle = supervised.handle.take();
+                    info.push((
+                        id.clone(),
+                        supervised.supervisor.clone(),
+                        handle,
+                        supervised.shutdown_timeout_ms,
+                    ));
                 }
-
-                // Abort the supervisor's task handle
-                if let Some(handle) = supervised_supervisor.handle.take() {
-                    handle.abort();
-                }
-
-                // Call shutdown on the child supervisor (recursive!)
-                if let Ok(mut child_supervisor) = supervised_supervisor.supervisor.try_write() {
-                    let _timeout = supervised_supervisor
-                        .shutdown_timeout_ms
-                        .map(Duration::from_millis);
-
-                    // Recursive call: child supervisor shuts down its own children
-                    // Use Box::pin to enable recursion in async fn
-                    let _ = Box::pin(child_supervisor.shutdown()).await;
-                }
-
-                // Emit ChildStopped event for child supervisor
-                let _ = self.event_tx.send(SupervisorEvent::ChildStopped(ActorId::from(id))).await;
             }
-        }
+            info
+        };
 
-        drop(child_supervisors); // Release lock before shutting down actors
+        for (id, supervisor_arc, handle, shutdown_timeout) in supervisor_info {
+            // Phase 3: Unregister parent-child relationship in ActorRegistry
+            if let Some(service_locator) = &self.service_locator {
+                if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
+                    let supervisor_id = ActorId::from(self.id.clone());
+                    let child_supervisor_id = ActorId::from(id.clone());
+                    registry.unregister_parent_child(&supervisor_id, &child_supervisor_id).await;
+                }
+            }
+
+            // Abort the supervisor's task handle
+            if let Some(handle) = handle {
+                handle.abort();
+            }
+
+            // Call shutdown on the child supervisor (recursive!)
+            // CRITICAL: No locks held here, preventing deadlock
+            let shutdown_future = async {
+                let mut child_supervisor = supervisor_arc.write().await;
+                Box::pin(child_supervisor.shutdown()).await
+            };
+            
+            if let Some(timeout) = shutdown_timeout {
+                let _ = tokio_timeout(Duration::from_millis(timeout), shutdown_future).await;
+            } else {
+                // Use configurable safety timeout to prevent deadlocks
+                let safety_timeout = self.default_shutdown_timeout.unwrap_or(Duration::from_secs(1));
+                let _ = tokio_timeout(safety_timeout, shutdown_future).await;
+            }
+
+            // Emit ChildStopped event for child supervisor
+            let _ = self.event_tx.send(SupervisorEvent::ChildStopped(ActorId::from(id))).await;
+        }
 
         // Phase 2: Shutdown child actors (in reverse start order)
         // Phase 3: Unregister parent-child relationships for actors
@@ -1442,18 +1582,35 @@ impl Supervisor {
             }
         }
 
-        let children = self.children.read().await;
-        let actor_count = children.len();
+        // CRITICAL: Collect child info first, then release lock before async operations
+        // This prevents deadlocks when actors try to acquire locks during shutdown
+        let mut child_info: Vec<(ActorId, Arc<RwLock<Actor>>, Option<tokio::task::JoinHandle<()>>, Option<u64>)> = {
+            let mut children = self.children.write().await;
+            let mut info = Vec::new();
+            let ids: Vec<ActorId> = children.keys().rev().cloned().collect();
+            for id in ids {
+                if let Some(mut child) = children.shift_remove(&id) {
+                    let handle = child.handle.take();
+                    info.push((
+                        id.clone(),
+                        child.actor.clone(),
+                        handle,
+                        child.spec.shutdown_timeout_ms,
+                    ));
+                }
+            }
+            info
+        };
+        
+        let actor_count = child_info.len();
         debug!(
             supervisor_id = %self.id,
             child_actor_count = actor_count,
             "Shutting down child actors (reverse start order)"
         );
 
-        for (id, child) in children.iter().rev() {
+        for (id, actor_arc, handle, shutdown_timeout) in child_info {
             // Phase 4: Enforce shutdown spec (BrutalKill, Timeout, Infinity)
-            let shutdown_timeout = child.spec.shutdown_timeout_ms;
-            
             match shutdown_timeout {
                 Some(0) => {
                     // BrutalKill: Immediate abort
@@ -1462,7 +1619,7 @@ impl Supervisor {
                         child_id = %id,
                         "BrutalKill: Aborting child immediately"
                     );
-                    if let Some(handle) = &child.handle {
+                    if let Some(handle) = handle {
                         handle.abort();
                     }
                 }
@@ -1481,43 +1638,43 @@ impl Supervisor {
                     // 3. actor.terminate()
                     // 4. facet.on_detach() for all facets (reverse priority order)
                     let stop_future = async {
-                        if let Ok(mut actor) = child.actor.try_write() {
-                            // OBSERVABILITY: Record metrics for graceful shutdown
-                            let shutdown_start = std::time::Instant::now();
-                            metrics::counter!("plexspaces_supervisor_child_shutdown_total",
+                        let mut actor = actor_arc.write().await;
+                        // OBSERVABILITY: Record metrics for graceful shutdown
+                        let shutdown_start = std::time::Instant::now();
+                        metrics::counter!("plexspaces_supervisor_child_shutdown_total",
+                            "supervisor_id" => self.id.clone(),
+                            "child_id" => id.clone()
+                        ).increment(1);
+                        
+                        let result = actor.stop().await;
+                        
+                        let shutdown_duration = shutdown_start.elapsed();
+                        metrics::histogram!("plexspaces_supervisor_child_shutdown_duration_seconds",
+                            "supervisor_id" => self.id.clone(),
+                            "child_id" => id.clone()
+                        ).record(shutdown_duration.as_secs_f64());
+                        
+                        if result.is_err() {
+                            metrics::counter!("plexspaces_supervisor_child_shutdown_errors_total",
                                 "supervisor_id" => self.id.clone(),
                                 "child_id" => id.clone()
                             ).increment(1);
-                            
-                            let result = actor.stop().await;
-                            
-                            let shutdown_duration = shutdown_start.elapsed();
-                            metrics::histogram!("plexspaces_supervisor_child_shutdown_duration_seconds",
-                                "supervisor_id" => self.id.clone(),
-                                "child_id" => id.clone()
-                            ).record(shutdown_duration.as_secs_f64());
-                            
-                            if result.is_err() {
-                                metrics::counter!("plexspaces_supervisor_child_shutdown_errors_total",
-                                    "supervisor_id" => self.id.clone(),
-                                    "child_id" => id.clone()
-                                ).increment(1);
-                                warn!(
-                                    supervisor_id = %self.id,
-                                    child_id = %id,
-                                    error = ?result.as_ref().err(),
-                                    "Child shutdown failed (continuing with other children)"
-                                );
-                            } else {
-                                debug!(
-                                    supervisor_id = %self.id,
-                                    child_id = %id,
-                                    duration_ms = shutdown_duration.as_millis(),
-                                    "Child shutdown completed (facet lifecycle hooks executed)"
-                                );
-                            }
+                            warn!(
+                                supervisor_id = %self.id,
+                                child_id = %id,
+                                error = ?result.as_ref().err(),
+                                "Child shutdown failed (continuing with other children)"
+                            );
+                        } else {
+                            debug!(
+                                supervisor_id = %self.id,
+                                child_id = %id,
+                                duration_ms = shutdown_duration.as_millis(),
+                                "Child shutdown completed (facet lifecycle hooks executed)"
+                            );
                         }
-                        if let Some(handle) = &child.handle {
+                        
+                        if let Some(handle) = &handle {
                             handle.abort();
                         }
                     };
@@ -1530,22 +1687,35 @@ impl Supervisor {
                             timeout_ms = timeout_ms,
                             "Child shutdown exceeded timeout, aborting"
                         );
-                        if let Some(handle) = &child.handle {
+                        if let Some(handle) = &handle {
                             handle.abort();
                         }
                     }
                 }
                 None => {
-                    // Infinity: Wait indefinitely (for supervisors)
+                    // Infinity: Wait indefinitely (for supervisors) - but with a configurable timeout to prevent deadlocks
+                    let safety_timeout = self.default_shutdown_timeout.unwrap_or(Duration::from_secs(1));
                     debug!(
                         supervisor_id = %self.id,
                         child_id = %id,
-                        "Infinity: Waiting indefinitely for child shutdown"
+                        timeout_secs = safety_timeout.as_secs(),
+                        "Infinity: Waiting for child shutdown (with configurable safety timeout)"
                     );
-                    if let Ok(mut actor) = child.actor.try_write() {
+                    let stop_future = async {
+                        let mut actor = actor_arc.write().await;
                         let _ = actor.stop().await;
+                    };
+                    // Use configurable safety timeout to prevent deadlocks
+                    if let Err(_) = tokio_timeout(safety_timeout, stop_future).await {
+                        warn!(
+                            supervisor_id = %self.id,
+                            child_id = %id,
+                            timeout_secs = safety_timeout.as_secs(),
+                            "Child shutdown exceeded safety timeout, aborting"
+                        );
                     }
-                    if let Some(handle) = &child.handle {
+                    // Abort handle after timeout check
+                    if let Some(handle) = &handle {
                         handle.abort();
                     }
                 }
@@ -1555,6 +1725,12 @@ impl Supervisor {
                 .event_tx
                 .send(SupervisorEvent::ChildStopped(id.clone()))
                 .await;
+        }
+        
+        // Remove all children from the map after shutdown
+        {
+            let mut children = self.children.write().await;
+            children.clear();
         }
 
         info!(
@@ -1599,9 +1775,20 @@ impl SupervisedChild for Supervisor {
         // OBSERVABILITY: Record metrics for supervisor startup (Phase 8)
         let startup_start = std::time::Instant::now();
         
+        info!(
+            supervisor_id = %self.id,
+            "Starting supervisor (Phase 4: Bottom-up startup with rollback)"
+        );
+        
         // Phase 4: Bottom-up startup with rollback
         // Start nested supervisors first (bottom-up), then verify actors are started
         // If any child fails, rollback all previously started children in reverse order
+        //
+        // Expected Behavior:
+        // 1. Nested supervisors are started first (bottom-up ordering)
+        // 2. Then child actors are started
+        // 3. If any child fails, all previously started children are rolled back
+        // 4. Supervisor enters running state only if all children start successfully
         
         let mut started_supervisor_ids: Vec<String> = Vec::new();
         let mut started_actor_ids: Vec<ActorId> = Vec::new();
@@ -1612,7 +1799,15 @@ impl SupervisedChild for Supervisor {
         {
             let child_supervisors = self.child_supervisors.read().await;
             let supervisor_ids: Vec<String> = child_supervisors.keys().cloned().collect();
+            let supervisor_count = supervisor_ids.len();
             drop(child_supervisors);
+            
+            debug!(
+                supervisor_id = %self.id,
+                child_supervisor_count = supervisor_count,
+                "Starting {} nested supervisor(s) in bottom-up order",
+                supervisor_count
+            );
             
             for supervisor_id in supervisor_ids {
                 let needs_start = {
@@ -1637,33 +1832,33 @@ impl SupervisedChild for Supervisor {
                     };
                     
                     if let Some(supervisor_arc) = supervisor_arc {
-                        if let Ok(mut child_supervisor) = supervisor_arc.try_write() {
-                            match child_supervisor.start().await {
-                                Ok(handle) => {
-                                    // Update the handle in the supervised supervisor
-                                    let mut child_supervisors = self.child_supervisors.write().await;
-                                    if let Some(supervised) = child_supervisors.get_mut(&supervisor_id) {
-                                        supervised.handle = Some(handle);
-                                    }
-                                    drop(child_supervisors);
-                                    started_supervisor_ids.push(supervisor_id.clone());
+                        // CRITICAL: Release lock before recursive start to prevent deadlock
+                        let start_result = {
+                            let mut child_supervisor = supervisor_arc.write().await;
+                            child_supervisor.start().await
+                        };
+                        
+                        match start_result {
+                            Ok(handle) => {
+                                // Update the handle in the supervised supervisor
+                                let mut child_supervisors = self.child_supervisors.write().await;
+                                if let Some(supervised) = child_supervisors.get_mut(&supervisor_id) {
+                                    supervised.handle = Some(handle);
                                 }
-                                Err(e) => {
-                                    rollback_needed = true;
-                                    failed_child_id = Some(format!("supervisor:{}", supervisor_id));
-                                    error!(
-                                        supervisor_id = %self.id,
-                                        child_supervisor_id = %supervisor_id,
-                                        error = %e.message,
-                                        "Failed to start nested supervisor"
-                                    );
-                                    break;
-                                }
+                                drop(child_supervisors);
+                                started_supervisor_ids.push(supervisor_id.clone());
                             }
-                        } else {
-                            rollback_needed = true;
-                            failed_child_id = Some(format!("supervisor:{}", supervisor_id));
-                            break;
+                            Err(e) => {
+                                rollback_needed = true;
+                                failed_child_id = Some(format!("supervisor:{}", supervisor_id));
+                                error!(
+                                    supervisor_id = %self.id,
+                                    child_supervisor_id = %supervisor_id,
+                                    error = %e.message,
+                                    "Failed to start nested supervisor"
+                                );
+                                break;
+                            }
                         }
                     } else {
                         rollback_needed = true;
@@ -2698,6 +2893,7 @@ mod tests {
             .handle_failure(
                 &"failing-child@localhost".to_string(),
                 "test error".to_string(),
+                None, // Will be parsed from reason string
             )
             .await
             .unwrap();
@@ -2747,6 +2943,7 @@ mod tests {
             .handle_failure(
                 &"temp-child@localhost".to_string(),
                 "test error".to_string(),
+                None, // Will be parsed from reason string
             )
             .await
             .unwrap();
@@ -2786,7 +2983,7 @@ mod tests {
         // Trigger failures until max restarts exceeded
         for i in 0..3 {
             let result = supervisor
-                .handle_failure(&"crash-child@localhost".to_string(), format!("crash {}", i))
+                .handle_failure(&"crash-child@localhost".to_string(), format!("crash {}", i), None)
                 .await;
 
             let _ = event_rx.recv().await; // ChildFailed
@@ -2838,6 +3035,7 @@ mod tests {
             .handle_failure(
                 &"stats-child@localhost".to_string(),
                 "test error".to_string(),
+                None, // Will be parsed from reason string
             )
             .await
             .unwrap();
@@ -2973,7 +3171,7 @@ mod tests {
 
         // Trigger failure on child-1
         supervisor
-            .handle_failure(&"child-1@localhost".to_string(), "test error".to_string())
+            .handle_failure(&"child-1@localhost".to_string(), "test error".to_string(), None)
             .await
             .unwrap();
 
@@ -3026,7 +3224,7 @@ mod tests {
 
         // Trigger failure on child-1
         supervisor
-            .handle_failure(&"child-1@localhost".to_string(), "test error".to_string())
+            .handle_failure(&"child-1@localhost".to_string(), "test error".to_string(), None)
             .await
             .unwrap();
 
@@ -3078,6 +3276,7 @@ mod tests {
             .handle_failure(
                 &"adaptive-child@localhost".to_string(),
                 "test error".to_string(),
+                None, // Will be parsed from reason string
             )
             .await
             .unwrap();
@@ -3163,6 +3362,7 @@ mod tests {
             .handle_failure(
                 &"backoff-child@localhost".to_string(),
                 "test error".to_string(),
+                None, // Will be parsed from reason string
             )
             .await
             .unwrap();
@@ -3237,7 +3437,7 @@ mod tests {
 
         // First restart
         supervisor
-            .handle_failure(&"window-child@localhost".to_string(), "error 1".to_string())
+            .handle_failure(&"window-child@localhost".to_string(), "error 1".to_string(), None)
             .await
             .unwrap();
         let _ = event_rx.recv().await; // ChildFailed
@@ -3245,7 +3445,7 @@ mod tests {
 
         // Second restart (within window)
         supervisor
-            .handle_failure(&"window-child@localhost".to_string(), "error 2".to_string())
+            .handle_failure(&"window-child@localhost".to_string(), "error 2".to_string(), None)
             .await
             .unwrap();
         let _ = event_rx.recv().await; // ChildFailed
@@ -3256,7 +3456,7 @@ mod tests {
 
         // Third restart (outside window - should reset counter)
         let result = supervisor
-            .handle_failure(&"window-child@localhost".to_string(), "error 3".to_string())
+            .handle_failure(&"window-child@localhost".to_string(), "error 3".to_string(), None)
             .await;
 
         // Should succeed because counter was reset

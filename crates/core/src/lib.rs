@@ -49,6 +49,8 @@ pub mod patterns;
 pub mod actor_trait;
 pub mod exit_reason;
 pub mod virtual_actor_manager;
+pub mod actor_state_checker;
+pub use actor_state_checker::ActorStateFetcher;
 // FacetManager moved to plexspaces-facet crate to break circular dependency
 pub mod facet_service_wrapper;
 pub use facet_service_wrapper::{FacetRegistryServiceWrapper, FacetManagerServiceWrapper};
@@ -67,9 +69,9 @@ pub use exit_reason::{ExitAction, ExitReason};
 // ObjectRegistration is re-exported from proto via actor_context module
 pub use actor_context::ObjectRegistration;
 // Re-export ActorRegistry and related types
-pub use actor_registry::{ActorRegistry, ActorRegistryError, ActorRoutingInfo, MonitorLink, VirtualActorMetadata, TemporarySenderEntry};
-// Re-export VirtualActorManager
-pub use virtual_actor_manager::{VirtualActorManager, VirtualActorError};
+pub use actor_registry::{ActorRegistry, ActorRegistryError, ActorRoutingInfo, MonitorLink, TemporarySenderEntry};
+// Re-export VirtualActorManager and VirtualActorMetadata (source of truth for virtual actors)
+pub use virtual_actor_manager::{VirtualActorManager, VirtualActorError, VirtualActorMetadata};
 // FacetManager re-exported from plexspaces-facet crate (for backward compatibility)
 pub use plexspaces_facet::FacetManager;
 // Re-export ServiceLocator

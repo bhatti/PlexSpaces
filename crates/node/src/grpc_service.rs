@@ -40,7 +40,7 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use crate::{ActorLocation, Node};
-use plexspaces_core::{ActorRegistry, ServiceLocator, service_locator::service_names, ExitReason};
+use plexspaces_core::{ActorRegistry, ServiceLocator, service_locator::service_names, ExitReason, ReplyWaiter, ReplyWaiterRegistry};
 use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
 
 /// ActorService gRPC implementation
@@ -296,6 +296,19 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
+        // GetActorRequest doesn't have labels field, use empty map
+        let labels_for_ctx = std::collections::HashMap::new();
+        
+        // Create RequestContext from gRPC request (before consuming request)
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
+            request.metadata(),
+            &labels_for_ctx,
+            &self.node.service_locator(),
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
         let req = request.into_inner();
         let actor_id = req.actor_id;
         
@@ -303,9 +316,8 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
-        // Create RequestContext for routing lookup (use internal context for system operations)
-        let internal_ctx = plexspaces_core::RequestContext::internal();
-        let routing = actor_registry.lookup_routing(&internal_ctx, &actor_id).await
+        // Use RequestContext from request for routing lookup (respects tenant/namespace)
+        let routing = actor_registry.lookup_routing(&ctx, &actor_id).await
             .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
         
         let location = if let Some(routing_info) = routing {
@@ -401,6 +413,22 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
+        // Extract metadata before consuming request (needed for context creation)
+        let metadata = request.metadata().clone();
+        
+        // SendMessageRequest doesn't have labels field, use empty map
+        let labels_for_ctx = std::collections::HashMap::new();
+        
+        // Create RequestContext from gRPC request (before consuming request)
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
+            &metadata,
+            &labels_for_ctx,
+            &self.node.service_locator(),
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
         let req = request.into_inner();
 
         // Validate: Check for missing message
@@ -412,7 +440,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         if proto_msg.receiver_id.is_empty() {
             return Err(Status::invalid_argument("Missing receiver_id"));
         }
-
+        
         // Convert proto message to internal message
         let message = convert_proto_to_internal(&proto_msg)?;
 
@@ -421,19 +449,48 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
-        // Check if actor exists in registry
-        let actor_ref = if let Some(_message_sender) = actor_registry.lookup_actor(&proto_msg.receiver_id).await {
-            // Actor exists - create ActorRef pointing to local node
-            plexspaces_actor::ActorRef::remote(
-                proto_msg.receiver_id.clone(),
-                self.node.id().as_str().to_string(),
-                self.node.service_locator().clone(),
-            )
+        // Check if actor exists in registry (including temporary senders)
+        // Temporary senders are registered in ActorRegistry, so they should be found here
+        let (actor_ref_opt, message_sender_opt) = if let Some(message_sender) = actor_registry.lookup_actor(&proto_msg.receiver_id).await {
+            // Actor exists (including temporary senders) - check if it's local or remote
+            // Use routing lookup to determine if actor is local
+            let routing = actor_registry.lookup_routing(&ctx, &proto_msg.receiver_id).await
+                .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
+            
+            if let Some(routing_info) = routing {
+                if routing_info.is_local {
+                    // Local actor - use MessageSender directly (it's an ActorRef internally)
+                    tracing::debug!(
+                        "🟡 [GRPC::SEND_MESSAGE] Local actor found in registry: receiver_id={}, node_id={}",
+                        proto_msg.receiver_id, self.node.id().as_str()
+                    );
+                    // For local actors, use MessageSender directly instead of creating ActorRef
+                    // This avoids the need to get mailbox from registry
+                    (None, Some(message_sender))
+                } else {
+                    // Remote actor
+                    tracing::debug!(
+                        "🟡 [GRPC::SEND_MESSAGE] Remote actor found in registry: receiver_id={}, node_id={}",
+                        proto_msg.receiver_id, routing_info.node_id
+                    );
+                    (Some(plexspaces_actor::ActorRef::remote(
+                        proto_msg.receiver_id.clone(),
+                        routing_info.node_id,
+                        self.node.service_locator().clone(),
+                    )), None)
+                }
+            } else {
+                // No routing info - actor not found
+                return Err(Status::not_found(format!("Actor not found: {}", proto_msg.receiver_id)));
+            }
         } else {
+            tracing::debug!(
+                "🟡 [GRPC::SEND_MESSAGE] Actor not found in registry, checking routing: receiver_id={}",
+                proto_msg.receiver_id
+            );
             // Check routing for remote actors
-            // Use internal context for routing lookup (system-level operation)
-            let internal_ctx = plexspaces_core::RequestContext::internal();
-            let routing = actor_registry.lookup_routing(&internal_ctx, &proto_msg.receiver_id).await
+            // Use RequestContext from request for routing lookup (respects tenant/namespace)
+            let routing = actor_registry.lookup_routing(&ctx, &proto_msg.receiver_id).await
                 .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
             
             if let Some(routing_info) = routing {
@@ -441,11 +498,11 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                     return Err(Status::not_found(format!("Actor not found: {}", proto_msg.receiver_id)));
                 } else {
                     // Remote actor
-                    plexspaces_actor::ActorRef::remote(
+                    (Some(plexspaces_actor::ActorRef::remote(
                         proto_msg.receiver_id.clone(),
                         routing_info.node_id,
                         self.node.service_locator().clone(),
-                    )
+                    )), None)
                 }
             } else {
                 return Err(Status::not_found(format!("Actor not found: {}", proto_msg.receiver_id)));
@@ -453,8 +510,89 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         };
         
         use plexspaces_actor::ActorRefError;
-        actor_ref.tell(message).await
-            .map_err(|e| {
+        use plexspaces_core::MessageSender;
+        
+        // Handle wait_for_response: if true, register waiter before sending
+        let (waiter_opt, waiter_registry_opt, correlation_id_opt) = if req.wait_for_response {
+            // Extract correlation_id from message (should be set by ask())
+            let correlation_id = message.correlation_id.clone()
+                .ok_or_else(|| Status::invalid_argument("Missing correlation_id for wait_for_response"))?;
+            
+            // Create ReplyWaiter and register it BEFORE sending message
+            use plexspaces_core::ReplyWaiter;
+            let waiter = ReplyWaiter::new();
+            let waiter_registry: Arc<plexspaces_core::ReplyWaiterRegistry> = self.node.service_locator().get_service_by_name(service_names::REPLY_WAITER_REGISTRY).await
+                .ok_or_else(|| Status::internal("ReplyWaiterRegistry not found in ServiceLocator"))?;
+            waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
+            
+            (Some(waiter), Some(waiter_registry), Some(correlation_id))
+        } else {
+            (None, None, None)
+        };
+        
+        // Send message using MessageSender for local actors, ActorRef for remote actors
+        let send_result = if let Some(msg_sender) = message_sender_opt {
+            // Local actor - use MessageSender directly
+            msg_sender.tell(message).await
+                .map_err(|e| ActorRefError::SendFailed(e.to_string()))
+        } else if let Some(actor_ref) = actor_ref_opt {
+            // Remote actor - use ActorRef
+            actor_ref.tell(message).await
+        } else {
+            return Err(Status::internal("No actor ref or message sender"));
+        };
+        
+        // Handle wait_for_response: if true, wait for reply and return it in response
+        if req.wait_for_response {
+            let waiter = waiter_opt.unwrap();
+            let waiter_registry = waiter_registry_opt.unwrap();
+            let correlation_id = correlation_id_opt.unwrap();
+            
+            // Check send result
+            if let Err(e) = &send_result {
+                // Cleanup waiter on error
+                waiter_registry.remove(&correlation_id).await;
+                // Convert ActorRefError to appropriate gRPC Status
+                let status = match e {
+                    ActorRefError::ActorNotFound(_) => Status::not_found(e.to_string()),
+                    ActorRefError::SendFailed(_) => Status::internal(format!("Failed to send message: {}", e)),
+                    ActorRefError::MailboxFull => Status::resource_exhausted(format!("Mailbox full: {}", e)),
+                    ActorRefError::ActorTerminated => Status::not_found(format!("Actor terminated: {}", e)),
+                    _ => Status::internal(format!("Failed to send message: {}", e)),
+                };
+                return Err(status);
+            }
+            
+            // Wait for reply with timeout
+            let timeout = req.timeout.as_ref()
+                .map(|d| std::time::Duration::from_secs(d.seconds as u64) + std::time::Duration::from_nanos(d.nanos as u64))
+                .unwrap_or_else(|| std::time::Duration::from_secs(10));
+            
+            match waiter.wait(timeout).await {
+                Ok(reply) => {
+                    // Cleanup waiter
+                    waiter_registry.remove(&correlation_id).await;
+                    // Convert reply to proto and return
+                    let reply_proto = reply.to_proto();
+                    Ok(Response::new(SendMessageResponse {
+                        message_id: proto_msg.id,
+                        response: Some(reply_proto),
+                    }))
+                }
+                Err(plexspaces_core::ReplyWaiterError::Timeout) => {
+                    // Cleanup waiter
+                    waiter_registry.remove(&correlation_id).await;
+                    Err(Status::deadline_exceeded("Reply timeout"))
+                }
+                Err(e) => {
+                    // Cleanup waiter
+                    waiter_registry.remove(&correlation_id).await;
+                    Err(Status::internal(format!("Reply waiter error: {}", e)))
+                }
+            }
+        } else {
+            // Fire-and-forget: message already sent above
+            send_result.map_err(|e| {
                 // Convert ActorRefError to appropriate gRPC Status
                 match e {
                     ActorRefError::ActorNotFound(_) => Status::not_found(e.to_string()),
@@ -465,11 +603,12 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                 }
             })?;
 
-        // Return success response
-        Ok(Response::new(SendMessageResponse {
-            message_id: proto_msg.id,
-            response: None,
-        }))
+            // Return success response
+            Ok(Response::new(SendMessageResponse {
+                message_id: proto_msg.id,
+                response: None,
+            }))
+        }
     }
 
     async fn set_actor_state(
@@ -511,21 +650,36 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
+        // Extract metadata before consuming request (needed for context creation)
+        let metadata = request.metadata().clone();
+        
+        // MonitorActorRequest doesn't have labels field, use empty map
+        let labels_for_ctx = std::collections::HashMap::new();
+        
+        // Create RequestContext from gRPC request (before consuming request)
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
+            &metadata,
+            &labels_for_ctx,
+            &self.node.service_locator(),
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
         let req = request.into_inner();
 
         // Extract fields
         let actor_id = req.actor_id;
         let supervisor_id = req.supervisor_id;
         let supervisor_callback = req.supervisor_callback;
-
+        
         // Verify actor exists locally using ActorRegistry
         use plexspaces_core::service_locator::service_names;
         let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
-        // Create RequestContext for routing lookup (use internal context for system operations)
-        let internal_ctx = plexspaces_core::RequestContext::internal();
-        let routing = actor_registry.lookup_routing(&internal_ctx, &actor_id).await
+        // Use RequestContext from request for routing lookup (respects tenant/namespace)
+        let routing = actor_registry.lookup_routing(&ctx, &actor_id).await
             .map_err(|e| Status::not_found(format!("Actor not found: {}", e)))?;
         
         match routing {
@@ -610,9 +764,18 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         // Check if service is accepting requests
         self.check_accepting_requests().await?;
         
-        // Create RequestContext for lookup operations
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::internal();
+        // LinkActorRequest doesn't have labels field, use empty map
+        let labels_for_ctx = std::collections::HashMap::new();
+        
+        // Create RequestContext from gRPC request (before consuming request)
+        let ctx = plexspaces_core::service_locator::request_context_from_grpc_request(
+            request.metadata(),
+            &labels_for_ctx,
+            &self.node.service_locator(),
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
         
         let req = request.into_inner();
 
@@ -621,6 +784,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
         let actor_registry: Arc<ActorRegistry> = self.node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
         
+        // Use RequestContext from request for routing lookup (respects tenant/namespace)
         // Check first actor
         let routing1 = actor_registry.lookup_routing(&ctx, &req.actor_id).await
             .map_err(|e| Status::not_found(format!("Actor {} not found: {}", req.actor_id, e)))?;
@@ -931,6 +1095,14 @@ fn convert_proto_to_internal(proto_msg: &ProtoMessage) -> Result<Message, Status
     message.sender = sender;
     message.receiver = receiver;
     message.message_type = proto_msg.message_type.clone();
+
+    // Extract correlation_id and reply_to from headers (they're stored there in to_proto())
+    if let Some(corr_id) = proto_msg.headers.get("correlation_id") {
+        message.correlation_id = Some(corr_id.clone());
+    }
+    if let Some(reply_to) = proto_msg.headers.get("reply_to") {
+        message.reply_to = Some(reply_to.clone());
+    }
 
     // Copy headers to metadata
     for (key, value) in &proto_msg.headers {

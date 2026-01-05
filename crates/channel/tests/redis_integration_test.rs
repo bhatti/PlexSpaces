@@ -48,12 +48,18 @@ use plexspaces_proto::channel::v1::*;
 
 // Helper to check if Redis is available
 async fn is_redis_available() -> bool {
-    redis::Client::open("redis://localhost:6379")
-        .and_then(|client| {
-            let mut conn = client.get_connection()?;
-            redis::cmd("PING").query::<String>(&mut conn)
-        })
-        .is_ok()
+    #[cfg(feature = "test-helpers")]
+    {
+        plexspaces_common::test_helpers::redis_available().await
+    }
+    #[cfg(not(feature = "test-helpers"))]
+    {
+        // Fallback: fast TCP connection check
+        use tokio::net::TcpStream;
+        use tokio::time::timeout;
+        use std::time::Duration;
+        timeout(Duration::from_millis(500), TcpStream::connect("localhost:6379")).await.is_ok()
+    }
 }
 
 // Helper to create test config

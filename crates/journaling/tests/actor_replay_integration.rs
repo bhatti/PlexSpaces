@@ -97,19 +97,21 @@ mod actor_integration_tests {
             behavior,
             mailbox,
             "default".to_string(),
+            "default".to_string(),
             None,
         );
 
         // Attach DurabilityFacet (this will set ReplayHandler automatically)
-        let config_value = serde_json::json!({
+        let mut config_value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
         });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
         let facet = DurabilityFacet::new(storage.clone(), config_value, 50);
         actor.attach_facet(Box::new(facet)).await.unwrap();
 
@@ -147,19 +149,21 @@ mod actor_integration_tests {
             behavior2,
             mailbox2,
             "default".to_string(),
+            "default".to_string(),
             None,
         );
 
         // Attach DurabilityFacet again (ReplayHandler will be set, replay will happen)
-        let config_value = serde_json::json!({
+        let mut config_value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
         });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
         let facet2 = DurabilityFacet::new(storage.clone(), config_value, 50);
         actor2.attach_facet(Box::new(facet2)).await.unwrap();
 
@@ -207,18 +211,20 @@ mod actor_integration_tests {
             behavior,
             mailbox,
             "default".to_string(),
+            "default".to_string(),
             None,
         );
 
-        let config_value = serde_json::json!({
+        let mut config_value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
         });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
         let facet = DurabilityFacet::new(storage.clone(), config_value, 50);
         actor.attach_facet(Box::new(facet)).await.unwrap();
         actor.start().await.unwrap();
@@ -267,18 +273,20 @@ mod actor_integration_tests {
             behavior2,
             mailbox2,
             "default".to_string(),
+            "default".to_string(),
             None,
         );
 
-        let config_value = serde_json::json!({
+        let mut config_value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
         });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
         let facet2 = DurabilityFacet::new(storage.clone(), config_value, 50);
         actor2.attach_facet(Box::new(facet2)).await.unwrap();
         actor2.start().await.unwrap();
@@ -326,18 +334,20 @@ mod actor_integration_tests {
             behavior,
             mailbox,
             "default".to_string(),
+            "default".to_string(),
             None,
         );
 
-        let config_value = serde_json::json!({
+        let mut config_value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
         });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
         let mut facet = DurabilityFacet::new(storage.clone(), config_value, 50);
         
         // Set StateLoader for automatic state loading
@@ -385,18 +395,20 @@ mod actor_integration_tests {
             behavior2,
             mailbox2,
             "default".to_string(),
+            "default".to_string(),
             None,
         );
 
-        let config_value = serde_json::json!({
+        let mut config_value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
         });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
         let mut facet2 = DurabilityFacet::new(storage.clone(), config_value, 50);
         let state_loader2 = CounterStateLoader {
             counter: Arc::clone(&counter2),

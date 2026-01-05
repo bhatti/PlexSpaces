@@ -18,15 +18,17 @@ mod sqlite_tests {
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
-        })
+        });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
+        value
     }
 
     /// Test: Exact scenario from test_replay_missing_checkpoint
@@ -46,7 +48,7 @@ mod sqlite_tests {
         };
 
         println!("=== Phase 1: Create first facet and write entries ===");
-        let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-4";
 
         println!("Attaching facet...");
@@ -176,7 +178,7 @@ mod sqlite_tests {
         };
 
         // Phase 1: Write entries
-        let mut facet1 = DurabilityFacet::new(storage.clone(), config.clone());
+        let mut facet1 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-seq";
 
         facet1.on_attach(actor_id, serde_json::json!({})).await.unwrap();
@@ -232,7 +234,7 @@ mod sqlite_tests {
         for cycle in 1..=3 {
             println!("=== Cycle {} ===", cycle);
             
-            let mut facet = DurabilityFacet::new(storage.clone(), config.clone());
+            let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
             facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
             
             facet.before_method("test", &format!("cycle-{}", cycle).into_bytes()).await.unwrap();

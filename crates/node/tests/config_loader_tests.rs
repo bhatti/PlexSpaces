@@ -52,21 +52,30 @@ shutdown:
 
 #[tokio::test]
 async fn test_env_var_substitution() {
-    env::set_var("TEST_NODE_ID", "env-node-123");
-    env::set_var("TEST_GRPC_ADDR", "0.0.0.0:9999");
+    // Use unique env var names to avoid conflicts with other tests
+    let node_id_var = "TEST_ENV_SUB_NODE_ID";
+    let grpc_addr_var = "TEST_ENV_SUB_GRPC_ADDR";
+    
+    // Ensure clean state - remove vars if they exist
+    env::remove_var(node_id_var);
+    env::remove_var(grpc_addr_var);
+    
+    // Set env vars right before use to avoid race conditions
+    env::set_var(node_id_var, "env-node-123");
+    env::set_var(grpc_addr_var, "0.0.0.0:9999");
 
-    let yaml_content = r#"
+    let yaml_content = format!(r#"
 name: "test-release"
 version: "1.0.0"
 description: "Test release"
 node:
-  id: "${TEST_NODE_ID}"
-  listen_address: "${TEST_GRPC_ADDR}"
+  id: "${{{}}}"
+  listen_address: "${{{}}}"
   cluster_seed_nodes: []
 runtime:
   grpc:
     enabled: true
-    address: "${TEST_GRPC_ADDR}"
+    address: "${{{}}}"
     max_connections: 100
     keepalive_interval_seconds: 30
   health:
@@ -74,12 +83,12 @@ runtime:
     heartbeat_timeout_seconds: 5
     registry_url: "http://localhost:8000"
 applications: []
-env: {}
+env: {{}}
 shutdown:
   global_timeout_seconds: 30
   grace_period_seconds: 5
   grpc_drain_timeout_seconds: 10
-"#;
+"#, node_id_var, grpc_addr_var, grpc_addr_var);
 
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(yaml_content.as_bytes()).unwrap();
@@ -92,8 +101,9 @@ shutdown:
     assert_eq!(spec.node.as_ref().unwrap().listen_address, "0.0.0.0:9999");
     assert_eq!(spec.runtime.as_ref().unwrap().grpc.as_ref().unwrap().address, "0.0.0.0:9999");
 
-    env::remove_var("TEST_NODE_ID");
-    env::remove_var("TEST_GRPC_ADDR");
+    // Clean up
+    env::remove_var(node_id_var);
+    env::remove_var(grpc_addr_var);
 }
 
 #[tokio::test]

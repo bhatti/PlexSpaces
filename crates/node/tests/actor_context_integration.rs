@@ -73,6 +73,9 @@ async fn test_node_spawns_actor_with_full_context() {
     let node_id = NodeId::new("test-node");
     let config = default_node_config();
     let node = Node::new(node_id, config);
+    
+    // Initialize services (required for ActorFactory to be available)
+    node.initialize_services().await.unwrap();
 
     // Create actor with behavior
     let behavior = Box::new(ContextAwareBehavior::new());
@@ -87,6 +90,7 @@ async fn test_node_spawns_actor_with_full_context() {
         format!("{}@temp", actor_name), // Temporary ID, will be fixed by spawn_actor_arc
         behavior,
         mailbox,
+        "default".to_string(),
         "default".to_string(),
         None,
     );
@@ -145,6 +149,9 @@ async fn test_actor_context_has_node_id() {
     let node_id = NodeId::new("test-node-2");
     let config = default_node_config();
     let node = Node::new(node_id.clone(), config);
+    
+    // Initialize services (required for ActorFactory to be available)
+    node.initialize_services().await.unwrap();
 
     let behavior = Box::new(ContextAwareBehavior::new());
     let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string()).await.unwrap();
@@ -152,6 +159,7 @@ async fn test_actor_context_has_node_id() {
         "test-actor-2@test-node-2".to_string(),
         behavior,
         mailbox,
+        "default".to_string(),
         "default".to_string(),
         None,
     );

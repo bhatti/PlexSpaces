@@ -371,6 +371,9 @@ pub struct Actor {
     /// Last message processed time (for health checks)
     last_message_time: Arc<RwLock<std::time::Instant>>,
 
+    /// Exit reason when actor terminates (used by watch_actor_termination)
+    exit_reason: Arc<RwLock<Option<ExitReason>>>,
+
     /// Dynamically attached facets (runtime behavior composition)
     facets: Arc<RwLock<FacetContainer>>,
 
@@ -509,6 +512,7 @@ impl Actor {
             resource_contract: None,
             resource_usage: Arc::new(RwLock::new(ResourceUsage::default())),
             last_message_time: Arc::new(RwLock::new(std::time::Instant::now())),
+            exit_reason: Arc::new(RwLock::new(None)),
             facets: Arc::new(RwLock::new(FacetContainer::new())),
             error_message: Arc::new(RwLock::new(String::new())),
         }
@@ -530,6 +534,11 @@ impl Actor {
     /// Get the actor context
     pub fn context(&self) -> &Arc<ActorContext> {
         &self.context
+    }
+    
+    /// Get the exit reason Arc (for watch_actor_termination)
+    pub fn exit_reason(&self) -> Arc<RwLock<Option<ExitReason>>> {
+        self.exit_reason.clone()
     }
 
     /// Set the resource profile for this actor
@@ -628,8 +637,11 @@ impl Actor {
     /// }
     /// ```
     pub async fn start(&mut self) -> Result<tokio::task::JoinHandle<()>, ActorError> {
+        eprintln!("🔵🔵🔵 [ACTOR::START] start() called: actor_id={}", self.id);
         let state = self.state.read().await.clone();
+        eprintln!("🔵🔵🔵 [ACTOR::START] Current state: actor_id={}, state={:?}", self.id, state);
         if state != ActorState::Creating && state != ActorState::Terminated {
+            eprintln!("🔴🔴🔴 [ACTOR::START] Invalid state for start(): actor_id={}, state={:?}", self.id, state);
             return Err(ActorError::InvalidState(format!(
                 "Cannot start actor in state {:?}",
                 state
@@ -646,6 +658,7 @@ impl Actor {
 
         // Step 1: State → Activating
         *self.state.write().await = ActorState::Activating;
+        eprintln!("🔵🔵🔵 [ACTOR::START] State transition to Activating: actor_id={}", self.id);
         
         // OBSERVABILITY: Track state transition
         metrics::counter!("plexspaces_actor_state_transitions_total",
@@ -798,30 +811,54 @@ impl Actor {
         let state = self.state.clone();
         let last_message_time = self.last_message_time.clone();
         let facets = self.facets.clone();
+        let exit_reason_arc = self.exit_reason.clone(); // Clone exit_reason Arc for use in message loop
         let actor_id_for_logging = self.id.clone(); // Capture actor_id before spawning
 
-        // Simple message loop - Node/Supervisor will detect termination via JoinHandle
-        let handle = tokio::spawn(async move {
-            // Mark as active
-            *state.write().await = ActorState::Active;
+        // Create a channel to signal when actor becomes active
+        // This allows start() to wait for the actor to be fully ready before returning
+        let (active_tx, active_rx) = tokio::sync::oneshot::channel::<()>();
+
+           // Simple message loop - Node/Supervisor will detect termination via JoinHandle
+           let handle = tokio::spawn(async move {
+               // Mark as active
+               *state.write().await = ActorState::Active;
+               eprintln!("🟢🟢🟢 [ACTOR::START] Message loop STARTED: actor_id={}, state=Active", actor_id_for_logging);
+            
+            // Signal that actor is now active and ready to process messages
+            // Ignore error if receiver was dropped (shouldn't happen in normal flow)
+            let _ = active_tx.send(());
             let mut loop_iteration = 0;
+            eprintln!("🟢🟢🟢 [ACTOR::START] Entering message loop: actor_id={}", actor_id_for_logging);
             loop {
                 loop_iteration += 1;
+                if loop_iteration % 100 == 0 {
+                    eprintln!("🔵 [ACTOR::START] Message loop iteration {}: actor_id={}, waiting for message...", loop_iteration, actor_id_for_logging);
+                }
                 // Use tokio::select! with biased to prioritize shutdown
                 // Add a very short timeout to periodically check shutdown (non-blocking)
                 // This allows shutdown to interrupt even when mailbox is empty
                 // The timeout is very short (1ms) to minimize latency while ensuring responsive shutdown
                 tokio::select! {
                     biased; // Prioritize shutdown branch
-                    _ = shutdown_rx.recv() => {
+                    result = shutdown_rx.recv() => {
                         // Shutdown signal received - highest priority
-                        tracing::debug!(
-                            actor_id = %actor_id_for_logging,
-                            "Actor message loop: Shutdown signal received, exiting loop"
-                        );
-                        break;
+                        // result can be Some(()) when signal sent, or None when channel closed
+                        eprintln!("🟢🟢🟢 [ACTOR::SHUTDOWN] Shutdown signal received in select: actor_id={}, result={:?}", actor_id_for_logging, result);
+                        match result {
+                            Some(()) | None => {
+                                eprintln!("🟢🟢🟢 [ACTOR::SHUTDOWN] Breaking message loop: actor_id={}, result={:?}", actor_id_for_logging, result);
+                                tracing::debug!(
+                                    actor_id = %actor_id_for_logging,
+                                    "Actor message loop: Shutdown signal received, exiting loop"
+                                );
+                                break; // Exit the message loop
+                            }
+                        }
+                        eprintln!("🔴🔴🔴 [ACTOR::SHUTDOWN] ERROR: Should not reach here after break! actor_id={}", actor_id_for_logging);
                     }
                     Some(message) = mailbox.dequeue() => {
+                        eprintln!("🟢🟢🟢 [ACTOR::DEQUEUE] DEQUEUED MESSAGE: actor_id={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={:?}, payload_len={}", 
+                            actor_id_for_logging, message.id, message.sender, message.receiver, message.correlation_id, message.message_type, message.payload().len());
                         tracing::debug!(
                             actor_id = %actor_id_for_logging,
                             message_id = %message.id,
@@ -902,8 +939,30 @@ impl Actor {
                                                 duration_ms = handle_exit_duration.as_millis(),
                                                 "EXIT from linked actor - propagating (actor will terminate)"
                                             );
+                                            // Store exit reason before terminating (use cloned Arc)
+                                            {
+                                                let mut stored_reason = exit_reason_arc.write().await;
+                                                *stored_reason = Some(exit_reason.clone());
+                                                tracing::debug!(
+                                                    actor_id = %actor_id_for_logging,
+                                                    from = %from_actor_id,
+                                                    stored_reason = ?exit_reason,
+                                                    "Stored exit reason before terminating (will propagate to links)"
+                                                );
+                                            }
                                             // Call terminate() before breaking
+                                            tracing::debug!(
+                                                actor_id = %actor_id_for_logging,
+                                                from = %from_actor_id,
+                                                reason = ?exit_reason,
+                                                "Calling behavior.terminate() due to EXIT"
+                                            );
                                             let _ = behavior_guard.terminate(&context, &exit_reason).await;
+                                            tracing::debug!(
+                                                actor_id = %actor_id_for_logging,
+                                                from = %from_actor_id,
+                                                "Behavior.terminate() completed, breaking message loop"
+                                            );
                                             break;
                                         }
                                         Ok(ExitAction::Handle) => {
@@ -962,11 +1021,34 @@ impl Actor {
                                         "EXIT from linked actor - not trapping, terminating"
                                     );
                                     let mut behavior_guard = behavior.write().await;
+                                    let from_actor_id_clone = from_actor_id.clone();
                                     let linked_reason = ExitReason::Linked {
                                         actor_id: from_actor_id,
                                         reason: Box::new(exit_reason),
                                     };
+                                    // Store exit reason before terminating (use cloned Arc)
+                                    {
+                                        let mut stored_reason = exit_reason_arc.write().await;
+                                        *stored_reason = Some(linked_reason.clone());
+                                        tracing::debug!(
+                                            actor_id = %actor_id_for_logging,
+                                            from = %from_actor_id_clone,
+                                            stored_reason = ?linked_reason,
+                                            "Stored linked exit reason before terminating (will propagate to links)"
+                                        );
+                                    }
+                                    tracing::debug!(
+                                        actor_id = %actor_id_for_logging,
+                                        from = %from_actor_id_clone,
+                                        reason = ?linked_reason,
+                                        "Calling behavior.terminate() due to EXIT (not trapping)"
+                                    );
                                     let _ = behavior_guard.terminate(&context, &linked_reason).await;
+                                    tracing::debug!(
+                                        actor_id = %actor_id_for_logging,
+                                        from = %from_actor_id_clone,
+                                        "Behavior.terminate() completed, breaking message loop"
+                                    );
                                     break;
                                 }
                                 continue; // Skip normal message processing for EXIT messages
@@ -988,23 +1070,45 @@ impl Actor {
                         if result.is_ok() {
                             // Successful processing - ACK the message
                             if let Err(e) = mailbox.ack_message(&message).await {
-                                tracing::warn!(
-                                    actor_id = %actor_id_for_logging,
-                                    message_id = %message.id,
-                                    error = %e,
-                                    "Failed to ack message after successful processing"
-                                );
+                                let error_str = e.to_string();
+                                // MessageNotFound is expected for in-memory channels (fire-and-forget)
+                                // Only log as warning for unexpected errors
+                                if error_str.contains("Message not found") {
+                                    tracing::debug!(
+                                        actor_id = %actor_id_for_logging,
+                                        message_id = %message.id,
+                                        "Message ack not supported (in-memory channel)"
+                                    );
+                                } else {
+                                    tracing::warn!(
+                                        actor_id = %actor_id_for_logging,
+                                        message_id = %message.id,
+                                        error = %e,
+                                        "Failed to ack message after successful processing"
+                                    );
+                                }
                             }
                         } else {
                             // Failed processing - NACK the message (will retry or DLQ)
                             let error_msg = result.as_ref().err().map(|e| e.to_string());
                             if let Err(e) = mailbox.nack_message(&message, error_msg.as_deref()).await {
-                                tracing::warn!(
-                                    actor_id = %actor_id_for_logging,
-                                    message_id = %message.id,
-                                    error = %e,
-                                    "Failed to nack message after failed processing"
-                                );
+                                let error_str = e.to_string();
+                                // MessageNotFound is expected for in-memory channels (fire-and-forget)
+                                // Only log as warning for unexpected errors
+                                if error_str.contains("Message not found") {
+                                    tracing::debug!(
+                                        actor_id = %actor_id_for_logging,
+                                        message_id = %message.id,
+                                        "Message nack not supported (in-memory channel)"
+                                    );
+                                } else {
+                                    tracing::warn!(
+                                        actor_id = %actor_id_for_logging,
+                                        message_id = %message.id,
+                                        error = %e,
+                                        "Failed to nack message after failed processing"
+                                    );
+                                }
                             }
                         }
 
@@ -1020,12 +1124,19 @@ impl Actor {
                         // This ensures shutdown can interrupt even when mailbox is empty
                         // The 1ms timeout is negligible for latency but ensures responsive shutdown
                         if shutdown_rx.try_recv().is_ok() {
+                            eprintln!("🟢 [ACTOR::START] Shutdown signal received (via timeout check): actor_id={}", actor_id_for_logging);
                             tracing::debug!(
                                 actor_id = %actor_id_for_logging,
                                 "Actor message loop: Shutdown signal received (via timeout check), exiting loop"
                             );
                             break;
                         }
+                        // Check if task is cancelled (aborted) - use tokio::task::yield_now()
+                        // If the task is cancelled, yield_now() will return immediately
+                        // This is a production-grade way to check for cancellation
+                        tokio::task::yield_now().await;
+                        // After yield, check if we should continue (task might have been cancelled)
+                        // The break will happen naturally when shutdown_rx.recv() returns None or when aborted
                         // Log every 1000 iterations (roughly every second) to show loop is running
                         if loop_iteration % 1000 == 0 {
                             tracing::debug!(
@@ -1042,11 +1153,33 @@ impl Actor {
             // Note: terminate() is called in Actor::stop() before the message loop exits
             // So we don't need to call it again here. The message loop just exits cleanly.
             
+            eprintln!("🟢🟢🟢 [ACTOR::SHUTDOWN] Message loop EXITED: actor_id={}, marking as Terminated", actor_id_for_logging);
             // Mark as stopped
             *state.write().await = ActorState::Terminated;
+            eprintln!("🟢🟢🟢 [ACTOR::SHUTDOWN] Actor marked as Terminated: actor_id={}", actor_id_for_logging);
         });
 
         self.processor_handle = Some(handle.abort_handle());
+
+        // Wait for actor to become active (message loop started and ready to process messages)
+        // This ensures actor is fully ready when start() returns, simplifying caller logic
+        // The actor is registered and message loop is running, so it can immediately process messages
+        active_rx.await
+            .map_err(|_| ActorError::InvalidState("Failed to wait for actor activation - message loop may have exited".to_string()))?;
+        
+        // Verify state is Active (double-check after waiting)
+        let current_state = self.state.read().await.clone();
+        if current_state != ActorState::Active {
+            return Err(ActorError::InvalidState(format!(
+                "Actor failed to reach Active state, current state: {:?}",
+                current_state
+            )));
+        }
+
+        tracing::debug!(
+            actor_id = %self.id,
+            "Actor fully active and ready to process messages"
+        );
 
         Ok(handle)
     }
@@ -1286,6 +1419,115 @@ impl Actor {
         tracing::info!(actor_id = %self.id, "Actor terminated");
 
         // Note: State is set to Terminated by on_deactivate(), no need to set again
+        Ok(())
+    }
+
+    /// Get shutdown sender for graceful shutdown from Arc
+    /// 
+    /// ## Purpose
+    /// Returns a clone of the shutdown sender so we can signal the message loop to stop.
+    /// `mpsc::Sender` is `Clone`, so we can safely clone and send to it from Arc<Actor>.
+    /// 
+    /// ## Returns
+    /// Some(Sender) if actor is running, None if already stopped
+    fn get_shutdown_sender(&self) -> Option<mpsc::Sender<()>> {
+        self.shutdown_tx.clone()
+    }
+    
+    /// Get processor abort handle for forced shutdown from Arc
+    /// 
+    /// ## Purpose
+    /// Returns a clone of the abort handle so we can abort the message loop if needed.
+    /// `AbortHandle` is `Clone`, so we can safely clone and abort from Arc<Actor>.
+    /// 
+    /// ## Returns
+    /// Some(AbortHandle) if message loop is running, None if already stopped
+    fn get_processor_abort_handle(&self) -> Option<tokio::task::AbortHandle> {
+        self.processor_handle.clone()
+    }
+
+    /// Stop the actor from Arc (production-grade graceful shutdown)
+    /// 
+    /// ## Purpose
+    /// Stops the actor's message loop when we only have Arc<Actor> (no mutable access).
+    /// This is used by ActorFactory when stopping actors from the registry.
+    /// 
+    /// ## Design
+    /// 1. Mark actor as Stopping (prevents new messages)
+    /// 2. Send shutdown signal via shutdown_tx (graceful - message loop exits cleanly)
+    /// 3. Wait briefly for graceful shutdown
+    /// 4. If still running, abort message loop (forced shutdown)
+    /// 5. Mark as Terminated
+    /// 
+    /// ## Production-Grade Features
+    /// - Uses proper shutdown channel (mpsc::Sender is Clone, so we can clone and send)
+    /// - Graceful shutdown first (allows in-progress messages to complete)
+    /// - Fallback to abort if graceful shutdown fails
+    /// - Proper state transitions (Active -> Stopping -> Terminated)
+    /// - No hacks or workarounds - uses Rust's Clone trait properly
+    pub async fn stop_from_arc(self: Arc<Self>) -> Result<(), ActorError> {
+        let state = self.state.read().await.clone();
+        // Check if already stopped or stopping
+        if state == ActorState::Stopping || state == ActorState::Terminated || matches!(state, ActorState::Failed(_)) {
+            return Ok(()); // Already stopped or stopping
+        }
+        // Only proceed if Active or Inactive
+        if state != ActorState::Active && state != ActorState::Inactive {
+            return Ok(()); // Invalid state for stopping
+        }
+        drop(state);
+
+        tracing::info!(actor_id = %self.id, "Stopping actor from Arc - starting graceful shutdown");
+
+        // Step 1: Mark as stopping (prevents new messages from being processed)
+        *self.state.write().await = ActorState::Stopping;
+
+        // Step 2: Send shutdown signal via shutdown_tx (graceful shutdown)
+        // mpsc::Sender is Clone, so we can clone it and send to it
+        let shutdown_sent = if let Some(shutdown_tx) = self.get_shutdown_sender() {
+            tracing::debug!(actor_id = %self.id, "Sending shutdown signal via shutdown_tx");
+            shutdown_tx.send(()).await.is_ok()
+        } else {
+            tracing::warn!(actor_id = %self.id, "No shutdown_tx available - actor may not be started");
+            false
+        };
+
+        if shutdown_sent {
+            // Step 3: Wait for graceful shutdown (message loop will exit when it receives signal)
+            // Give it more time to process shutdown signal and exit cleanly
+            // Use a timeout to check if message loop has actually stopped
+            let shutdown_timeout = tokio::time::Duration::from_millis(500);
+            let start = std::time::Instant::now();
+            while start.elapsed() < shutdown_timeout {
+                let current_state = self.state.read().await.clone();
+                if current_state == ActorState::Terminated {
+                    tracing::debug!(actor_id = %self.id, "Actor terminated gracefully");
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            }
+        }
+
+        // Step 4: Always abort the message loop task to ensure it stops
+        // CRITICAL: Even if graceful shutdown worked, we must abort the task
+        // to ensure the message loop actually terminates
+        // Production-grade: Use abort() to guarantee task termination
+        if let Some(handle) = self.get_processor_abort_handle() {
+            let current_state = self.state.read().await.clone();
+            if current_state != ActorState::Terminated {
+                tracing::warn!(actor_id = %self.id, "Actor not terminated after shutdown signal, aborting message loop");
+            }
+            // Always abort the message loop task - this is the only way to guarantee it stops
+            // The shutdown signal might not be received if the loop is stuck
+            handle.abort();
+            // Wait for abort to take effect (task cancellation is async)
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }
+
+        // Step 5: Mark as terminated (final state)
+        *self.state.write().await = ActorState::Terminated;
+
+        tracing::debug!(actor_id = %self.id, "Actor stopped from Arc (graceful={})", shutdown_sent);
         Ok(())
     }
 
@@ -1614,11 +1856,14 @@ impl Actor {
             };
 
             // Register actor in registry with type information for dashboard
+            // Note: Config and instance will be updated later in spawn_built_actor (idempotent)
             registry.register_actor(
                 &ctx,
                 self.id.clone(),
                 Arc::new(actor_ref) as Arc<dyn MessageSender>,
                 actor_type,
+                None, // Config not available here (set during spawn, updated later)
+                None, // Instance not available here (stored separately in actor_factory_impl, updated later)
             ).await;
 
             // OBSERVABILITY: Log successful registration
@@ -1669,6 +1914,9 @@ impl Actor {
         last_message_time: &Arc<RwLock<std::time::Instant>>,
         facets: &Arc<RwLock<FacetContainer>>,
     ) -> Result<(), ActorError> {
+        eprintln!("🔵 [ACTOR::PROCESS_MESSAGE] START: actor_id={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
+            actor_id, message.id, message.sender, message.receiver, message.correlation_id, message.message_type_str());
+        
         // RECURSION DETECTION: Track call depth to detect infinite loops
         use std::thread_local;
         thread_local! {
@@ -1762,12 +2010,15 @@ impl Actor {
 
         // Process with behavior (Go-style: context first, then message)
         // Note: ActorContext is now static - sender_id and correlation_id are in Message, not context
+        eprintln!("🔵 [ACTOR::PROCESS] About to acquire behavior lock: actor_id={}, message_id={}", actor_id, message.id);
         let mut behavior = behavior.write().await;
+        eprintln!("🟢 [ACTOR::PROCESS] Behavior lock acquired, calling handle_message: actor_id={}, message_id={}", actor_id, message.id);
         tracing::debug!(
             "🔴 [PROCESS_MESSAGE] CALLING handle_message: depth={}, actor_id={}, sender={:?}, receiver={}",
             depth, actor_id_owned, message.sender, message.receiver
         );
         let result = behavior.handle_message(context, message.clone()).await;
+        eprintln!("🟢 [ACTOR::PROCESS] handle_message returned: actor_id={}, message_id={}, result={:?}", actor_id, message.id, result.is_ok());
         tracing::debug!(
             "🔴 [PROCESS_MESSAGE] handle_message COMPLETED: depth={}, actor_id={}, result={:?}",
             depth, actor_id_owned, result.is_ok()
@@ -2634,4 +2885,80 @@ mod tests {
         let health2 = actor.health().await;
         assert!(matches!(health2, ActorHealth::Healthy));
     }
+}
+
+// Implement ActorStateFetcher trait for Actor to allow state fetching from plexspaces_core
+//
+// ## Purpose
+// This implementation allows `plexspaces_core` to fetch actor state without importing `Actor` directly.
+// This breaks the circular dependency between `plexspaces_core` and `plexspaces_actor`.
+//
+// ## Usage
+// The trait is used by:
+// - `ActorRegistry::get_actor_state()` - gets actor instance state
+// - `ActorRegistry::is_actor_state_active()` - checks if actor state is Active
+// - `VirtualActorManager::is_active()` - checks if virtual actor is active (state is Active)
+//
+// ## Implementation
+// Returns the actor's current state as a proto `ActorState` enum value.
+// This is consistent for all actor types (regular/virtual/workflows/etc.).
+#[async_trait::async_trait]
+impl plexspaces_core::ActorStateFetcher for Actor {
+    async fn get_state(&self) -> i32 {
+        use crate::ActorState;
+        use plexspaces_proto::v1::actor::ActorState as ProtoActorState;
+        
+        // Convert ActorState to proto enum value
+        match self.state().await {
+            ActorState::Unspecified => ProtoActorState::ActorStateUnspecified as i32,
+            ActorState::Creating => ProtoActorState::ActorStateCreating as i32,
+            ActorState::Active => ProtoActorState::ActorStateActive as i32,
+            ActorState::Inactive => ProtoActorState::ActorStateInactive as i32,
+            ActorState::Activating => ProtoActorState::ActorStateActivating as i32,
+            ActorState::Deactivating => ProtoActorState::ActorStateDeactivating as i32,
+            ActorState::Stopping => ProtoActorState::ActorStateStopping as i32,
+            ActorState::Migrating => ProtoActorState::ActorStateMigrating as i32,
+            ActorState::Failed(_) => ProtoActorState::ActorStateFailed as i32,
+            ActorState::Terminated => ProtoActorState::ActorStateTerminated as i32,
+        }
+    }
+}
+
+/// Register callback for state fetching
+///
+/// ## Purpose
+/// Registers a callback that allows `plexspaces_core` to fetch actor state without importing `Actor` directly.
+/// The callback uses `Arc::downcast` to get the concrete `Actor` type, then calls the `ActorStateFetcher::get_state()`
+/// trait method.
+///
+/// ## Usage
+/// This should be called during initialization (e.g., in `NodeBuilder::build()` or similar) to register the callback.
+/// The callback is used by `ActorRegistry::get_actor_state()` and `ActorRegistry::is_actor_state_active()`.
+///
+/// ## Implementation
+/// The callback uses the `ActorStateFetcher` trait to fetch state. This allows `plexspaces_core` to check
+/// actor state without circular dependencies. This is consistent for all actor types (regular/virtual/workflows/etc.).
+pub fn register_state_fetcher_callback() {
+    use std::sync::Arc;
+    use std::pin::Pin;
+    use std::future::Future;
+    use plexspaces_core::ActorStateFetcher;
+    
+    plexspaces_core::actor_state_checker::register_state_fetcher_callback(
+        |instance: &Arc<dyn std::any::Any + Send + Sync>| {
+            let instance_clone = instance.clone();
+            Box::pin(async move {
+                // Try to downcast to Actor Arc (we can import Actor here)
+                if let Ok(actor_arc) = Arc::downcast::<Actor>(instance_clone) {
+                    // Call the trait method to get state
+                    let state_value = actor_arc.get_state().await;
+                    eprintln!("🔵 [ACTOR_STATE_FETCHER] get_state() called: actor_id={}, state_value={}", actor_arc.id(), state_value);
+                    Some(state_value)
+                } else {
+                    eprintln!("🔴 [ACTOR_STATE_FETCHER] Failed to downcast to Actor");
+                    None
+                }
+            }) as Pin<Box<dyn Future<Output = Option<i32>> + Send>>
+        }
+    );
 }

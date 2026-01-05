@@ -209,10 +209,11 @@ mod udp_backend;
 mod sqs_backend;
 
 // Mock backend for testing
-#[cfg(any(test, feature = "test-utils"))]
+// Available when test-utils feature is enabled (required for integration tests)
+#[cfg(feature = "test-utils")]
 pub mod mock_backend;
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(feature = "test-utils")]
 pub use mock_backend::MockChannel;
 
 // Re-export all public items

@@ -33,6 +33,7 @@ mod tests {
     use tempfile::TempDir;
 
     /// Helper to create a durable mailbox with SQLite backend
+    #[cfg(feature = "sqlite-backend")]
     async fn create_durable_mailbox(mailbox_id: &str) -> Mailbox {
         // Use in-memory SQLite for tests (more reliable than file-based in test environment)
         // In production, use file-based SQLite for durability
@@ -60,19 +61,21 @@ mod tests {
             backend_config: None,
         };
         
-        let config_value = serde_json::json!({
+        let mut config_value = serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,
             "state_schema_version": config.state_schema_version,
         });
+        // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+        // Skip it - DurabilityFacet will use default if not provided
         DurabilityFacet::new(storage, config_value, 50)
     }
 
     #[tokio::test]
+    #[cfg(feature = "sqlite-backend")]
     async fn test_mailbox_is_durable_check() {
         // Test in-memory mailbox (not durable)
         let mailbox = MailboxBuilder::new()
@@ -91,6 +94,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "sqlite-backend")]
     async fn test_mailbox_graceful_shutdown() {
         let mailbox = create_durable_mailbox("test-graceful").await;
         
@@ -111,6 +115,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "sqlite-backend")]
     async fn test_mailbox_observability_stats() {
         let mailbox = create_durable_mailbox("test-observability").await;
         
@@ -243,7 +248,15 @@ mod tests {
                 state_schema_version: 1,
                 backend_config: None,
             };
-            let mut facet = DurabilityFacet::new(storage, durability_config);
+            let config_value = serde_json::json!({
+                "backend": durability_config.backend,
+                "checkpoint_interval": durability_config.checkpoint_interval,
+                "replay_on_activation": durability_config.replay_on_activation,
+                "cache_side_effects": durability_config.cache_side_effects,
+                "compression": durability_config.compression,
+                "state_schema_version": durability_config.state_schema_version,
+            });
+            let mut facet = DurabilityFacet::new(storage, config_value, 50);
             facet.on_attach("recovery-actor", serde_json::json!({})).await.unwrap();
             
             // Send messages
@@ -298,7 +311,15 @@ mod tests {
                 state_schema_version: 1,
                 backend_config: None,
             };
-            let mut facet = DurabilityFacet::new(storage, durability_config);
+            let config_value = serde_json::json!({
+                "backend": durability_config.backend,
+                "checkpoint_interval": durability_config.checkpoint_interval,
+                "replay_on_activation": durability_config.replay_on_activation,
+                "cache_side_effects": durability_config.cache_side_effects,
+                "compression": durability_config.compression,
+                "state_schema_version": durability_config.state_schema_version,
+            });
+            let mut facet = DurabilityFacet::new(storage, config_value, 50);
             facet.on_attach("recovery-actor", serde_json::json!({})).await.unwrap();
             
             // Wait for recovery

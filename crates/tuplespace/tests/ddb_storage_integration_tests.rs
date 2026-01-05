@@ -28,6 +28,18 @@ mod ddb_tests {
     use chrono::Duration;
     use std::time::Duration as StdDuration;
 
+    use plexspaces_common::test_helpers::dynamodb_local_available;
+
+    /// Helper to check if DynamoDB simulator is available and skip test with warning if not
+    async fn check_ddb_available() -> bool {
+        if !dynamodb_local_available().await {
+            eprintln!("⚠️  WARNING: DynamoDB Local simulator is not running. Skipping DDB test.");
+            eprintln!("   To run DDB tests, start DynamoDB Local: docker run -p 8000:8000 amazon/dynamodb-local");
+            return false;
+        }
+        true
+    }
+
     /// Helper to create DynamoDB storage for testing
     async fn create_ddb_storage() -> DynamoDBStorage {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
@@ -69,6 +81,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_write_batch() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let prefix = unique_key("key");
 
@@ -83,6 +98,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_read() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 
@@ -105,6 +123,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_read_wildcard() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let prefix = unique_key("test");
 
@@ -140,6 +161,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_take() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 
@@ -166,6 +190,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_count() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 
@@ -187,6 +214,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_exists() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 
@@ -207,6 +237,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_clear() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 
@@ -231,6 +264,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_stats() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         storage.write(Tuple::new(vec![TupleField::Integer(1)])).await.unwrap();
@@ -246,6 +282,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_renew_lease() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
 
         use plexspaces_tuplespace::Lease;
@@ -260,6 +299,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_lease_expiration() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let key = unique_key("expire");
 
@@ -285,6 +327,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_pattern_type_match() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 
@@ -308,6 +353,9 @@ mod ddb_tests {
 
     #[tokio::test]
     async fn test_ddb_read_blocking() {
+        if !check_ddb_available().await {
+            return;
+        }
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 

@@ -247,7 +247,7 @@ mod tests {
         // Discover in default namespace (should not find either)
         let default_ctx = default_ctx();
         let default_actors = registry
-            .discover(&default_ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100)
+            .discover(&default_ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100, 0)
             .await
             .unwrap();
         assert_eq!(default_actors.len(), 0);

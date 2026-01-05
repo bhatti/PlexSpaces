@@ -57,5 +57,8 @@ pub use actor_factory_impl::ActorFactoryImpl;
 pub use virtual_actor_wrapper::VirtualActorWrapper;
 pub use service_locator_helpers::get_actor_factory;
 
+// Re-export register_state_fetcher_callback for tests
+pub use r#mod::register_state_fetcher_callback;
+
 // Actor registry
 // pub mod registry; // TEMPORARILY DISABLED - awaiting migration to object_registry proto

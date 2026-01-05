@@ -19,7 +19,8 @@ mod sqlite_tests {
         serde_json::json!({
             "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
-            "checkpoint_timeout": config.checkpoint_timeout,
+            // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
+            // DurabilityFacet will use a default if not provided
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
             "compression": config.compression,

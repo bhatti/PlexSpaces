@@ -475,29 +475,18 @@ impl JournalStorage for MemoryJournalStorage {
     ) -> JournalResult<(Vec<ActorEvent>, PageResponse)> {
         let events = self.events.read().await;
 
-        // Use offset to get starting sequence
-        // If offset is provided in page_request, use it; otherwise use from_sequence
-        // offset takes precedence as it's the explicit pagination parameter
-        let start_sequence = if page_request.offset > 0 {
-            page_request.offset as u64
-        } else {
-            from_sequence
-        };
+        // offset is the number of events to skip (not a sequence number)
+        let skip_count = page_request.offset.max(0) as usize;
 
         // Validate and clamp limit (1-1000)
         let page_size = page_request.limit.max(1).min(1000) as usize;
 
         if let Some(actor_events) = events.get(actor_id) {
-            // Binary search for start position (O(log n))
-            let start_idx = actor_events
-                .binary_search_by_key(&start_sequence, |e| e.sequence)
-                .unwrap_or_else(|idx| idx);
-
-            // Filter events >= start_sequence and >= from_sequence
+            // First filter by from_sequence, then skip offset events, then take page_size + 1
             let filtered: Vec<&ActorEvent> = actor_events
                 .iter()
-                .skip(start_idx)
-                .filter(|e| e.sequence >= start_sequence.max(from_sequence))
+                .filter(|e| e.sequence >= from_sequence)
+                .skip(skip_count)
                 .take(page_size + 1) // Fetch one extra to check if there's more
                 .collect();
 
@@ -509,12 +498,8 @@ impl JournalStorage for MemoryJournalStorage {
                 .cloned()
                 .collect();
 
-            // Calculate offset for next page: last sequence returned + 1
-            let next_offset = if !events_to_return.is_empty() {
-                events_to_return.last().unwrap().sequence + 1
-            } else {
-                start_sequence
-            };
+            // Calculate next offset: current offset + number of events returned
+            let next_offset = skip_count + events_to_return.len();
             
             let page_response = PageResponse {
                 total_size: 0, // Total size not available without full scan (expensive)
@@ -545,13 +530,8 @@ impl JournalStorage for MemoryJournalStorage {
     ) -> JournalResult<ActorHistory> {
         let events = self.events.read().await;
 
-        // Decode page_token to get starting sequence (cursor-based pagination)
-        // page_token format: sequence number as string (e.g., "123")
-        let start_sequence = if page_request.offset == 0 {
-            0
-        } else {
-            (page_request.offset.max(0)) as u64
-        };
+        // offset is the number of events to skip (not a sequence number)
+        let skip_count = page_request.offset.max(0) as usize;
 
         // Validate and clamp page_size (1-1000)
         let page_size = page_request.limit.max(1).min(1000) as usize;
@@ -572,15 +552,10 @@ impl JournalStorage for MemoryJournalStorage {
                 .and_then(|e| e.timestamp.clone())
                 .or_else(|| Some(prost_types::Timestamp::from(std::time::SystemTime::now())));
 
-            // Binary search for start position (O(log n))
-            let start_idx = actor_events
-                .binary_search_by_key(&start_sequence, |e| e.sequence)
-                .unwrap_or_else(|idx| idx);
-
-            // Fetch page_size + 1 to check if there's more
+            // Skip offset events, then take page_size + 1 to check if there's more
             let filtered: Vec<&ActorEvent> = actor_events
                 .iter()
-                .skip(start_idx)
+                .skip(skip_count)
                 .take(page_size + 1)
                 .collect();
 
@@ -592,9 +567,12 @@ impl JournalStorage for MemoryJournalStorage {
                 .cloned()
                 .collect();
 
+            // Calculate next offset: current offset + number of events returned
+            let next_offset = skip_count + events_to_return.len();
+
             let page_response = PageResponse {
                 total_size: 0, // Total size not available without full scan (expensive)
-                offset: start_sequence as i32,
+                offset: next_offset as i32,
                 limit: page_size as i32,
                 has_next: has_more,
             };
@@ -619,7 +597,7 @@ impl JournalStorage for MemoryJournalStorage {
                 metadata: HashMap::new(),
                 page_response: Some(PageResponse {
                     total_size: 0,
-                    offset: start_sequence as i32,
+                    offset: skip_count as i32,
                     limit: page_size as i32,
                     has_next: false,
                 }),
@@ -1065,7 +1043,7 @@ mod tests {
         assert_eq!(events[0].sequence, 1);
         assert!(page_response.has_next);
 
-        // Second page: use offset from previous page (which is last sequence + 1)
+        // Second page: use offset from previous page (which is skip count)
         let page_request2 = PageRequest {
             offset: page_response.offset,
             limit: 3,
@@ -1073,17 +1051,17 @@ mod tests {
             order_by: String::new(),
         };
 
-        // Use offset as from_sequence (it's already the next sequence to start from)
+        // offset is skip count, from_sequence is still 0 (start from beginning)
         let (events2, page_response2) = storage
-            .replay_events_from_paginated("actor-1", page_response.offset as u64, &page_request2)
+            .replay_events_from_paginated("actor-1", 0, &page_request2)
             .await
             .unwrap();
 
         assert_eq!(events2.len(), 3);
-        assert_eq!(events2[0].sequence, 4);
+        assert_eq!(events2[0].sequence, 4); // Skipped 3 events (1,2,3), so next is 4
         assert!(page_response2.has_next);
 
-        // Last page: use offset from previous page (which is last sequence + 1)
+        // Last page: use offset from previous page (which is skip count)
         let page_request3 = PageRequest {
             offset: page_response2.offset,
             limit: 3,
@@ -1091,15 +1069,14 @@ mod tests {
             order_by: String::new(),
         };
 
-        // Use offset from page_request (it's already the next sequence to start from)
-        // Pass 0 as from_sequence since offset in page_request takes precedence
+        // offset is skip count, from_sequence is still 0 (start from beginning)
         let (events3, page_response3) = storage
             .replay_events_from_paginated("actor-1", 0, &page_request3)
             .await
             .unwrap();
 
         assert_eq!(events3.len(), 3);
-        assert_eq!(events3[0].sequence, 7);
+        assert_eq!(events3[0].sequence, 7); // Skipped 6 events (1-6), so next is 7
         // Should have more pages
         assert!(page_response3.has_next);
     }
@@ -1141,10 +1118,10 @@ mod tests {
         assert!(history.page_response.is_some());
         assert!(history.page_response.as_ref().unwrap().has_next);
 
-        // Second page
+        // Second page: use offset from previous page (already the next skip count)
         let page_response = history.page_response.as_ref().unwrap();
         let page_request2 = PageRequest {
-            offset: page_response.offset + page_response.limit,
+            offset: page_response.offset, // Already the next offset (skip count)
             limit: 2,
             filter: String::new(),
             order_by: String::new(),

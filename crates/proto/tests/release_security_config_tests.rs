@@ -39,7 +39,11 @@ mod tests {
 
         let mtls_config = MtlsConfig {
             enable_mtls: true,
-            ca_certificate: "-----BEGIN CERTIFICATE-----\n...".to_string(),
+            ca_certificate_path: "/path/to/ca.pem".to_string(),
+            server_certificate_path: "/path/to/server.pem".to_string(),
+            server_key_path: "/path/to/server.key".to_string(),
+            auto_generate: false,
+            cert_dir: "/app/certs".to_string(),
             trusted_services: vec!["scheduler-service".to_string()],
             certificate_rotation_interval: Some(prost_types::Duration {
                 seconds: 86400 * 30,
@@ -49,6 +53,7 @@ mod tests {
 
         let jwt_config = JwtConfig {
             enable_jwt: true,
+            secret: "test-secret".to_string(),
             issuer: "https://auth.example.com".to_string(),
             jwks_url: "https://auth.example.com/.well-known/jwks.json".to_string(),
             allowed_audiences: vec!["plexspaces-api".to_string()],
@@ -56,6 +61,12 @@ mod tests {
                 seconds: 3600,
                 nanos: 0,
             }),
+            refresh_token_ttl: Some(prost_types::Duration {
+                seconds: 604800, // 7 days
+                nanos: 0,
+            }),
+            tenant_id_claim: "tenant_id".to_string(),
+            user_id_claim: "sub".to_string(),
         };
 
         let api_key = ApiKey {
@@ -77,6 +88,8 @@ mod tests {
             mtls: Some(mtls_config),
             jwt: Some(jwt_config),
             api_keys: vec![api_key],
+            allow_disable_auth: false,
+            disable_auth: false,
         };
 
         assert!(security_config.service_identity.is_some());
@@ -98,12 +111,21 @@ mod tests {
             mtls: None,
             jwt: None,
             api_keys: vec![],
+            allow_disable_auth: false,
+            disable_auth: false,
         };
 
         let runtime_config = RuntimeConfig {
             grpc: None,
             health: None,
             security: Some(security_config),
+            blob: None,
+            shared_database: None,
+            locks_provider: None,
+            channel_provider: None,
+            tuplespace_provider: None,
+            mailbox_provider: None,
+            framework_info: None,
         };
 
         assert!(runtime_config.security.is_some());
@@ -123,12 +145,21 @@ mod tests {
             mtls: None,
             jwt: None,
             api_keys: vec![],
+            allow_disable_auth: false,
+            disable_auth: false,
         };
 
         let runtime_config = RuntimeConfig {
             grpc: None,
             health: None,
             security: Some(security_config),
+            blob: None,
+            shared_database: None,
+            locks_provider: None,
+            channel_provider: None,
+            tuplespace_provider: None,
+            mailbox_provider: None,
+            framework_info: None,
         };
 
         let release_spec = ReleaseSpec {

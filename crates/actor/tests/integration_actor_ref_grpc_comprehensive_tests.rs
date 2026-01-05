@@ -25,7 +25,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         let obj_type = object_type.unwrap_or(ObjectType::ObjectTypeUnspecified);
         self.inner
-            .lookup(ctx, object_id, Some(obj_type))
+            .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -49,6 +49,23 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
             .register(ctx, registration)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn discover(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: Option<ObjectType>,
+        object_category: Option<String>,
+        capabilities: Option<Vec<String>>,
+        labels: Option<Vec<String>>,
+        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .discover(ctx, object_type, object_category, capabilities, labels, health_status, limit, offset)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -100,7 +117,6 @@ async fn test_remote_actor_ref_connection_failure() {
     let node_registration = ObjectRegistration {
             object_id: "remote-node".to_string(),
             object_type: ObjectType::ObjectTypeNode as i32,
-        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:99999".to_string(), // Unreachable port
         ..Default::default()
@@ -144,7 +160,6 @@ async fn test_remote_actor_ref_ask_timeout() {
     let node_registration = ObjectRegistration {
             object_id: "remote-node".to_string(),
             object_type: ObjectType::ObjectTypeNode as i32,
-        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:99999".to_string(),
         tenant_id: "default".to_string(),
@@ -190,7 +205,6 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
     let node_registration = ObjectRegistration {
             object_id: "remote-node".to_string(),
             object_type: ObjectType::ObjectTypeNode as i32,
-        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "Node".to_string(),
         grpc_address: "http://127.0.0.1:99999".to_string(),
         ..Default::default()

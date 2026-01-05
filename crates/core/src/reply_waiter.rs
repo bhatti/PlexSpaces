@@ -19,14 +19,51 @@
 //! Reply waiter using async condition variables for high-performance ask pattern
 //!
 //! ## Purpose
-//! Replaces ReplyTracker with async condition variables for better performance
-//! and simpler design. Uses tokio::sync::Notify for async-compatible wait/notify.
+//! **ReplyWaiter is used ONLY for async waiting, NOT for routing.**
+//!
+//! ReplyWaiter provides the async waiting mechanism for the `ask()` pattern (request-reply).
+//! It allows the caller of `ask()` to wait asynchronously for a reply message with timeout support.
+//!
+//! ## Important: ReplyWaiter vs Routing
+//!
+//! **ReplyWaiter is NOT responsible for routing replies.** Routing is handled by:
+//! - **Local sender**: `ActorService::send_reply()` looks up the sender's ActorRef in the registry
+//!   and calls `ActorRef::tell()` on it. `tell()` then routes the reply to ReplyWaiter if a
+//!   correlation_id matches.
+//! - **Remote sender**: `ActorService::send_reply()` uses gRPC to send the reply to the remote node.
+//!   The remote `ActorRef::tell()` then routes the reply to ReplyWaiter if a correlation_id matches.
+//!
+//! **ReplyWaiter's role**: Once a reply message arrives at `ActorRef::tell()` with a matching
+//! correlation_id, `tell()` routes it to the ReplyWaiter, which wakes up the waiting `ask()` caller.
 //!
 //! ## Design
 //! - Uses Mutex + Notify for async-compatible waiting
 //! - Supports timeout via tokio::time::timeout
 //! - Single-use (one reply per waiter)
 //! - High performance: no channel overhead, direct notification
+//!
+//! ## Reply Routing Flow
+//!
+//! ### Local Sender (Same Node)
+//! ```
+//! 1. Actor calls ctx.send_reply()
+//!    └─> ActorService::send_reply() looks up sender's ActorRef in registry
+//!    └─> Calls sender_ref.tell(reply_message) with correlation_id
+//!    └─> ActorRef::tell() checks for ReplyWaiter with correlation_id
+//!        └─> Routes reply to ReplyWaiter (bypasses mailbox)
+//!            └─> ReplyWaiter.notify() wakes up waiting ask() caller
+//! ```
+//!
+//! ### Remote Sender (Different Node)
+//! ```
+//! 1. Actor calls ctx.send_reply()
+//!    └─> ActorService::send_reply() detects remote sender
+//!    └─> Uses gRPC to send reply to remote node
+//!    └─> Reply arrives at remote ActorRef::tell() with correlation_id
+//!        └─> ActorRef::tell() checks for ReplyWaiter with correlation_id
+//!            └─> Routes reply to ReplyWaiter (bypasses mailbox)
+//!                └─> ReplyWaiter.notify() wakes up waiting ask() caller
+//! ```
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -39,7 +76,19 @@ use crate::service_locator::Service;
 /// Reply waiter using async condition variables for high-performance ask pattern
 ///
 /// ## Purpose
-/// Uses tokio::sync::Notify for async-compatible wait/notify.
+/// **ReplyWaiter is used ONLY for async waiting, NOT for routing.**
+///
+/// ReplyWaiter provides the async waiting mechanism for the `ask()` pattern. It allows the
+/// caller of `ask()` to wait asynchronously for a reply message with timeout support.
+///
+/// ## Important: ReplyWaiter vs Routing
+///
+/// **ReplyWaiter is NOT responsible for routing replies.** Routing is handled by:
+/// - **Local sender**: `ActorService::send_reply()` → `ActorRef::tell()` → ReplyWaiter
+/// - **Remote sender**: `ActorService::send_reply()` → gRPC → remote `ActorRef::tell()` → ReplyWaiter
+///
+/// **ReplyWaiter's role**: Once a reply message arrives at `ActorRef::tell()` with a matching
+/// correlation_id, `tell()` routes it to the ReplyWaiter, which wakes up the waiting `ask()` caller.
 ///
 /// ## Design
 /// - Uses Mutex + Notify for async-compatible waiting
@@ -166,8 +215,10 @@ impl Default for ReplyWaiter {
 /// Registry for managing reply waiters by correlation_id
 ///
 /// ## Purpose
-/// Stores ReplyWaiter instances keyed by correlation_id for routing
-/// replies to waiting ask() callers.
+/// Stores ReplyWaiter instances keyed by correlation_id. When a reply arrives with a matching
+/// correlation_id, `ActorRef::tell()` looks up the ReplyWaiter here and notifies it to wake up
+/// the waiting `ask()` caller. **Note**: This registry is for async waiting, not for routing.
+/// Routing is handled by `ActorService::send_reply()`.
 #[derive(Clone)]
 pub struct ReplyWaiterRegistry {
     waiters: Arc<RwLock<HashMap<String, ReplyWaiter>>>,
@@ -187,9 +238,13 @@ impl ReplyWaiterRegistry {
     /// * `correlation_id` - Unique correlation ID for this request
     /// * `waiter` - The reply waiter to register
     pub async fn register(&self, correlation_id: String, waiter: ReplyWaiter) {
-        tracing::debug!("ReplyWaiterRegistry::register: correlation_id={}", correlation_id);
         let mut waiters = self.waiters.write().await;
-        waiters.insert(correlation_id, waiter);
+        waiters.insert(correlation_id.clone(), waiter);
+        tracing::debug!(
+            "🟢 [REPLY_WAITER_REGISTRY] Registered waiter: correlation_id={}, total_waiters={}",
+            correlation_id,
+            waiters.len()
+        );
     }
     
     /// Notify a waiter that reply has arrived
@@ -202,19 +257,32 @@ impl ReplyWaiterRegistry {
     /// - true if waiter was found and notified
     /// - false if no waiter found for this correlation_id
     pub async fn notify(&self, correlation_id: &str, reply: Message) -> bool {
-        tracing::debug!("ReplyWaiterRegistry::notify: correlation_id={}", correlation_id);
+        let waiters_count = self.waiters.read().await.len();
+        eprintln!("🔵 [REPLY_WAITER_REGISTRY] notify called: correlation_id={}, waiters_count={}", 
+            correlation_id, waiters_count);
+        tracing::debug!(
+            "🟢 [REPLY_WAITER_REGISTRY] notify called: correlation_id={}, waiters_count={}",
+            correlation_id,
+            waiters_count
+        );
         
         let mut waiters = self.waiters.write().await;
         if let Some(waiter) = waiters.remove(correlation_id) {
             drop(waiters); // Release lock before notifying
+            eprintln!("🟢 [REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...", correlation_id);
+            tracing::debug!("🟢 [REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...", correlation_id);
             if waiter.notify(reply).await.is_ok() {
-                tracing::debug!("ReplyWaiterRegistry::notify: Waiter notified successfully");
+                tracing::debug!("🟢 [REPLY_WAITER_REGISTRY] Waiter notified successfully: correlation_id={}", correlation_id);
                 return true;
             } else {
-                tracing::warn!("ReplyWaiterRegistry::notify: Failed to notify waiter");
+                tracing::warn!("🟢 [REPLY_WAITER_REGISTRY] Failed to notify waiter: correlation_id={}", correlation_id);
             }
         } else {
-            tracing::debug!("ReplyWaiterRegistry::notify: No waiter found for correlation_id={}", correlation_id);
+            tracing::warn!(
+                "🟢 [REPLY_WAITER_REGISTRY] No waiter found for correlation_id={}, available_ids={:?}",
+                correlation_id,
+                waiters.keys().collect::<Vec<_>>()
+            );
         }
         false
     }

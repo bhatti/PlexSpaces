@@ -21,11 +21,14 @@
 use plexspaces_actor::ActorRef;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{
-    grpc_client::RemoteActorClient, grpc_service::ActorServiceImpl, Node, NodeId, default_node_config,
+    grpc_client::RemoteActorClient, grpc_service::ActorServiceImpl, Node, NodeId, NodeBuilder, default_node_config,
 };
 use plexspaces_proto::{v1::actor::Message as ProtoMessage, ActorServiceServer};
 use std::sync::Arc;
 use tonic::transport::Server;
+
+#[path = "test_helpers.rs"]
+mod test_helpers;
 
 /// Helper to create a proto message with default values
 fn create_proto_message(id: &str, sender: &str, receiver: &str, payload: Vec<u8>) -> ProtoMessage {
@@ -40,6 +43,8 @@ fn create_proto_message(id: &str, sender: &str, receiver: &str, payload: Vec<u8>
         ttl: None,
         headers: std::collections::HashMap::new(),
         idempotency_key: String::new(),
+        uri_method: String::new(),
+        uri_path: String::new(),
     }
 }
 
@@ -72,28 +77,41 @@ async fn start_test_server(node: Arc<Node>) -> String {
 
 /// Helper to create a test node with a registered actor
 async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
-    let node = Arc::new(NodeBuilder::new("test-node-1").build());
+    let node = Arc::new(NodeBuilder::new("test-node-1").build().await);
 
+    // Create a simple test behavior that processes messages
+    struct TestBehavior;
     
-    use plexspaces_core::MessageSender;
+    #[async_trait::async_trait]
+    impl plexspaces_core::Actor for TestBehavior {
+        async fn handle_message(
+            &mut self,
+            _ctx: &plexspaces_core::ActorContext,
+            _msg: plexspaces_mailbox::Message,
+        ) -> Result<(), plexspaces_core::BehaviorError> {
+            // Just consume the message - no processing needed for gRPC client tests
+            Ok(())
+        }
+
+        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+            plexspaces_core::BehaviorType::GenServer
+        }
+    }
+
+    // Spawn a real actor that processes messages (prevents mailbox from filling up)
+    use plexspaces_actor::ActorBuilder;
+    use plexspaces_core::ActorId;
+    use test_helpers::spawn_actor_helper;
     
-    let actor_id = "test-actor-1@test-node-1".to_string();
-    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), actor_id.clone()).await.unwrap());
-    let service_locator = node.service_locator();
-    let actor_ref = ActorRef::local(actor_id.clone(), mailbox.clone(), service_locator.clone());
+    let behavior = Box::new(TestBehavior);
+    let mut actor = ActorBuilder::new(behavior)
+        .with_id(ActorId::from("test-actor-1@test-node-1"))
+        .build()
+        .await
+        .unwrap();
     
-    // Register actor with MessageSender (mailbox is internal)
-    let wrapper = Arc::new(ActorRef::local(
-        actor_id.clone(),
-        mailbox,
-        service_locator,
-    ));
-    node.actor_registry().register_actor(actor_id.clone(), wrapper, None, None, None).await;
-    
-    // Also register with node for config tracking
-    let core_actor_ref = plexspaces_core::ActorRef::new(actor_ref.id().as_str().to_string()).unwrap();
-    node.actor_registry().register_actor_with_config(actor_ref.id().as_str().to_string(), None).await.unwrap();
-    // Note: Metrics are updated internally by Node methods
+    // Spawn the actor (this creates a real actor that processes messages)
+    let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     (node, actor_ref)
 }
@@ -158,7 +176,7 @@ async fn test_send_message_via_client() {
 #[tokio::test]
 async fn test_send_message_to_nonexistent_actor() {
     // Setup: Start server WITHOUT registered actor
-    let node = Arc::new(NodeBuilder::new("test-node-2").build());
+    let node = Arc::new(NodeBuilder::new("test-node-2").build().await);
     let server_addr = start_test_server(node).await;
 
     // Create client

@@ -188,6 +188,20 @@ pub async fn initialize_services_in_locator(
         service_locator.clone(),
         None, // Use default HealthProbeConfig
     ).await;
+    
+    // Register ActorService in ServiceLocator so ActorContext::send_reply() can use it
+    // Production-grade: All essential services should be available after initialization
+    // This ensures actors can send replies even when gRPC server is not started
+    use plexspaces_actor_service::ActorServiceImpl;
+    use std::sync::Arc;
+    // Use node_id_str which is already available from final_node_config.id
+    let actor_service_for_context = Arc::new(
+        ActorServiceImpl::new(
+            service_locator.clone(),
+            node_id_str.clone(),
+        )
+    );
+    service_locator.register_actor_service(actor_service_for_context.clone() as Arc<dyn plexspaces_core::ActorService + Send + Sync>).await;
 }
 
 /// Create a ServiceLocator with all default services registered

@@ -25,28 +25,42 @@ mod tests {
     use plexspaces_core::RequestContext;
     use object_store::local::LocalFileSystem;
     use std::sync::Arc;
-    use tempfile::{TempDir, NamedTempFile};
-    use http_body_util::Full;
+    use tempfile::TempDir;
+    use http_body_util::{Full, BodyExt};
     use hyper::body::Bytes;
     use hyper::{Request, Method, Uri, StatusCode};
+    use futures::stream;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
+    fn init_sqlx_drivers() {
+        INIT.call_once(|| {
+            // Install sqlx::any default drivers before any database operations
+            // This is required for AnyPool to work with sqlite
+            // Using Once ensures it's only called once, even in parallel test scenarios
+            sqlx::any::install_default_drivers();
+        });
+    }
 
     async fn create_test_service() -> (Arc<BlobService>, TempDir) {
+        // Ensure sqlx drivers are installed (idempotent, safe for parallel tests)
+        init_sqlx_drivers();
+        
         let temp_dir = TempDir::new().unwrap();
         let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
 
-        // Use temporary file-based database for reliability
+        // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
         use sqlx::AnyPool;
         use sqlx::any::AnyPoolOptions;
-        use tempfile::NamedTempFile;
         
-        // Use temporary file-based database (more reliable than in-memory)
-        let temp_db = NamedTempFile::new().unwrap();
-        let db_path = temp_db.path().to_str().unwrap();
-        let db_url = format!("sqlite:{}", db_path);
+        // Use in-memory database for tests (not recovery-related, so memory is appropriate)
+        // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
+        let db_url = "sqlite::memory:";
         
         let any_pool = AnyPoolOptions::new()
-            .max_connections(5)
-            .connect(&db_url)
+            .max_connections(1)
+            .connect(db_url)
             .await
             .unwrap();
         
@@ -69,6 +83,16 @@ mod tests {
 
         let service = BlobService::with_object_store(config, local_store, repository);
         (Arc::new(service), temp_dir)
+    }
+
+    fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
+        RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string())
+    }
+
+    // Helper to create body from bytes for tests
+    // Now that handle_request accepts generic Body, we can use Full<Bytes> directly
+    fn create_incoming_body(data: Vec<u8>) -> Full<Bytes> {
+        Full::new(Bytes::from(data))
     }
 
     #[tokio::test]
@@ -94,11 +118,11 @@ mod tests {
         );
 
         let uri: Uri = "/api/v1/blobs/upload".parse().unwrap();
-        let mut req = Request::builder()
+        let req = Request::builder()
             .method(Method::POST)
             .uri(uri)
             .header("content-type", format!("multipart/form-data; boundary={}", boundary))
-            .body(hyper::body::Incoming::from(body.into_bytes()))
+            .body(create_incoming_body(body.into_bytes()))
             .unwrap();
 
         let resp = handler.handle_request(req).await.unwrap();
@@ -109,7 +133,7 @@ mod tests {
         assert_eq!(parts.headers.get("content-type").unwrap(), "application/json");
         
         // Parse response body
-        let body_bytes: Bytes = body.into();
+        let body_bytes = BodyExt::collect(body).await.unwrap().to_bytes();
         let metadata: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(metadata["tenant_id"], "tenant-1");
         assert_eq!(metadata["namespace"], "ns-1");
@@ -135,7 +159,7 @@ mod tests {
             .method(Method::POST)
             .uri(uri)
             .header("content-type", format!("multipart/form-data; boundary={}", boundary))
-            .body(hyper::body::Incoming::from(body.into_bytes()))
+            .body(create_incoming_body(body.into_bytes()))
             .unwrap();
 
         let resp = handler.handle_request(req).await;
@@ -148,10 +172,10 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
         
         // First upload a blob
+        let ctx = create_test_context("tenant-1", "ns-1");
         let metadata = service
             .upload_blob(
-                "tenant-1",
-                "ns-1",
+                &ctx,
                 "test.txt",
                 b"Hello, World!".to_vec(),
                 Some("text/plain".to_string()),
@@ -169,7 +193,9 @@ mod tests {
         let req = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .body(hyper::body::Incoming::from(vec![]))
+            .header("x-tenant-id", "tenant-1")
+            .header("x-namespace", "ns-1")
+            .body(create_incoming_body(vec![]))
             .unwrap();
 
         let resp = handler.handle_request(req).await.unwrap();
@@ -179,7 +205,7 @@ mod tests {
         assert_eq!(parts.headers.get("content-type").unwrap(), "text/plain");
         assert!(parts.headers.get("content-disposition").is_some());
         
-        let body_bytes: Bytes = body.into();
+        let body_bytes = BodyExt::collect(body).await.unwrap().to_bytes();
         assert_eq!(body_bytes.as_ref(), b"Hello, World!");
     }
 
@@ -192,7 +218,7 @@ mod tests {
         let req = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .body(hyper::body::Incoming::from(vec![]))
+            .body(create_incoming_body(vec![]))
             .unwrap();
 
         let resp = handler.handle_request(req).await;
@@ -209,7 +235,7 @@ mod tests {
         let req = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .body(hyper::body::Incoming::from(vec![]))
+            .body(create_incoming_body(vec![]))
             .unwrap();
 
         let resp = handler.handle_request(req).await.unwrap();

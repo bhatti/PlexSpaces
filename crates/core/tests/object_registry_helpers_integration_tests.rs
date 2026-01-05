@@ -6,14 +6,18 @@
 
 #[cfg(feature = "sql-backend")]
 mod tests {
-    use plexspaces_core::RequestContext;
-    use plexspaces_core::object_registry_helpers::*;
-    use plexspaces_object_registry::ObjectRegistry;
-    use plexspaces_keyvalue::SqliteKVStore;
-    use plexspaces_proto::object_registry::v1::ObjectType;
-    use std::sync::Arc;
-    use std::time::Duration;
-    use tokio::time::sleep;
+use plexspaces_core::RequestContext;
+use plexspaces_core::object_registry_helpers::*;
+use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_keyvalue::SqliteKVStore;
+use plexspaces_proto::object_registry::v1::ObjectType;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+use tokio::time::sleep;
+
+// Atomic counter for generating unique test IDs
+static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     /// Helper to create a SQLite database for testing
     async fn create_test_db() -> Arc<SqliteKVStore> {
@@ -27,11 +31,26 @@ mod tests {
         Arc::new(ObjectRegistry::new(kv))
     }
     
+    /// Helper to create test RequestContext with proper tenant/namespace isolation
+    /// Generates unique tenant/namespace per test to allow concurrent test execution
+    fn create_test_context() -> RequestContext {
+        let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        RequestContext::new_without_auth(
+            format!("test-tenant-{}", test_id),
+            format!("test-namespace-{}", test_id),
+        )
+    }
+    
+    /// Helper to generate unique test identifier for object IDs
+    /// Ensures each test uses unique object IDs to avoid conflicts when running concurrently
+    fn get_test_id() -> u64 {
+        TEST_COUNTER.load(Ordering::Relaxed)
+    }
 
     #[tokio::test]
     async fn test_discover_nodes_basic() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Register multiple nodes
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", Some("cluster1")).await.unwrap();
@@ -51,17 +70,17 @@ mod tests {
     #[tokio::test]
     async fn test_discover_nodes_caching() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Register a node
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         // First discovery - should query registry
-        let nodes1 = discover_nodes(&trait_registry, &ctx).await.unwrap();
+        let nodes1 = discover_nodes(&registry, &ctx).await.unwrap();
         assert_eq!(nodes1.len(), 1);
         
         // Second discovery immediately - should use cache
-        let nodes2 = discover_nodes(&trait_registry, &ctx).await.unwrap();
+        let nodes2 = discover_nodes(&registry, &ctx).await.unwrap();
         assert_eq!(nodes2.len(), 1);
         assert_eq!(nodes1[0].object_id, nodes2[0].object_id);
     }
@@ -69,31 +88,31 @@ mod tests {
     #[tokio::test]
     async fn test_discover_nodes_cache_invalidation() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Register and discover
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
-        let nodes1 = discover_nodes(&trait_registry, &ctx).await.unwrap();
+        let nodes1 = discover_nodes(&registry, &ctx).await.unwrap();
         assert_eq!(nodes1.len(), 1);
         
         // Register another node - should invalidate cache
         register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Next discovery should see both nodes (cache was invalidated)
-        let nodes2 = discover_nodes(&trait_registry, &ctx).await.unwrap();
+        let nodes2 = discover_nodes(&registry, &ctx).await.unwrap();
         assert_eq!(nodes2.len(), 2);
     }
 
     #[tokio::test]
     async fn test_discover_nodes_cache_expiration() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Register a node
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         // First discovery
-        let nodes1 = discover_nodes(&trait_registry, &ctx).await.unwrap();
+        let nodes1 = discover_nodes(&registry, &ctx).await.unwrap();
         assert_eq!(nodes1.len(), 1);
         
         // Register another node after cache is populated
@@ -101,14 +120,14 @@ mod tests {
         
         // Wait for cache to expire (60 seconds) - but we'll test invalidation instead
         // Since register_node invalidates cache, we should see both nodes
-        let nodes2 = discover_nodes(&trait_registry, &ctx).await.unwrap();
+        let nodes2 = discover_nodes(&registry, &ctx).await.unwrap();
         assert_eq!(nodes2.len(), 2);
     }
 
     #[tokio::test]
     async fn test_discover_application_nodes_basic() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Register nodes
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
@@ -119,7 +138,7 @@ mod tests {
         register_application(&registry, &ctx, "myapp", "1.0.0", "node2", "http://127.0.0.1:8001").await.unwrap();
         
         // Discover application nodes
-        let nodes = discover_application_nodes(&trait_registry, &ctx, "myapp").await.unwrap();
+        let nodes = discover_application_nodes(&registry, &ctx, "myapp").await.unwrap();
         assert_eq!(nodes.len(), 2);
         
         let node_ids: Vec<String> = nodes.iter().map(|n| n.node_id.clone()).collect();
@@ -130,17 +149,17 @@ mod tests {
     #[tokio::test]
     async fn test_discover_application_nodes_caching() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         register_application(&registry, &ctx, "myapp", "1.0.0", "node1", "http://127.0.0.1:8000").await.unwrap();
         
         // First discovery
-        let nodes1 = discover_application_nodes(&trait_registry, &ctx, "myapp").await.unwrap();
+        let nodes1 = discover_application_nodes(&registry, &ctx, "myapp").await.unwrap();
         assert_eq!(nodes1.len(), 1);
         
         // Second discovery - should use cache
-        let nodes2 = discover_application_nodes(&trait_registry, &ctx, "myapp").await.unwrap();
+        let nodes2 = discover_application_nodes(&registry, &ctx, "myapp").await.unwrap();
         assert_eq!(nodes2.len(), 1);
         assert_eq!(nodes1[0].object_id, nodes2[0].object_id);
     }
@@ -148,7 +167,7 @@ mod tests {
     #[tokio::test]
     async fn test_discover_workflow_nodes_basic() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Register nodes
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
@@ -159,7 +178,7 @@ mod tests {
         register_workflow(&registry, &ctx, "workflow2", "def1", "node2", "http://127.0.0.1:8001").await.unwrap();
         
         // Discover workflow nodes
-        let nodes = discover_workflow_nodes(&trait_registry, &ctx, "def1").await.unwrap();
+        let nodes = discover_workflow_nodes(&registry, &ctx, "def1").await.unwrap();
         assert_eq!(nodes.len(), 2);
         
         let node_ids: Vec<String> = nodes.iter().map(|n| n.node_id.clone()).collect();
@@ -170,17 +189,17 @@ mod tests {
     #[tokio::test]
     async fn test_discover_workflow_nodes_caching() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         register_workflow(&registry, &ctx, "workflow1", "def1", "node1", "http://127.0.0.1:8000").await.unwrap();
         
         // First discovery
-        let nodes1 = discover_workflow_nodes(&trait_registry, &ctx, "def1").await.unwrap();
+        let nodes1 = discover_workflow_nodes(&registry, &ctx, "def1").await.unwrap();
         assert_eq!(nodes1.len(), 1);
         
         // Second discovery - should use cache
-        let nodes2 = discover_workflow_nodes(&trait_registry, &ctx, "def1").await.unwrap();
+        let nodes2 = discover_workflow_nodes(&registry, &ctx, "def1").await.unwrap();
         assert_eq!(nodes2.len(), 1);
         assert_eq!(nodes1[0].object_id, nodes2[0].object_id);
     }
@@ -197,12 +216,12 @@ mod tests {
         register_node(&registry, &ctx2, "node2", "http://127.0.0.1:8001", None).await.unwrap();
         
         // Discover nodes in tenant1 - should only see node1
-        let nodes1 = discover_nodes(&trait_registry, &ctx1).await.unwrap();
+        let nodes1 = discover_nodes(&registry, &ctx1).await.unwrap();
         assert_eq!(nodes1.len(), 1);
         assert_eq!(nodes1[0].object_id, "node1");
         
         // Discover nodes in tenant2 - should only see node2
-        let nodes2 = discover_nodes(&trait_registry, &ctx2).await.unwrap();
+        let nodes2 = discover_nodes(&registry, &ctx2).await.unwrap();
         assert_eq!(nodes2.len(), 1);
         assert_eq!(nodes2[0].object_id, "node2");
     }
@@ -210,28 +229,28 @@ mod tests {
     #[tokio::test]
     async fn test_discover_empty_results() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Discover nodes when none are registered
-        let nodes = discover_nodes(&trait_registry, &ctx).await.unwrap();
+        let nodes = discover_nodes(&registry, &ctx).await.unwrap();
         assert_eq!(nodes.len(), 0);
         
         // Discover application that doesn't exist
-        let apps = discover_application_nodes(&trait_registry, &ctx, "nonexistent").await.unwrap();
+        let apps = discover_application_nodes(&registry, &ctx, "nonexistent").await.unwrap();
         assert_eq!(apps.len(), 0);
         
         // Discover workflow that doesn't exist
-        let workflows = discover_workflow_nodes(&trait_registry, &ctx, "nonexistent").await.unwrap();
+        let workflows = discover_workflow_nodes(&registry, &ctx, "nonexistent").await.unwrap();
         assert_eq!(workflows.len(), 0);
     }
 
     #[tokio::test]
     async fn test_register_node_with_cluster() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         let result = register_node(
-            &trait_registry,
+            &registry,
             &ctx,
             "node1",
             "http://127.0.0.1:8000",
@@ -252,12 +271,12 @@ mod tests {
     #[tokio::test]
     async fn test_register_application() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         let result = register_application(
-            &trait_registry,
+            &registry,
             &ctx,
             "myapp",
             "1.0.0",
@@ -279,12 +298,12 @@ mod tests {
     #[tokio::test]
     async fn test_register_workflow() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         
         let result = register_workflow(
-            &trait_registry,
+            &registry,
             &ctx,
             "workflow1",
             "def1",
@@ -306,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn test_discover_multiple_applications() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
@@ -317,11 +336,11 @@ mod tests {
         register_application(&registry, &ctx, "app1", "1.0.0", "node2", "http://127.0.0.1:8001").await.unwrap();
         
         // Discover app1 nodes - should find both node1 and node2
-        let app1_nodes = discover_application_nodes(&trait_registry, &ctx, "app1").await.unwrap();
+        let app1_nodes = discover_application_nodes(&registry, &ctx, "app1").await.unwrap();
         assert_eq!(app1_nodes.len(), 2);
         
         // Discover app2 nodes - should find only node1
-        let app2_nodes = discover_application_nodes(&trait_registry, &ctx, "app2").await.unwrap();
+        let app2_nodes = discover_application_nodes(&registry, &ctx, "app2").await.unwrap();
         assert_eq!(app2_nodes.len(), 1);
         assert_eq!(app2_nodes[0].node_id, "node1");
     }
@@ -329,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn test_discover_multiple_workflows() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         register_node(&registry, &ctx, "node1", "http://127.0.0.1:8000", None).await.unwrap();
         register_node(&registry, &ctx, "node2", "http://127.0.0.1:8001", None).await.unwrap();
@@ -340,11 +359,11 @@ mod tests {
         register_workflow(&registry, &ctx, "workflow3", "def2", "node1", "http://127.0.0.1:8000").await.unwrap();
         
         // Discover def1 workflows - should find both node1 and node2
-        let def1_nodes = discover_workflow_nodes(&trait_registry, &ctx, "def1").await.unwrap();
+        let def1_nodes = discover_workflow_nodes(&registry, &ctx, "def1").await.unwrap();
         assert_eq!(def1_nodes.len(), 2);
         
         // Discover def2 workflows - should find only node1
-        let def2_nodes = discover_workflow_nodes(&trait_registry, &ctx, "def2").await.unwrap();
+        let def2_nodes = discover_workflow_nodes(&registry, &ctx, "def2").await.unwrap();
         assert_eq!(def2_nodes.len(), 1);
         assert_eq!(def2_nodes[0].node_id, "node1");
     }
@@ -352,7 +371,7 @@ mod tests {
     #[tokio::test]
     async fn test_discover_nodes_pagination() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Register 10 nodes
         for i in 1..=10 {
@@ -412,7 +431,7 @@ mod tests {
     #[tokio::test]
     async fn test_discover_application_nodes_pagination() {
         let registry = create_test_registry().await;
-        let ctx = RequestContext::internal();
+        let ctx = create_test_context();
         
         // Register nodes
         for i in 1..=5 {

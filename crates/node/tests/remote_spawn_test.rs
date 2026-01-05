@@ -41,8 +41,9 @@ fn create_test_node(id: &str, port: u16) -> Node {
 
 #[tokio::test]
 async fn test_spawn_actor_basic() {
-    // Create a node
+    // Create a node and initialize services (required for ActorFactory to be available)
     let node = Arc::new(create_test_node("test-node", 9501));
+    node.initialize_services().await.unwrap();
 
     // Create gRPC service
     let service = plexspaces_node::grpc_service::ActorServiceImpl::new(node.clone());
@@ -126,6 +127,7 @@ async fn test_spawn_remote_actor_missing_actor_type() {
 #[tokio::test]
 async fn test_spawn_remote_actor_wrong_node() {
     let node = Arc::new(create_test_node("node1", 9504));
+    node.initialize_services().await.unwrap();
     let service = plexspaces_node::grpc_service::ActorServiceImpl::new(node.clone());
 
     // gRPC spawn_actor always spawns on the node receiving the request
@@ -148,6 +150,7 @@ async fn test_spawn_remote_actor_wrong_node() {
 #[tokio::test]
 async fn test_spawn_multiple_remote_actors() {
     let node = Arc::new(create_test_node("test-node", 9505));
+    node.initialize_services().await.unwrap();
     let service = plexspaces_node::grpc_service::ActorServiceImpl::new(node.clone());
 
     // Spawn 3 actors

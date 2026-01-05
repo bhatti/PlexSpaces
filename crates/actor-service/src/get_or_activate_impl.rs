@@ -71,12 +71,10 @@ pub async fn get_or_activate_actor_impl(
         .await
         .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
     
-    // Create RequestContext for routing lookup (use internal context for system operations)
-    let internal_ctx = RequestContext::internal();
-    
+    // Use RequestContext from request for routing lookup (respects tenant/namespace)
     // Try to lookup routing - if it fails, assume actor doesn't exist (will create it)
     let routing = actor_registry
-        .lookup_routing(&internal_ctx, &actor_id)
+        .lookup_routing(ctx, &actor_id)
         .await
         .ok()
         .flatten();

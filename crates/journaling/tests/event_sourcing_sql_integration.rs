@@ -168,9 +168,9 @@ use plexspaces_facet::Facet;
         assert_eq!(events[0].sequence, 1);
         assert!(page_response.has_next);
 
-        // Second page
+        // Second page: use offset from previous page (already the next skip count)
         let page_request2 = PageRequest {
-            offset: page_response.offset + page_response.limit,
+            offset: page_response.offset, // Already the next offset (skip count)
             limit: 3,
             filter: String::new(),
             order_by: String::new(),
@@ -182,7 +182,7 @@ use plexspaces_facet::Facet;
             .unwrap();
 
         assert_eq!(events2.len(), 3);
-        assert_eq!(events2[0].sequence, 4);
+        assert_eq!(events2[0].sequence, 4); // Skipped 3 events (1,2,3), so next is 4
         assert!(page_response2.has_next);
     }
 
@@ -223,10 +223,10 @@ use plexspaces_facet::Facet;
         assert!(history.page_response.is_some());
         assert!(history.page_response.as_ref().unwrap().has_next);
 
-        // Second page
+        // Second page: use offset from previous page (already the next skip count)
         let page_response = history.page_response.as_ref().unwrap();
         let page_request2 = PageRequest {
-            offset: page_response.offset + page_response.limit,
+            offset: page_response.offset, // Already the next offset (skip count)
             limit: 2,
             filter: String::new(),
             order_by: String::new(),
@@ -255,7 +255,12 @@ use plexspaces_facet::Facet;
         };
 
         // Create facet
-        let mut facet = EventSourcingFacet::new(storage.clone(), config);
+        let config_value = serde_json::json!({
+            "event_log_enabled": config.event_log_enabled,
+            "snapshot_interval": config.snapshot_interval,
+            "time_travel_enabled": config.time_travel_enabled,
+        });
+        let mut facet = EventSourcingFacet::new(storage.clone(), config_value, 50);
         facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
 
         // Process multiple state changes
@@ -302,8 +307,8 @@ use plexspaces_facet::Facet;
 
         // Test pagination with large event log
         let page_request = PageRequest {
-            page_size: 20,
-            page_token: String::new(),
+            offset: 0,
+            limit: 20,
             filter: String::new(),
             order_by: String::new(),
         };
@@ -314,16 +319,17 @@ use plexspaces_facet::Facet;
             .unwrap();
 
         assert_eq!(events.len(), 20);
-        assert!(!page_response.next_page_token.is_empty());
+        assert!(page_response.has_next);
 
         // Verify we can get all events through pagination
+        // page_response.offset is already the next offset (skip count)
         let mut total = 20;
-        let mut next_token = page_response.next_page_token;
+        let mut current_offset = page_response.offset;
 
         loop {
             let page_request = PageRequest {
-                page_size: 20,
-                page_token: next_token,
+                offset: current_offset,
+                limit: 20,
                 filter: String::new(),
                 order_by: String::new(),
             };
@@ -334,10 +340,11 @@ use plexspaces_facet::Facet;
                 .unwrap();
 
             total += events.len();
-            if page_response.next_page_token.is_empty() {
+            if !page_response.has_next {
                 break;
             }
-            next_token = page_response.next_page_token;
+            // page_response.offset is already the next offset
+            current_offset = page_response.offset;
         }
 
         assert_eq!(total, 100);

@@ -78,8 +78,9 @@ fn create_test_message(id: &str, payload: &str) -> ChannelMessage {
 // ============================================================================
 
 #[tokio::test]
+#[cfg(feature = "test-utils")]
 async fn test_mock_shutdown_stop_accepting_new() {
-    use plexspaces_channel::mock_backend::MockChannel;
+    use plexspaces_channel::{mock_backend::MockChannel, Channel};
 
     let config = create_test_config_with_retry_dlq(
         "test-shutdown-new",
@@ -92,22 +93,23 @@ async fn test_mock_shutdown_stop_accepting_new() {
     // Send some messages
     for i in 0..5 {
         let msg = create_test_message(&format!("msg-{}", i), "payload");
-        channel.send(msg).await.unwrap();
+        let _: String = Channel::send(&channel, msg).await.unwrap();
     }
 
     // Initiate shutdown
-    channel.close().await.unwrap();
+    Channel::close(&channel).await.unwrap();
     assert!(channel.is_closed());
 
     // Should reject new messages
     let new_msg = create_test_message("new-msg", "new");
-    let result = channel.send(new_msg).await;
+    let result: ChannelResult<String> = Channel::send(&channel, new_msg).await;
     assert!(result.is_err(), "Should reject new messages after shutdown");
 }
 
 #[tokio::test]
+#[cfg(feature = "test-utils")]
 async fn test_mock_shutdown_complete_in_progress() {
-    use plexspaces_channel::mock_backend::MockChannel;
+    use plexspaces_channel::{mock_backend::MockChannel, Channel};
 
     let config = create_test_config_with_retry_dlq(
         "test-shutdown-in-progress",
@@ -120,30 +122,31 @@ async fn test_mock_shutdown_complete_in_progress() {
     // Send messages
     for i in 0..10 {
         let msg = create_test_message(&format!("msg-{}", i), "payload");
-        channel.send(msg).await.unwrap();
+        let _: String = Channel::send(&channel, msg).await.unwrap();
     }
 
     // Receive some messages (in-progress)
-    let in_progress = channel.receive(3).await.unwrap();
+    let in_progress: Vec<ChannelMessage> = Channel::receive(&channel, 3).await.unwrap();
     assert_eq!(in_progress.len(), 3);
 
     // Initiate shutdown
-    channel.close().await.unwrap();
+    Channel::close(&channel).await.unwrap();
 
     // Should be able to ACK in-progress messages (simulating completion)
     for msg in in_progress {
-        channel.ack(&msg.id).await.unwrap();
+        Channel::ack(&channel, &msg.id).await.unwrap();
     }
 
     // Verify stats
-    let stats = channel.get_stats().await.unwrap();
+    let stats: ChannelStats = Channel::get_stats(&channel).await.unwrap();
     assert_eq!(stats.messages_sent, 10);
     assert_eq!(stats.messages_received, 3);
 }
 
 #[tokio::test]
+#[cfg(feature = "test-utils")]
 async fn test_mock_restart_recover_unacked() {
-    use plexspaces_channel::mock_backend::MockChannel;
+    use plexspaces_channel::{mock_backend::MockChannel, Channel};
 
     // Phase 1: Send messages, receive some, don't ACK (simulate crash)
     let config1 = create_test_config_with_retry_dlq(
@@ -157,11 +160,11 @@ async fn test_mock_restart_recover_unacked() {
     // Send messages
     for i in 0..5 {
         let msg = create_test_message(&format!("msg-{}", i), "payload");
-        channel1.send(msg).await.unwrap();
+        let _: String = Channel::send(&channel1, msg).await.unwrap();
     }
 
     // Receive 2 messages but don't ACK (simulating crash)
-    let received = channel1.receive(2).await.unwrap();
+    let received: Vec<ChannelMessage> = Channel::receive(&channel1, 2).await.unwrap();
     assert_eq!(received.len(), 2);
     let _unacked_ids: Vec<String> = received.iter().map(|m| m.id.clone()).collect();
     
@@ -181,7 +184,7 @@ async fn test_mock_restart_recover_unacked() {
     // In a real scenario, unacked messages would be redelivered
     // For mock, we verify the pattern works
     // The remaining 3 messages should still be available
-    let remaining = channel2.receive(10).await.unwrap();
+    let remaining: Vec<ChannelMessage> = Channel::receive(&channel2, 10).await.unwrap();
     // Note: Mock doesn't persist, so this would be empty
     // But the test verifies the shutdown/restart pattern
     assert!(remaining.len() <= 3, "Should not have more than remaining messages");
@@ -222,6 +225,7 @@ mod sqlite_tests {
 
     #[tokio::test]
     async fn test_sqlite_restart_recover_unacked_messages() {
+        use plexspaces_channel::Channel;
         // Use in-memory database for testing (file-based has path issues on macOS)
         let db_path = ":memory:".to_string();
 
@@ -233,11 +237,11 @@ mod sqlite_tests {
             // Send messages
             for i in 0..5 {
                 let msg = create_test_message(&format!("msg-{}", i), &format!("payload-{}", i));
-                channel.send(msg).await.unwrap();
+                let _: String = Channel::send(&channel, msg).await.unwrap();
             }
 
             // Receive 2 messages but don't ACK (simulating crash)
-            let received = channel.receive(2).await.unwrap();
+            let received: Vec<ChannelMessage> = Channel::receive(&channel, 2).await.unwrap();
             assert_eq!(received.len(), 2);
             // Channel is dropped (simulating crash/restart)
         }
@@ -253,13 +257,14 @@ mod sqlite_tests {
 
             // In-memory database doesn't persist, so we verify the channel works after "restart"
             // For true recovery testing, use file-based database
-            let stats = channel.get_stats().await.unwrap();
+            let stats: ChannelStats = Channel::get_stats(&channel).await.unwrap();
             assert_eq!(stats.messages_sent, 0, "New instance starts fresh (in-memory)");
         }
     }
 
     #[tokio::test]
     async fn test_sqlite_restart_continue_from_next_message() {
+        use plexspaces_channel::Channel;
         // Use in-memory database for testing
         // Note: In-memory doesn't persist across instances, but we test the recovery logic
         let db_path = ":memory:".to_string();
@@ -272,18 +277,18 @@ mod sqlite_tests {
             // Send messages
             for i in 0..10 {
                 let msg = create_test_message(&format!("msg-{}", i), &format!("payload-{}", i));
-                channel.send(msg).await.unwrap();
+                let _: String = channel.send(msg).await.unwrap();
             }
 
             // Process first 3 messages and ACK them
-            let batch1 = channel.receive(3).await.unwrap();
+            let batch1: Vec<ChannelMessage> = channel.receive(3).await.unwrap();
             assert_eq!(batch1.len(), 3);
             for msg in batch1 {
-                channel.ack(&msg.id).await.unwrap();
+                Channel::ack(&channel, &msg.id).await.unwrap();
             }
 
             // Receive next 2 messages but crash before ACK
-            let batch2 = channel.receive(2).await.unwrap();
+            let batch2: Vec<ChannelMessage> = channel.receive(2).await.unwrap();
             assert_eq!(batch2.len(), 2);
             // Don't ACK - simulate crash
         }
@@ -299,13 +304,14 @@ mod sqlite_tests {
 
             // In-memory database doesn't persist, so new instance starts fresh
             // This test verifies the shutdown/restart pattern works
-            let stats = channel.get_stats().await.unwrap();
+            let stats: ChannelStats = Channel::get_stats(&channel).await.unwrap();
             assert_eq!(stats.messages_sent, 0, "New instance starts fresh (in-memory)");
         }
     }
 
     #[tokio::test]
     async fn test_sqlite_shutdown_graceful() {
+        use plexspaces_channel::Channel;
         // Use in-memory database for testing
         let db_path = ":memory:".to_string();
 
@@ -314,20 +320,21 @@ mod sqlite_tests {
         // Send messages
         for i in 0..10 {
             let msg = create_test_message(&format!("msg-{}", i), "payload");
-            channel.send(msg).await.unwrap();
+            let _: String = channel.send(msg).await.unwrap();
         }
 
         // Receive some messages (in-progress)
-        let in_progress = channel.receive(3).await.unwrap();
+        let in_progress: Vec<ChannelMessage> = channel.receive(3).await.unwrap();
         assert_eq!(in_progress.len(), 3);
 
         // Initiate shutdown
-        channel.close().await.unwrap();
+        Channel::close(&channel).await.unwrap();
         assert!(channel.is_closed());
 
         // Should reject new messages
         let new_msg = create_test_message("new-msg", "new");
-        assert!(channel.send(new_msg).await.is_err(), "Should reject new messages after shutdown");
+        let result: ChannelResult<String> = Channel::send(&channel, new_msg).await;
+        assert!(result.is_err(), "Should reject new messages after shutdown");
 
         // Should be able to ACK in-progress messages
         for msg in in_progress {
@@ -346,12 +353,18 @@ mod redis_tests {
     use crate::RedisChannel;
 
     async fn is_redis_available() -> bool {
-        redis::Client::open("redis://localhost:6379")
-            .and_then(|client| {
-                let mut conn = client.get_connection()?;
-                redis::cmd("PING").query::<String>(&mut conn)
-            })
-            .is_ok()
+        #[cfg(feature = "test-helpers")]
+        {
+            plexspaces_common::test_helpers::redis_available().await
+        }
+        #[cfg(not(feature = "test-helpers"))]
+        {
+            // Fallback: fast TCP connection check
+            use tokio::net::TcpStream;
+            use tokio::time::timeout;
+            use std::time::Duration;
+            timeout(Duration::from_millis(500), TcpStream::connect("localhost:6379")).await.is_ok()
+        }
     }
 
     async fn create_redis_channel(name: &str) -> RedisChannel {
@@ -392,10 +405,11 @@ mod redis_tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis to be running
     async fn test_redis_restart_recover_pending_messages() {
+        use plexspaces_channel::Channel;
         if !is_redis_available().await {
-            eprintln!("Skipping test: Redis not available");
+            eprintln!("⚠️  WARNING: Redis is not running. Skipping Redis test.");
+            eprintln!("To run Redis tests, start Redis: docker run -p 6379:6379 redis");
             return;
         }
 
@@ -409,11 +423,11 @@ mod redis_tests {
             // Send messages
             for i in 0..5 {
                 let msg = create_test_message(&format!("msg-{}", i), &format!("payload-{}", i));
-                channel.send(msg).await.unwrap();
+                let _: String = Channel::send(&channel, msg).await.unwrap();
             }
 
             // Receive 2 messages but don't ACK (simulating crash)
-            let received = channel.receive(2).await.unwrap();
+            let received: Vec<ChannelMessage> = Channel::receive(&channel, 2).await.unwrap();
             assert_eq!(received.len(), 2);
             // Channel is dropped (simulating crash/restart)
         }
@@ -429,7 +443,7 @@ mod redis_tests {
             // Should be able to receive pending messages (via XREADGROUP with pending IDs)
             // Note: Redis will redeliver pending messages after claim_timeout
             // For this test, we verify the channel can be recreated and used
-            let stats = channel.get_stats().await.unwrap();
+            let stats: ChannelStats = Channel::get_stats(&channel).await.unwrap();
             assert!(stats.messages_sent >= 5, "Should have sent messages");
         }
 
@@ -437,10 +451,11 @@ mod redis_tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis to be running
     async fn test_redis_shutdown_graceful() {
+        use plexspaces_channel::Channel;
         if !is_redis_available().await {
-            eprintln!("Skipping test: Redis not available");
+            eprintln!("⚠️  WARNING: Redis is not running. Skipping Redis test.");
+            eprintln!("To run Redis tests, start Redis: docker run -p 6379:6379 redis");
             return;
         }
 
@@ -452,20 +467,21 @@ mod redis_tests {
         // Send messages
         for i in 0..10 {
             let msg = create_test_message(&format!("msg-{}", i), "payload");
-            channel.send(msg).await.unwrap();
+            let _: String = channel.send(msg).await.unwrap();
         }
 
         // Receive some messages (in-progress)
-        let in_progress = channel.receive(3).await.unwrap();
+        let in_progress: Vec<ChannelMessage> = channel.receive(3).await.unwrap();
         assert_eq!(in_progress.len(), 3);
 
         // Initiate shutdown
-        channel.close().await.unwrap();
+        Channel::close(&channel).await.unwrap();
         assert!(channel.is_closed());
 
         // Should reject new messages
         let new_msg = create_test_message("new-msg", "new");
-        assert!(channel.send(new_msg).await.is_err(), "Should reject new messages after shutdown");
+        let result: ChannelResult<String> = Channel::send(&channel, new_msg).await;
+        assert!(result.is_err(), "Should reject new messages after shutdown");
 
         // Should be able to ACK in-progress messages
         for msg in in_progress {

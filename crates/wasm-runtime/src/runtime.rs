@@ -144,8 +144,16 @@ impl WasmRuntime {
                 .allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(pooling));
         }
 
-        let engine = Engine::new(&wasmtime_config)
-            .map_err(|e| WasmError::CompilationError(e.to_string()))?;
+        // Engine::new() is a blocking synchronous call that can take time
+        // Run it in spawn_blocking so timeouts work properly
+        // Clone config before moving into closure
+        let wasmtime_config_clone = wasmtime_config.clone();
+        let engine = tokio::task::spawn_blocking(move || {
+            Engine::new(&wasmtime_config_clone)
+        })
+        .await
+        .map_err(|e| WasmError::CompilationError(format!("Failed to spawn blocking task: {}", e)))?
+        .map_err(|e| WasmError::CompilationError(e.to_string()))?;
 
         Ok(Self {
             engine,
@@ -222,7 +230,19 @@ impl WasmRuntime {
         
         // Try to parse as standard module first
         // If that fails and component-model is enabled, try as component
-        let module = match Module::new(&self.engine, bytes) {
+        // Module::new() and Component::new() are blocking calls - run in spawn_blocking
+        // Engine is Send + Sync, so we can pass a reference
+        let engine = &self.engine;
+        let bytes_clone = bytes.to_vec();
+        let module = match tokio::task::spawn_blocking({
+            let engine = engine.clone();
+            move || {
+                Module::new(&engine, &bytes_clone)
+            }
+        })
+        .await
+        .map_err(|e| WasmError::CompilationError(format!("Failed to spawn blocking task: {}", e)))?
+        .map_err(|e| WasmError::CompilationError(e.to_string())) {
             Ok(m) => {
                 // Successfully parsed as traditional module
                 // Use it as a module (not a component)
@@ -265,7 +285,17 @@ impl WasmRuntime {
                 #[cfg(feature = "component-model")]
                 {
                     use wasmtime::component::Component;
-                    match Component::new(&self.engine, bytes) {
+                    let engine = &self.engine;
+                    let bytes_clone = bytes.to_vec();
+                    match tokio::task::spawn_blocking({
+                        let engine = engine.clone();
+                        move || {
+                            Component::new(&engine, &bytes_clone)
+                        }
+                    })
+                    .await
+                    .map_err(|e| WasmError::CompilationError(format!("Failed to spawn blocking task: {}", e)))?
+                    .map_err(|e| WasmError::CompilationError(e.to_string())) {
                         Ok(component) => {
                             let compile_duration = compile_start.elapsed();
                             tracing::info!(

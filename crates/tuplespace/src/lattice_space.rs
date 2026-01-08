@@ -239,7 +239,7 @@ impl TupleSpaceGossiper {
             if let Some(peer) = self.peers.get(rand::random::<usize>() % self.peers.len()) {
                 // Gossip with peer
                 if let Err(e) = self.local.gossip(peer).await {
-                    eprintln!("Gossip error: {:?}", e);
+                    tracing::warn!("Gossip error: {:?}", e);
                 }
             }
         }

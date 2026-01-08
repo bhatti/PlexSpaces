@@ -292,10 +292,12 @@ impl Facet for VirtualActorFacet {
         _reason: &plexspaces_facet::ExitReason,
     ) -> Result<(), FacetError> {
         // Mark for deactivation on EXIT
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %actor_id,
             "VirtualActorFacet handling EXIT signal - marking for deactivation"
         );
+        }
         
         // Clear activation state
         *self.last_activated.write().await = None;
@@ -330,12 +332,14 @@ impl Facet for VirtualActorFacet {
         reason: &plexspaces_facet::ExitReason,
     ) -> Result<(), FacetError> {
         // Log DOWN notification for observability
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %actor_id,
             monitored_id = %monitored_id,
             reason = ?reason,
             "VirtualActorFacet received DOWN notification (no action needed)"
         );
+        }
         
         metrics::counter!("plexspaces_virtual_actor_facet_down_total",
             "actor_id" => actor_id.to_string(),

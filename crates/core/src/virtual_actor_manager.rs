@@ -343,7 +343,9 @@ impl VirtualActorManager {
             let type_name = std::any::type_name_of_val(&*sender);
             if type_name.contains("VirtualActorWrapper") {
                 // VirtualActorWrapper found - actor is registered but not active
-                eprintln!("🔵 [VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=VirtualActorWrapper, is_active=false", actor_id);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("[VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=VirtualActorWrapper, is_active=false", actor_id);
+                }
                 return false;
             }
             // ActorRef found - check if instance exists AND actor state is Active
@@ -351,18 +353,24 @@ impl VirtualActorManager {
             // We need to check the actual actor state, not just instance existence
             let has_instance = self.actor_registry.get_actor_instance(actor_id).await.is_some();
             if !has_instance {
-                eprintln!("🔵 [VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=ActorRef, no instance, is_active=false", actor_id);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("[VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=ActorRef, no instance, is_active=false", actor_id);
+                }
                 return false;
             }
             
             // Check actor state - actor is only active if state is Active
             // Uses ActorStateFetcher trait to fetch state and check if it's Active
             let is_state_active = self.check_actor_state_active(actor_id).await;
-            eprintln!("🔵 [VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=ActorRef, has_instance=true, state_active={}, is_active={}", actor_id, is_state_active, is_state_active);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!("[VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=ActorRef, has_instance=true, state_active={}, is_active={}", actor_id, is_state_active, is_state_active);
+            }
             is_state_active
         } else {
             // Actor not registered
-            eprintln!("🔵 [VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, not registered, is_active=false", actor_id);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!("[VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, not registered, is_active=false", actor_id);
+            }
             false
         }
     }

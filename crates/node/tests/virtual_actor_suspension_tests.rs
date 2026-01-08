@@ -247,7 +247,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
                 "checkpoint_interval": 100, // Don't auto-checkpoint (we'll do it manually)
                 "replay_on_activation": true, // Restore state on reactivation
             });
-            let durability_facet = Box::new(DurabilityFacet::new((*storage).clone(), durability_config, 50));
+            let durability_facet = Box::new(DurabilityFacet::new(storage.clone(), durability_config, 50));
             
             actor
                 .attach_facet(durability_facet)

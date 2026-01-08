@@ -90,17 +90,81 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
     DashboardServiceImpl::with_health_reporter(service_locator, health_reporter_access)
 }
 
+/// Shared WASM bytes cache (loaded once, reused for all tests)
+static SHARED_WASM_BYTES: std::sync::OnceLock<tokio::sync::Mutex<Option<Vec<u8>>>> = std::sync::OnceLock::new();
+static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Get calculator WASM file path
 fn get_calculator_wasm_path() -> PathBuf {
+    // First try: test fixtures (preferred)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.pop(); // crates/
-    path.pop(); // workspace root
+    path.pop(); // crates/dashboard
+    path.push("wasm-runtime");
+    path.push("tests");
+    path.push("fixtures");
+    path.push("calculator_actor.wasm");
+    if path.exists() {
+        return path;
+    }
+    
+    // Second try: examples directory (fallback)
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop(); // crates/dashboard
+    path.pop(); // crates
     path.push("examples");
     path.push("simple");
     path.push("wasm_calculator");
     path.push("wasm-modules");
     path.push("calculator_actor.wasm");
     path
+}
+
+/// Get or load shared WASM bytes
+/// Loads the 40MB WASM file once and caches it for all tests
+async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
+    let cache = SHARED_WASM_BYTES.get_or_init(|| tokio::sync::Mutex::new(None));
+    
+    // Fast path: already loaded
+    {
+        let guard = cache.lock().await;
+        if let Some(ref bytes) = *guard {
+            return Some(bytes.clone());
+        }
+    }
+    
+    // Slow path: need to load (use lock to ensure only one thread loads)
+    let _guard = INIT_LOCK.lock().unwrap();
+    
+    // Double-check after acquiring lock
+    {
+        let guard = cache.lock().await;
+        if let Some(ref bytes) = *guard {
+            return Some(bytes.clone());
+        }
+    }
+    
+    // Load WASM file (first time only)
+    let wasm_path = get_calculator_wasm_path();
+    if !wasm_path.exists() {
+        return None;
+    }
+    
+    eprintln!("📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)", wasm_path.display());
+    
+    let bytes = tokio::task::spawn_blocking(move || fs::read(&wasm_path))
+        .await
+        .ok()
+        .and_then(|r| r.ok())?;
+    
+    eprintln!("✅ WASM file loaded: {} bytes", bytes.len());
+    
+    // Cache the bytes
+    {
+        let mut guard = cache.lock().await;
+        *guard = Some(bytes.clone());
+    }
+    
+    Some(bytes)
 }
 
 /// Create minimal WASM module for testing (if calculator WASM not available)
@@ -174,9 +238,9 @@ async fn test_wasm_deployment_with_applicationspec_creates_actors() {
         supervisor: Some(supervisor_spec),
     };
     
-    // Get WASM file or create minimal one
-    let wasm_bytes = if get_calculator_wasm_path().exists() {
-        fs::read(get_calculator_wasm_path()).expect("Failed to read WASM file")
+    // Get WASM file or create minimal one (use shared module for performance)
+    let wasm_bytes = if let Some(bytes) = get_shared_wasm_bytes().await {
+        bytes
     } else {
         eprintln!("⚠️  Calculator WASM not found, using minimal WASM module");
         create_minimal_wasm_module()

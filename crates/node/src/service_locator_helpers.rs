@@ -23,7 +23,7 @@
 //! that don't need a full Node instance.
 
 use std::sync::Arc;
-use plexspaces_core::ServiceLocator;
+use plexspaces_core::{ServiceLocator, service_locator::service_names};
 
 /// Initialize services in an existing ServiceLocator
 ///
@@ -56,6 +56,7 @@ use plexspaces_core::ServiceLocator;
 /// - ApplicationManager
 /// - NodeConfig
 /// - HealthService
+/// - JournalStorage (SQLite if available, otherwise Memory)
 pub async fn initialize_services_in_locator(
     service_locator: Arc<ServiceLocator>,
     node_id: Option<String>,
@@ -202,7 +203,86 @@ pub async fn initialize_services_in_locator(
         )
     );
     service_locator.register_actor_service(actor_service_for_context.clone() as Arc<dyn plexspaces_core::ActorService + Send + Sync>).await;
+    
+    // Create and register default journal storage (shared by all actors)
+    // Use config-based approach following the same pattern as create_channel and create_storage
+    // Get DurabilityConfig from release_config.runtime.journaling_provider
+    use plexspaces_journaling::create_journal_storage;
+    use plexspaces_proto::v1::journaling::{DurabilityConfig, JournalBackend};
+    
+    // Get DurabilityConfig from release_config, or use default
+    let durability_config = if let Some(ref release) = release_config {
+        if let Some(ref runtime) = release.runtime {
+            // Use journaling_provider from RuntimeConfig if available
+            if runtime.journaling_provider.is_some() {
+                runtime.journaling_provider.clone().unwrap()
+            } else {
+                // Default: SQLite if available, otherwise Memory
+                create_default_durability_config()
+            }
+        } else {
+            create_default_durability_config()
+        }
+    } else {
+        create_default_durability_config()
+    };
+    
+    // Create journal storage using config-based factory function
+    // This returns Arc<dyn JournalStorage> which we register as a trait object
+    match create_journal_storage(durability_config.clone()).await {
+        Ok(storage) => {
+            // Register as trait object - no need to know concrete type
+            service_locator.register_journal_storage(storage).await;
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Failed to create journal storage from config, falling back to Memory"
+            );
+            // Fallback to Memory on error
+            use plexspaces_journaling::MemoryJournalStorage;
+            let memory_storage = MemoryJournalStorage::new();
+            let storage_arc: Arc<dyn plexspaces_core::JournalStorage> = Arc::new(memory_storage);
+            service_locator.register_journal_storage(storage_arc).await;
+        }
+    }
 }
+
+/// Create default DurabilityConfig
+/// Prefer SQLite if available, otherwise Memory
+fn create_default_durability_config() -> plexspaces_proto::v1::journaling::DurabilityConfig {
+    use plexspaces_proto::v1::journaling::{durability_config, SqliteJournalConfig};
+    
+    #[cfg(feature = "sqlite-backend")]
+    {
+        plexspaces_proto::v1::journaling::DurabilityConfig {
+            backend: plexspaces_proto::v1::journaling::JournalBackend::JournalBackendSqlite as i32,
+            checkpoint_interval: 100,
+            checkpoint_timeout: None,
+            replay_on_activation: true,
+            cache_side_effects: true,
+            compression: plexspaces_proto::v1::journaling::CompressionType::CompressionTypeNone as i32,
+            state_schema_version: 1,
+            backend_config: Some(durability_config::BackendConfig::Sqlite(SqliteJournalConfig {
+                db_path: ":memory:".to_string(),
+            })),
+        }
+    }
+    #[cfg(not(feature = "sqlite-backend"))]
+    {
+        plexspaces_proto::v1::journaling::DurabilityConfig {
+            backend: plexspaces_proto::v1::journaling::JournalBackend::JournalBackendMemory as i32,
+            checkpoint_interval: 100,
+            checkpoint_timeout: None,
+            replay_on_activation: true,
+            cache_side_effects: true,
+            compression: plexspaces_proto::v1::journaling::CompressionType::CompressionTypeNone as i32,
+            state_schema_version: 1,
+            backend_config: None,
+        }
+    }
+}
+
 
 /// Create a ServiceLocator with all default services registered
 ///

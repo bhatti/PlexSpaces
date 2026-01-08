@@ -39,15 +39,6 @@ impl ActorService for MockActorService {
         self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
         Ok("msg-id".to_string())
     }
-    async fn send_reply(
-        &self,
-        _correlation_id: Option<&str>,
-        _sender_id: &plexspaces_core::ActorId,
-        _target_actor_id: plexspaces_core::ActorId,
-        _reply_message: Message,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
 }
 
 struct MockObjectRegistry;

@@ -338,7 +338,9 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                 ActorLocation::Remote(_) => "remote",
             }
         ).increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(actor_id = %actor_id, node_id = %self.node.id().as_str(), "Actor lookup via gRPC");
+        }
         
         // Build proto Actor message
         use plexspaces_proto::v1::actor::{Actor as ProtoActor, ActorState};
@@ -460,19 +462,23 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
             if let Some(routing_info) = routing {
                 if routing_info.is_local {
                     // Local actor - use MessageSender directly (it's an ActorRef internally)
-                    tracing::debug!(
-                        "🟡 [GRPC::SEND_MESSAGE] Local actor found in registry: receiver_id={}, node_id={}",
-                        proto_msg.receiver_id, self.node.id().as_str()
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
+                            "🟡 [GRPC::SEND_MESSAGE] Local actor found in registry: receiver_id={}, node_id={}",
+                            proto_msg.receiver_id, self.node.id().as_str()
+                        );
+                    }
                     // For local actors, use MessageSender directly instead of creating ActorRef
                     // This avoids the need to get mailbox from registry
                     (None, Some(message_sender))
                 } else {
                     // Remote actor
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "🟡 [GRPC::SEND_MESSAGE] Remote actor found in registry: receiver_id={}, node_id={}",
                         proto_msg.receiver_id, routing_info.node_id
                     );
+                    }
                     (Some(plexspaces_actor::ActorRef::remote(
                         proto_msg.receiver_id.clone(),
                         routing_info.node_id,
@@ -484,10 +490,12 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                 return Err(Status::not_found(format!("Actor not found: {}", proto_msg.receiver_id)));
             }
         } else {
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 "🟡 [GRPC::SEND_MESSAGE] Actor not found in registry, checking routing: receiver_id={}",
                 proto_msg.receiver_id
             );
+            }
             // Check routing for remote actors
             // Use RequestContext from request for routing lookup (respects tenant/namespace)
             let routing = actor_registry.lookup_routing(&ctx, &proto_msg.receiver_id).await
@@ -724,7 +732,7 @@ impl plexspaces_proto::v1::actor::actor_service_server::ActorService for ActorSe
                 )
                 .await
                 {
-                    eprintln!("Failed to notify supervisor: {}", e);
+                    tracing::warn!("Failed to notify supervisor: {}", e);
                 }
             }
         });

@@ -112,7 +112,7 @@ pub async fn get_actor_state(instance: &Arc<dyn std::any::Any + Send + Sync>) ->
     } else {
         // Callback not registered - return None as safe default
         // This should not happen in production as the callback is registered during initialization
-        eprintln!("🔴 [ACTOR_STATE_CHECKER] get_actor_state: callback not registered!");
+        tracing::warn!("[ACTOR_STATE_CHECKER] get_actor_state: callback not registered!");
         None
     }
 }

@@ -119,47 +119,63 @@ impl ReplyWaiter {
     /// - Ok(Message) if reply received within timeout
     /// - Err(ReplyWaiterError::Timeout) if timeout exceeded
     pub async fn wait(&self, timeout: Duration) -> Result<Message, ReplyWaiterError> {
-        tracing::debug!(
-            "🟣 [REPLY_WAITER] WAIT START: timeout={:?}",
-            timeout
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[REPLY_WAITER] WAIT START: timeout={:?}",
+                timeout
+            );
+        }
         
         let timeout_future = tokio::time::sleep(timeout);
         let wait_future = async {
             loop {
                 let mut reply = self.reply.lock().await;
                 if let Some(msg) = reply.take() {
-                    tracing::debug!(
-                        "🟣 [REPLY_WAITER] WAIT SUCCESS: Received reply, sender={:?}, receiver={}, correlation_id={:?}",
-                        msg.sender, msg.receiver, msg.correlation_id
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
+                            "[REPLY_WAITER] WAIT SUCCESS: Received reply, sender={:?}, receiver={}, correlation_id={:?}",
+                            msg.sender, msg.receiver, msg.correlation_id
+                        );
+                    }
                     return Ok(msg);
                 }
                 drop(reply); // Release lock before waiting
                 
                 // Wait for notification
-                tracing::debug!("🟣 [REPLY_WAITER] WAITING: Waiting for notification...");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("[REPLY_WAITER] WAITING: Waiting for notification...");
+                }
                 self.notify.notified().await;
-                tracing::debug!("🟣 [REPLY_WAITER] NOTIFIED: Woken up, checking for reply...");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("[REPLY_WAITER] NOTIFIED: Woken up, checking for reply...");
+                }
             }
         };
         
         tokio::select! {
             result = wait_future => {
-                match &result {
-                    Ok(msg) => tracing::debug!(
-                        "🟣 [REPLY_WAITER] WAIT COMPLETED: Reply received, sender={:?}, receiver={}, correlation_id={:?}",
-                        msg.sender, msg.receiver, msg.correlation_id
-                    ),
-                    Err(e) => tracing::debug!(
-                        "🟣 [REPLY_WAITER] WAIT ERROR: error={:?}",
-                        e
-                    ),
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    match &result {
+                        Ok(msg) => {
+                            tracing::debug!(
+                                "[REPLY_WAITER] WAIT COMPLETED: Reply received, sender={:?}, receiver={}, correlation_id={:?}",
+                                msg.sender, msg.receiver, msg.correlation_id
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "[REPLY_WAITER] WAIT ERROR: error={:?}",
+                                e
+                            );
+                        }
+                    }
                 }
                 result
             },
             _ = timeout_future => {
-                tracing::debug!("🟣 [REPLY_WAITER] WAIT TIMEOUT: timeout={:?}", timeout);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("[REPLY_WAITER] WAIT TIMEOUT: timeout={:?}", timeout);
+                }
                 Err(ReplyWaiterError::Timeout)
             },
         }
@@ -174,10 +190,12 @@ impl ReplyWaiter {
     /// - Ok(()) if notification sent successfully
     /// - Err if reply already set
     pub async fn notify(&self, reply: Message) -> Result<(), ReplyWaiterError> {
-        tracing::debug!(
-            "🟣 [REPLY_WAITER] NOTIFY START: reply_sender={:?}, reply_receiver={}, correlation_id={:?}",
-            reply.sender, reply.receiver, reply.correlation_id
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[REPLY_WAITER] NOTIFY START: reply_sender={:?}, reply_receiver={}, correlation_id={:?}",
+                reply.sender, reply.receiver, reply.correlation_id
+            );
+        }
         
         let mut stored_reply = self.reply.lock().await;
         
@@ -192,16 +210,20 @@ impl ReplyWaiter {
         *stored_reply = Some(reply.clone());
         drop(stored_reply); // Release lock before notifying
         
-        tracing::debug!(
-            "🟣 [REPLY_WAITER] NOTIFYING: correlation_id={:?}, reply_sender={:?}, reply_receiver={}",
-            reply.correlation_id, reply.sender, reply.receiver
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[REPLY_WAITER] NOTIFYING: correlation_id={:?}, reply_sender={:?}, reply_receiver={}",
+                reply.correlation_id, reply.sender, reply.receiver
+            );
+        }
         self.notify.notify_one();
         
-        tracing::debug!(
-            "🟣 [REPLY_WAITER] NOTIFY SUCCESS: correlation_id={:?}",
-            reply.correlation_id
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[REPLY_WAITER] NOTIFY SUCCESS: correlation_id={:?}",
+                reply.correlation_id
+            );
+        }
         Ok(())
     }
 }
@@ -240,11 +262,13 @@ impl ReplyWaiterRegistry {
     pub async fn register(&self, correlation_id: String, waiter: ReplyWaiter) {
         let mut waiters = self.waiters.write().await;
         waiters.insert(correlation_id.clone(), waiter);
-        tracing::debug!(
-            "🟢 [REPLY_WAITER_REGISTRY] Registered waiter: correlation_id={}, total_waiters={}",
-            correlation_id,
-            waiters.len()
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[REPLY_WAITER_REGISTRY] Registered waiter: correlation_id={}, total_waiters={}",
+                correlation_id,
+                waiters.len()
+            );
+        }
     }
     
     /// Notify a waiter that reply has arrived
@@ -258,21 +282,24 @@ impl ReplyWaiterRegistry {
     /// - false if no waiter found for this correlation_id
     pub async fn notify(&self, correlation_id: &str, reply: Message) -> bool {
         let waiters_count = self.waiters.read().await.len();
-        eprintln!("🔵 [REPLY_WAITER_REGISTRY] notify called: correlation_id={}, waiters_count={}", 
-            correlation_id, waiters_count);
-        tracing::debug!(
-            "🟢 [REPLY_WAITER_REGISTRY] notify called: correlation_id={}, waiters_count={}",
-            correlation_id,
-            waiters_count
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[REPLY_WAITER_REGISTRY] notify called: correlation_id={}, waiters_count={}",
+                correlation_id,
+                waiters_count
+            );
+        }
         
         let mut waiters = self.waiters.write().await;
         if let Some(waiter) = waiters.remove(correlation_id) {
             drop(waiters); // Release lock before notifying
-            eprintln!("🟢 [REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...", correlation_id);
-            tracing::debug!("🟢 [REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...", correlation_id);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!("[REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...", correlation_id);
+            }
             if waiter.notify(reply).await.is_ok() {
-                tracing::debug!("🟢 [REPLY_WAITER_REGISTRY] Waiter notified successfully: correlation_id={}", correlation_id);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("[REPLY_WAITER_REGISTRY] Waiter notified successfully: correlation_id={}", correlation_id);
+                }
                 return true;
             } else {
                 tracing::warn!("🟢 [REPLY_WAITER_REGISTRY] Failed to notify waiter: correlation_id={}", correlation_id);
@@ -292,7 +319,9 @@ impl ReplyWaiterRegistry {
     /// ## Arguments
     /// * `correlation_id` - Correlation ID to remove
     pub async fn remove(&self, correlation_id: &str) {
-        tracing::debug!("ReplyWaiterRegistry::remove: correlation_id={}", correlation_id);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("ReplyWaiterRegistry::remove: correlation_id={}", correlation_id);
+        }
         let mut waiters = self.waiters.write().await;
         waiters.remove(correlation_id);
     }

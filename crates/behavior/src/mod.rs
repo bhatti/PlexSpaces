@@ -193,19 +193,11 @@ pub trait GenServer: Actor {
         const MAX_RECURSION_DEPTH: usize = 100;
         if depth > MAX_RECURSION_DEPTH {
             let _ = ROUTE_MESSAGE_DEPTH.with(|d| d.set(0)); // Reset on panic
+            let backtrace = std::backtrace::Backtrace::capture();
             tracing::error!(
-                "🟡 [ROUTE_MESSAGE] RECURSION DETECTED! depth={}, sender={:?}, target={}, correlation_id={:?}",
-                depth, msg.sender, msg.receiver, msg.correlation_id
+                "INFINITE RECURSION DETECTED IN route_message! depth={}, max={}, sender={:?}, target={}, correlation_id={:?}, backtrace={:?}",
+                depth, MAX_RECURSION_DEPTH, msg.sender, msg.receiver, msg.correlation_id, backtrace
             );
-            eprintln!("\n╔════════════════════════════════════════════════════════════════╗");
-            eprintln!("║  INFINITE RECURSION DETECTED IN route_message!                  ║");
-            eprintln!("║  Depth: {} (max: {})                                            ║", depth, MAX_RECURSION_DEPTH);
-            eprintln!("║  Sender: {:?}                                                    ║", msg.sender);
-            eprintln!("║  Target: {}                                                      ║", msg.receiver);
-            eprintln!("║  Correlation ID: {:?}                                            ║", msg.correlation_id);
-            eprintln!("╚════════════════════════════════════════════════════════════════╝");
-            eprintln!("\nStack backtrace:");
-            eprintln!("{:?}", std::backtrace::Backtrace::capture());
             return Err(BehaviorError::ProcessingError(format!(
                 "Infinite recursion detected in route_message (depth: {})",
                 depth
@@ -230,15 +222,19 @@ pub trait GenServer: Actor {
                     sender_id
                 )));
             }
-            tracing::debug!(
-                "🟡 [ROUTE_MESSAGE] START: depth={}, message_id={}, sender={:?}, target_actor_id={}, message_type={:?}, message_type_str={}, correlation_id={:?}",
-                depth, msg.id, sender_id, target_actor_id, msg_type, msg.message_type_str(), msg.correlation_id
-            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    "[ROUTE_MESSAGE] START: depth={}, message_id={}, sender={:?}, target_actor_id={}, message_type={:?}, message_type_str={}, correlation_id={:?}",
+                    depth, msg.id, sender_id, target_actor_id, msg_type, msg.message_type_str(), msg.correlation_id
+                );
+            }
         } else {
-            tracing::debug!(
-                "🟡 [ROUTE_MESSAGE] START: depth={}, message_id={}, No sender (fire-and-forget), target_actor_id={}, message_type={:?}, message_type_str={}",
-                depth, msg.id, target_actor_id, msg_type, msg.message_type_str()
-            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    "[ROUTE_MESSAGE] START: depth={}, message_id={}, No sender (fire-and-forget), target_actor_id={}, message_type={:?}, message_type_str={}",
+                    depth, msg.id, target_actor_id, msg_type, msg.message_type_str()
+                );
+            }
         }
         
         match msg_type {
@@ -247,37 +243,33 @@ pub trait GenServer: Actor {
                 let sender_is_temp = msg.sender.as_ref()
                     .map(|s| s.starts_with("ask-") && s.contains('@'))
                     .unwrap_or(false);
-                eprintln!("🔵🔵🔵 [ROUTE_MESSAGE] CALL: Routing to handle_request: message_id={}, sender={:?}, is_temporary_sender={}, target_actor_id={}, correlation_id={:?}",
-                    msg.id, msg.sender, sender_is_temp, target_actor_id, msg.correlation_id);
-                tracing::debug!(
-                    "🟡 [ROUTE_MESSAGE] CALL: Routing to handle_request: message_id={}, sender={:?}, target_actor_id={}, correlation_id={:?}",
-                    msg.id, msg.sender, target_actor_id, msg.correlation_id
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[ROUTE_MESSAGE] Routing to handle_request: message_id={}, sender={:?}, is_temporary_sender={}, target_actor_id={}, correlation_id={:?}",
+                        msg.id, msg.sender, sender_is_temp, target_actor_id, msg.correlation_id
+                    );
+                }
                 
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
                 let sender_id = msg.sender.clone();
                 let correlation_id = msg.correlation_id.clone();
                 
-                eprintln!("🔵🔵🔵 [ROUTE_MESSAGE] CALLING handle_request: message_id={}, sender={:?}, is_temporary_sender={}, target_actor_id={}, correlation_id={:?}",
-                    message_id, sender_id, sender_is_temp, target_actor_id, correlation_id);
-                tracing::debug!(
-                    "🟡 [ROUTE_MESSAGE] CALLING handle_request: message_id={}, sender={:?}, target_actor_id={}, correlation_id={:?}",
-                    message_id, sender_id, target_actor_id, correlation_id
-                );
-                
                 // Call handle_request with Message (handler will use ActorService::send() to send reply)
                 let result = self.handle_request(ctx, msg).await;
-                eprintln!("🟢🟢🟢 [ROUTE_MESSAGE] handle_request returned: message_id={}, target_actor_id={}, correlation_id={:?}, result={:?}",
-                    message_id, target_actor_id, correlation_id, result.is_ok());
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[ROUTE_MESSAGE] handle_request completed: message_id={}, target_actor_id={}, correlation_id={:?}, result={:?}",
+                        message_id, target_actor_id, correlation_id, result.is_ok()
+                    );
+                }
                 result?;
-                
-                eprintln!("🟢🟢🟢 [ROUTE_MESSAGE] handle_request COMPLETED: message_id={}, target_actor_id={}, correlation_id={:?}",
-                    message_id, target_actor_id, correlation_id);
-                tracing::debug!(
-                    "🟡 [ROUTE_MESSAGE] handle_request COMPLETED: message_id={}, target_actor_id={}, correlation_id={:?}",
-                    message_id, target_actor_id, correlation_id
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[ROUTE_MESSAGE] handle_request COMPLETED: message_id={}, target_actor_id={}, correlation_id={:?}",
+                        message_id, target_actor_id, correlation_id
+                    );
+                }
                 
                 metrics::counter!("plexspaces_behavior_genserver_replies_sent_total", "behavior" => "genserver").increment(1);
                 
@@ -293,10 +285,12 @@ pub trait GenServer: Actor {
             }
             MessageType::Cast => {
                 // Handle Cast (fire-and-forget) - call handle_request but don't require reply
-                tracing::debug!(
-                    "🟡 [ROUTE_MESSAGE] CAST: Routing to handle_request (fire-and-forget): message_id={}, sender={:?}, target_actor_id={}",
-                    msg.id, msg.sender, target_actor_id
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[ROUTE_MESSAGE] CAST: Routing to handle_request (fire-and-forget): message_id={}, sender={:?}, target_actor_id={}",
+                        msg.id, msg.sender, target_actor_id
+                    );
+                }
                 
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
@@ -306,10 +300,12 @@ pub trait GenServer: Actor {
                 // For Cast, reply is optional (fire-and-forget)
                 let _ = self.handle_request(ctx, msg).await;
                 
-                tracing::debug!(
-                    "🟡 [ROUTE_MESSAGE] CAST handle_request completed: message_id={}, target_actor_id={}",
-                    message_id, target_actor_id
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[ROUTE_MESSAGE] CAST handle_request completed: message_id={}, target_actor_id={}",
+                        message_id, target_actor_id
+                    );
+                }
                 
                 // Decrement recursion depth on success
                 let _ = ROUTE_MESSAGE_DEPTH.with(|d| {
@@ -722,7 +718,9 @@ pub trait Workflow: Actor {
                             BehaviorError::ProcessingError(format!("Failed to send workflow run reply: {}", e))
                         })?;
                     metrics::counter!("plexspaces_behavior_workflow_replies_sent_total", "behavior" => "workflow", "type" => "run").increment(1);
-                    tracing::debug!(target_id = %target_id, "Workflow run reply sent");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(target_id = %target_id, "Workflow run reply sent");
+                    }
                 } else {
                     tracing::warn!("Workflow run has no reply_to or sender_id, reply not sent");
                     metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "no_sender", "type" => "run").increment(1);
@@ -742,7 +740,9 @@ pub trait Workflow: Actor {
                 let duration = start.elapsed();
                 metrics::histogram!("plexspaces_behavior_workflow_signal_duration_seconds", "behavior" => "workflow", "signal" => name.clone()).record(duration.as_secs_f64());
                 
-                tracing::debug!(signal_name = %name, "Workflow signal processed");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(signal_name = %name, "Workflow signal processed");
+                }
                 Ok(())
             }
             MessageType::WorkflowQuery(name) => {
@@ -791,7 +791,9 @@ pub trait Workflow: Actor {
                         BehaviorError::ProcessingError(format!("Failed to send workflow query reply: {}", e))
                     })?;
                     metrics::counter!("plexspaces_behavior_workflow_replies_sent_total", "behavior" => "workflow", "type" => "query").increment(1);
-                    tracing::debug!(target_id = %target_id, query_name = %name, "Workflow query reply sent");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(target_id = %target_id, query_name = %name, "Workflow query reply sent");
+                    }
                 } else {
                     metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "no_sender", "type" => "query").increment(1);
                     tracing::warn!(query_name = %name, "Workflow query has no reply_to or sender_id, reply not sent");

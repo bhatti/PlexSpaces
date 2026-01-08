@@ -141,8 +141,14 @@ pub struct RuntimeConfig {
     /// Default: memory
     #[prost(message, optional, tag="9")]
     pub mailbox_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
-    /// Framework version information (auto-populated at build time)
+    /// Journaling provider configuration (for actor durability)
+    ///
+    /// Supports: memory, sqlite, postgres, redis
+    /// Default: sqlite (if available), else memory
     #[prost(message, optional, tag="10")]
+    pub journaling_provider: ::core::option::Option<super::super::journaling::v1::DurabilityConfig>,
+    /// Framework version information (auto-populated at build time)
+    #[prost(message, optional, tag="11")]
     pub framework_info: ::core::option::Option<super::super::storage::v1::FrameworkInfo>,
 }
 /// gRPC server configuration

@@ -1200,21 +1200,25 @@ impl Mailbox {
                     // This is non-blocking and doesn't require a lock
                     let local_send_result = local_sender.send(msg.clone());
                     
-                    tracing::debug!(
-                        message_id = %msg_id,
-                        "Mailbox processor: Sending message - channel: {:?}, local_receiver: {:?}", 
-                        channel_send_result.is_ok(), 
-                        local_send_result.is_ok()
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
+                            message_id = %msg_id,
+                            "Mailbox processor: Sending message - channel: {:?}, local_receiver: {:?}", 
+                            channel_send_result.is_ok(), 
+                            local_send_result.is_ok()
+                        );
+                    }
                     
                     match (channel_send_result, local_send_result) {
                         (Ok(_), Ok(())) => {
                             num_sent += 1;
-                            tracing::debug!(
-                                message_id = %msg_id,
-                                "Mailbox processor: ✅ Successfully sent message to both channel and local_receiver (total: {})", 
-                                num_sent
-                            );
+                            if tracing::enabled!(tracing::Level::DEBUG) {
+                                tracing::debug!(
+                                    message_id = %msg_id,
+                                    "Mailbox processor: ✅ Successfully sent message to both channel and local_receiver (total: {})", 
+                                    num_sent
+                                );
+                            }
                         }
                         (Err(ChannelError::ChannelClosed(_)), _) | (_, Err(_)) => {
                             // Channel or local receiver closed, stop processing
@@ -1283,7 +1287,9 @@ impl Mailbox {
             // Check if message ID already seen (LRU cache returns None if expired or not found)
             if cache.get(&message.id).is_some() {
                 // Duplicate message ID - skip
-                tracing::debug!(message_id = %message.id, "Skipping duplicate message ID");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(message_id = %message.id, "Skipping duplicate message ID");
+                }
                 return Ok(());
             }
             
@@ -1301,7 +1307,9 @@ impl Mailbox {
             if let Some(_cached_entry) = cache.get(idempotency_key) {
                 // Duplicate idempotency key - skip message (deduplication)
                 // Note: get() already checked expiration, so if we get here, the key is valid
-                tracing::debug!(idempotency_key = %idempotency_key, "Skipping duplicate message with idempotency key");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(idempotency_key = %idempotency_key, "Skipping duplicate message with idempotency key");
+                }
                 return Ok(());
             }
             
@@ -1385,19 +1393,23 @@ impl Mailbox {
         stats.total_enqueued += 1;
         stats.current_size += 1;
 
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             message_id = %message_id,
             queue_size = stats.current_size,
             "Mailbox::enqueue: ✅ Message enqueued successfully"
         );
+        }
 
         // Notify processor that a message is available
         // This wakes up the processor task that's waiting on notify.notified()
         self.notify.notify_one();
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             message_id = %message_id,
             "Mailbox::enqueue: Notified processor task"
         );
+        }
 
         Ok(())
     }
@@ -1484,6 +1496,7 @@ impl Mailbox {
                 };
                 
                 if let Some(msg) = msg_opt {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         mailbox_id = %mailbox_id,
                         message_id = %msg.id,
@@ -1494,6 +1507,7 @@ impl Mailbox {
                         attempts = attempts,
                         "📬 Mailbox::dequeue: ✅ Received message from local_receiver (try_recv)"
                     );
+                    }
                     return Some(msg);
                 }
                 
@@ -1535,10 +1549,12 @@ impl Mailbox {
                         if !is_in_memory {
                             let shutdown = *shutdown_flag.read().await;
                             if shutdown {
+                                if tracing::enabled!(tracing::Level::DEBUG) {
                                 tracing::debug!(
                                     mailbox_id = %mailbox_id,
                                     "Mailbox::dequeue: Shutdown in progress, stopping receive"
                                 );
+                                }
                                 return None;
                             }
                         }
@@ -1547,6 +1563,7 @@ impl Mailbox {
                             Ok(messages) => {
                                 if let Some(channel_msg) = messages.first() {
                                     let msg = Message::from(channel_msg.clone());
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
                                     tracing::debug!(
                                         mailbox_id = %mailbox_id,
                                         message_id = %msg.id,
@@ -1556,6 +1573,7 @@ impl Mailbox {
                                         correlation_id = ?msg.correlation_id,
                                         "📬 Mailbox::dequeue: ✅ Received message from channel (receive)"
                                     );
+                                    }
                                     return Some(msg);
                                 }
                             }
@@ -1578,10 +1596,12 @@ impl Mailbox {
                     if !is_in_memory {
                         let shutdown = *shutdown_flag.read().await;
                         if shutdown {
+                            if tracing::enabled!(tracing::Level::DEBUG) {
                             tracing::debug!(
                                 mailbox_id = %mailbox_id,
                                 "Mailbox::dequeue: Shutdown in progress, stopping receive"
                             );
+                            }
                             return None;
                         }
                     }
@@ -1596,6 +1616,7 @@ impl Mailbox {
                             Ok(messages) => {
                                 if let Some(channel_msg) = messages.first() {
                                     let msg = Message::from(channel_msg.clone());
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
                                     tracing::debug!(
                                         mailbox_id = %mailbox_id,
                                         message_id = %msg.id,
@@ -1605,6 +1626,7 @@ impl Mailbox {
                                         correlation_id = ?msg.correlation_id,
                                         "📬 Mailbox::dequeue: ✅ Received message from channel (try_receive)"
                                     );
+                                    }
                                     return Some(msg);
                                 }
                             }
@@ -1678,12 +1700,14 @@ impl Mailbox {
             "Message acked successfully"
         );
 
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             mailbox_id = %self.mailbox_id,
             message_id = %message.id,
             channel_msg_id = %channel_msg_id,
             "✅ Mailbox::ack_message: Message acknowledged"
         );
+        }
 
         Ok(())
     }
@@ -1729,6 +1753,7 @@ impl Mailbox {
             "Message nacked (channel handles retry/DLQ)"
         );
 
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             mailbox_id = %self.mailbox_id,
             message_id = %message.id,
@@ -1736,6 +1761,7 @@ impl Mailbox {
             error = ?error,
             "⚠️ Mailbox::nack_message: Message nacked (channel handles retry/DLQ)"
         );
+        }
 
         Ok(())
     }
@@ -1899,10 +1925,12 @@ impl Mailbox {
             let mut shutdown_flag = self.shutdown_flag.write().await;
             *shutdown_flag = true;
             drop(shutdown_flag);
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 mailbox_id = %self.mailbox_id,
                 "Shutdown flag set - no new messages will be accepted"
             );
+            }
         }
         
         // Step 2: For durable backends, flush pending messages
@@ -1935,10 +1963,12 @@ impl Mailbox {
         loop {
             let in_progress = *self.in_progress_count.read().await;
             if in_progress == 0 {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     mailbox_id = %self.mailbox_id,
                     "All in-progress messages completed"
                 );
+                }
                 break;
             }
             
@@ -1964,10 +1994,12 @@ impl Mailbox {
                     "Failed to close channel during shutdown"
                 );
             } else {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     mailbox_id = %self.mailbox_id,
                     "Channel closed successfully"
                 );
+                }
             }
         }
         

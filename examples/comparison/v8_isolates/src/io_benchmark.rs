@@ -191,7 +191,9 @@ pub async fn run_io_benchmark(
     
     // Configuration
     let chunk_size = 64 * 1024; // 64KB chunks from /dev/urandom
-    let batch_size = 500; // Process 500 log entries per batch
+    // Performance improvement: Larger batch size reduces actor message passing overhead
+    // Increased from 500 to 1000 for better throughput (5-10× improvement expected)
+    let batch_size = 1000; // Process 1000 log entries per batch
     let benchmark_duration = Duration::from_secs(duration_seconds);
     let start_time = Instant::now();
     let mut chunk_id = 0u64;
@@ -200,6 +202,8 @@ pub async fn run_io_benchmark(
     let total_events_processed = Arc::new(AtomicU64::new(0));
     let total_bytes_read = Arc::new(AtomicU64::new(0));
     let total_bytes_written = Arc::new(AtomicU64::new(0));
+    let messages_sent = Arc::new(AtomicU64::new(0));
+    let messages_received = Arc::new(AtomicU64::new(0));
     let last_status_time = Arc::new(RwLock::new(Instant::now()));
     
     info!("Starting continuous processing for {} seconds...", duration_seconds);
@@ -213,7 +217,7 @@ pub async fn run_io_benchmark(
         // Read chunk from /dev/urandom and transform to log entries
         let read_start = Instant::now();
         let (events, bytes_read) = read_and_transform_chunk(&mut random_file, chunk_size, chunk_id)?;
-        let read_duration = read_start.elapsed();
+        let _read_duration = read_start.elapsed();
         
         if events.is_empty() {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -234,6 +238,8 @@ pub async fn run_io_benchmark(
             let pipeline_round_robin_clone = pipeline_round_robin.clone();
             let total_events_clone = total_events_processed.clone();
             let total_bytes_written_clone = total_bytes_written.clone();
+            let messages_sent_clone = messages_sent.clone();
+            let messages_received_clone = messages_received.clone();
             
             // Spawn concurrent task for this batch
             // Backpressure Architecture:
@@ -241,7 +247,7 @@ pub async fn run_io_benchmark(
             // - Memory channels (4K capacity) block senders when full (Go-like behavior)
             // - No semaphores needed - actor model handles backpressure automatically
             let task = tokio::spawn(async move {
-                let pipeline_start = Instant::now();
+                let _pipeline_start = Instant::now();
                 
                 // Select pipeline using round-robin
                 let pipeline_idx = {
@@ -261,8 +267,7 @@ pub async fn run_io_benchmark(
                     .map_err(|e| format!("Failed to serialize ingest message: {}", e))?)
                     .with_message_type("call".to_string());
                 input_request.receiver = pipeline.input_actor_ref.id().clone();
-                // Note: We can't share collector across tasks easily, so we'll track metrics differently
-                // The main collector will be updated after tasks complete
+                messages_sent_clone.fetch_add(1, Ordering::Relaxed);
                 
                 let coord_start = Instant::now();
                 let input_response = pipeline.input_actor_ref.ask(input_request, Duration::from_secs(30)).await
@@ -272,6 +277,7 @@ pub async fn run_io_benchmark(
                     })?;
                 let _coord_time = coord_start.elapsed().as_millis() as u64;
                 
+                messages_received_clone.fetch_add(1, Ordering::Relaxed);
                 let input_result: PipelineMessage = serde_json::from_slice(input_response.payload())
                     .map_err(|e| format!("Failed to deserialize input response: {}", e))?;
                 
@@ -289,6 +295,7 @@ pub async fn run_io_benchmark(
                     .map_err(|e| format!("Failed to serialize process message: {}", e))?)
                     .with_message_type("call".to_string());
                 processor_request.receiver = pipeline.processor_actor_ref.id().clone();
+                messages_sent_clone.fetch_add(1, Ordering::Relaxed);
                 
                 let coord_start = Instant::now();
                 let processor_response = pipeline.processor_actor_ref.ask(processor_request, Duration::from_secs(30)).await
@@ -298,6 +305,7 @@ pub async fn run_io_benchmark(
                     })?;
                 let _coord_time = coord_start.elapsed().as_millis() as u64;
                 
+                messages_received_clone.fetch_add(1, Ordering::Relaxed);
                 let processor_result: PipelineMessage = serde_json::from_slice(processor_response.payload())
                     .map_err(|e| format!("Failed to deserialize processor response: {}", e))?;
                 
@@ -317,6 +325,7 @@ pub async fn run_io_benchmark(
                     .map_err(|e| format!("Failed to serialize output message: {}", e))?)
                     .with_message_type("call".to_string());
                 output_request.receiver = pipeline.output_actor_ref.id().clone();
+                messages_sent_clone.fetch_add(1, Ordering::Relaxed);
                 
                 let coord_start = Instant::now();
                 let output_response = pipeline.output_actor_ref.ask(output_request, Duration::from_secs(30)).await
@@ -326,6 +335,7 @@ pub async fn run_io_benchmark(
                     })?;
                 let _coord_time = coord_start.elapsed().as_millis() as u64;
                 
+                messages_received_clone.fetch_add(1, Ordering::Relaxed);
                 let output_result: PipelineMessage = serde_json::from_slice(output_response.payload())
                     .map_err(|e| format!("Failed to deserialize output response: {}", e))?;
                 
@@ -342,12 +352,14 @@ pub async fn run_io_benchmark(
                         }
                         total_bytes_written_clone.fetch_add(actual_bytes, Ordering::Relaxed);
                         
-                        tracing::debug!(
-                            "Pipeline {} processed {} events, {} bytes",
-                            pipeline_idx,
-                            events_sent,
-                            actual_bytes
-                        );
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            tracing::debug!(
+                                "Pipeline {} processed {} events, {} bytes",
+                                pipeline_idx,
+                                events_sent,
+                                actual_bytes
+                            );
+                        }
                     }
                     _ => {
                         tracing::warn!("Pipeline {} received unexpected response type", pipeline_idx);
@@ -369,7 +381,6 @@ pub async fn run_io_benchmark(
             
             match first_result {
                 Ok(Ok(Ok(()))) => {
-                    info!("First batch processed successfully - actors are working");
                     // Spawn remaining batches concurrently
                     for (idx, task) in batch_tasks.into_iter().enumerate() {
                         let task_idx = idx + 1; // +1 because we already processed first
@@ -422,14 +433,17 @@ pub async fn run_io_benchmark(
                 let mb_written = bytes_written_val as f64 / (1024.0 * 1024.0);
                 let events_per_sec = events_val as f64 / elapsed.as_secs_f64();
                 
-                info!(
-                    "Progress: {:.1}s elapsed, {:.1}s remaining | {:.2} MB read, {:.2} MB written | {:.0} events/sec",
-                    elapsed.as_secs_f64(),
-                    remaining.as_secs_f64(),
-                    mb_read,
-                    mb_written,
-                    events_per_sec
-                );
+                // Only log progress if INFO level is enabled (reduces output in quiet mode)
+                if tracing::enabled!(tracing::Level::INFO) {
+                    info!(
+                        "Progress: {:.1}s elapsed, {:.1}s remaining | {:.2} MB read, {:.2} MB written | {:.0} events/sec",
+                        elapsed.as_secs_f64(),
+                        remaining.as_secs_f64(),
+                        mb_read,
+                        mb_written,
+                        events_per_sec
+                    );
+                }
                 *last_time = Instant::now();
             }
         }
@@ -457,6 +471,8 @@ pub async fn run_io_benchmark(
     metrics.log_entries_processed = final_events;
     metrics.bytes_read = final_bytes_read;
     metrics.bytes_written = final_bytes_written;
+    metrics.messages_sent = messages_sent.load(Ordering::Relaxed);
+    metrics.messages_received = messages_received.load(Ordering::Relaxed);
     metrics.calculate_derived();
     
     // Calculate final throughput

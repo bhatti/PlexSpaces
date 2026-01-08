@@ -12,11 +12,75 @@ use tokio::time::{sleep, Duration};
 use plexspaces_node::{Node, NodeBuilder};
 use reqwest::multipart;
 
+/// Shared WASM bytes cache (loaded once, reused for all tests)
+static SHARED_WASM_BYTES: std::sync::OnceLock<tokio::sync::Mutex<Option<Vec<u8>>>> = std::sync::OnceLock::new();
+static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Helper to get the calculator WASM file path
 fn get_calculator_wasm_path() -> PathBuf {
+    // First try: test fixtures (preferred)
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop(); // crates/node
+    path.push("wasm-runtime");
+    path.push("tests");
+    path.push("fixtures");
+    path.push("calculator_actor.wasm");
+    if path.exists() {
+        return path;
+    }
+    
+    // Second try: examples directory (fallback)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../../examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm");
     path
+}
+
+/// Get or load shared WASM bytes
+/// Loads the 40MB WASM file once and caches it for all tests
+async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
+    let cache = SHARED_WASM_BYTES.get_or_init(|| tokio::sync::Mutex::new(None));
+    
+    // Fast path: already loaded
+    {
+        let guard = cache.lock().await;
+        if let Some(ref bytes) = *guard {
+            return Some(bytes.clone());
+        }
+    }
+    
+    // Slow path: need to load (use lock to ensure only one thread loads)
+    let _guard = INIT_LOCK.lock().unwrap();
+    
+    // Double-check after acquiring lock
+    {
+        let guard = cache.lock().await;
+        if let Some(ref bytes) = *guard {
+            return Some(bytes.clone());
+        }
+    }
+    
+    // Load WASM file (first time only)
+    let wasm_path = get_calculator_wasm_path();
+    if !wasm_path.exists() {
+        return None;
+    }
+    
+    eprintln!("📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)", wasm_path.display());
+    
+    let bytes = tokio::task::spawn_blocking(move || std::fs::read(&wasm_path))
+        .await
+        .ok()
+        .and_then(|r| r.ok())?;
+    
+    eprintln!("✅ WASM file loaded: {} bytes", bytes.len());
+    
+    // Cache the bytes
+    {
+        let mut guard = cache.lock().await;
+        *guard = Some(bytes.clone());
+    }
+    
+    Some(bytes)
 }
 
 /// Helper to create a test node with a fixed port to avoid port binding issues
@@ -70,8 +134,9 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
         return;
     }
     
-    // ACT: Deploy WASM component via HTTP
-    let wasm_bytes = std::fs::read(&wasm_path).expect("Failed to read WASM file");
+    // ACT: Deploy WASM component via HTTP (use shared module for performance)
+    let wasm_bytes = get_shared_wasm_bytes().await
+        .expect("WASM file not found. Please ensure calculator_actor.wasm is available.");
     eprintln!("📦 Deploying WASM component: {} ({} bytes)", wasm_path.display(), wasm_bytes.len());
     
     let form = multipart::Form::new()
@@ -182,7 +247,8 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
     }
     
     // ACT: Deploy WASM component with ApplicationSpec containing supervisor tree
-    let wasm_bytes = std::fs::read(&wasm_path).expect("Failed to read WASM file");
+    let wasm_bytes = get_shared_wasm_bytes().await
+        .expect("WASM file not found. Please ensure calculator_actor.wasm is available.");
     
     // Note: The HTTP handler auto-generates ApplicationSpec with a default supervisor tree
     // For this test, we'll deploy without explicit config and verify that:

@@ -21,6 +21,7 @@ plexspaces-facet = { workspace = true }
 plexspaces-channel = { workspace = true }  # For create_default_channel
 
 # Service adapters (optional feature to avoid circular dependencies)
+# Note: supervisor and journaling are optional to avoid circular dependencies
 # Note: These will be added when we integrate Node with ActorContext
 # For now, wrappers are stubbed out
 
@@ -54,6 +55,10 @@ default = []
 # Keep tracing feature for backward compatibility, but tracing is always enabled
 tracing = []
 sql-backend = ["plexspaces-keyvalue/sql-backend"]
+# Optional dependencies for trait implementations (to avoid circular dependencies)
+# Note: These create circular dependencies, so we'll use a different approach
+# supervisor-traits = ["dep:plexspaces-supervisor"]
+# journaling-traits = ["dep:plexspaces-journaling"]
 # service-adapters feature will be enabled when Node integration is complete
 # service-adapters = ["dep:plexspaces-actor-service", "dep:plexspaces-object-registry", "dep:plexspaces-node"]
 

@@ -617,6 +617,7 @@ impl Channel for RedisChannel {
                             crate::observability::backend_name(self.config.backend),
                         );
                         
+                        if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             channel = %self.config.name,
                             message_id = %message_id,
@@ -624,15 +625,18 @@ impl Channel for RedisChannel {
                             max_retries = max_retries,
                             "Message sent to DLQ after max retries"
                         );
+                        }
                     }
                 }
             } else {
                 // Just don't ACK (message will be redelivered after timeout)
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     channel = %self.config.name,
                     message_id = %message_id,
                     "Message nacked (will be redelivered after timeout, DLQ disabled or not configured)"
                 );
+                }
             }
         }
 

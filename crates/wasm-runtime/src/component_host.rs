@@ -156,7 +156,9 @@ impl plexspaces::actor::logging::Host for LoggingImpl {
     }
 
     async fn debug(&mut self, message: String) {
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(actor_id = %self.actor_id, "{}", message);
+        }
     }
 
     async fn info(&mut self, message: String) {
@@ -174,7 +176,11 @@ impl plexspaces::actor::logging::Host for LoggingImpl {
     async fn log(&mut self, level: plexspaces::actor::logging::LogLevel, message: String) {
         match level {
             plexspaces::actor::logging::LogLevel::Trace => tracing::trace!(actor_id = %self.actor_id, "{}", message),
-            plexspaces::actor::logging::LogLevel::Debug => tracing::debug!(actor_id = %self.actor_id, "{}", message),
+            plexspaces::actor::logging::LogLevel::Debug => {
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(actor_id = %self.actor_id, "{}", message);
+                }
+            },
             plexspaces::actor::logging::LogLevel::Info => tracing::info!(actor_id = %self.actor_id, "{}", message),
             plexspaces::actor::logging::LogLevel::Warn => tracing::warn!(actor_id = %self.actor_id, "{}", message),
             plexspaces::actor::logging::LogLevel::Error => tracing::error!(actor_id = %self.actor_id, "{}", message),
@@ -192,7 +198,9 @@ impl plexspaces::actor::logging::Host for LoggingImpl {
                 tracing::trace!(actor_id = %self.actor_id, "{}", message);
             }
             plexspaces::actor::logging::LogLevel::Debug => {
-                tracing::debug!(actor_id = %self.actor_id, "{}", message);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(actor_id = %self.actor_id, "{}", message);
+                }
             }
             plexspaces::actor::logging::LogLevel::Info => {
                 tracing::info!(actor_id = %self.actor_id, "{}", message);
@@ -264,6 +272,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_messaging_tell_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_messaging_tell_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     to = %to,
@@ -272,6 +281,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     payload_size = payload.len(),
                     "Message sent via tell"
                 );
+                }
                 Ok(message_id)
             }
             Err(e) => {
@@ -332,6 +342,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_messaging_ask_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_messaging_ask_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     to = %to,
@@ -340,6 +351,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     duration_ms = duration.as_millis(),
                     "Ask request completed successfully"
                 );
+                }
                 Ok(reply_payload)
             }
             Err(e) => {
@@ -399,6 +411,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
         
         if let Some((sender_id, reply_tx)) = reply_result {
             if reply_tx.send(payload.clone()).is_ok() {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     correlation_id = %correlation_id,
@@ -406,6 +419,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     payload_size = payload.len(),
                     "Reply sent via pending ask channel"
                 );
+                }
                 
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_messaging_reply_duration_seconds").record(duration.as_secs_f64());
@@ -474,6 +488,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_messaging_forward_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_messaging_forward_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     to = %to,
@@ -483,6 +498,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     payload_size = payload.len(),
                     "Message forwarded"
                 );
+                }
                 Ok(message_id)
             }
             Err(e) => {
@@ -539,6 +555,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_messaging_spawn_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_messaging_spawn_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     module_ref = %module_ref,
@@ -546,6 +563,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     duration_ms = duration.as_millis(),
                     "Actor spawned successfully"
                 );
+                }
                 Ok(spawned_actor_id)
             }
             Err(e) => {
@@ -609,12 +627,14 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_messaging_stop_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_messaging_stop_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     target_actor_id = %actor_id,
                     duration_ms = duration.as_millis(),
                     "Actor stopped successfully"
                 );
+                }
                 Ok(())
             }
             Err(e) => {
@@ -792,12 +812,14 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     let duration = start_time.elapsed();
                     metrics::histogram!("plexspaces_wasm_messaging_demonitor_duration_seconds").record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_messaging_demonitor_success_total").increment(1);
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         actor_id = %self.actor_id,
                         target_id = %target_id,
                         monitor_ref = monitor_ref,
                         "Demonitor successful"
                     );
+                    }
                     Ok(())
                 }
                 Err(e) => {
@@ -861,12 +883,14 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
         
         let actual_duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_messaging_sleep_actual_duration_ms").record(actual_duration.as_millis() as f64);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %self.actor_id,
             requested_ms = duration_ms,
             actual_ms = actual_duration.as_millis(),
             "Actor slept"
         );
+        }
     }
 
     async fn send_after(
@@ -915,12 +939,14 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     "Failed to deliver scheduled message"
                 );
             } else {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %actor_id_clone,
                     timer_id = timer_id,
                     msg_type = %msg_type_clone,
                     "Scheduled message delivered"
                 );
+                }
             }
             
             // Remove timer from tracking when it completes
@@ -934,6 +960,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             timers.insert(timer_id, join_handle);
         }
 
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %self.actor_id,
             timer_id = timer_id,
@@ -941,6 +968,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             msg_type = %msg_type,
             "Scheduled message"
         );
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_messaging_send_after_duration_seconds").record(duration.as_secs_f64());
@@ -969,11 +997,13 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
         let mut timers = self.timers.write().await;
         if let Some(join_handle) = timers.remove(&timer_id) {
             join_handle.abort();
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 actor_id = %self.actor_id,
                 timer_id = timer_id,
                 "Timer cancelled"
             );
+            }
             let duration = start_time.elapsed();
             metrics::histogram!("plexspaces_wasm_messaging_cancel_timer_duration_seconds").record(duration.as_secs_f64());
             metrics::counter!("plexspaces_wasm_messaging_cancel_timer_success_total").increment(1);
@@ -1215,10 +1245,12 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_tuplespace_write_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_tuplespace_write_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     "Tuplespace write succeeded"
                 );
+                }
                 Ok(())
             }
             Err(e) => {
@@ -1773,6 +1805,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_channels_send_to_queue_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_channels_send_to_queue_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     queue = %queue_name,
                     msg_type = %msg_type,
@@ -1780,6 +1813,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                     payload_size = payload.len(),
                     "Message sent to queue"
                 );
+                }
                 Ok(message_id)
             }
             Err(e) => {
@@ -1827,6 +1861,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_channels_receive_from_queue_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_channels_receive_from_queue_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     queue = %queue_name,
                     message_id = %message_id,
@@ -1834,6 +1869,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                     payload_size = payload.len(),
                     "Message received from queue"
                 );
+                }
                 Ok(Some(plexspaces::actor::channels::QueueMessage {
                     id: message_id,
                     msg_type,
@@ -1885,11 +1921,13 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         .entered();
 
         // Ack is a placeholder - actual implementation requires ChannelService with ack support
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             queue = %queue_name,
             message_id = %message_id,
             "Ack called (placeholder implementation)"
         );
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_channels_ack_duration_seconds").record(duration.as_secs_f64());
@@ -1916,12 +1954,14 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         .entered();
 
         // Nack is a placeholder - actual implementation requires ChannelService with nack support
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             queue = %queue_name,
             message_id = %message_id,
             requeue = requeue,
             "Nack called (placeholder implementation)"
         );
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_channels_nack_duration_seconds").record(duration.as_secs_f64());
@@ -1944,6 +1984,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_channels_publish_to_topic_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_channels_publish_to_topic_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     topic = %topic_name,
                     msg_type = %msg_type,
@@ -1951,6 +1992,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                     payload_size = payload.len(),
                     "Message published to topic"
                 );
+                }
                 Ok(message_id)
             }
             Err(e) => {
@@ -2017,12 +2059,14 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                 // Messages from subscribed topics are delivered to the actor's mailbox automatically
                 // by the node's message routing system. No additional forwarding task is needed.
 
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     topic = %topic_name,
                     filter = ?filter,
                     subscription_id = subscription_id,
                     "Subscribed to topic"
                 );
+                }
 
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_channels_subscribe_to_topic_duration_seconds").record(duration.as_secs_f64());
@@ -2063,11 +2107,13 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         };
 
         if let Some(topic) = topic_name {
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 subscription_id = subscription_id,
                 topic = %topic,
                 "Unsubscribed from topic"
             );
+            }
         } else {
             tracing::warn!(
                 subscription_id = subscription_id,
@@ -2203,6 +2249,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                     metrics::histogram!("plexspaces_wasm_blob_upload_duration_seconds").record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_blob_upload_success_total").increment(1);
                     
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         bucket = %bucket,
                         key = %key,
@@ -2210,6 +2257,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                         size = metadata.content_length,
                         "Blob uploaded successfully"
                     );
+                    }
                     
                     Ok(plexspaces::actor::blob::BlobMetadata {
                         blob_id: metadata.blob_id,
@@ -2315,11 +2363,13 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                     metrics::histogram!("plexspaces_wasm_blob_download_duration_seconds").record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_blob_download_success_total").increment(1);
                     
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         blob_id = %effective_blob_id,
                         size = data.len(),
                         "Blob downloaded successfully"
                     );
+                    }
                     
                     Ok(data)
                 }
@@ -2416,10 +2466,12 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                     metrics::histogram!("plexspaces_wasm_blob_delete_duration_seconds").record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_blob_delete_success_total").increment(1);
                     
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         blob_id = %effective_blob_id,
                         "Blob deleted successfully"
                     );
+                    }
                     
                     Ok(())
                 }
@@ -2579,12 +2631,14 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                     metrics::histogram!("plexspaces_wasm_blob_list_duration_seconds").record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_blob_list_success_total").increment(1);
                     
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         bucket = %bucket,
                         prefix = %prefix,
                         count = wit_metadata.len(),
                         "List blobs completed successfully"
                     );
+                    }
                     
                     Ok(wit_metadata)
                 }
@@ -2819,11 +2873,13 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                     metrics::histogram!("plexspaces_wasm_blob_copy_duration_seconds").record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_blob_copy_success_total").increment(1);
                     
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         source_blob_id = %effective_source_blob_id,
                         dest_blob_id = %dest_metadata.blob_id,
                         "Blob copied successfully"
                     );
+                    }
                     
                     Ok(plexspaces::actor::blob::BlobMetadata {
                         blob_id: dest_metadata.blob_id,
@@ -2891,12 +2947,14 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
         // For now, these functions return placeholder values to maintain API compatibility.
         let execution_id = workflow_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
 
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             workflow_type = %workflow_type,
             execution_id = %execution_id,
             input_size = input.len(),
             "Start workflow called (placeholder implementation)"
         );
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_workflow_start_duration_seconds").record(duration.as_secs_f64());
@@ -2923,12 +2981,14 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
 
         // NOTE: Workflow functions are placeholder implementations. Full workflow orchestration
         // requires WorkflowService integration which will be added in a future phase.
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             workflow_id = %workflow_id,
             signal_name = %signal_name,
             payload_size = payload.len(),
             "Signal workflow called (placeholder implementation)"
         );
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_workflow_signal_duration_seconds").record(duration.as_secs_f64());
@@ -2953,11 +3013,13 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
 
         // NOTE: Workflow functions are placeholder implementations. Full workflow orchestration
         // requires WorkflowService integration which will be added in a future phase.
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             workflow_id = %workflow_id,
             query_type = %query_type,
             "Query workflow called (placeholder implementation)"
         );
+        }
 
         metrics::counter!("plexspaces_wasm_workflow_query_success_total").increment(1);
         Ok(vec![]) // Empty result for placeholder
@@ -2981,11 +3043,13 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
 
         // NOTE: Workflow functions are placeholder implementations. Full workflow orchestration
         // requires WorkflowService integration which will be added in a future phase.
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             workflow_id = %workflow_id,
             timeout_ms = timeout_ms,
             "Await workflow called (placeholder implementation)"
         );
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_workflow_await_duration_seconds").record(duration.as_secs_f64());
@@ -3011,11 +3075,13 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
 
         // NOTE: Workflow functions are placeholder implementations. Full workflow orchestration
         // requires WorkflowService integration which will be added in a future phase./ActivityExecutor
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             activity_type = %activity_type,
             input_size = input.len(),
             "Schedule activity called (placeholder implementation)"
         );
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_workflow_schedule_activity_duration_seconds").record(duration.as_secs_f64());
@@ -3121,6 +3187,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_durability_persist_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_durability_persist_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     event_type = %event_type,
@@ -3128,6 +3195,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                     payload_size = payload.len(),
                     "Event persisted successfully"
                 );
+                }
                 Ok(sequence)
             }
             Err(e) => {
@@ -3200,12 +3268,14 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_durability_persist_batch_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_durability_persist_batch_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     event_count = actor_events.len(),
                     first_sequence = first_sequence,
                     "Batch events persisted successfully"
                 );
+                }
                 Ok(first_sequence)
             }
             Err(e) => {
@@ -3291,11 +3361,13 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_durability_checkpoint_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_durability_checkpoint_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     sequence = current_sequence,
                     "Checkpoint created successfully"
                 );
+                }
                 Ok(current_sequence)
             }
             Err(e) => {
@@ -3406,11 +3478,13 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
             // During replay, return cached result
             let cache = self.side_effect_cache.read().await;
             if let Some(cached) = cache.get(&key) {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     key = %key,
                     "Returning cached side effect result during replay"
                 );
+                }
                 return Ok(cached.clone());
             } else {
                 // No cache found - this shouldn't happen in proper replay
@@ -3465,12 +3539,14 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_durability_cache_side_effect_duration_seconds").record(duration.as_secs_f64());
         metrics::counter!("plexspaces_wasm_durability_cache_side_effect_success_total").increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %self.actor_id,
             key = %key,
             result_size = result_value.len(),
             "Side effect cached successfully"
         );
+        }
         Ok(result_value)
     }
 
@@ -3548,6 +3624,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_durability_read_journal_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_durability_read_journal_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     from_sequence = from_sequence,
@@ -3556,6 +3633,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                     entries_returned = journal_entries.len(),
                     "Journal entries read successfully"
                 );
+                }
                 Ok(journal_entries)
             }
             Err(e) => {
@@ -3648,12 +3726,14 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_durability_compact_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_durability_compact_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     up_to_sequence = up_to_sequence,
                     entries_deleted = deleted_count,
                     "Journal compacted successfully"
                 );
+                }
                 Ok(())
             }
             Err(e) => {
@@ -3714,14 +3794,18 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_get_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_get_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(key = %key, value_size = value.len(), "KeyValue get succeeded");
+                }
                 Ok(Some(value))
             }
             Ok(None) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_get_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_get_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(key = %key, "KeyValue get returned None");
+                }
                 Ok(None)
             }
             Err(e) => {
@@ -3770,7 +3854,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_put_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_put_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(key = %key, "KeyValue put succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -3822,7 +3908,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_put_with_ttl_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_put_with_ttl_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(key = %key, ttl_ms = ttl_ms, "KeyValue put_with_ttl succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -3868,7 +3956,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_delete_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_delete_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(key = %key, "KeyValue delete succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -3914,7 +4004,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_exists_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_exists_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(key = %key, exists = exists, "KeyValue exists succeeded");
+                }
                 Ok(exists)
             }
             Err(e) => {
@@ -3966,7 +4058,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_list_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_list_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(prefix = %prefix, limit = limit, count = keys.len(), "KeyValue list succeeded");
+                }
                 Ok(keys)
             }
             Err(e) => {
@@ -4014,7 +4108,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_compare_and_swap_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_compare_and_swap_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(key = %key, success = success, "KeyValue compare_and_swap succeeded");
+                }
                 Ok(success)
             }
             Err(e) => {
@@ -4062,7 +4158,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_keyvalue_increment_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_keyvalue_increment_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(key = %key, delta = delta, new_value = new_value, "KeyValue increment succeeded");
+                }
                 Ok(new_value)
             }
             Err(e) => {
@@ -4095,7 +4193,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         // NOTE: KeyValue watch is not yet implemented in the KeyValueStore backend.
         // This is an acceptable limitation - watch/unwatch will be added when the backend
         // supports change notifications.
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(key = %key, "Watch called (not yet implemented in backend)");
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_keyvalue_watch_duration_seconds").record(duration.as_secs_f64());
@@ -4124,7 +4224,9 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         // NOTE: KeyValue unwatch is not yet implemented in the KeyValueStore backend.
         // This is an acceptable limitation - watch/unwatch will be added when the backend
         // supports change notifications.
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(subscription_id = subscription_id, "Unwatch called (not yet implemented in backend)");
+        }
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_keyvalue_unwatch_duration_seconds").record(duration.as_secs_f64());
@@ -4182,7 +4284,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_create_group_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_process_groups_create_group_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(group_name = %group_name, namespace = %namespace, "ProcessGroup create_group succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -4233,7 +4337,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_delete_group_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_process_groups_delete_group_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(group_name = %group_name, "ProcessGroup delete_group succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -4286,7 +4392,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_join_group_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_process_groups_join_group_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(group_name = %group_name, namespace = %namespace, "ProcessGroup join_group succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -4338,7 +4446,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_leave_group_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_process_groups_leave_group_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(group_name = %group_name, "ProcessGroup leave_group succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -4393,7 +4503,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_get_members_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_process_groups_get_members_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(group_name = %group_name, count = actor_ids.len(), "ProcessGroup get_members succeeded");
+                }
                 Ok(actor_ids)
             }
             Err(e) => {
@@ -4448,7 +4560,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_get_local_members_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_process_groups_get_local_members_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(group_name = %group_name, count = actor_ids.len(), "ProcessGroup get_local_members succeeded");
+                }
                 Ok(actor_ids)
             }
             Err(e) => {
@@ -4497,7 +4611,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_list_groups_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_process_groups_list_groups_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(count = groups.len(), "ProcessGroup list_groups succeeded");
+                }
                 Ok(groups)
             }
             Err(e) => {
@@ -4551,7 +4667,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_publish_to_group_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_process_groups_publish_to_group_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(group_name = %group_name, topic = ?topic, recipients = actor_ids.len(), "ProcessGroup publish_to_group succeeded");
+                }
                 Ok(actor_ids)
             }
             Err(e) => {
@@ -4643,7 +4761,9 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_locks_acquire_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_locks_acquire_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(lock_key = %lock_key, holder_id = %holder_id, "Lock acquire succeeded");
+                }
                 Ok(wit_lock)
             }
             Err(e) => {
@@ -4726,7 +4846,9 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_locks_renew_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_locks_renew_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(lock_key = %lock_key, holder_id = %holder_id, version = %version, "Lock renew succeeded");
+                }
                 Ok(wit_lock)
             }
             Err(e) => {
@@ -4792,7 +4914,9 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_locks_release_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_locks_release_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(lock_key = %lock_key, holder_id = %holder_id, version = %version, "Lock release succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -4876,7 +5000,9 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_locks_try_acquire_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_locks_try_acquire_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(lock_key = %lock_key, holder_id = %holder_id, "Lock try_acquire succeeded");
+                }
                 Ok(Some(wit_lock))
             }
             Err(e) => {
@@ -4885,7 +5011,9 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                     let duration = start_time.elapsed();
                     metrics::histogram!("plexspaces_wasm_locks_try_acquire_duration_seconds").record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_locks_try_acquire_success_total").increment(1);
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(lock_key = %lock_key, holder_id = %holder_id, "Lock try_acquire returned None (lock held)");
+                    }
                     Ok(None)
                 } else {
                     metrics::counter!("plexspaces_wasm_locks_try_acquire_errors_total").increment(1);
@@ -4948,14 +5076,18 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_locks_get_lock_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_locks_get_lock_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(lock_key = %lock_key, "Lock get_lock succeeded");
+                }
                 Ok(Some(wit_lock))
             }
             Ok(None) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_locks_get_lock_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_locks_get_lock_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(lock_key = %lock_key, "Lock get_lock returned None");
+                }
                 Ok(None)
             }
             Err(e) => {
@@ -5127,7 +5259,9 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_registry_register_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_register_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(object_id = %object_id, object_type = ?object_type, "Registry register succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -5194,7 +5328,9 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_registry_unregister_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_unregister_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(object_type = ?object_type, object_id = %object_id, "Registry unregister succeeded");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -5260,14 +5396,18 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_registry_lookup_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_lookup_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(object_type = ?object_type, object_id = %object_id, "Registry lookup succeeded");
+                }
                 Ok(Some(wit_reg))
             }
             Ok(None) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_registry_lookup_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_lookup_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(object_type = ?object_type, object_id = %object_id, "Registry lookup returned None");
+                }
                 Ok(None)
             }
             Err(e) => {
@@ -5349,7 +5489,9 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_registry_discover_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_discover_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(object_type = ?object_type, count = wit_regs.len(), "Registry discover succeeded");
+                }
                 Ok(wit_regs)
             }
             Err(e) => {
@@ -5409,7 +5551,9 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_registry_heartbeat_duration_seconds").record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_heartbeat_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(object_type = ?object_type, object_id = %object_id, "Registry heartbeat succeeded");
+                }
                 Ok(())
             }
             Err(e) => {

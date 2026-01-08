@@ -39,7 +39,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::{Checkpoint, JournalEntry, JournalError, JournalResult, JournalStats, JournalStorage, ActorEvent, ActorHistory};
+use crate::{Checkpoint, JournalEntry, JournalStats, ActorEvent, ActorHistory};
+use plexspaces_core::{JournalStorage, JournalError, JournalResult};
 use crate::storage::{ReminderState, ReminderRegistration};
 use plexspaces_proto::prost_types;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
@@ -1227,5 +1228,12 @@ mod tests {
         assert_eq!(events[0].sequence, 5);
         assert_eq!(events[1].sequence, 6);
         assert_eq!(events[2].sequence, 7);
+    }
+}
+
+// Implement Service trait for registration in ServiceLocator
+impl plexspaces_core::Service for MemoryJournalStorage {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_locator::service_names::JOURNAL_STORAGE.to_string()
     }
 }

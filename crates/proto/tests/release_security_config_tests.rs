@@ -125,6 +125,7 @@ mod tests {
             channel_provider: None,
             tuplespace_provider: None,
             mailbox_provider: None,
+            journaling_provider: None,
             framework_info: None,
         };
 
@@ -159,6 +160,7 @@ mod tests {
             channel_provider: None,
             tuplespace_provider: None,
             mailbox_provider: None,
+            journaling_provider: None,
             framework_info: None,
         };
 

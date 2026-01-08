@@ -26,7 +26,8 @@
 #[cfg(test)]
 mod tests {
     use plexspaces_mailbox::{Mailbox, MailboxBuilder, Message};
-    use plexspaces_journaling::{DurabilityFacet, DurabilityConfig, JournalBackend, CompressionType};
+    use plexspaces_journaling::{DurabilityFacet, DurabilityConfig, JournalBackend, CompressionType, JournalStorage};
+    use std::sync::Arc;
     #[cfg(feature = "sqlite-backend")]
     use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_facet::Facet;
@@ -46,9 +47,9 @@ mod tests {
 
     /// Helper to create a DurabilityFacet
     #[cfg(feature = "sqlite-backend")]
-    async fn create_durability_facet() -> DurabilityFacet<SqliteJournalStorage> {
+    async fn create_durability_facet() -> DurabilityFacet {
         // Use in-memory SQLite for tests (more reliable)
-        let storage = SqliteJournalStorage::new(":memory:").await.unwrap();
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         
         let config = DurabilityConfig {
             backend: JournalBackend::JournalBackendSqlite as i32,
@@ -256,7 +257,7 @@ mod tests {
                 "compression": durability_config.compression,
                 "state_schema_version": durability_config.state_schema_version,
             });
-            let mut facet = DurabilityFacet::new(storage, config_value, 50);
+            let mut facet = DurabilityFacet::new(Arc::new(storage), config_value, 50);
             facet.on_attach("recovery-actor", serde_json::json!({})).await.unwrap();
             
             // Send messages
@@ -319,7 +320,7 @@ mod tests {
                 "compression": durability_config.compression,
                 "state_schema_version": durability_config.state_schema_version,
             });
-            let mut facet = DurabilityFacet::new(storage, config_value, 50);
+            let mut facet = DurabilityFacet::new(Arc::new(storage), config_value, 50);
             facet.on_attach("recovery-actor", serde_json::json!({})).await.unwrap();
             
             // Wait for recovery

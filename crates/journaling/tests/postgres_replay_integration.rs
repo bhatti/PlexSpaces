@@ -21,10 +21,10 @@ mod postgres_integration_tests {
 
     /// Helper to create a test PostgreSQL storage
     /// Uses test database URL from environment or defaults to local test DB
-    async fn create_test_storage() -> PostgresJournalStorage {
+    async fn create_test_storage() -> Arc<dyn JournalStorage> {
         let db_url = std::env::var("TEST_POSTGRES_URL")
             .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/plexspaces_test".to_string());
-        PostgresJournalStorage::new(&db_url).await.unwrap()
+        Arc::new(PostgresJournalStorage::new(&db_url).await.unwrap())
     }
 
     /// Helper to create durability config

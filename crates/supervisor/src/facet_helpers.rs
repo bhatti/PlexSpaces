@@ -79,11 +79,13 @@ pub async fn create_facet_from_proto(
     // The priority is stored in FacetContainer metadata, not in the facet itself
     // So we just return the facet - priority will be set during attachment
     
+    if tracing::enabled!(tracing::Level::DEBUG) {
     tracing::debug!(
         facet_type = %facet_type,
         priority = proto_facet.priority,
         "Created facet from proto configuration"
     );
+    }
     
     Ok(facet)
 }
@@ -155,11 +157,13 @@ pub async fn create_facets_from_proto(
         }
     }
     
+    if tracing::enabled!(tracing::Level::DEBUG) {
     tracing::debug!(
         total = proto_facets.len(),
         created = facets.len(),
         "Created facets from proto configurations"
     );
+    }
     
     facets
 }

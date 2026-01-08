@@ -573,10 +573,14 @@ impl DashboardService for DashboardServiceImpl {
         if let Some(actor_registry) = actor_registry {
             // Use actor_type_index to get counts by type
             let index = actor_registry.actor_type_index().read().await;
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!("get_summary: actor_type_index has {} entries", index.len());
+            }
             for ((_tenant, _namespace, actor_type), actor_ids) in index.iter() {
                 *actors_by_type.entry(actor_type.clone()).or_insert(0) += actor_ids.len() as u32;
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!("get_summary: aggregated actor_type={}, count={}", actor_type, actor_ids.len());
+                }
             }
             
             // Also count actors without type (registered but not in index)

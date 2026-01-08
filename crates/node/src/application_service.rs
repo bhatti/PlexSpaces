@@ -262,7 +262,9 @@ impl ApplicationService for ApplicationServiceImpl {
                     tracing::info!("Set release config on node from deployment request");
                 } else {
                     // Node already has release config - log but don't override
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!("Node already has release config, not overriding from deployment request");
+                    }
                 }
             }
             
@@ -410,7 +412,9 @@ impl ApplicationService for ApplicationServiceImpl {
     ) -> Result<Response<ListApplicationsResponse>, Status> {
         // Record metrics
         metrics::counter!("plexspaces_node_application_list_requests_total").increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Listing applications");
+        }
         // Get list of applications from ApplicationManager
         let app_names = self.application_manager.list_applications().await;
         

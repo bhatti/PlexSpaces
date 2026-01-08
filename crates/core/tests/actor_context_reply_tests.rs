@@ -23,9 +23,6 @@ mod tests {
             self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
             Ok("msg-id".to_string())
         }
-        async fn send_reply(&self, _correlation_id: Option<&str>, _actor_id: &String, _message_id: String, _message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            Ok(())
-        }
     }
 
     struct MockObjectRegistry;

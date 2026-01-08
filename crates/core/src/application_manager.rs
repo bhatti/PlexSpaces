@@ -159,7 +159,9 @@ impl ApplicationManager {
             )));
         }
 
-        eprintln!("Registering application: {}", name);
+        if tracing::enabled!(tracing::Level::INFO) {
+            tracing::info!("Registering application: {}", name);
+        }
 
         apps.insert(
             name.clone(),
@@ -183,7 +185,9 @@ impl ApplicationManager {
                 // Note: We can't use concrete ObjectRegistry type here due to circular dependency.
                 // Unregistration will be handled by the node crate's object_registry_helpers.
                 // This is a placeholder - the actual unregistration happens in the node crate.
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(application = %name, "Application unregistered (object-registry unregistration handled by node crate)");
+                }
             }
         }
 
@@ -233,11 +237,13 @@ impl ApplicationManager {
         // Transition to Starting
         instance.state = ApplicationState::ApplicationStateStarting;
         
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             application = %name,
             state = ?instance.state,
             "Application state transition: Created -> Starting"
         );
+        }
 
         // Get node context (must be set before calling start)
         let node_context = {
@@ -246,10 +252,12 @@ impl ApplicationManager {
                 "Node context not set. Call set_node_context() before starting applications.".to_string()
             ))?.clone()
         };
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             application = %name,
             "Calling application.start() method"
         );
+        }
         match instance.app.start(node_context).await {
             Ok(()) => {
                 instance.state = ApplicationState::ApplicationStateRunning;
@@ -282,6 +290,7 @@ impl ApplicationManager {
                 
                 // Log metrics
                 if actor_count > 0 || supervisor_count > 0 {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         application = %name,
                         actor_count = actor_count,
@@ -289,6 +298,7 @@ impl ApplicationManager {
                         duration_ms = startup_duration.as_millis(),
                         "Application metrics after startup"
                     );
+                    }
                 }
                 
                 Ok(())
@@ -344,10 +354,12 @@ impl ApplicationManager {
             .ok_or_else(|| ApplicationError::Other(format!("Application '{}' not found", name)))?;
 
         if instance.state != ApplicationState::ApplicationStateRunning {
-            eprintln!(
-                "Application '{}' is in state {:?}, expected Running",
-                name, instance.state
-            );
+            if tracing::enabled!(tracing::Level::INFO) {
+                tracing::info!(
+                    "Application '{}' is in state {:?}, expected Running",
+                    name, instance.state
+                );
+            }
             return Ok(()); // Already stopped
         }
 
@@ -364,6 +376,7 @@ impl ApplicationManager {
         let actor_count = instance.tracked_actor_count;
         let supervisor_count = instance.tracked_supervisor_count;
         
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             application = %name,
             state = ?instance.state,
@@ -371,6 +384,7 @@ impl ApplicationManager {
             supervisor_count = supervisor_count,
             "Application state transition: Running -> Stopping"
         );
+        }
 
         // OBSERVABILITY: Record metrics for application shutdown (Phase 8)
         let shutdown_start = std::time::Instant::now();
@@ -481,7 +495,9 @@ impl ApplicationManager {
                 // Collect metrics for each application
                 let actor_count = inst.tracked_actor_count;
                 let supervisor_count = inst.tracked_supervisor_count;
-                eprintln!("   → Stopping '{}' (actors: {}, supervisors: {})", name, actor_count, supervisor_count);
+                if tracing::enabled!(tracing::Level::INFO) {
+                    tracing::info!("   → Stopping '{}' (actors: {}, supervisors: {})", name, actor_count, supervisor_count);
+                }
                 name.clone()
             })
             .collect();
@@ -489,7 +505,9 @@ impl ApplicationManager {
         drop(apps); // Release read lock before stopping
 
         if app_names.is_empty() {
-            eprintln!("   (No running applications to stop)");
+            if tracing::enabled!(tracing::Level::INFO) {
+                tracing::info!("   (No running applications to stop)");
+            }
             return Ok(());
         }
 
@@ -500,11 +518,13 @@ impl ApplicationManager {
             match self.stop(name, timeout_duration).await {
                 Ok(()) => {
                     stopped_count += 1;
-                    eprintln!("   ✓ Stopped '{}' ({}/{})", name, stopped_count, app_names.len());
+                    if tracing::enabled!(tracing::Level::INFO) {
+                        tracing::info!("   ✓ Stopped '{}' ({}/{})", name, stopped_count, app_names.len());
+                    }
                 }
                 Err(e) => {
                     errors.push(format!("{}: {}", name, e));
-                    eprintln!("   ✗ Failed to stop '{}': {}", name, e);
+                    tracing::warn!("   ✗ Failed to stop '{}': {}", name, e);
                 }
             }
         }
@@ -588,7 +608,9 @@ impl ApplicationManager {
         }
 
         apps.remove(name);
-        eprintln!("Unregistered application: {}", name);
+        if tracing::enabled!(tracing::Level::INFO) {
+            tracing::info!("Unregistered application: {}", name);
+        }
 
         // Note: Object-registry unregistration is handled by the node crate
         // to avoid circular dependency (core can't depend on object-registry)
@@ -627,6 +649,7 @@ impl ApplicationManager {
         instance.metrics = Some(metrics.clone());
         
         // Log metrics update
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             application = %name,
             actor_count = metrics.actor_count,
@@ -636,6 +659,7 @@ impl ApplicationManager {
             supervisor_count_changed = old_supervisor_count != metrics.supervisor_count,
             "Application metrics updated"
         );
+        }
         
         Ok(())
     }
@@ -664,12 +688,14 @@ impl ApplicationManager {
         
         // Log metrics update
         if old_count != actor_count {
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 application = %name,
                 old_count = old_count,
                 new_count = actor_count,
                 "Actor count updated"
             );
+            }
         }
         
         Ok(())
@@ -699,12 +725,14 @@ impl ApplicationManager {
         
         // Log metrics update
         if old_count != supervisor_count {
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 application = %name,
                 old_count = old_count,
                 new_count = supervisor_count,
                 "Supervisor count updated"
             );
+            }
         }
         
         Ok(())

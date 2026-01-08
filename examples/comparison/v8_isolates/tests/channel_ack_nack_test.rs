@@ -5,8 +5,8 @@
 // This test verifies that channels correctly implement ack/nack for
 // production-grade log/metric processing systems.
 
-use plexspaces_channel::{Channel, ChannelConfig, ChannelMessage, create_channel};
-use plexspaces_proto::plexspaces::channel::v1::{ChannelBackend, DeliveryGuarantee, OrderingGuarantee};
+use plexspaces_channel::{Channel, create_channel};
+use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, ChannelMessage, DeliveryGuarantee, OrderingGuarantee};
 use serde_json;
 
 #[tokio::test]
@@ -220,6 +220,9 @@ async fn test_channel_ack_after_nack() {
     // Now ACK should succeed
     channel.ack(&msg_id).await.expect("Failed to ACK requeued message");
 }
+
+
+
 
 
 

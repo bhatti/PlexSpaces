@@ -782,7 +782,9 @@ impl TupleSpaceStorage for RedisStorage {
                 return;
             }
 
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!("Subscribed to Redis channel: {}", channel);
+            }
 
             // Read messages from the subscription
             // Redis SUBSCRIBE returns messages in the format: ["message", channel, payload]
@@ -804,7 +806,9 @@ impl TupleSpaceStorage for RedisStorage {
                                         Ok(event) => {
                                             if tx.send(event).await.is_err() {
                                                 // Receiver dropped, exit
+                                                if tracing::enabled!(tracing::Level::DEBUG) {
                                                 tracing::debug!("Watch event receiver dropped, stopping subscription");
+                                                }
                                                 break;
                                             }
                                         }

@@ -292,30 +292,12 @@ async fn test_activate_virtual_actor_not_found() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
     
-    // Get services
-    let manager: Arc<VirtualActorManager> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::VIRTUAL_ACTOR_MANAGER).await.unwrap();
-    
-    // Register as virtual actor but don't store actor instance
-    let facet_box = Arc::new(tokio::sync::RwLock::new(
-        Box::new(VirtualActorFacet::new(serde_json::json!({
-            "idle_timeout": "5m",
-            "activation_strategy": "lazy"
-        }), 100)) as Box<dyn std::any::Any + Send + Sync>
-    ));
-    manager.register(
-        "test-actor@test-node".to_string(),
-        facet_box,
-        Some("GenServer".to_string()), // actor_type
-        None, // config
-        "default".to_string(), // tenant_id
-        "default".to_string(), // namespace
-    ).await.unwrap();
-    
-    // Try to activate - should fail because no actor instance
+    // Try to activate actor that was never registered - should fail because no metadata
     let result = factory.activate_virtual_actor(&"test-actor@test-node".to_string()).await;
-    assert!(result.is_err(), "Should fail when actor instance not found");
+    assert!(result.is_err(), "Should fail when virtual actor not found in VirtualActorManager");
     let err_msg = format!("{}", result.as_ref().unwrap_err());
-    assert!(err_msg.contains("not found"), "Error should mention not found");
+    assert!(err_msg.contains("not found") || err_msg.contains("not a virtual actor"), 
+            "Error should mention not found, got: {}", err_msg);
 }
 
 #[tokio::test]

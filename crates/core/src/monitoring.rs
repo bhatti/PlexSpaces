@@ -176,6 +176,7 @@ pub async fn record_message_routing_metrics(
     #[cfg(feature = "tracing")]
     {
         if success {
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 actor_id = %actor_id,
                 node_id = %node_id,
@@ -183,6 +184,7 @@ pub async fn record_message_routing_metrics(
                 duration_ms = duration.as_millis(),
                 "Message routed successfully"
             );
+            }
         } else {
             tracing::error!(
                 actor_id = %actor_id,
@@ -230,6 +232,7 @@ pub fn record_actor_activation_metrics(
     }
     
     #[cfg(feature = "tracing")]
+    if tracing::enabled!(tracing::Level::DEBUG) {
     tracing::debug!(
         actor_id = %actor_id,
         node_id = %node_id,
@@ -238,6 +241,7 @@ pub fn record_actor_activation_metrics(
         success = success,
         "Actor activation"
     );
+    }
 }
 
 /// Record connection metrics

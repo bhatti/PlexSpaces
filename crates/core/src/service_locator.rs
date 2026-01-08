@@ -79,6 +79,7 @@ use tonic::transport::Channel;
 use crate::actor_context::{ActorService, ChannelService, TupleSpaceProvider};
 use crate::monitoring::NodeMetricsAccessor;
 use crate::RequestContext;
+use crate::JournalStorage;
 
 /// Standard service names for consistent registration and lookup
 pub mod service_names {
@@ -92,6 +93,7 @@ pub mod service_names {
     pub const FACET_REGISTRY: &str = "FacetRegistry"; // Phase 1: Unified Lifecycle - FacetRegistry integration
     pub const ACTOR_FACTORY_IMPL: &str = "ActorFactoryImpl";
     pub const APPLICATION_MANAGER: &str = "ApplicationManager";
+    pub const JOURNAL_STORAGE: &str = "JournalStorage";
 }
 
 /// Wrapper to store Arc<T> with type name for TypeId-independent extraction
@@ -235,6 +237,10 @@ pub struct ServiceLocator {
     /// This allows ActorContext::get_channel_service() to work without unsafe code
     channel_service: Arc<RwLock<Option<Arc<dyn ChannelService + Send + Sync>>>>,
     
+    /// Registered JournalStorage (stored separately for type-safe access)
+    /// This allows components to retrieve JournalStorage as a trait object without knowing the concrete type
+    journal_storage: Arc<RwLock<Option<Arc<dyn JournalStorage + Send + Sync>>>>,
+    
     /// Registered NodeMetricsAccessor (stored separately for type-safe access)
     /// This allows components to read and update NodeMetrics without depending on Node type
     node_metrics_accessor: Arc<RwLock<Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>>>,
@@ -269,6 +275,7 @@ impl ServiceLocator {
             actor_service: Arc::new(RwLock::new(None)),
             tuplespace_provider: Arc::new(RwLock::new(None)),
             channel_service: Arc::new(RwLock::new(None)),
+            journal_storage: Arc::new(RwLock::new(None)),
             node_metrics_accessor: Arc::new(RwLock::new(None)),
             actor_factory: Arc::new(RwLock::new(None)),
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
@@ -549,6 +556,33 @@ impl ServiceLocator {
         channel_service.clone().map(|s| s as Arc<dyn ChannelService>)
     }
 
+    /// Register JournalStorage as a trait object
+    ///
+    /// ## Purpose
+    /// Allows JournalStorage to be retrieved by trait type when the concrete type is unknown.
+    /// This enables trait-based retrieval without hardcoding concrete storage implementations.
+    ///
+    /// ## Arguments
+    /// * `storage` - JournalStorage as a trait object
+    pub async fn register_journal_storage(&self, storage: Arc<dyn JournalStorage + Send + Sync>) {
+        let mut journal_storage = self.journal_storage.write().await;
+        *journal_storage = Some(storage);
+    }
+
+    /// Get JournalStorage
+    ///
+    /// ## Purpose
+    /// Retrieves JournalStorage that was registered as a trait object.
+    /// This allows components to retrieve storage without knowing the concrete type.
+    ///
+    /// ## Returns
+    /// `Some(Arc<dyn JournalStorage>)` if registered, `None` otherwise
+    pub async fn get_journal_storage(&self) -> Option<Arc<dyn JournalStorage>> {
+        let journal_storage = self.journal_storage.read().await;
+        journal_storage.clone().map(|s| s as Arc<dyn JournalStorage>)
+    }
+
+
     /// Register NodeMetricsAccessor as a trait object
     ///
     /// ## Purpose
@@ -575,6 +609,7 @@ impl ServiceLocator {
         // Clone the Arc to return it
         metrics_accessor.as_ref().map(|s| s.clone())
     }
+
 
     /// Register ActorFactory as a trait object
     ///

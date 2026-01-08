@@ -8,10 +8,11 @@ mod sqlite_tests {
     use plexspaces_journaling::*;
     use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_facet::Facet;
+    use std::sync::Arc;
 
     /// Helper to create a test SQLite storage (in-memory)
-    async fn create_test_storage() -> SqliteJournalStorage {
-        SqliteJournalStorage::new(":memory:").await.unwrap()
+    async fn create_test_storage() -> Arc<dyn JournalStorage> {
+        Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap())
     }
 
     /// Helper to convert DurabilityConfig to Value

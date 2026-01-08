@@ -85,7 +85,8 @@
 //! - Sort Key: `next_fire_time` (Number)
 //! - Purpose: Efficient query for due reminders
 
-use crate::{Checkpoint, JournalEntry, JournalResult, JournalStats, ActorEvent, ActorHistory, JournalStorage};
+use crate::{Checkpoint, JournalEntry, JournalStats, ActorEvent, ActorHistory};
+use plexspaces_core::{JournalStorage, JournalError, JournalResult};
 use async_trait::async_trait;
 use aws_sdk_dynamodb::{
     error::ProvideErrorMetadata,

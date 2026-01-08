@@ -35,7 +35,7 @@ use plexspaces_journaling::{ActivationProvider, VirtualActorFacet};
 use plexspaces_mailbox::Message;
 use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
 use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics, NodeRuntimeConfig};
-use plexspaces_supervisor::LinkProvider;
+use plexspaces_core::LinkProvider;
 use std::time::{Duration, SystemTime};
 
 // Import gRPC client for remote messaging
@@ -1014,9 +1014,9 @@ impl Node {
                 // Check if it's the "No drivers installed" error
                 let error_msg = format!("{}", e);
                 if error_msg.contains("No drivers installed") {
-                    eprintln!("Warning: sqlx drivers not available. Ensure sqlx features include 'sqlite' and 'any'. Blob service disabled.");
+                    tracing::warn!("Warning: sqlx drivers not available. Ensure sqlx features include 'sqlite' and 'any'. Blob service disabled.");
                 } else {
-                    eprintln!("Warning: Failed to create blob service database: {}. Blob service disabled.", e);
+                    tracing::warn!("Warning: Failed to create blob service database: {}. Blob service disabled.", e);
                 }
                 return None;
             }
@@ -1026,7 +1026,7 @@ impl Node {
         let repository = match SqlBlobRepository::new(any_pool).await {
             Ok(repo) => Arc::new(repo),
             Err(e) => {
-                eprintln!("Warning: Failed to create blob repository with migrations: {}. Blob service disabled.", e);
+                tracing::warn!("Warning: Failed to create blob repository with migrations: {}. Blob service disabled.", e);
                 return None;
             }
         };
@@ -1048,7 +1048,7 @@ impl Node {
                 Some(service_arc)
             }
             Err(e) => {
-                eprintln!("Warning: Failed to initialize blob service: {}. Blob service disabled.", e);
+                tracing::warn!("Warning: Failed to initialize blob service: {}. Blob service disabled.", e);
                 None
             }
         }
@@ -1116,7 +1116,9 @@ impl Node {
                     self.set_release_spec(release_spec).await;
                     tracing::info!("Loaded release config from file or environment variable");
                 } else {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!("No release config found, using defaults");
+                    }
                 }
             }
         }
@@ -1163,12 +1165,12 @@ impl Node {
             if let Some(object_registry) = node_for_registration.service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
                 let grpc_address = format!("http://{}", listen_addr);
                 if let Err(e) = register_node(&object_registry, &ctx, &node_id_str, &grpc_address, None).await {
-                    eprintln!("Node {}: Failed to register in ObjectRegistry: {}", node_id_str, e);
+                    tracing::warn!("Node {}: Failed to register in ObjectRegistry: {}", node_id_str, e);
                 } else {
                     tracing::info!(node_id = %node_id_str, "Node registered in ObjectRegistry");
                 }
             } else {
-                eprintln!("Node {}: ObjectRegistry not found in ServiceLocator", node_id_str);
+                tracing::warn!("Node {}: ObjectRegistry not found in ServiceLocator", node_id_str);
             }
             // Notify that registration is complete (success or failure)
             registration_notify_for_registration.notify_one();
@@ -1187,7 +1189,7 @@ impl Node {
 
                 // Calculate and send heartbeat with capacity to ObjectRegistry
                 if let Err(e) = node_for_heartbeat.send_heartbeat_with_capacity().await {
-                    eprintln!("Node {}: Failed to send heartbeat: {}", node_for_heartbeat.id.as_str(), e);
+                    tracing::warn!("Node {}: Failed to send heartbeat: {}", node_for_heartbeat.id.as_str(), e);
                 }
             }
         });
@@ -1226,7 +1228,7 @@ impl Node {
                 .parse::<std::net::SocketAddr>()
                 .unwrap_or_else(|_| "127.0.0.1:10000".parse().unwrap());
             
-            eprintln!("🌐 Starting blob HTTP server on http://{}", http_addr);
+            tracing::warn!("🌐 Starting blob HTTP server on http://{}", http_addr);
             
             // Start Axum server on separate task
             match tokio::net::TcpListener::bind(http_addr).await {
@@ -1234,12 +1236,12 @@ impl Node {
                     Some(tokio::spawn(async move {
                         use axum::serve;
                         if let Err(e) = serve(listener, router).await {
-                            eprintln!("Blob HTTP server error: {}", e);
+                            tracing::warn!("Blob HTTP server error: {}", e);
                         }
                     }))
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to bind blob HTTP server to {}: {}. Blob HTTP endpoints disabled.", http_addr, e);
+                    tracing::warn!("Warning: Failed to bind blob HTTP server to {}: {}. Blob HTTP endpoints disabled.", http_addr, e);
                     None
                 }
             }
@@ -1349,7 +1351,7 @@ impl Node {
         let scheduler_for_start = background_scheduler.clone();
         tokio::spawn(async move {
             if let Err(e) = scheduler_for_start.start().await {
-                eprintln!("Background scheduler error: {}", e);
+                tracing::warn!("Background scheduler error: {}", e);
             }
         });
         
@@ -1376,10 +1378,10 @@ impl Node {
             *router = Some(task_router.clone());
         }
         
-        eprintln!("Node {}: Scheduling service initialized", self.id.as_str());
+        tracing::warn!("Node {}: Scheduling service initialized", self.id.as_str());
 
         // Start gRPC server with all services
-        eprintln!(
+        tracing::warn!(
             "Node {}: Starting gRPC server on {}",
             self.id.as_str(),
             addr
@@ -1409,13 +1411,13 @@ impl Node {
 
                 tokio::select! {
                     _ = sigterm.recv() => {
-                        eprintln!("Node {}: Received SIGTERM", node_for_shutdown.id.as_str());
+                        tracing::warn!("Node {}: Received SIGTERM", node_for_shutdown.id.as_str());
                     }
                     _ = sigint.recv() => {
-                        eprintln!("Node {}: Received SIGINT (Ctrl+C)", node_for_shutdown.id.as_str());
+                        tracing::warn!("Node {}: Received SIGINT (Ctrl+C)", node_for_shutdown.id.as_str());
                     }
                     _ = shutdown_rx => {
-                        eprintln!("Node {}: Received programmatic shutdown", node_for_shutdown.id.as_str());
+                        tracing::warn!("Node {}: Received programmatic shutdown", node_for_shutdown.id.as_str());
                     }
                 }
             }
@@ -1425,16 +1427,16 @@ impl Node {
             {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {
-                        eprintln!("Node {}: Received Ctrl+C", node_for_shutdown.id.as_str());
+                        tracing::warn!("Node {}: Received Ctrl+C", node_for_shutdown.id.as_str());
                     }
                     _ = shutdown_rx => {
-                        eprintln!("Node {}: Received programmatic shutdown", node_for_shutdown.id.as_str());
+                        tracing::warn!("Node {}: Received programmatic shutdown", node_for_shutdown.id.as_str());
                     }
                 }
             }
 
             // Perform graceful shutdown
-            eprintln!(
+            tracing::warn!(
                 "Node {}: Initiating graceful shutdown...",
                 node_for_shutdown.id.as_str()
             );
@@ -1442,7 +1444,7 @@ impl Node {
                 .shutdown(tokio::time::Duration::from_secs(30))
                 .await
             {
-                eprintln!(
+                tracing::warn!(
                     "Node {}: Shutdown error: {}",
                     node_for_shutdown.id.as_str(),
                     e
@@ -1491,10 +1493,10 @@ impl Node {
         use crate::dependency_registration::register_builtin_dependencies;
         let deps_registered = register_builtin_dependencies(plexspaces_health_reporter.clone()).await
             .unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to register built-in dependencies: {}", e);
+                tracing::warn!("Warning: Failed to register built-in dependencies: {}", e);
                 0
             });
-        eprintln!("✅ Registered {} built-in dependency checkers", deps_registered);
+        tracing::warn!("✅ Registered {} built-in dependency checkers", deps_registered);
         
         // Register dependencies from object-registry if configured
         // This allows registering dependencies by name/type from the registry
@@ -2244,18 +2246,18 @@ impl Node {
                     .parse::<std::net::SocketAddr>()
                     .unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()); // Use 0 as fallback for random port
                 
-                eprintln!("🌐 Starting HTTP gateway server on http://{}", http_addr);
-                eprintln!("📊 Dashboard available at http://{}/", http_addr);
+                tracing::warn!("🌐 Starting HTTP gateway server on http://{}", http_addr);
+                tracing::warn!("📊 Dashboard available at http://{}/", http_addr);
                 
                 match tokio::net::TcpListener::bind(http_addr).await {
                     Ok(listener) => {
                         use axum::serve;
                         if let Err(e) = serve(listener, app).await {
-                            eprintln!("HTTP gateway server error: {}", e);
+                            tracing::warn!("HTTP gateway server error: {}", e);
                         }
                     }
                     Err(e) => {
-                        eprintln!("Warning: Failed to bind HTTP gateway server to {}: {}. HTTP gateway disabled.", http_addr, e);
+                        tracing::warn!("Warning: Failed to bind HTTP gateway server to {}: {}. HTTP gateway disabled.", http_addr, e);
                     }
                 }
             })
@@ -2800,7 +2802,7 @@ impl Node {
             while let Some(event) = rx.recv().await {
                 // Handle lifecycle event
                 if let Err(e) = node.handle_lifecycle_event(event).await {
-                    eprintln!("Error handling lifecycle event for {}: {:?}", actor_id, e);
+                    tracing::warn!("Error handling lifecycle event for {}: {:?}", actor_id, e);
                 }
             }
         });
@@ -2851,7 +2853,9 @@ impl Node {
             }
             _ => {
                 // Other lifecycle events (Starting, Activated, etc.) - log for observability
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(actor_id = %event.actor_id, node_id = %self.id().as_str(), "Lifecycle event");
+                }
             }
         }
 
@@ -2966,35 +2970,34 @@ impl Node {
     /// node.shutdown(tokio::time::Duration::from_secs(30)).await?;
     /// ```
     pub async fn shutdown(&self, timeout: tokio::time::Duration) -> Result<(), ApplicationError> {
-        eprintln!("\n╔════════════════════════════════════════════════════════════════╗");
-        eprintln!("║  Starting Graceful Shutdown                                    ║");
-        eprintln!("╚════════════════════════════════════════════════════════════════╝");
-        eprintln!("Node: {} | Timeout: {:?}\n", self.id.as_str(), timeout);
+        tracing::warn!("\n╔════════════════════════════════════════════════════════════════╗");
+        tracing::warn!("║  Starting Graceful Shutdown                                    ║");
+        tracing::warn!("╚════════════════════════════════════════════════════════════════╝");
+        tracing::warn!("Node: {} | Timeout: {:?}\n", self.id.as_str(), timeout);
 
         // Collect initial metrics before shutdown
         let (app_count, actor_count, queue_size, active_reqs, conn_nodes) = self.collect_shutdown_metrics().await;
-        eprintln!("📊 Initial State:");
-        eprintln!("   • Applications: {}", app_count);
-        eprintln!("   • Actors: {}", actor_count);
-        eprintln!("   • Total Mailbox Queue Size: {}", queue_size);
-        eprintln!("   • Active Requests: {}", active_reqs);
-        eprintln!("   • Connected Nodes: {}", conn_nodes);
-        eprintln!();
-
+        tracing::warn!("📊 Initial State:");
+        tracing::warn!("   • Applications: {}", app_count);
+        tracing::warn!("   • Actors: {}", actor_count);
+        tracing::warn!("   • Total Mailbox Queue Size: {}", queue_size);
+        tracing::warn!("   • Active Requests: {}", active_reqs);
+        tracing::warn!("   • Connected Nodes: {}", conn_nodes);
+        
         // Begin graceful shutdown on health reporter (sets NOT_SERVING, prevents new requests)
         // HealthService.begin_shutdown() will set ServiceLocator.shutdown_flag
         {
             let health_reporter_guard = self.health_reporter.read().await;
             if let Some(ref health_reporter) = *health_reporter_guard {
                 let (drained, duration, completed) = health_reporter.begin_shutdown(Some(timeout)).await;
-                eprintln!("🛑 Phase 1: Health Status");
-                eprintln!("   ✓ Health set to NOT_SERVING");
-                eprintln!("   ✓ Requests drained: {} | Duration: {:?} | Completed: {}", drained, duration, completed);
+                tracing::warn!("🛑 Phase 1: Health Status");
+                tracing::warn!("   ✓ Health set to NOT_SERVING");
+                tracing::warn!("   ✓ Requests drained: {} | Duration: {:?} | Completed: {}", drained, duration, completed);
             } else {
                 // Fallback: if health reporter not available, set ServiceLocator flag directly
                 self.service_locator.set_shutdown(true).await;
-                eprintln!("🛑 Phase 1: Health Status");
-                eprintln!("   ✓ ServiceLocator shutdown flag set (health reporter not available)");
+                tracing::warn!("🛑 Phase 1: Health Status");
+                tracing::warn!("   ✓ ServiceLocator shutdown flag set (health reporter not available)");
             }
         }
 
@@ -3006,7 +3009,7 @@ impl Node {
                 // Send shutdown signal to trigger gRPC server shutdown
                 // Ignore error if already shut down
                 let _ = tx.send(());
-                eprintln!("   ✓ gRPC server shutdown signal sent");
+                tracing::warn!("   ✓ gRPC server shutdown signal sent");
             }
         }
 
@@ -3014,8 +3017,8 @@ impl Node {
         {
             let scheduler = self.background_scheduler.read().await;
             if let Some(scheduler) = scheduler.as_ref() {
-                eprintln!("🛑 Phase 2: Background Services");
-                eprintln!("   ✓ Background scheduler stopped");
+                tracing::warn!("🛑 Phase 2: Background Services");
+                tracing::warn!("   ✓ Background scheduler stopped");
                 scheduler.stop();
             }
         }
@@ -3025,9 +3028,9 @@ impl Node {
         let application_manager: Arc<ApplicationManager> = self.service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await
             .ok_or_else(|| ApplicationError::Other("ApplicationManager not found in ServiceLocator".to_string()))?;
         
-        eprintln!("🛑 Phase 3: Stopping Applications");
+        tracing::warn!("🛑 Phase 3: Stopping Applications");
         let apps_before = application_manager.list_applications().await.len();
-        eprintln!("   • Stopping {} applications...", apps_before);
+        tracing::warn!("   • Stopping {} applications...", apps_before);
         
         let stop_start = std::time::Instant::now();
         application_manager.stop_all(timeout).await?;
@@ -3039,39 +3042,36 @@ impl Node {
         // Collect metrics after stopping applications
         let (_, after_actor_count, after_queue_size, after_active_reqs, _) = self.collect_shutdown_metrics().await;
         
-        eprintln!("   ✓ Applications stopped: {} | Duration: {:?}", apps_stopped, stop_duration);
-        eprintln!("   • Remaining actors: {} (down from {})", after_actor_count, actor_count);
-        eprintln!("   • Remaining mailbox queue size: {} (down from {})", after_queue_size, queue_size);
-        eprintln!();
-
+        tracing::warn!("   ✓ Applications stopped: {} | Duration: {:?}", apps_stopped, stop_duration);
+        tracing::warn!("   • Remaining actors: {} (down from {})", after_actor_count, actor_count);
+        tracing::warn!("   • Remaining mailbox queue size: {} (down from {})", after_queue_size, queue_size);
+        
         // Close network connections
-        eprintln!("🛑 Phase 4: Network Connections");
+        tracing::warn!("🛑 Phase 4: Network Connections");
         let connected_nodes = self.connected_nodes().await;
-        eprintln!("   • Closing {} connections...", connected_nodes.len());
+        tracing::warn!("   • Closing {} connections...", connected_nodes.len());
         for node_id in connected_nodes {
             let _ = self.disconnect_from(&node_id).await;
         }
-        eprintln!("   ✓ All network connections closed");
-        eprintln!();
+        tracing::warn!("   ✓ All network connections closed");
         
         // Flush TupleSpace pending operations (ensure all writes are persisted)
         // TupleSpace operations are synchronous, so no explicit flush needed
         // For external backends, they handle persistence automatically
-        eprintln!("🛑 Phase 5: Final Cleanup");
-        eprintln!("   ✓ TupleSpace operations flushed");
+        tracing::warn!("🛑 Phase 5: Final Cleanup");
+        tracing::warn!("   ✓ TupleSpace operations flushed");
         
         // Final metrics
         let (final_app_count, final_actor_count, final_queue_size, final_active_reqs, _) = self.collect_shutdown_metrics().await;
-        eprintln!("\n📊 Final State:");
-        eprintln!("   • Applications: {} (stopped: {})", final_app_count, apps_stopped);
-        eprintln!("   • Actors: {} (stopped: {})", final_actor_count, actor_count.saturating_sub(final_actor_count));
-        eprintln!("   • Mailbox Queue Size: {} (drained: {})", final_queue_size, queue_size.saturating_sub(final_queue_size));
-        eprintln!("   • Active Requests: {} (completed: {})", final_active_reqs, active_reqs.saturating_sub(final_active_reqs));
-        eprintln!();
-
-        eprintln!("╔════════════════════════════════════════════════════════════════╗");
-        eprintln!("║  ✅ Graceful Shutdown Complete                                ║");
-        eprintln!("╚════════════════════════════════════════════════════════════════╝\n");
+        tracing::warn!("\n📊 Final State:");
+        tracing::warn!("   • Applications: {} (stopped: {})", final_app_count, apps_stopped);
+        tracing::warn!("   • Actors: {} (stopped: {})", final_actor_count, actor_count.saturating_sub(final_actor_count));
+        tracing::warn!("   • Mailbox Queue Size: {} (drained: {})", final_queue_size, queue_size.saturating_sub(final_queue_size));
+        tracing::warn!("   • Active Requests: {} (completed: {})", final_active_reqs, active_reqs.saturating_sub(final_active_reqs));
+        
+        tracing::warn!("╔════════════════════════════════════════════════════════════════╗");
+        tracing::warn!("║  ✅ Graceful Shutdown Complete                                ║");
+        tracing::warn!("╚════════════════════════════════════════════════════════════════╝\n");
         Ok(())
     }
 
@@ -3244,42 +3244,44 @@ impl Node {
         // Step 1: Stop the actor properly (terminates message loop gracefully)
         // CRITICAL: Must stop actor BEFORE suspending to prevent race conditions
         // Production-grade: Use stop_from_arc() which sends shutdown signal and aborts task
-        eprintln!("🔵 [DEACTIVATE] Step 1: Stopping actor before suspension: actor_id={}", actor_id);
+        tracing::warn!("🔵 [DEACTIVATE] Step 1: Stopping actor before suspension: actor_id={}", actor_id);
         if let Some(instance) = actor_registry.get_actor_instance(&actor_id).await {
             use std::any::Any;
             if let Ok(actor_arc) = instance.downcast::<plexspaces_actor::Actor>() {
-                eprintln!("🔵 [DEACTIVATE] Found actor instance, calling stop_from_arc: actor_id={}", actor_id);
+                tracing::warn!("🔵 [DEACTIVATE] Found actor instance, calling stop_from_arc: actor_id={}", actor_id);
                 // Use stop_from_arc() - production-grade graceful shutdown
                 // This sends shutdown signal, waits, then aborts if needed
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(actor_id = %actor_id, "Stopping actor before suspension");
+                }
                 if let Err(e) = actor_arc.stop_from_arc().await {
-                    eprintln!("🔴 [DEACTIVATE] Failed to stop actor: actor_id={}, error={}", actor_id, e);
+                    tracing::warn!("🔴 [DEACTIVATE] Failed to stop actor: actor_id={}, error={}", actor_id, e);
                     tracing::warn!(
                         actor_id = %actor_id,
                         error = %e,
                         "Failed to stop actor during suspension (continuing)"
                     );
                 } else {
-                    eprintln!("🟢 [DEACTIVATE] Actor stop_from_arc() completed: actor_id={}", actor_id);
+                    tracing::warn!("🟢 [DEACTIVATE] Actor stop_from_arc() completed: actor_id={}", actor_id);
                 }
                 // Wait a bit more to ensure message loop task is fully terminated
                 // This prevents race conditions where actor is reactivated before old loop stops
-                eprintln!("🔵 [DEACTIVATE] Waiting for message loop to fully terminate: actor_id={}", actor_id);
+                tracing::warn!("🔵 [DEACTIVATE] Waiting for message loop to fully terminate: actor_id={}", actor_id);
                 tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                eprintln!("🟢 [DEACTIVATE] Wait completed, checking actor state: actor_id={}", actor_id);
+                tracing::warn!("🟢 [DEACTIVATE] Wait completed, checking actor state: actor_id={}", actor_id);
             } else {
-                eprintln!("🔴 [DEACTIVATE] Failed to downcast actor instance: actor_id={}", actor_id);
+                tracing::warn!("🔴 [DEACTIVATE] Failed to downcast actor instance: actor_id={}", actor_id);
             }
         } else {
-            eprintln!("🟡 [DEACTIVATE] No actor instance found (already suspended?): actor_id={}", actor_id);
+            tracing::warn!("🟡 [DEACTIVATE] No actor instance found (already suspended?): actor_id={}", actor_id);
         }
         
         // Step 2: Suspend virtual actor (removes instance and ActorRef, preserves metadata)
         // This is different from unregister_with_cleanup() which removes everything
         // CRITICAL: Only suspend AFTER actor is fully stopped
-        eprintln!("🔵 [DEACTIVATE] Step 2: Suspending virtual actor: actor_id={}", actor_id);
+        tracing::warn!("🔵 [DEACTIVATE] Step 2: Suspending virtual actor: actor_id={}", actor_id);
         actor_registry.suspend_virtual_actor(&actor_id).await;
-        eprintln!("🟢 [DEACTIVATE] Virtual actor suspended: actor_id={}", actor_id);
+        tracing::warn!("🟢 [DEACTIVATE] Virtual actor suspended: actor_id={}", actor_id);
 
         // CRITICAL: Re-register VirtualActorWrapper so actor remains addressable (Orleans design)
         // After deactivation, virtual actors should still be registered (with VirtualActorWrapper)
@@ -3456,13 +3458,13 @@ impl Node {
                             use plexspaces_core::service_locator::service_names;
                             if let Some(actor_registry) = node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await {
                                 if let Err(e) = actor_registry.unregister_with_cleanup(&actor_id).await {
-                                    eprintln!("Failed to deactivate idle virtual actor {}: {}", actor_id, e);
+                                    tracing::warn!("Failed to deactivate idle virtual actor {}: {}", actor_id, e);
                                 }
                             } else {
                                 // Fallback to direct access if not registered yet
                                 if let Ok(actor_registry) = node.actor_registry().await {
                                     if let Err(e) = actor_registry.unregister_with_cleanup(&actor_id).await {
-                                        eprintln!("Failed to deactivate idle virtual actor {}: {}", actor_id, e);
+                                        tracing::warn!("Failed to deactivate idle virtual actor {}: {}", actor_id, e);
                                     }
                                 }
                             }
@@ -3562,7 +3564,9 @@ impl Node {
                                         "remote_node_id" => node_id.as_str().to_string()
                                     ).increment(1);
                                 } else {
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
                                     tracing::debug!(remote_node_id = %node_id.as_str(), consecutive_failures = consecutive_failures, "Failed to reconnect during health check");
+                                    }
                                 }
                             }
                         }
@@ -5331,3 +5335,683 @@ mod tests {
         config.resource_requirements = None; // No resource requirements
         config.config_schema_version = 1;
         let actor_registry = get_actor_registry(&node).await;
+        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None).await;
+        }
+
+        // Calculate capacity
+        let capacity = node.calculate_node_capacity().await;
+
+        // Verify allocated resources are still zero (actor has no requirements)
+        let allocated = capacity.allocated.as_ref().unwrap();
+        assert_eq!(allocated.cpu_cores, 0.0);
+        assert_eq!(allocated.memory_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn test_calculate_node_capacity_after_unregister() {
+        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+        use std::sync::Arc;
+        let node = NodeBuilder::new("test-node").build().await;
+
+        // Register actor with resources
+        let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
+        let actor_ref = ActorRef::local("actor-1@test-node", mailbox.clone(), node.service_locator());
+        let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 0, 0);
+        let actor_registry = get_actor_registry(&node).await;
+        
+        // Register actor first
+        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        let actor_id = actor_ref.id().clone();
+        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        actor_registry.register_actor(&ctx, actor_id.clone(), sender.clone(), None, Some(config), None).await;
+
+        // Verify allocated resources
+        let capacity = node.calculate_node_capacity().await;
+        let allocated = capacity.allocated.as_ref().unwrap();
+        assert_eq!(allocated.cpu_cores, 2.0);
+
+        // Unregister actor
+        let actor_registry = get_actor_registry(&node).await;
+        actor_registry.unregister_with_cleanup(actor_ref.id()).await.unwrap();
+
+        // Verify allocated resources are back to zero
+        let capacity = node.calculate_node_capacity().await;
+        let allocated = capacity.allocated.as_ref().unwrap();
+        assert_eq!(allocated.cpu_cores, 0.0);
+        assert_eq!(allocated.memory_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn test_calculate_node_capacity_with_partial_resource_spec() {
+        let node = NodeBuilder::new("test-node").build().await;
+
+        // Create config with only CPU specified (no memory/disk)
+        use plexspaces_proto::{
+            v1::actor::{ActorConfig, ActorResourceRequirements},
+            common::v1::ResourceSpec,
+        };
+
+        let resources = ResourceSpec {
+            cpu_cores: 1.0,
+            memory_bytes: 0,
+            disk_bytes: 0,
+            gpu_count: 0,
+            gpu_type: String::new(),
+        };
+
+        let resource_requirements = ActorResourceRequirements {
+            resources: Some(resources),
+            required_labels: std::collections::HashMap::new(),
+            placement: None,
+            actor_groups: vec![],
+        };
+
+        let mut config = ActorConfig::default();
+        config.resource_requirements = Some(resource_requirements);
+        config.config_schema_version = 1;
+
+        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+        use std::sync::Arc;
+        let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
+        let actor_ref = ActorRef::local("actor-1@test-node", mailbox.clone(), node.service_locator());
+        // Register actor with MessageSender (mailbox is internal)
+        
+        use plexspaces_core::MessageSender;
+        let wrapper = Arc::new(ActorRef::local(
+            actor_ref.id().clone(),
+            mailbox.clone(),
+            node.service_locator().clone(),
+        ));
+        let actor_registry = get_actor_registry(&node).await;
+        // Use internal context for test actor registration (system-level operation)
+        let internal_ctx = RequestContext::internal();
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        let actor_registry = get_actor_registry(&node).await;
+        if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
+            let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None).await;
+        }
+
+        // Calculate capacity
+        let capacity = node.calculate_node_capacity().await;
+        let allocated = capacity.allocated.as_ref().unwrap();
+
+        // Verify only CPU is allocated
+        assert_eq!(allocated.cpu_cores, 1.0);
+        assert_eq!(allocated.memory_bytes, 0);
+        assert_eq!(allocated.disk_bytes, 0);
+    }
+
+    // ============================================================================
+    // Application Lifecycle Tests (Erlang/OTP-style)
+    // ============================================================================
+
+    use async_trait::async_trait;
+    use plexspaces_core::application::{
+        Application, ApplicationError, ApplicationNode, ApplicationState, HealthStatus,
+    };
+
+    // Mock application for testing
+    struct MockTestApplication {
+        name: String,
+        should_fail_start: bool,
+        should_fail_stop: bool,
+        start_called: Arc<RwLock<bool>>,
+        stop_called: Arc<RwLock<bool>>,
+    }
+
+    impl MockTestApplication {
+        fn new(name: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                should_fail_start: false,
+                should_fail_stop: false,
+                start_called: Arc::new(RwLock::new(false)),
+                stop_called: Arc::new(RwLock::new(false)),
+            }
+        }
+
+        fn new_failing_start(name: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                should_fail_start: true,
+                should_fail_stop: false,
+                start_called: Arc::new(RwLock::new(false)),
+                stop_called: Arc::new(RwLock::new(false)),
+            }
+        }
+
+        fn new_failing_stop(name: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                should_fail_start: false,
+                should_fail_stop: true,
+                start_called: Arc::new(RwLock::new(false)),
+                stop_called: Arc::new(RwLock::new(false)),
+            }
+        }
+
+        async fn was_start_called(&self) -> bool {
+            *self.start_called.read().await
+        }
+
+        async fn was_stop_called(&self) -> bool {
+            *self.stop_called.read().await
+        }
+    }
+
+    #[async_trait]
+    impl Application for MockTestApplication {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn version(&self) -> &str {
+            "0.1.0"
+        }
+
+        async fn start(&mut self, node: Arc<dyn ApplicationNode>) -> Result<(), ApplicationError> {
+            *self.start_called.write().await = true;
+            tracing::warn!("MockApp '{}' starting on node: {}", self.name, node.id());
+            if self.should_fail_start {
+                Err(ApplicationError::StartupFailed("mock failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn stop(&mut self) -> Result<(), ApplicationError> {
+            *self.stop_called.write().await = true;
+            tracing::warn!("MockApp '{}' stopping", self.name);
+            if self.should_fail_stop {
+                Err(ApplicationError::ShutdownFailed("mock failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn health_check(&self) -> HealthStatus {
+            HealthStatus::HealthStatusHealthy
+        }
+        
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[tokio::test]
+    async fn test_register_application() {
+        let node = NodeBuilder::new("test-node").build().await;
+
+        let app = Box::new(MockTestApplication::new("test-app"));
+        node.register_application(app).await.unwrap();
+
+        // Verify application is registered
+        let state = node
+            .application_manager()
+            .await
+            .unwrap()
+            .get_state("test-app")
+            .await;
+        assert_eq!(state, Some(ApplicationState::ApplicationStateCreated));
+    }
+
+    #[tokio::test]
+    async fn test_register_duplicate_application() {
+        let node = NodeBuilder::new("test-node").build().await;
+
+        let app1 = Box::new(MockTestApplication::new("test-app"));
+        node.register_application(app1).await.unwrap();
+
+        let app2 = Box::new(MockTestApplication::new("test-app"));
+        let result = node.register_application(app2).await;
+
+        // Should fail with duplicate error
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("already registered"));
+    }
+
+    #[tokio::test]
+    async fn test_start_application() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let app = Box::new(MockTestApplication::new("test-app"));
+        let start_called = app.start_called.clone();
+
+        node.register_application(app).await.unwrap();
+        node.start_application("test-app").await.unwrap();
+
+        // Verify application started
+        let state = node
+            .application_manager()
+            .await
+            .unwrap()
+            .get_state("test-app")
+            .await;
+        assert_eq!(state, Some(ApplicationState::ApplicationStateRunning));
+
+        // Verify start was called
+        assert!(*start_called.read().await);
+    }
+
+    #[tokio::test]
+    async fn test_start_application_failure() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let app = Box::new(MockTestApplication::new_failing_start("test-app"));
+        node.register_application(app).await.unwrap();
+
+        let result = node.start_application("test-app").await;
+
+        // Should fail
+        assert!(result.is_err());
+
+        // State should be Failed
+        let state = node
+            .application_manager()
+            .await
+            .unwrap()
+            .get_state("test-app")
+            .await;
+        assert_eq!(state, Some(ApplicationState::ApplicationStateFailed));
+    }
+
+    #[tokio::test]
+    async fn test_stop_application() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let app = Box::new(MockTestApplication::new("test-app"));
+        let stop_called = app.stop_called.clone();
+
+        node.register_application(app).await.unwrap();
+        node.start_application("test-app").await.unwrap();
+        node.stop_application("test-app", tokio::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        // Verify application stopped
+        let state = node
+            .application_manager()
+            .await
+            .unwrap()
+            .get_state("test-app")
+            .await;
+        assert_eq!(state, Some(ApplicationState::ApplicationStateStopped));
+
+        // Verify stop was called
+        assert!(*stop_called.read().await);
+    }
+
+    #[tokio::test]
+    async fn test_stop_application_failure() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let app = Box::new(MockTestApplication::new_failing_stop("test-app"));
+        node.register_application(app).await.unwrap();
+        node.start_application("test-app").await.unwrap();
+
+        let result = node
+            .stop_application("test-app", tokio::time::Duration::from_secs(5))
+            .await;
+
+        // Should fail
+        assert!(result.is_err());
+
+        // State should be Failed
+        let state = node
+            .application_manager()
+            .await
+            .unwrap()
+            .get_state("test-app")
+            .await;
+        assert_eq!(state, Some(ApplicationState::ApplicationStateFailed));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_multiple_applications() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        // Register and start 3 applications
+        let apps = vec![
+            Box::new(MockTestApplication::new("app1")) as Box<dyn Application>,
+            Box::new(MockTestApplication::new("app2")) as Box<dyn Application>,
+            Box::new(MockTestApplication::new("app3")) as Box<dyn Application>,
+        ];
+
+        for app in apps {
+            node.register_application(app).await.unwrap();
+        }
+
+        node.start_application("app1").await.unwrap();
+        node.start_application("app2").await.unwrap();
+        node.start_application("app3").await.unwrap();
+
+        // Shutdown all applications
+        node.shutdown(tokio::time::Duration::from_secs(10))
+            .await
+            .unwrap();
+
+        // Verify all applications stopped
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("app1")
+                .await,
+            Some(ApplicationState::ApplicationStateStopped)
+        );
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("app2")
+                .await,
+            Some(ApplicationState::ApplicationStateStopped)
+        );
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("app3")
+                .await,
+            Some(ApplicationState::ApplicationStateStopped)
+        );
+
+        // Verify shutdown flag set
+        assert!(node.is_shutdown_requested().await);
+    }
+
+    #[tokio::test]
+    async fn test_application_node_trait_implementation() {
+        use crate::NodeBuilder;
+        let node = NodeBuilder::new("test-node")
+            .with_listen_address("0.0.0.0:9999")
+            .build().await;
+
+        // Test ApplicationNode trait methods (uses trait methods, not Node methods)
+        let node_ref: &dyn ApplicationNode = &node;
+        assert_eq!(node_ref.id(), "test-node");
+        assert_eq!(node_ref.listen_addr(), "0.0.0.0:9999");
+    }
+
+    #[tokio::test]
+    async fn test_start_nonexistent_application() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let result = node.start_application("nonexistent").await;
+
+        // Should fail with not found error
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_stop_nonexistent_application() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let result = node
+            .stop_application("nonexistent", tokio::time::Duration::from_secs(5))
+            .await;
+
+        // Should fail with not found error
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_application_lifecycle_full_cycle() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let app = Box::new(MockTestApplication::new("lifecycle-test"));
+        let start_called = app.start_called.clone();
+        let stop_called = app.stop_called.clone();
+
+        // Full lifecycle: register -> start -> stop
+        node.register_application(app).await.unwrap();
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("lifecycle-test")
+                .await,
+            Some(ApplicationState::ApplicationStateCreated)
+        );
+
+        node.start_application("lifecycle-test").await.unwrap();
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("lifecycle-test")
+                .await,
+            Some(ApplicationState::ApplicationStateRunning)
+        );
+        assert!(*start_called.read().await);
+
+        node.stop_application("lifecycle-test", tokio::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("lifecycle-test")
+                .await,
+            Some(ApplicationState::ApplicationStateStopped)
+        );
+        assert!(*stop_called.read().await);
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_with_partial_failure() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        // Register 2 apps: one normal, one failing to stop
+        let app1 = Box::new(MockTestApplication::new("good-app")) as Box<dyn Application>;
+        let app2 =
+            Box::new(MockTestApplication::new_failing_stop("bad-app")) as Box<dyn Application>;
+
+        node.register_application(app1).await.unwrap();
+        node.register_application(app2).await.unwrap();
+
+        node.start_application("good-app").await.unwrap();
+        node.start_application("bad-app").await.unwrap();
+
+        // Shutdown should fail due to bad-app
+        let result = node.shutdown(tokio::time::Duration::from_secs(5)).await;
+        assert!(result.is_err());
+
+        // good-app should still be stopped
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("good-app")
+                .await,
+            Some(ApplicationState::ApplicationStateStopped)
+        );
+
+        // bad-app should be in Failed state
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("bad-app")
+                .await,
+            Some(ApplicationState::ApplicationStateFailed)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_request_flag() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        // Initially not requested
+        assert!(!node.is_shutdown_requested().await);
+
+        // Register and start an app
+        let app = Box::new(MockTestApplication::new("test-app"));
+        node.register_application(app).await.unwrap();
+        node.start_application("test-app").await.unwrap();
+
+        // Shutdown
+        node.shutdown(tokio::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        // Now shutdown is requested
+        assert!(node.is_shutdown_requested().await);
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_with_no_applications() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        // Initialize services
+        node.initialize_services().await.unwrap();
+
+        // Shutdown with no apps should succeed
+        let result = node.shutdown(tokio::time::Duration::from_secs(5)).await;
+        assert!(result.is_ok());
+
+        // Shutdown flag should be set
+        assert!(node.is_shutdown_requested().await);
+    }
+
+    #[tokio::test]
+    async fn test_application_manager_accessor() {
+        let node = NodeBuilder::new("test-node").build().await;
+
+        // Get application manager reference
+        let manager = node.application_manager();
+
+        // Verify it's the same manager (returns empty list initially)
+        let apps = manager.await.unwrap().list_applications().await;
+        assert_eq!(apps.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_start_attempts() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let app = Box::new(MockTestApplication::new("test-app"));
+        node.register_application(app).await.unwrap();
+
+        // First start succeeds
+        node.start_application("test-app").await.unwrap();
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("test-app")
+                .await,
+            Some(ApplicationState::ApplicationStateRunning)
+        );
+
+        // Second start should fail (not in Created state)
+        let result = node.start_application("test-app").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("state"));
+    }
+
+    #[tokio::test]
+    async fn test_stop_already_stopped_application() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        let app = Box::new(MockTestApplication::new("test-app"));
+        node.register_application(app).await.unwrap();
+        node.start_application("test-app").await.unwrap();
+
+        // First stop succeeds
+        node.stop_application("test-app", tokio::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(
+            node            .application_manager().await.unwrap()
+                .get_state("test-app")
+                .await,
+            Some(ApplicationState::ApplicationStateStopped)
+        );
+
+        // Second stop should succeed (already stopped)
+        let result = node
+            .stop_application("test-app", tokio::time::Duration::from_secs(5))
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_stops_all_applications() {
+        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+        // Track which apps were stopped
+        let stopped_apps = Arc::new(RwLock::new(Vec::new()));
+
+        // Create apps that record when they stop
+        struct StopTrackingApp {
+            name: String,
+            stopped_apps: Arc<RwLock<Vec<String>>>,
+        }
+
+        #[async_trait]
+        impl Application for StopTrackingApp {
+            fn name(&self) -> &str {
+                &self.name
+            }
+
+            fn version(&self) -> &str {
+                "0.1.0"
+            }
+
+            async fn start(
+                &mut self,
+                _node: Arc<dyn ApplicationNode>,
+            ) -> Result<(), ApplicationError> {
+                Ok(())
+            }
+
+            async fn stop(&mut self) -> Result<(), ApplicationError> {
+                self.stopped_apps.write().await.push(self.name.clone());
+                Ok(())
+            }
+
+            async fn health_check(&self) -> HealthStatus {
+                HealthStatus::HealthStatusHealthy
+            }
+            
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        // Register and start multiple apps
+        for i in 1..=3 {
+            let app = Box::new(StopTrackingApp {
+                name: format!("app{}", i),
+                stopped_apps: stopped_apps.clone(),
+            }) as Box<dyn Application>;
+            node.register_application(app).await.unwrap();
+            node.start_application(&format!("app{}", i)).await.unwrap();
+        }
+
+        // Shutdown
+        node.shutdown(tokio::time::Duration::from_secs(10))
+            .await
+            .unwrap();
+
+        // Verify all apps were stopped (order not guaranteed due to HashMap)
+        let stopped = stopped_apps.read().await;
+        assert_eq!(stopped.len(), 3);
+        assert!(stopped.contains(&"app1".to_string()));
+        assert!(stopped.contains(&"app2".to_string()));
+        assert!(stopped.contains(&"app3".to_string()));
+    }
+}
+
+
+// ============================================================================
+// LinkProvider and ActivationProvider Implementation
+// ============================================================================
+//
+// NOTE: LinkProvider and ActivationProvider are now implemented in ActorRegistry
+// (see crates/core/src/actor_registry.rs) to support local actors.
+//
+// Node::link() and Node::unlink() still support remote actor linking via gRPC,
+// but this is advanced functionality. For local actors, use ActorRegistry directly.
+//
+// TODO: Remote Actor Linking Support
+// Node currently supports remote actor linking via gRPC (see Node::link() and Node::unlink()).
+// This is advanced functionality and can be enhanced later. For now:
+// - Local actors: Use ActorRegistry (implements LinkProvider)
+// - Remote actors: Use Node::link() / Node::unlink() directly (gRPC-based)
+// Future enhancement: Add remote linking support to ActorRegistry by:
+// 1. Adding optional Node reference to ActorRegistry
+// 2. Checking if actors are local before linking
+// 3. Delegating to Node for remote actor linking

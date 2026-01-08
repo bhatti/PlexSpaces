@@ -310,6 +310,7 @@ impl ExecutionContextImpl {
                         "side_effect_type" => side_effect_type.clone(),
                         "actor_id" => inner.actor_id.clone()
                     ).record(duration.as_secs_f64());
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         actor_id = %inner.actor_id,
                         side_effect_id = %side_effect_id,
@@ -317,6 +318,7 @@ impl ExecutionContextImpl {
                         duration_ms = duration.as_millis(),
                         "Side effect executed and cached"
                     );
+                    }
                 }
 
                 // Create side effect entry for journal

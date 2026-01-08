@@ -20,6 +20,8 @@ use tracing::info;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
+    // Default to 'info' level to reduce verbose output
+    // Use RUST_LOG=debug for detailed debugging, RUST_LOG=error for minimal output
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -43,6 +45,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await;
 
+    // Initialize services (registers journal storage, actor registry, etc.)
+    node.initialize_services().await
+        .map_err(|e| format!("Failed to initialize services: {}", e))?;
+
     // Verify services are ready (ActorService is now registered during initialize_services)
     let service_locator = node.service_locator();
     for _ in 0..10 {
@@ -50,6 +56,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    
+    // Verify journal storage is available (will be created by initialize_services if not present)
+    if service_locator.get_journal_storage().await.is_none() {
+        // Register default in-memory journal storage for this example
+        use plexspaces_journaling::MemoryJournalStorage;
+        use std::sync::Arc;
+        use plexspaces_core::JournalStorage;
+        let default_storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        service_locator.register_journal_storage(default_storage).await;
+        info!("Registered default in-memory journal storage for example");
     }
 
     // Run control plane demo with metrics
@@ -96,6 +113,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║  ✅ Data Plane: Pipeline with actors, channels, workflows     ║");
     println!("║  ✅ Production-Grade Performance Metrics Collected              ║");
     println!("╚════════════════════════════════════════════════════════════════╝");
+
+    // Shutdown node to ensure clean exit
+    info!("Shutting down node...");
+    node.shutdown(Duration::from_secs(10)).await
+        .map_err(|e| format!("Failed to shutdown node: {}", e))?;
+    info!("Node shutdown complete");
 
     Ok(())
 }

@@ -26,12 +26,13 @@ use plexspaces_journaling::{
     sql::SqliteJournalStorage,
 };
 use plexspaces_proto::prost_types;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::time::sleep;
 
 /// Helper to create a test SQLite storage (in-memory)
-async fn create_test_storage() -> SqliteJournalStorage {
-    SqliteJournalStorage::new(":memory:").await.unwrap()
+async fn create_test_storage() -> Arc<dyn JournalStorage> {
+    Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap())
 }
 
 /// Helper to create a test reminder registration

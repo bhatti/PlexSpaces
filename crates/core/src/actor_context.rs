@@ -151,6 +151,74 @@ pub trait ActorService: Send + Sync {
 
 }
 
+/// Trait for providing link semantics (bidirectional death propagation)
+///
+/// ## Purpose
+/// Allows components to link actors for cascading failure handling.
+/// ActorRegistry implements this trait to provide link/unlink functionality for local actors.
+///
+/// ## Erlang Philosophy
+/// Supervision uses links internally (Erlang/OTP pattern). When a supervisor
+/// adds a child, it links to the child so cascading failures work correctly.
+///
+/// ## Design
+/// - Supports local actors (actors registered in ActorRegistry)
+/// - Remote actor linking is handled by Node (advanced functionality)
+/// - Follows Erlang/OTP link semantics (bidirectional death propagation)
+#[async_trait]
+pub trait LinkProvider: Send + Sync {
+    /// Link two actors (bidirectional death propagation)
+    ///
+    /// ## Arguments
+    /// * `actor_id` - First actor in the link
+    /// * `linked_actor_id` - Second actor in the link
+    ///
+    /// ## Returns
+    /// Success or error
+    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String>;
+
+    /// Unlink two actors
+    ///
+    /// ## Arguments
+    /// * `actor_id` - First actor in the link
+    /// * `linked_actor_id` - Second actor in the link
+    ///
+    /// ## Returns
+    /// Success or error
+    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String>;
+}
+
+/// Trait for activating virtual actors (used by ReminderFacet)
+///
+/// ## Purpose
+/// Allows components to trigger actor activation when needed (e.g., when reminders fire).
+/// This enables reminders to wake up deactivated virtual actors.
+///
+/// ## Design
+/// - Supports local actors (actors registered in ActorRegistry)
+/// - Decouples ReminderFacet from Node
+/// - ActorRegistry implements this trait for local actor activation
+#[async_trait]
+pub trait ActivationProvider: Send + Sync {
+    /// Check if actor is currently active
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor to check
+    ///
+    /// ## Returns
+    /// true if actor is active, false if deactivated
+    async fn is_actor_active(&self, actor_id: &ActorId) -> bool;
+    
+    /// Activate a virtual actor
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor to activate
+    ///
+    /// ## Returns
+    /// ActorRef if activation successful, error otherwise
+    async fn activate_actor(&self, actor_id: &ActorId) -> Result<ActorRef, String>;
+}
+
 /// Trait for facet service operations (accessing facets from actors)
 ///
 /// ## Purpose
@@ -577,13 +645,15 @@ impl ActorContext {
         mut reply_message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let target_actor_id_clone = target_actor_id.clone();
-        eprintln!("🔵 [ACTOR_CONTEXT::send_reply] START: sender_id={}, target_actor_id={}, correlation_id={:?}, reply_message_id={}", 
-            sender_id, target_actor_id_clone, correlation_id, reply_message.id);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("[ACTOR_CONTEXT::send_reply] START: sender_id={}, target_actor_id={}, correlation_id={:?}, reply_message_id={}", 
+                sender_id, target_actor_id_clone, correlation_id, reply_message.id);
+        }
         
         // SIMPLIFIED: Use send() method - temporary sender behaves like normal actor
-        // Set message fields: receiver=target_actor_id (where reply goes), sender=current_actor, correlation_id
-        reply_message.receiver = target_actor_id.clone();
-        reply_message.sender = Some(sender_id.clone());
+        // Set message fields: receiver=sender_id (where reply goes TO), sender=target_actor_id (where reply comes FROM), correlation_id
+        reply_message.receiver = sender_id.clone(); // Reply goes TO the sender (temporary sender for ask pattern)
+        reply_message.sender = Some(target_actor_id.clone()); // Reply comes FROM the current actor
         if let Some(corr_id) = correlation_id {
             reply_message.correlation_id = Some(corr_id.to_string());
         }
@@ -593,11 +663,13 @@ impl ActorContext {
         let actor_service = self.get_actor_service().await
             .ok_or_else(|| "ActorService not available in ServiceLocator".to_string())?;
         
-        let result = actor_service.send(&target_actor_id, reply_message).await
+        let result = actor_service.send(sender_id, reply_message).await
             .map(|_| ()); // Ignore message_id return value
         
-        eprintln!("🟢 [ACTOR_CONTEXT::send_reply] END: sender_id={}, target_actor_id={}, result={:?}", 
-            sender_id, target_actor_id_clone, result.is_ok());
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("[ACTOR_CONTEXT::send_reply] END: sender_id={}, target_actor_id={}, result={:?}", 
+                sender_id, target_actor_id_clone, result.is_ok());
+        }
         result
     }
 

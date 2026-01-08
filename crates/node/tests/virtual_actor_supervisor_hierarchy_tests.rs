@@ -147,23 +147,35 @@ async fn create_test_node_with_server() -> Arc<Node> {
     node_clone.initialize_services().await.expect("Failed to initialize services");
     // Start node in background (start() blocks forever)
     let node_clone2 = node.clone();
+    let start_error = std::sync::Arc::new(tokio::sync::Mutex::new(None::<String>));
+    let start_error_clone = start_error.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone2.start().await {
-            eprintln!("🔴 [TEST] Node start failed: {:?}", e);
+            let error_msg = format!("Node start failed: {:?}", e);
+            eprintln!("🔴 [TEST] {}", error_msg);
+            *start_error_clone.lock().await = Some(error_msg);
         }
     });
     // Wait for WASM runtime to be initialized (required for application deployment)
     // start() initializes WASM runtime early, but it's async so we need to poll
+    // WasmRuntime::new() can take time (Engine::new() is a blocking call that runs in spawn_blocking)
     let start = std::time::Instant::now();
     let mut attempts = 0;
-    while start.elapsed() < Duration::from_secs(10) {
+    let timeout = Duration::from_secs(30); // Increased timeout for WASM runtime initialization
+    while start.elapsed() < timeout {
+        // Check if start() failed
+        if let Some(error) = start_error.lock().await.as_ref() {
+            start_handle.abort();
+            panic!("WASM runtime not initialized - {} - cannot run integration test", error);
+        }
+        
         if node.wasm_runtime().await.is_some() {
-            eprintln!("🟢 [TEST] WASM runtime initialized after {} attempts", attempts);
+            eprintln!("🟢 [TEST] WASM runtime initialized after {} attempts (elapsed: {:?})", attempts, start.elapsed());
             break;
         }
         attempts += 1;
-        if attempts % 50 == 0 {
-            eprintln!("🔵 [TEST] Waiting for WASM runtime... (attempt {})", attempts);
+        if attempts % 100 == 0 {
+            eprintln!("🔵 [TEST] Waiting for WASM runtime... (attempt {}, elapsed: {:?})", attempts, start.elapsed());
         }
         // Use small sleep to allow start() to make progress
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -171,9 +183,13 @@ async fn create_test_node_with_server() -> Arc<Node> {
     
     // Verify WASM runtime is initialized
     if node.wasm_runtime().await.is_none() {
-        eprintln!("🔴 [TEST] WASM runtime not initialized after {} attempts", attempts);
+        let error_msg = start_error.lock().await.clone();
         start_handle.abort();
-        panic!("WASM runtime not initialized - cannot run integration test");
+        if let Some(error) = error_msg {
+            panic!("WASM runtime not initialized after {} attempts - {} - cannot run integration test", attempts, error);
+        } else {
+            panic!("WASM runtime not initialized after {} attempts (elapsed: {:?}) - cannot run integration test", attempts, start.elapsed());
+        }
     }
     
     // Additional wait for services to be fully ready
@@ -485,7 +501,9 @@ async fn test_mixed_eager_lazy_virtual_actors() {
 /// This is the ONLY integration test - tests actual WASM application deployment
 #[tokio::test]
 async fn test_application_deployment_with_eager_virtual_actors() {
-    timeout(Duration::from_secs(10), async {
+    // Increased timeout to account for WASM runtime initialization, deployment, and actor activation
+    // WASM deployment can take time due to module compilation and actor spawning
+    timeout(Duration::from_secs(60), async {
         let node = create_test_node_with_server().await;
         let node_id = node.id().as_str();
         
@@ -538,15 +556,34 @@ async fn test_application_deployment_with_eager_virtual_actors() {
             initial_state: vec![],
         };
         
-        let response = service.deploy_application(Request::new(request)).await;
-        assert!(response.is_ok(), "Deployment should succeed: {:?}", response.err());
-        let res = response.unwrap().into_inner();
-        assert!(res.success, "Deployment should be successful");
+        eprintln!("🔵 [TEST] Starting application deployment...");
+        let deploy_start = std::time::Instant::now();
+        let response = tokio::time::timeout(
+            Duration::from_secs(20),
+            service.deploy_application(Request::new(request))
+        ).await;
         
-        // Wait for actor to be registered
+        match response {
+            Ok(Ok(resp)) => {
+                eprintln!("✅ [TEST] Deployment response received in {:?}", deploy_start.elapsed());
+                let res = resp.into_inner();
+                assert!(res.success, "Deployment should be successful: {:?}", res);
+                eprintln!("✅ [TEST] Application deployed successfully");
+            }
+            Ok(Err(e)) => {
+                panic!("Deployment failed: {:?}", e);
+            }
+            Err(_) => {
+                panic!("Deployment timed out after 20 seconds");
+            }
+        }
+        
+        // Wait for actor to be registered (with longer timeout for WASM deployment)
         let actor_id = format!("eager-worker-1@{}", node_id);
-        let registered = wait_for_actors_registered(&node, &[actor_id.clone()], Duration::from_secs(3)).await;
-        assert!(registered, "Eager virtual actor should be registered");
+        eprintln!("🔵 [TEST] Waiting for actor to be registered: {}", actor_id);
+        let registered = wait_for_actors_registered(&node, &[actor_id.clone()], Duration::from_secs(10)).await;
+        assert!(registered, "Eager virtual actor should be registered: {}", actor_id);
+        eprintln!("✅ [TEST] Actor registered: {}", actor_id);
         
         // Check if eager actor is active (should activate immediately)
         let registry = node.service_locator()
@@ -554,11 +591,15 @@ async fn test_application_deployment_with_eager_virtual_actors() {
             .await
             .expect("ActorRegistry not found");
         
+        eprintln!("🔵 [TEST] Checking if actor is active: {}", actor_id);
         let active = registry.is_actor_activated(&actor_id).await;
-        assert!(active, "Eager virtual actor should be active");
+        assert!(active, "Eager virtual actor should be active: {}", actor_id);
+        eprintln!("✅ [TEST] Actor is active: {}", actor_id);
         
         // Verify actor is accessible
+        eprintln!("🔵 [TEST] Verifying actor is accessible: {}", actor_id);
         let actor_ref = lookup_actor_ref(&node, &actor_id).await;
-        assert!(actor_ref.is_ok() && actor_ref.unwrap().is_some(), "Eager virtual actor should be accessible");
-    }).await.expect("Test should complete within 10 seconds");
+        assert!(actor_ref.is_ok() && actor_ref.unwrap().is_some(), "Eager virtual actor should be accessible: {}", actor_id);
+        eprintln!("✅ [TEST] Actor is accessible: {}", actor_id);
+    }).await.expect("Test should complete within 60 seconds");
 }

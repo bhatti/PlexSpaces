@@ -45,7 +45,7 @@ pub async fn start_blob_http_server(
     let handle = tokio::spawn(async move {
         use axum::serve;
         if let Err(e) = serve(listener, router).await {
-            eprintln!("Blob HTTP server error: {}", e);
+            tracing::warn!("Blob HTTP server error: {}", e);
         }
     });
 

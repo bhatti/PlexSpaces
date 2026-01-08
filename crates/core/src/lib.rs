@@ -39,6 +39,7 @@ pub mod behavior_factory;
 pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegistry};
 // registry module removed - replaced by object-registry
 pub mod actor_context;
+pub use actor_context::{LinkProvider, ActivationProvider};
 pub mod actor_registry;
 // Service wrappers moved to node crate to avoid circular dependencies
 // Only TupleSpaceProviderWrapper remains here since TupleSpace is in core
@@ -59,6 +60,8 @@ pub mod message_metrics;
 pub mod reply_waiter;
 pub use monitoring::NodeMetricsAccessor;
 pub use message_metrics::{ActorMetrics, ActorMetricsHandle, ActorMetricsExt, new_actor_metrics};
+pub mod journal_storage;
+pub use journal_storage::{JournalStorage, JournalError, JournalResult};
 
 // Re-export enhanced ActorContext
 pub use actor_context::{

@@ -24,15 +24,15 @@ mod sqlite_integration_tests {
 
     /// Helper to create a test storage (SQLite or PostgreSQL)
     #[cfg(feature = "sqlite-backend")]
-    async fn create_test_storage() -> SqliteJournalStorage {
-        SqliteJournalStorage::new(":memory:").await.unwrap()
+    async fn create_test_storage() -> Arc<dyn JournalStorage> {
+        Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap())
     }
 
     #[cfg(all(feature = "postgres-backend", not(feature = "sqlite-backend")))]
-    async fn create_test_storage() -> PostgresJournalStorage {
+    async fn create_test_storage() -> Arc<dyn JournalStorage> {
         let db_url = std::env::var("TEST_POSTGRES_URL")
             .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/plexspaces_test".to_string());
-        PostgresJournalStorage::new(&db_url).await.unwrap()
+        Arc::new(PostgresJournalStorage::new(&db_url).await.unwrap())
     }
 
     /// Helper to create durability config

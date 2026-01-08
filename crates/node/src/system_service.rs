@@ -80,7 +80,9 @@ impl SystemService for SystemServiceImpl {
         metrics::counter!("plexspaces_node_system_info_requests_total",
             "include_details" => include_details.to_string()
         ).increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("System info requested (include_details: {})", include_details);
+        }
         
         // Get node stats if available
         let stats = if let Some(ref node) = self.node {
@@ -167,7 +169,9 @@ impl SystemService for SystemServiceImpl {
         metrics::counter!("plexspaces_node_health_requests_total",
             "components_count" => components.len().to_string()
         ).increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Health check requested (components: {:?})", components);
+        }
         
         // Use detailed health check (same as get_detailed_health but simpler response)
         let health = self
@@ -337,7 +341,9 @@ impl SystemService for SystemServiceImpl {
         
         // Record metrics
         metrics::counter!("plexspaces_node_metrics_requests_total").increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Metrics requested");
+        }
         
         // Get node stats if available
         let stats = if let Some(ref node) = self.node {
@@ -526,7 +532,9 @@ impl SystemService for SystemServiceImpl {
         metrics::counter!("plexspaces_node_config_requests_total",
             "key_pattern" => key_pattern.clone()
         ).increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Config retrieval requested (pattern: {})", key_pattern);
+        }
         
         // Get node config if available
         let mut settings = vec![];
@@ -643,7 +651,9 @@ impl SystemService for SystemServiceImpl {
         
         // Record metrics
         metrics::counter!("plexspaces_node_logs_requests_total").increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Log retrieval requested");
+        }
         
         // For now, log retrieval is not implemented
         // In the future, we could integrate with a log aggregation system
@@ -720,7 +730,9 @@ impl SystemService for SystemServiceImpl {
     ) -> Result<Response<ListBackupsResponse>, Status> {
         // Record metrics
         metrics::counter!("plexspaces_node_backup_list_requests_total").increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Backup listing requested");
+        }
         
         // For now, return empty list (no backups implemented yet)
         use plexspaces_proto::common::v1::PageResponse;
@@ -741,7 +753,9 @@ impl SystemService for SystemServiceImpl {
     ) -> Result<Response<GetShutdownStatusResponse>, Status> {
         // Record metrics
         metrics::counter!("plexspaces_node_shutdown_status_requests_total").increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Shutdown status requested");
+        }
         
         // Get shutdown state from health reporter
         let state = self.health_reporter.get_state().await;

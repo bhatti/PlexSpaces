@@ -256,11 +256,13 @@ impl WasmApplication {
             // Module not found - for tests and simple modules, return empty list (graceful degradation)
             // In production, this would be an error, but for testing we allow it
             // Log at debug level since this is acceptable for simple modules
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 application = %self.name,
                 module_hash = %self.module_hash,
                 "WASM module not found - returning empty supervisor tree (acceptable for simple modules or tests)"
             );
+            }
         }
 
         // Fallback: Return empty list if no spec and no WASM function
@@ -607,12 +609,14 @@ impl WasmApplication {
             // Stop actor with timeout (default: 5 seconds per actor)
             let timeout_duration = Duration::from_secs(5);
             
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 application = %self.name,
                 actor_id = %actor_id,
                 timeout_seconds = timeout_duration.as_secs(),
                 "Stopping actor with timeout"
             );
+            }
             
             // Use ActorFactory directly from ServiceLocator
             let service_locator = node.service_locator()
@@ -632,22 +636,26 @@ impl WasmApplication {
             let actor_id_string = actor_id.to_string();
             match timeout(timeout_duration, actor_factory.stop_actor(&actor_id_string)).await {
                 Ok(Ok(())) => {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         application = %self.name,
                         actor_id = %actor_id,
                         "Actor stopped successfully"
                     );
+                    }
                     Ok(())
                 }
                 Ok(Err(e)) => {
                     let error_msg = e.to_string();
                     // Check if actor not found (might have already stopped)
                     if error_msg.contains("not found") || error_msg.contains("Actor not found") {
+                        if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             application = %self.name,
                             actor_id = %actor_id,
                             "Actor already stopped (not found)"
                         );
+                        }
                         Ok(()) // Actor already stopped, that's fine
                     } else {
                         let full_error = format!(
@@ -704,12 +712,14 @@ impl Application for WasmApplication {
         // Log environment variables if available
         if let Some(spec) = &self.spec {
             if !spec.env.is_empty() {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     application = %self.name,
                     env_var_count = spec.env.len(),
                     env_vars = ?spec.env.keys().collect::<Vec<_>>(),
                     "WASM application environment variables available"
                 );
+                }
             }
         }
 
@@ -775,12 +785,14 @@ impl Application for WasmApplication {
             let mut stopped_count = 0;
             
             for (idx, actor_id) in actor_ids.iter().rev().enumerate() {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     application = %self.name,
                     actor_id = %actor_id,
                     progress = format!("{}/{}", idx + 1, actor_ids.len()),
                     "Stopping actor"
                 );
+                }
                 
                 if let Err(e) = self.stop_actor_gracefully(actor_id).await {
                     let error_msg = format!("Failed to stop actor '{}': {}", actor_id, e);

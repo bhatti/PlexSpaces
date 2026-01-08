@@ -83,7 +83,7 @@ pub async fn start(node_id: &str, listen_addr: &str) -> Result<()> {
     let node_for_start = node.clone();
     tokio::spawn(async move {
         if let Err(e) = node_for_start.start().await {
-            eprintln!("Node failed to start: {}", e);
+            tracing::warn!("Node failed to start: {}", e);
             std::process::exit(1);
         }
     });

@@ -70,7 +70,7 @@ mod actor_integration_tests {
     /// 4. Verify state is restored through replay
     #[tokio::test]
     async fn test_actor_replay_with_handler() {
-        let storage = SqliteJournalStorage::new(":memory:").await.unwrap();
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         #[cfg(feature = "sqlite-backend")]
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
@@ -185,7 +185,7 @@ mod actor_integration_tests {
     /// 5. Verify checkpoint + delta replay works
     #[tokio::test]
     async fn test_actor_replay_with_checkpoint() {
-        let storage = SqliteJournalStorage::new(":memory:").await.unwrap();
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         #[cfg(feature = "sqlite-backend")]
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
@@ -305,7 +305,7 @@ mod actor_integration_tests {
     /// 4. Verify state is automatically restored
     #[tokio::test]
     async fn test_actor_replay_with_state_loader() {
-        let storage = SqliteJournalStorage::new(":memory:").await.unwrap();
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         #[cfg(feature = "sqlite-backend")]
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]

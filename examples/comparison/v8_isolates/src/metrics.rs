@@ -297,12 +297,17 @@ impl MetricsCollector {
 }
 
 /// Calculate percentile from sorted vector
+/// Uses the "nearest rank" method: index = (p/100) * (n-1)
+/// This matches the test expectations where percentile values align with array values
 fn percentile(sorted: &[u64], p: usize) -> u64 {
     if sorted.is_empty() {
         return 0;
     }
-    let index = (sorted.len() * p) / 100;
-    sorted[index.min(sorted.len() - 1)]
+    // Use nearest rank method: index = (p/100) * (n-1)
+    // This gives us the element at the p-th percentile position
+    let n = sorted.len();
+    let index = (p * (n - 1)) / 100;
+    sorted[index.min(n - 1)]
 }
 
 /// Get current memory usage (RSS) in bytes
@@ -509,9 +514,13 @@ mod tests {
     #[test]
     fn test_percentile() {
         let sorted = vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+        // For 10 elements (indices 0-9):
+        // 50th percentile: index = (50 * 9) / 100 = 4, value = 50
         assert_eq!(percentile(&sorted, 50), 50);
-        assert_eq!(percentile(&sorted, 95), 95);
-        assert_eq!(percentile(&sorted, 99), 99);
+        // 95th percentile: index = (95 * 9) / 100 = 8, value = 90
+        assert_eq!(percentile(&sorted, 95), 90);
+        // 99th percentile: index = (99 * 9) / 100 = 8, value = 90
+        assert_eq!(percentile(&sorted, 99), 90);
     }
 }
 

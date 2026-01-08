@@ -85,14 +85,18 @@ pub async fn get_or_activate_actor_impl(
             // Check if actor is active
             if actor_registry.lookup_actor(&actor_id).await.is_some() {
                 // Actor exists and is active
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(actor_id = %actor_id, "Actor already exists and is active");
+                }
                 (false, actor_id)
             } else {
                 // Actor ID is for local node but actor is not active
                 // Check if it's a virtual actor
                 if virtual_actor_manager.is_virtual(&actor_id).await {
                     // Virtual actor - activate it
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %actor_id, "Virtual actor exists but not active - activating");
+                    }
                     actor_factory
                         .activate_virtual_actor(&actor_id)
                         .await
@@ -110,7 +114,9 @@ pub async fn get_or_activate_actor_impl(
                     }
                     
                     // Create actor using ActorFactory
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %actor_id, "Actor not found - creating new actor");
+                    }
                     actor_factory
                         .spawn_actor(
                             ctx,
@@ -131,7 +137,9 @@ pub async fn get_or_activate_actor_impl(
         }
         Some(_) => {
             // Actor exists on remote node - return remote ActorRef
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(actor_id = %actor_id, "Actor exists on remote node");
+            }
             (false, actor_id)
         }
         None => {
@@ -156,7 +164,9 @@ pub async fn get_or_activate_actor_impl(
             };
             
             // Create actor using ActorFactory
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(actor_id = %local_actor_id, "Actor doesn't exist - creating new actor");
+            }
             actor_factory
                 .spawn_actor(
                     ctx,

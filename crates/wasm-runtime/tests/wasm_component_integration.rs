@@ -18,13 +18,10 @@ use tokio::time::timeout;
 use tokio::sync::Mutex;
 use std::sync::OnceLock;
 
-/// Helper to get the calculator WASM file path
-/// Uses test fixture (checked into git) to avoid build dependencies
-fn get_calculator_wasm_path() -> PathBuf {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.push("tests/fixtures/calculator_actor.wasm");
-    path
-}
+// Include shared WASM module helper
+#[path = "shared_wasm_module.rs"]
+mod shared_wasm_module;
+use shared_wasm_module::{get_calculator_wasm_path, get_shared_wasm_bytes};
 
 /// Shared runtime and module for all tests
 /// Loads once and reuses to avoid repeated compilation of 40MB WASM file
@@ -71,13 +68,10 @@ async fn get_shared_module() -> WasmModule {
     let runtime = get_shared_runtime().await;
     let runtime_guard = runtime.lock().await;
     
-    let wasm_path = get_calculator_wasm_path();
-    if !wasm_path.exists() {
-        panic!("WASM test fixture not found at {:?}. This file should be checked into git.", wasm_path);
-    }
-    
-    let wasm_bytes = fs::read(&wasm_path).expect("Failed to read WASM file");
-    eprintln!("📦 Loading WASM component (first time, ~40MB): {} ({} bytes)", wasm_path.display(), wasm_bytes.len());
+    // Use shared WASM bytes (loaded once, cached)
+    let wasm_bytes = get_shared_wasm_bytes().await
+        .expect("WASM test fixture not found. This file should be checked into git.");
+    eprintln!("📦 Loading WASM component (first time, ~40MB): {} bytes", wasm_bytes.len());
     
     // For 40MB file, increase timeout to 60 seconds
     let module = timeout(

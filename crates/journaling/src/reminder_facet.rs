@@ -65,26 +65,10 @@ use tracing;
 ///
 /// ## Design
 /// Similar to LinkProvider pattern - decouples ReminderFacet from Node.
-#[async_trait]
-pub trait ActivationProvider: Send + Sync {
-    /// Check if actor is currently active
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor to check
-    ///
-    /// ## Returns
-    /// true if actor is active, false if deactivated
-    async fn is_actor_active(&self, actor_id: &ActorId) -> bool;
-    
-    /// Activate a virtual actor
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor to activate
-    ///
-    /// ## Returns
-    /// ActorRef if activation successful, error otherwise
-    async fn activate_actor(&self, actor_id: &ActorId) -> Result<ActorRef, String>;
-}
+///
+/// NOTE: ActivationProvider trait moved to plexspaces-core to avoid circular dependencies.
+/// Re-export for backward compatibility.
+pub use plexspaces_core::ActivationProvider;
 
 // Re-export ReminderFired from proto
 pub use plexspaces_proto::timer::v1::ReminderFired;
@@ -351,7 +335,9 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
                 
                 // Debug: Log if we found due reminders (only in debug mode)
                 if !due_reminders.is_empty() {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!("Found {} due reminders", due_reminders.len());
+                    }
                 }
                 
                 // Fire due reminders
@@ -389,7 +375,9 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
                     let actor_ref_opt = actor_ref.read().await.clone();
                     let actor_service_opt = actor_service.read().await.clone();
                     if let (Some(ref_guard), Some(service_guard)) = (actor_ref_opt.as_ref(), actor_service_opt.as_ref()) {
+                        if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!("Firing reminder: {}", reg.reminder_name);
+                        }
                         let reminder_fired = ReminderFired {
                             actor_id: reg.actor_id.clone(),
                             reminder_name: reg.reminder_name.clone(),
@@ -575,11 +563,13 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
                         "Failed to persist paused reminder state"
                     );
                 } else {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         actor_id = %actor_id,
                         reminder_name = %reminder_name,
                         "Paused reminder on EXIT signal"
                     );
+                    }
                 }
             }
         }
@@ -615,12 +605,14 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
         reason: &plexspaces_facet::ExitReason,
     ) -> Result<(), FacetError> {
         // Log DOWN notification for observability
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %actor_id,
             monitored_id = %monitored_id,
             reason = ?reason,
             "ReminderFacet received DOWN notification (no action needed)"
         );
+        }
         
         metrics::counter!("plexspaces_reminder_facet_down_total",
             "actor_id" => actor_id.to_string(),

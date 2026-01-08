@@ -320,10 +320,12 @@ impl WasmInstance {
                             "Failed to add plexspaces host bindings: {}", e
                         )))?;
                         
+                        if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             actor_id = %actor_id,
                             "Attempting component instantiation with WASI bindings"
                         );
+                        }
                         
                         // Try to instantiate with WASI bindings
                         let component_instance = component_linker
@@ -531,7 +533,7 @@ impl WasmInstance {
                         Some(wasmtime::Extern::Memory(memory)) => {
                             // Read string from WASM memory
                             if ptr < 0 || len < 0 {
-                                eprintln!("[WASM] log error: invalid pointer or length");
+                                tracing::warn!("[WASM] log error: invalid pointer or length");
                                 return;
                             }
 
@@ -540,7 +542,7 @@ impl WasmInstance {
                             let data = memory.data(&caller);
 
                             if ptr + len > data.len() {
-                                eprintln!("[WASM] log error: out of bounds access");
+                                tracing::warn!("[WASM] log error: out of bounds access");
                                 return;
                             }
 
@@ -548,15 +550,15 @@ impl WasmInstance {
                                 Ok(message) => {
                                     // Log with actor context
                                     let actor_id = &caller.data().actor_id;
-                                    println!("[WASM:{}] {}", actor_id, message);
+                                    tracing::info!("[WASM:{}] {}", actor_id, message);
                                 }
                                 Err(e) => {
-                                    eprintln!("[WASM] log error: invalid UTF-8: {}", e);
+                                    tracing::warn!("[WASM] log error: invalid UTF-8: {}", e);
                                 }
                             }
                         }
                         _ => {
-                            eprintln!("[WASM] log error: memory not exported");
+                            tracing::warn!("[WASM] log error: memory not exported");
                         }
                     }
                 },
@@ -578,7 +580,7 @@ impl WasmInstance {
                         Some(wasmtime::Extern::Memory(memory)) => {
                             // Validate pointers
                             if to_ptr < 0 || to_len < 0 || msg_ptr < 0 || msg_len < 0 {
-                                eprintln!("[WASM] send_message error: invalid pointer or length");
+                                tracing::warn!("[WASM] send_message error: invalid pointer or length");
                                 return -1i32;
                             }
 
@@ -590,7 +592,7 @@ impl WasmInstance {
 
                             // Check bounds
                             if to_ptr + to_len > data.len() || msg_ptr + msg_len > data.len() {
-                                eprintln!("[WASM] send_message error: out of bounds access");
+                                tracing::warn!("[WASM] send_message error: out of bounds access");
                                 return -1i32;
                             }
 
@@ -615,24 +617,26 @@ impl WasmInstance {
                                                 "Failed to send message from WASM actor"
                                             );
                                         } else {
+                                            if tracing::enabled!(tracing::Level::DEBUG) {
                                             tracing::debug!(
                                                 from = %from_actor,
                                                 to = %to_actor,
                                                 "Message sent successfully from WASM actor"
                                             );
+                                            }
                                         }
                                     });
                                     
                                     0i32 // Success (message sent asynchronously)
                                 }
                                 (Err(e), _) | (_, Err(e)) => {
-                                    eprintln!("[WASM] send_message error: invalid UTF-8: {}", e);
+                                    tracing::warn!("[WASM] send_message error: invalid UTF-8: {}", e);
                                     -1i32 // Error
                                 }
                             }
                         }
                         _ => {
-                            eprintln!("[WASM] send_message error: memory not exported");
+                            tracing::warn!("[WASM] send_message error: memory not exported");
                             -1i32 // Error
                         }
                     }
@@ -656,7 +660,7 @@ impl WasmInstance {
                         Some(wasmtime::Extern::Memory(memory)) => {
                             // Validate pointers
                             if queue_name_ptr < 0 || queue_name_len < 0 || msg_type_ptr < 0 || msg_type_len < 0 || payload_ptr < 0 || payload_len < 0 {
-                                eprintln!("[WASM] send_to_queue error: invalid pointer or length");
+                                tracing::warn!("[WASM] send_to_queue error: invalid pointer or length");
                                 return -1i32;
                             }
 
@@ -679,10 +683,12 @@ impl WasmInstance {
                                     tokio::spawn(async move {
                                         match host_functions.send_to_queue(&queue_name, &msg_type, payload).await {
                                             Ok(_msg_id) => {
+                                                if tracing::enabled!(tracing::Level::DEBUG) {
                                                 tracing::debug!(
                                                     queue = %queue_name,
                                                     "Message sent to queue from WASM actor"
                                                 );
+                                                }
                                             }
                                             Err(e) => {
                                                 tracing::error!(
@@ -697,13 +703,13 @@ impl WasmInstance {
                                     0i32 // Success
                                 }
                                 _ => {
-                                    eprintln!("[WASM] send_to_queue error: invalid UTF-8");
+                                    tracing::warn!("[WASM] send_to_queue error: invalid UTF-8");
                                     -1i32
                                 }
                             }
                         }
                         _ => {
-                            eprintln!("[WASM] send_to_queue error: memory not exported");
+                            tracing::warn!("[WASM] send_to_queue error: memory not exported");
                             -1i32
                         }
                     }
@@ -727,7 +733,7 @@ impl WasmInstance {
                         Some(wasmtime::Extern::Memory(memory)) => {
                             // Validate pointers
                             if topic_name_ptr < 0 || topic_name_len < 0 || msg_type_ptr < 0 || msg_type_len < 0 || payload_ptr < 0 || payload_len < 0 {
-                                eprintln!("[WASM] publish_to_topic error: invalid pointer or length");
+                                tracing::warn!("[WASM] publish_to_topic error: invalid pointer or length");
                                 return -1i32;
                             }
 
@@ -750,10 +756,12 @@ impl WasmInstance {
                                     tokio::spawn(async move {
                                         match host_functions.publish_to_topic(&topic_name, &msg_type, payload).await {
                                             Ok(_msg_id) => {
+                                                if tracing::enabled!(tracing::Level::DEBUG) {
                                                 tracing::debug!(
                                                     topic = %topic_name,
                                                     "Message published to topic from WASM actor"
                                                 );
+                                                }
                                             }
                                             Err(e) => {
                                                 tracing::error!(
@@ -768,13 +776,13 @@ impl WasmInstance {
                                     0i32 // Success
                                 }
                                 _ => {
-                                    eprintln!("[WASM] publish_to_topic error: invalid UTF-8");
+                                    tracing::warn!("[WASM] publish_to_topic error: invalid UTF-8");
                                     -1i32
                                 }
                             }
                         }
                         _ => {
-                            eprintln!("[WASM] publish_to_topic error: memory not exported");
+                            tracing::warn!("[WASM] publish_to_topic error: memory not exported");
                             -1i32
                         }
                     }
@@ -795,7 +803,7 @@ impl WasmInstance {
                         Some(wasmtime::Extern::Memory(memory)) => {
                             // Validate pointers
                             if queue_name_ptr < 0 || queue_name_len < 0 {
-                                eprintln!("[WASM] receive_from_queue error: invalid pointer or length");
+                                tracing::warn!("[WASM] receive_from_queue error: invalid pointer or length");
                                 return -1i32;
                             }
 
@@ -812,17 +820,17 @@ impl WasmInstance {
                                     // like receive_from_queue, use WASM components instead which support async host functions.
                                     // This is an acceptable limitation - traditional modules should use blocking operations
                                     // or migrate to components for async support.
-                                    eprintln!("[WASM] receive_from_queue: async receive not yet supported in sync host functions");
-                    -1i32
+                                    tracing::warn!("[WASM] receive_from_queue: async receive not yet supported in sync host functions");
+                                    -1i32
                                 }
                                 _ => {
-                                    eprintln!("[WASM] receive_from_queue error: invalid UTF-8");
+                                    tracing::warn!("[WASM] receive_from_queue error: invalid UTF-8");
                                     -1i32
                                 }
                             }
                         }
                         _ => {
-                            eprintln!("[WASM] receive_from_queue error: memory not exported");
+                            tracing::warn!("[WASM] receive_from_queue error: memory not exported");
                             -1i32
                         }
                     }
@@ -1099,10 +1107,12 @@ impl WasmInstance {
                 "Component init() call not yet implemented for wasmtime v25 API changes"
             );
         }
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %self.actor_id,
             "Skipping component init (API needs to be updated for wasmtime v25)"
         );
+        }
         Ok(())
     }
     

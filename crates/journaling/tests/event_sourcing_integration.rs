@@ -227,7 +227,7 @@ async fn test_event_sourcing_with_durability_facet() {
     });
     // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
     // Skip it - DurabilityFacet will use default if not provided
-    let durability_facet = DurabilityFacet::new((*storage).clone(), durability_config_value, 50);
+    let durability_facet = DurabilityFacet::new(storage.clone(), durability_config_value, 50);
     let event_sourcing_config_value = serde_json::json!({
         "event_log_enabled": event_sourcing_config.event_log_enabled,
         "snapshot_interval": event_sourcing_config.snapshot_interval,

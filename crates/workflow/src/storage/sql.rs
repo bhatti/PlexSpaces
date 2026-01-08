@@ -126,7 +126,9 @@ impl WorkflowStorage {
             }
         };
 
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Connecting to SQLite with connection string: {}", conn_str);
+        }
         // Ensure parent directory exists for file-based databases
         if !conn_str.starts_with("sqlite::memory:") {
             if let Some(db_path) = conn_str.strip_prefix("sqlite:") {

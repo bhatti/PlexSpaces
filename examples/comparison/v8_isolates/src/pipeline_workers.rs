@@ -13,6 +13,8 @@ use plexspaces_behavior::GenServer;
 use plexspaces_channel::{Channel, create_channel};
 use plexspaces_core::{Actor, ActorContext, ActorId, BehaviorError, BehaviorType, RequestContext};
 use plexspaces_journaling::{DurabilityFacet, MemoryJournalStorage};
+use std::sync::Arc;
+use plexspaces_core::JournalStorage;
 use plexspaces_mailbox::Message;
 use plexspaces_node::Node;
 use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, ChannelMessage, DeliveryGuarantee, OrderingGuarantee};
@@ -554,13 +556,20 @@ pub async fn create_pipelines(
             .map_err(|e| format!("Failed to spawn input actor for pipeline {}: {}", i, e))?;
         
         // Create processor worker with durability
+        // Use journal storage from ServiceLocator (shared across all pipelines)
+        // If not available, create a default in-memory storage for this example
+        let storage: Arc<dyn JournalStorage> = service_locator
+            .get_journal_storage()
+            .await
+            .unwrap_or_else(|| Arc::new(MemoryJournalStorage::new()) as Arc<dyn JournalStorage>);
         let processor_actor_id: ActorId = format!("processor-{}@v8-isolates-node-1", pipeline_id);
         let processor_behavior: Box<dyn plexspaces_core::Actor> = Box::new(ProcessorWorkerActor::new(pipeline_id.clone()));
         
-        let storage = MemoryJournalStorage::new();
         let durability_facet = Box::new(DurabilityFacet::new(
             storage,
-            serde_json::json!({}),
+            serde_json::json!({
+                "checkpoint_interval": 1000,  // Checkpoint every 1000 messages instead of default 100
+            }),
             50,
         ));
         

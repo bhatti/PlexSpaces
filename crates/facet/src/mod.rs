@@ -524,7 +524,9 @@ impl FacetContainer {
                     let duration = start.elapsed();
                     metrics::histogram!("plexspaces_facet_intercept_before_duration_seconds", "method" => method.to_string()).record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_facet_intercept_shortcircuit_total", "method" => method.to_string(), "facet_type" => facet.facet_type().to_string()).increment(1);
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(facet_type = %facet.facet_type(), "Facet short-circuited");
+                    }
                     return Ok(result);
                 }
                 _ => {}
@@ -603,6 +605,14 @@ impl FacetContainer {
     /// Reference to facets vector (sorted by priority, descending)
     pub fn get_all_facets(&self) -> &[Arc<RwLock<Box<dyn Facet>>>] {
         &self.facets
+    }
+
+    /// Get metadata for all facets
+    ///
+    /// ## Returns
+    /// Reference to metadata HashMap (facet_type -> FacetMetadata)
+    pub fn get_metadata(&self) -> &HashMap<String, FacetMetadata> {
+        &self.metadata
     }
 
     /// Detach all facets (for actor termination)

@@ -306,7 +306,9 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         
         // Record metrics
         metrics::counter!("plexspaces_node_tuplespace_write_requests_total").increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("TupleSpace write requested");
+        }
 
         // Validate request
         if req.tuples.is_empty() {

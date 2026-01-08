@@ -112,8 +112,7 @@ impl FacetFactory for DurabilityFacetFactory {
             .map(|p| p as i32)
             .unwrap_or(100);
         // Create DurabilityFacet with in-memory storage for tests
-        // DurabilityFacet::new() takes storage directly, not Arc
-        let storage = MemoryJournalStorage::new();
+        let storage = Arc::new(MemoryJournalStorage::new());
         Ok(Box::new(DurabilityFacet::new(storage, config, priority)))
     }
 

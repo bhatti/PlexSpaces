@@ -65,7 +65,8 @@
 //! - Checkpoint lookup: O(log n) via PRIMARY KEY → < 1ms
 //! - Truncate: O(m) where m = entries to delete → < 100ms for 10K entries
 
-use crate::{Checkpoint, JournalEntry, JournalError, JournalResult, JournalStats, JournalStorage, ActorEvent, ActorHistory};
+use crate::{Checkpoint, JournalEntry, JournalStats, ActorEvent, ActorHistory};
+use plexspaces_core::{JournalStorage, JournalError, JournalResult};
 use crate::storage::{ReminderState, ReminderRegistration};
 use async_trait::async_trait;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
@@ -2845,5 +2846,13 @@ mod tests {
         let entry3 = create_test_entry("actor-2", 0).await;
         let seq3 = storage.append_entry(&entry3).await.unwrap();
         assert_eq!(seq3, 1);
+    }
+}
+
+// Implement Service trait for registration in ServiceLocator
+#[cfg(feature = "sqlite-backend")]
+impl plexspaces_core::Service for SqliteJournalStorage {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_locator::service_names::JOURNAL_STORAGE.to_string()
     }
 }

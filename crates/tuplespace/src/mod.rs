@@ -550,7 +550,9 @@ impl TupleSpace {
         tokio::spawn(async move {
             match storage_clone.subscribe_watch_events(&namespace_str_clone).await {
                 Ok(mut receiver) => {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!("Subscribed to watch events for namespace: {}", namespace_str_clone);
+                    }
                     // Forward distributed events to local watchers
                     while let Some(event) = receiver.recv().await {
                         let watchers_guard = watchers_clone.read().await;
@@ -582,7 +584,9 @@ impl TupleSpace {
                 }
                 Err(TupleSpaceError::NotSupported(_)) => {
                     // Storage backend doesn't support subscriptions (e.g., SQLite, or PostgreSQL not yet implemented)
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!("Watch event subscription not supported for this storage backend");
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to subscribe to watch events: {}", e);

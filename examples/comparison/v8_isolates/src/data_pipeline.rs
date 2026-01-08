@@ -12,6 +12,8 @@ use plexspaces_behavior::GenServer;
 // use plexspaces_channel::{Channel, ChannelConfig, ChannelBackend, InMemoryChannel};
 use plexspaces_core::{Actor, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_journaling::{DurabilityFacet, MemoryJournalStorage};
+use std::sync::Arc;
+use plexspaces_core::JournalStorage;
 use plexspaces_mailbox::Message;
 use plexspaces_node::Node;
 use std::time::{Duration, Instant};
@@ -47,7 +49,9 @@ impl Actor for IngestionActor {
             PipelineMessage::Ingest { events } => {
                 // In production, send to pipeline channel with backpressure check
                 // For demo, we'll just log
-                info!("IngestionActor received {} events", events.len());
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("IngestionActor received {} events", events.len());
+                }
             }
             _ => {}
         }
@@ -127,8 +131,10 @@ impl GenServer for PipelineProcessorActor {
                 if let Some(config) = &self.config {
                     for dest in &config.destinations {
                         // In production, send to destination actors via channels
-                        info!("Sending {} events to destination: {}", 
-                            processed.len(), dest.destination_type);
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            tracing::debug!("Sending {} events to destination: {}", 
+                                processed.len(), dest.destination_type);
+                        }
                     }
                 }
 
@@ -352,23 +358,33 @@ impl DestinationActor {
         // For demo, simulate
         match self.destination_type.as_str() {
             "splunk" => {
-                info!("Sending {} events to Splunk", events.len());
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("Sending {} events to Splunk", events.len());
+                }
                 // Simulate HTTP request to Splunk HEC
             }
             "datadog" => {
-                info!("Sending {} events to Datadog", events.len());
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("Sending {} events to Datadog", events.len());
+                }
                 // Simulate HTTP request to Datadog API
             }
             "kinesis" => {
-                info!("Sending {} events to Kinesis", events.len());
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("Sending {} events to Kinesis", events.len());
+                }
                 // Simulate AWS Kinesis put_records
             }
             "s3" => {
-                info!("Sending {} events to S3", events.len());
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("Sending {} events to S3", events.len());
+                }
                 // Simulate S3 put_object
             }
             "elasticsearch" => {
-                info!("Sending {} events to Elasticsearch", events.len());
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("Sending {} events to Elasticsearch", events.len());
+                }
                 // Simulate Elasticsearch bulk API
             }
             _ => {
@@ -394,11 +410,17 @@ pub async fn run_data_plane_benchmark(node: &Node) -> Result<PerformanceMetrics,
     let pipeline_id: ActorId = "pipeline-processor@v8-isolates-node-1".to_string();
     let ctx = plexspaces_core::RequestContext::internal();
     
-    // Create durability facet
-    let storage = MemoryJournalStorage::new();
+    // Create durability facet using journal storage from ServiceLocator
+    // If not available, create a default in-memory storage for this example
+    let storage: Arc<dyn JournalStorage> = service_locator
+        .get_journal_storage()
+        .await
+        .unwrap_or_else(|| Arc::new(MemoryJournalStorage::new()) as Arc<dyn JournalStorage>);
     let durability_facet = Box::new(DurabilityFacet::new(
         storage,
-        serde_json::json!({}),
+        serde_json::json!({
+            "checkpoint_interval": 1000,  // Checkpoint every 1000 messages instead of default 100
+        }),
         50,
     ));
     

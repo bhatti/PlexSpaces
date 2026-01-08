@@ -448,7 +448,7 @@ impl PlexSpacesHealthReporter {
     /// ```rust,ignore
     /// // After node initialization
     /// let duration = reporter.mark_startup_complete(None).await;
-    /// eprintln!("Startup took {:?}", duration);
+    /// tracing::warn!("Startup took {:?}", duration);
     /// ```
     pub async fn mark_startup_complete(&self, message: Option<String>) -> Duration {
         let startup_duration = self.started_at.elapsed();
@@ -472,7 +472,7 @@ impl PlexSpacesHealthReporter {
             service_status.insert("plexspaces.supervisor.v1.SupervisorService".to_string(), ServingStatus::ServingStatusServing);
         }
 
-        eprintln!(
+        tracing::warn!(
             "✅ Startup complete in {:?}, node SERVING",
             startup_duration
         );
@@ -502,7 +502,7 @@ impl PlexSpacesHealthReporter {
     /// // On SIGTERM
     /// let (drained, duration, completed) = reporter.begin_shutdown(None).await;
     /// if !completed {
-    ///     eprintln!("Warning: {} requests still in flight", drained);
+    ///     tracing::warn!("Warning: {} requests still in flight", drained);
     /// }
     /// ```
     pub async fn begin_shutdown(&self, drain_timeout: Option<Duration>) -> (u64, Duration, bool) {
@@ -536,7 +536,7 @@ impl PlexSpacesHealthReporter {
             service_status.insert("plexspaces.supervisor.v1.SupervisorService".to_string(), ServingStatus::ServingStatusNotServing);
         }
 
-        eprintln!("🛑 Graceful shutdown: NOT_SERVING, draining requests...");
+        tracing::warn!("🛑 Graceful shutdown: NOT_SERVING, draining requests...");
 
         // Drain requests
         let timeout = drain_timeout.unwrap_or_else(|| {
@@ -552,9 +552,9 @@ impl PlexSpacesHealthReporter {
         let (drained, duration, completed) = self.drain_requests(timeout).await;
 
         if completed {
-            eprintln!("✅ All {} requests drained in {:?}", drained, duration);
+            tracing::warn!("✅ All {} requests drained in {:?}", drained, duration);
         } else {
-            eprintln!(
+            tracing::warn!(
                 "⚠️  Drain timeout, {} requests still in flight after {:?}",
                 drained, duration
             );
@@ -599,11 +599,13 @@ impl PlexSpacesHealthReporter {
         // but they require a NamedService type. For now, we track internally.
         // The standard health service will use overall health for service-specific checks.
         
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             service = service_name,
             status = status_i32,
             "Service health status updated"
         );
+        }
     }
 
     /// Get service-specific health status
@@ -679,7 +681,7 @@ impl PlexSpacesHealthReporter {
     /// ```rust,ignore
     /// let status = reporter.get_readiness().await;
     /// if !status.is_ready {
-    ///     eprintln!("Not ready: {}", status.not_ready_reason);
+    ///     tracing::warn!("Not ready: {}", status.not_ready_reason);
     /// }
     /// ```
     pub async fn get_readiness(&self) -> NodeReadinessStatus {

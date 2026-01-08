@@ -220,6 +220,7 @@ impl WasmRuntime {
             )));
         }
         
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             module_name = name,
             module_version = version,
@@ -227,6 +228,7 @@ impl WasmRuntime {
             magic_number = format!("{:02x?}", magic),
             "Attempting to compile WASM module"
         );
+        }
         
         // Try to parse as standard module first
         // If that fails and component-model is enabled, try as component
@@ -606,11 +608,13 @@ impl WasmRuntime {
         // is supported. This is an acceptable limitation - name@version indexing can be
         // added if needed for specific use cases, but hash-based lookup is the primary method.
         if let Some((name, version)) = module_ref.split_once('@') {
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 name = %name,
                 version = %version,
                 "name@version lookup not yet supported, use hash instead"
             );
+            }
         }
 
         None

@@ -469,12 +469,9 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
     
-    // Spawn task to handle messages and reply via ActorService
+    // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
     let mailbox_counter_clone = mailbox_counter.clone();
-    let actor_service1: Arc<dyn ActorService + Send + Sync> = node1_service_locator
-        .get_actor_service()
-        .await
-        .expect("ActorService should be registered");
+    let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
@@ -490,15 +487,20 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
                     }
                     _ => continue,
                 };
-                // Send reply using ActorService.send_reply() (handles temporary senders correctly)
+                // Send reply using ActorRegistry to get temporary sender's ActorRef and call tell()
+                // This routes correctly to ReplyWaiter for ask() pattern
                 if let Some(sender_id) = &msg.sender {
-                    let reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
-                    let _ = actor_service1.send_reply(
-                        msg.correlation_id.as_deref(),
-                        sender_id,
-                        counter_id_for_spawn.clone(),
-                        reply_msg,
-                    ).await;
+                    let mut reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
+                    reply_msg.receiver = sender_id.clone();
+                    reply_msg.sender = Some(counter_id_for_spawn.clone());
+                    if let Some(corr_id) = &msg.correlation_id {
+                        reply_msg.correlation_id = Some(corr_id.clone());
+                    }
+                    // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
+                    // This ensures proper routing to ReplyWaiter
+                    if let Some(sender_ref) = actor_registry1_clone.lookup_actor(sender_id).await {
+                        let _ = sender_ref.tell(reply_msg).await;
+                    }
                 }
             }
         }
@@ -581,12 +583,9 @@ async fn test_chained_asks_multi_node() {
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
     
-    // Spawn task to handle messages and reply via ActorService
+    // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
     let mailbox_counter_clone = mailbox_counter.clone();
-    let actor_service1: Arc<dyn ActorService + Send + Sync> = node1_service_locator
-        .get_actor_service()
-        .await
-        .expect("ActorService should be registered");
+    let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
@@ -602,15 +601,20 @@ async fn test_chained_asks_multi_node() {
                     }
                     _ => continue,
                 };
-                // Send reply using ActorService.send_reply() (handles temporary senders correctly)
+                // Send reply using ActorRegistry to get temporary sender's ActorRef and call tell()
+                // This routes correctly to ReplyWaiter for ask() pattern
                 if let Some(sender_id) = &msg.sender {
-                    let reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
-                    let _ = actor_service1.send_reply(
-                        msg.correlation_id.as_deref(),
-                        sender_id,
-                        counter_id_for_spawn.clone(),
-                        reply_msg,
-                    ).await;
+                    let mut reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
+                    reply_msg.receiver = sender_id.clone();
+                    reply_msg.sender = Some(counter_id_for_spawn.clone());
+                    if let Some(corr_id) = &msg.correlation_id {
+                        reply_msg.correlation_id = Some(corr_id.clone());
+                    }
+                    // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
+                    // This ensures proper routing to ReplyWaiter
+                    if let Some(sender_ref) = actor_registry1_clone.lookup_actor(sender_id).await {
+                        let _ = sender_ref.tell(reply_msg).await;
+                    }
                 }
             }
         }
@@ -691,12 +695,9 @@ async fn test_concurrent_asks_multi_node() {
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
     
-    // Spawn task to handle messages and reply via ActorService
+    // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
     let mailbox_counter_clone = mailbox_counter.clone();
-    let actor_service1: Arc<dyn ActorService + Send + Sync> = node1_service_locator
-        .get_actor_service()
-        .await
-        .expect("ActorService should be registered");
+    let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
@@ -712,15 +713,20 @@ async fn test_concurrent_asks_multi_node() {
                     }
                     _ => continue,
                 };
-                // Send reply using ActorService.send_reply() (handles temporary senders correctly)
+                // Send reply using ActorRegistry to get temporary sender's ActorRef and call tell()
+                // This routes correctly to ReplyWaiter for ask() pattern
                 if let Some(sender_id) = &msg.sender {
-                    let reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
-                    let _ = actor_service1.send_reply(
-                        msg.correlation_id.as_deref(),
-                        sender_id,
-                        counter_id_for_spawn.clone(),
-                        reply_msg,
-                    ).await;
+                    let mut reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
+                    reply_msg.receiver = sender_id.clone();
+                    reply_msg.sender = Some(counter_id_for_spawn.clone());
+                    if let Some(corr_id) = &msg.correlation_id {
+                        reply_msg.correlation_id = Some(corr_id.clone());
+                    }
+                    // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
+                    // This ensures proper routing to ReplyWaiter
+                    if let Some(sender_ref) = actor_registry1_clone.lookup_actor(sender_id).await {
+                        let _ = sender_ref.tell(reply_msg).await;
+                    }
                 }
             }
         }

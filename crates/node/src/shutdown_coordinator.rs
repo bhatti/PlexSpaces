@@ -57,7 +57,7 @@
 //!
 //!     // Wait for shutdown signal
 //!     let signal = shutdown_rx.await.unwrap();
-//!     eprintln!("Received signal: {:?}", signal);
+//!     tracing::warn!("Received signal: {:?}", signal);
 //!
 //!     // Graceful shutdown
 //!     coordinator.shutdown(&node).await?;
@@ -162,15 +162,15 @@ impl ShutdownCoordinator {
 
             let shutdown_signal = tokio::select! {
                 _ = sigterm.recv() => {
-                    eprintln!("📡 Received SIGTERM, initiating graceful shutdown...");
+                    tracing::warn!("📡 Received SIGTERM, initiating graceful shutdown...");
                     ShutdownSignal::ShutdownSignalSigterm
                 }
                 _ = sigint.recv() => {
-                    eprintln!("📡 Received SIGINT (Ctrl+C), initiating graceful shutdown...");
+                    tracing::warn!("📡 Received SIGINT (Ctrl+C), initiating graceful shutdown...");
                     ShutdownSignal::ShutdownSignalSigint
                 }
                 _ = sighup.recv() => {
-                    eprintln!("📡 Received SIGHUP, initiating graceful shutdown...");
+                    tracing::warn!("📡 Received SIGHUP, initiating graceful shutdown...");
                     ShutdownSignal::ShutdownSignalSighup
                 }
             };
@@ -232,7 +232,7 @@ impl ShutdownCoordinator {
         status.shutdown_started_at = Some(prost_types::Timestamp::from(now));
         drop(status);
 
-        eprintln!("🛑 Starting graceful shutdown sequence...");
+        tracing::warn!("🛑 Starting graceful shutdown sequence...");
 
         // Phase 1: Set health to NOT_SERVING
         self.execute_phase(
@@ -288,7 +288,7 @@ impl ShutdownCoordinator {
         drop(status);
 
         let elapsed = self.shutdown_started.lock().await.unwrap().elapsed();
-        eprintln!("✅ Graceful shutdown complete in {:?}", elapsed);
+        tracing::warn!("✅ Graceful shutdown complete in {:?}", elapsed);
 
         Ok(())
     }
@@ -310,7 +310,7 @@ impl ShutdownCoordinator {
         let phase_clone3 = phase.clone();
         let phase_value = phase_clone1 as i32;
         let phase_num = self.get_phase_number(phase_clone3);
-        eprintln!("  {}/7 {}", phase_num, description);
+        tracing::warn!("  {}/7 {}", phase_num, description);
 
         // Update current phase
         let mut status = self.status.lock().await;

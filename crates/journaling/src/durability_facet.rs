@@ -115,7 +115,7 @@ use tracing;
 /// - Uses ExecutionContext for side effect caching
 /// - Uses CheckpointManager for periodic snapshots
 /// - Intercepts before/after method calls via Facet trait
-pub struct DurabilityFacet<S: JournalStorage> {
+pub struct DurabilityFacet {
     /// Facet configuration as Value (immutable, for Facet trait)
     config_value: Value,
     
@@ -129,10 +129,10 @@ pub struct DurabilityFacet<S: JournalStorage> {
     config: DurabilityConfig,
 
     /// Journal storage backend
-    storage: Arc<S>,
+    storage: Arc<dyn JournalStorage>,
 
     /// Checkpoint manager
-    checkpoint_manager: Arc<CheckpointManager<S>>,
+    checkpoint_manager: Arc<CheckpointManager>,
 
     /// Execution context for current execution
     pub(crate) execution_context: Arc<RwLock<Option<ExecutionContextImpl>>>,
@@ -159,11 +159,11 @@ pub struct DurabilityFacet<S: JournalStorage> {
 /// Default priority for DurabilityFacet
 pub const DURABILITY_FACET_DEFAULT_PRIORITY: i32 = 50;
 
-impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
+impl DurabilityFacet {
     /// Create a new durability facet
     ///
     /// ## Arguments
-    /// * `storage` - Journal storage backend
+    /// * `storage` - Journal storage backend as trait object
     /// * `config` - Facet configuration as Value (can be empty `{}` for defaults)
     /// * `priority` - Facet priority (default: 50)
     ///
@@ -174,7 +174,7 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
     /// ```rust,no_run
     /// # use plexspaces_journaling::*;
     /// # async fn example() -> JournalResult<()> {
-    /// let storage = MemoryJournalStorage::new();
+    /// let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
     /// let config = serde_json::json!({
     ///     "checkpoint_interval": 100,
     ///     "replay_on_activation": true,
@@ -184,7 +184,7 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(storage: S, config: Value, priority: i32) -> Self {
+    pub fn new(storage: Arc<dyn JournalStorage>, config: Value, priority: i32) -> Self {
         // Parse Value to DurabilityConfig
         let durability_config = Self::parse_config(config.clone());
         // Create checkpoint config from durability config
@@ -199,12 +199,6 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
             metadata: HashMap::new(),
         };
 
-        let storage_arc = Arc::new(storage);
-
-        // Create a cloned reference for CheckpointManager
-        // Note: CheckpointManager needs S, not Arc<S>
-        // We'll wrap storage in Arc for sharing, but CheckpointManager takes ownership
-        let checkpoint_storage = Arc::clone(&storage_arc);
         // Get schema version from durability_config (default to 1 if not set)
         let schema_version = if durability_config.state_schema_version > 0 {
             durability_config.state_schema_version
@@ -212,8 +206,10 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
             1 // Default to schema version 1
         };
         
+        // Create checkpoint manager with shared storage reference
+        let checkpoint_storage = Arc::clone(&storage);
         let checkpoint_manager = Arc::new(CheckpointManager::new(
-            (*checkpoint_storage).clone(),
+            checkpoint_storage,
             checkpoint_config,
             schema_version,
         ));
@@ -223,7 +219,7 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
             priority,
             actor_id: Arc::new(RwLock::new(None)),
             config: durability_config,
-            storage: storage_arc,
+            storage,
             checkpoint_manager,
             execution_context: Arc::new(RwLock::new(None)),
             message_sequence: Arc::new(RwLock::new(0)),
@@ -331,6 +327,18 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
         }
     }
 
+    /// Get storage backend (for facet recreation during reactivation)
+    ///
+    /// ## Returns
+    /// Clone of the storage backend
+    ///
+    /// ## Notes
+    /// This is used when reactivating suspended virtual actors to recreate the DurabilityFacet
+    /// with the same storage backend.
+    pub fn get_storage(&self) -> Arc<dyn JournalStorage> {
+        Arc::clone(&self.storage)
+    }
+
     /// Replay journal entries to restore actor state (without message handler)
     ///
     /// ## Arguments
@@ -385,7 +393,9 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
                 metrics::histogram!("plexspaces_journaling_side_effects_cached",
                     "actor_id" => actor_id.to_string()
                 ).record(side_effect_count as f64);
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(actor_id = %actor_id, side_effects_count = side_effect_count, "Side effects cached for replay");
+                }
             }
 
         // CRITICAL: Update message_sequence to highest sequence number from ALL entries
@@ -458,7 +468,9 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
             metrics::histogram!("plexspaces_journaling_side_effects_cached",
                 "actor_id" => actor_id.to_string()
             ).record(side_effect_count as f64);
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(actor_id = %actor_id, side_effects_count = side_effect_count, "Side effects cached for replay");
+            }
         }
 
         // Replay MessageReceived entries through handler (Restate pattern)
@@ -777,7 +789,7 @@ impl<S: JournalStorage + Clone + 'static> DurabilityFacet<S> {
 }
 
 #[async_trait]
-impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
+impl Facet for DurabilityFacet {
     fn facet_type(&self) -> &str {
         "durability"
     }
@@ -857,7 +869,9 @@ impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
                 }
                 Err(JournalError::CheckpointNotFound(_)) => {
                     // No checkpoint, replay from beginning
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %actor_id, "No checkpoint found, replaying from beginning");
+                    }
                     (0, None)
                 }
                 Err(e) => {
@@ -961,10 +975,12 @@ impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
         _reason: &plexspaces_facet::ExitReason,
     ) -> Result<(), FacetError> {
         // Flush journal and save checkpoint on EXIT
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %actor_id,
             "DurabilityFacet handling EXIT signal - flushing journal and saving checkpoint"
         );
+        }
         
         // Save checkpoint if enabled (use maybe_checkpoint which handles interval logic)
         let checkpoint_start = std::time::Instant::now();
@@ -983,11 +999,13 @@ impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
             metrics::histogram!("plexspaces_durability_facet_exit_checkpoint_duration_seconds",
                 "actor_id" => actor_id.to_string()
             ).record(checkpoint_duration.as_secs_f64());
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 actor_id = %actor_id,
                 duration_ms = checkpoint_duration.as_millis(),
                 "Saved checkpoint on EXIT signal"
             );
+            }
         }
         
         metrics::counter!("plexspaces_durability_facet_exit_total",
@@ -1013,12 +1031,14 @@ impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
         reason: &plexspaces_facet::ExitReason,
     ) -> Result<(), FacetError> {
         // Log DOWN notification for observability
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             actor_id = %actor_id,
             monitored_id = %monitored_id,
             reason = ?reason,
             "DurabilityFacet received DOWN notification (no action needed)"
         );
+        }
         
         metrics::counter!("plexspaces_durability_facet_down_total",
             "actor_id" => actor_id.to_string(),
@@ -1110,7 +1130,9 @@ impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
         metrics::histogram!("plexspaces_journaling_append_duration_seconds",
             "actor_id" => actor_id.clone()
         ).record(duration.as_secs_f64());
+        if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(actor_id = %actor_id, sequence = sequence, duration_ms = duration.as_millis(), "Journal entry appended");
+        }
 
         Ok(InterceptResult::Continue)
     }
@@ -1219,7 +1241,9 @@ impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
             metrics::histogram!("plexspaces_journaling_batch_size",
                 "actor_id" => actor_id.clone()
             ).record(batch_size as f64);
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(actor_id = %actor_id, batch_size = batch_size, duration_ms = duration.as_millis(), "Journal batch appended");
+            }
         }
 
         // Check if checkpoint should be created
@@ -1252,7 +1276,9 @@ impl<S: JournalStorage + Clone + 'static> Facet for DurabilityFacet<S> {
             metrics::gauge!("plexspaces_journaling_latest_checkpoint_sequence",
                 "actor_id" => actor_id.clone()
             ).set(current_sequence as f64);
-            tracing::info!(actor_id = %actor_id, sequence = current_sequence, size_bytes = checkpoint_size, duration_ms = duration.as_millis(), "Checkpoint created");
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(actor_id = %actor_id, sequence = current_sequence, size_bytes = checkpoint_size, duration_ms = duration.as_millis(), "Checkpoint created");
+            }
         }
 
         Ok(InterceptResult::Continue)
@@ -1317,7 +1343,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_creation() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1327,7 +1353,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_attach_without_replay() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let mut config = create_test_config();
         config.replay_on_activation = false; // Disable replay
 
@@ -1348,7 +1374,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_attach_with_empty_journal_replay() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config(); // replay_on_activation = true
 
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1360,7 +1386,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_detach() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1381,7 +1407,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_before_method_journals_message_received() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1414,7 +1440,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_after_method_journals_message_processed() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1452,7 +1478,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sequence_number_increments() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1481,7 +1507,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_checkpoint_creation_at_interval() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1506,7 +1532,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_journal_on_activation() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false; // First attach without replay
@@ -1551,7 +1577,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_error_handling() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1564,7 +1590,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_before_method_without_attach_fails() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1576,7 +1602,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_messages_with_different_payloads() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1616,7 +1642,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_get_state() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
@@ -1627,7 +1653,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_set_state() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let config = create_test_config();
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
@@ -1639,7 +1665,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_with_checkpoint() {
-        let storage = MemoryJournalStorage::new();
+        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1696,7 +1722,7 @@ mod tests {
         // and to avoid any potential issues with MemoryJournalStorage cloning
         use crate::sql::SqliteJournalStorage;
 
-        let storage = SqliteJournalStorage::new(":memory:").await.unwrap();
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone(); // SQLite pool is Arc-based, so clone shares connection
 
         let mut config = create_test_config();
@@ -1764,7 +1790,7 @@ mod tests {
         // Use SQLite to ensure batching works correctly without side effects
         use crate::sql::SqliteJournalStorage;
 
-        let storage = SqliteJournalStorage::new(":memory:").await.unwrap();
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
 
         let mut config = create_test_config();

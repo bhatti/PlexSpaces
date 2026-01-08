@@ -76,7 +76,7 @@ pub async fn register_builtin_dependencies(
         reporter.register_readiness_checker(cb_checker.clone()).await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        eprintln!("✅ Registered Redis health checker (critical) with circuit breaker");
+        tracing::warn!("✅ Registered Redis health checker (critical) with circuit breaker");
     }
 
     // Check for PostgreSQL (used by KeyValue store and TupleSpace)
@@ -94,7 +94,7 @@ pub async fn register_builtin_dependencies(
         reporter.register_readiness_checker(cb_checker.clone()).await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        eprintln!("✅ Registered PostgreSQL health checker (critical) with circuit breaker");
+        tracing::warn!("✅ Registered PostgreSQL health checker (critical) with circuit breaker");
     }
 
     // Check for Kafka (messaging)
@@ -109,7 +109,7 @@ pub async fn register_builtin_dependencies(
         reporter.register_readiness_checker(cb_checker.clone()).await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        eprintln!("✅ Registered Kafka health checker (critical) with circuit breaker");
+        tracing::warn!("✅ Registered Kafka health checker (critical) with circuit breaker");
     }
 
     // Check for MinIO (blob storage)
@@ -143,7 +143,7 @@ pub async fn register_builtin_dependencies(
             reporter.register_startup_checker(cb_checker.clone()).await;
         }
         registered_count += 1;
-        eprintln!("✅ Registered MinIO health checker (critical: {}) with circuit breaker", is_critical);
+        tracing::warn!("✅ Registered MinIO health checker (critical: {}) with circuit breaker", is_critical);
     }
 
     // Check for DynamoDB (storage backend)
@@ -172,7 +172,7 @@ pub async fn register_builtin_dependencies(
             reporter.register_startup_checker(cb_checker.clone()).await;
         }
         registered_count += 1;
-        eprintln!("✅ Registered DynamoDB health checker (critical: {}) with circuit breaker", is_critical);
+        tracing::warn!("✅ Registered DynamoDB health checker (critical: {}) with circuit breaker", is_critical);
     }
 
     // Check for SQS (channel backend)
@@ -200,7 +200,7 @@ pub async fn register_builtin_dependencies(
             reporter.register_startup_checker(cb_checker.clone()).await;
         }
         registered_count += 1;
-        eprintln!("✅ Registered SQS health checker (critical: {}) with circuit breaker", is_critical);
+        tracing::warn!("✅ Registered SQS health checker (critical: {}) with circuit breaker", is_critical);
     }
 
     Ok(registered_count)
@@ -236,7 +236,7 @@ pub async fn register_dependencies(
         // Parse dependency spec: "name:type:critical"
         let parts: Vec<&str> = dep_spec.split(':').collect();
         if parts.len() < 2 {
-            eprintln!("Warning: Invalid dependency spec '{}', expected 'name:type:critical'", dep_spec);
+            tracing::warn!("Warning: Invalid dependency spec '{}', expected 'name:type:critical'", dep_spec);
             continue;
         }
 
@@ -250,7 +250,7 @@ pub async fn register_dependencies(
             "actor" => ObjectType::ObjectTypeActor,
             "tuplespace" => ObjectType::ObjectTypeTuplespace,
             _ => {
-                eprintln!("Warning: Unknown dependency type '{}' for '{}'", dep_type_str, dep_name);
+                tracing::warn!("Warning: Unknown dependency type '{}' for '{}'", dep_type_str, dep_name);
                 continue;
             }
         };
@@ -262,11 +262,11 @@ pub async fn register_dependencies(
         {
             Ok(Some(reg)) => reg,
             Ok(None) => {
-                eprintln!("Warning: Dependency '{}' not found in registry", dep_name);
+                tracing::warn!("Warning: Dependency '{}' not found in registry", dep_name);
                 continue;
             }
             Err(e) => {
-                eprintln!("Error looking up dependency '{}': {}", dep_name, e);
+                tracing::warn!("Error looking up dependency '{}': {}", dep_name, e);
                 continue;
             }
         };
@@ -287,7 +287,7 @@ pub async fn register_dependencies(
         }
 
         registered_count += 1;
-        eprintln!("✅ Registered dependency checker: {} (critical: {})", dep_name, is_critical);
+        tracing::warn!("✅ Registered dependency checker: {} (critical: {})", dep_name, is_critical);
     }
 
     Ok(registered_count)

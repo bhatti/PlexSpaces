@@ -269,12 +269,14 @@ impl MessageSender for ActorServiceMessageSender {
         let monitor_id_clone = monitor_id.clone();
         tokio::spawn(async move {
             while let Some((terminated_id, reason)) = rx.recv().await {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     monitor = %monitor_id_clone,
                     terminated = %terminated_id,
                     reason = ?reason,
                     "Received DOWN notification for monitored actor"
                 );
+                }
                 // TODO: Send DOWN message to WASM actor's mailbox
                 // This requires integration with WASM message handling
             }

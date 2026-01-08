@@ -46,38 +46,9 @@ use plexspaces_proto::supervision::v1::{SupervisionError as ProtoError, Supervis
 // ============================================================================
 // Link Provider Trait (Phase 8.5: Link Semantics Integration)
 // ============================================================================
-
-/// Trait for providing link semantics to supervisors
-///
-/// ## Purpose
-/// Allows Supervisor to use links internally without creating circular dependencies.
-/// Node implements this trait to provide link/unlink functionality.
-///
-/// ## Erlang Philosophy
-/// Supervision uses links internally (Erlang/OTP pattern). When a supervisor
-/// adds a child, it links to the child so cascading failures work correctly.
-#[async_trait::async_trait]
-pub trait LinkProvider: Send + Sync {
-    /// Link two actors (bidirectional death propagation)
-    ///
-    /// ## Arguments
-    /// * `actor_id` - First actor in the link
-    /// * `linked_actor_id` - Second actor in the link
-    ///
-    /// ## Returns
-    /// Success or error
-    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String>;
-
-    /// Unlink two actors
-    ///
-    /// ## Arguments
-    /// * `actor_id` - First actor in the link
-    /// * `linked_actor_id` - Second actor in the link
-    ///
-    /// ## Returns
-    /// Success or error
-    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String>;
-}
+// NOTE: LinkProvider trait moved to plexspaces-core to avoid circular dependencies.
+// Re-export for backward compatibility.
+pub use plexspaces_core::LinkProvider;
 
 // ============================================================================
 // Supervised Child Trait (Rust-side interface, uses proto errors)
@@ -355,18 +326,32 @@ impl Supervisor {
     /// Set Node for link semantics (Phase 8.5: Erlang link/1 pattern)
     ///
     /// ## Purpose
-    /// When Node is provided, supervisor uses links internally for cascading failures.
+    /// When LinkProvider is provided, supervisor uses links internally for cascading failures.
     /// This enables the Erlang/OTP pattern where supervision uses links.
+    /// ActorRegistry implements LinkProvider and should be used for local actors.
     ///
     /// ## Arguments
-    /// * `node` - Node that implements LinkProvider trait
+    /// * `link_provider` - LinkProvider implementation (typically ActorRegistry)
     ///
     /// ## Returns
     /// Self for method chaining
-    pub fn with_node(mut self, node: Arc<dyn LinkProvider + Send + Sync>) -> Self {
-        self.node = Some(node);
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// use plexspaces_core::{ActorRegistry, ServiceLocator};
+    /// let actor_registry: Arc<ActorRegistry> = service_locator.get_service().await.unwrap();
+    /// supervisor.with_link_provider(actor_registry as Arc<dyn LinkProvider + Send + Sync>);
+    /// ```
+    ///
+    /// ## TODO: Remote Actor Linking
+    /// Node supports remote actor linking via gRPC, but this is advanced functionality.
+    /// For now, LinkProvider in ActorRegistry only supports local actors.
+    /// Remote linking can be added later by enhancing ActorRegistry with Node reference.
+    pub fn with_link_provider(mut self, link_provider: Arc<dyn LinkProvider + Send + Sync>) -> Self {
+        self.node = Some(link_provider);
         self
     }
+    
 
     /// Set ServiceLocator for creating ActorRefs
     ///

@@ -346,11 +346,13 @@ impl SqliteChannel {
             })?;
 
         if result.rows_affected() > 0 {
+            if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 "Cleaned up {} old acked messages for channel '{}'",
                 result.rows_affected(),
                 self.config.name
             );
+            }
         }
 
         Ok(())
@@ -710,11 +712,13 @@ impl Channel for SqliteChannel {
             } else {
                 // Mark as acked (drop message)
                 self.ack(message_id).await?;
+                if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     channel = %self.config.name,
                     message_id = %message_id,
                     "SQLite message nacked (dropped, DLQ disabled)"
                 );
+                }
             }
         }
 

@@ -385,11 +385,15 @@ impl ActorRegistry {
         if let Some(state_value) = self.get_actor_state(actor_id).await {
             // Check if state is Active (proto enum value)
             let is_active = state_value == ProtoActorState::ActorStateActive as i32;
-            eprintln!("🔵 [ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value={}, ActorStateActive={}, is_active={}", 
-                actor_id, state_value, ProtoActorState::ActorStateActive as i32, is_active);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!("[ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value={}, ActorStateActive={}, is_active={}", 
+                    actor_id, state_value, ProtoActorState::ActorStateActive as i32, is_active);
+            }
             is_active
         } else {
-            eprintln!("🔵 [ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value=None, is_active=false", actor_id);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!("[ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value=None, is_active=false", actor_id);
+            }
             false
         }
     }
@@ -418,7 +422,9 @@ impl ActorRegistry {
     pub async fn get_actor_type(&self, actor_id: &ActorId) -> Option<String> {
         let actor_types = self.actor_types.read().await;
         let result = actor_types.get(actor_id).cloned();
-        eprintln!("🔵 [ACTOR_REGISTRY] get_actor_type: actor_id={}, result={:?}, total_types={}", actor_id, result, actor_types.len());
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("[ACTOR_REGISTRY] get_actor_type: actor_id={}, result={:?}, total_types={}", actor_id, result, actor_types.len());
+        }
         result
     }
     
@@ -447,7 +453,9 @@ impl ActorRegistry {
             let actor_types = self.actor_types.read().await;
             actor_types.get(actor_id).cloned()
         };
-        eprintln!("🔵 [ACTOR_REGISTRY] suspend_virtual_actor: actor_id={}, actor_type_before={:?}", actor_id, actor_type_before);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("[ACTOR_REGISTRY] suspend_virtual_actor: actor_id={}, actor_type_before={:?}", actor_id, actor_type_before);
+        }
         
         // Remove instance (preserves actor_type, metadata, config for rebuilding)
         // When the Arc is dropped (removed from map), the actor will be stopped
@@ -467,12 +475,16 @@ impl ActorRegistry {
             let actor_types = self.actor_types.read().await;
             actor_types.get(actor_id).cloned()
         };
-        eprintln!("🟢 [ACTOR_REGISTRY] suspend_virtual_actor: actor_id={}, actor_type_after={:?}", actor_id, actor_type_after);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("[ACTOR_REGISTRY] suspend_virtual_actor: actor_id={}, actor_type_after={:?}", actor_id, actor_type_after);
+        }
         
-        tracing::debug!(
-            actor_id = %actor_id,
-            "Suspended virtual actor (instance and ActorRef removed, actor_type/metadata/config preserved)"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                actor_id = %actor_id,
+                "Suspended virtual actor (instance and ActorRef removed, actor_type/metadata/config preserved)"
+            );
+        }
     }
     
     // NOTE: remove_actor_instance() removed - use unregister_with_cleanup() instead
@@ -605,10 +617,12 @@ impl ActorRegistry {
         if let Some(ref instance) = instance {
             let mut actor_instances = self.actor_instances.write().await;
             actor_instances.insert(actor_id.clone(), instance.clone());
-            tracing::debug!(
-                actor_id = %actor_id,
-                "Stored actor instance (actor is activated and ready for ask())"
-            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    actor_id = %actor_id,
+                    "Stored actor instance (actor is activated and ready for ask())"
+                );
+            }
         }
         
         // Update actor-type index if type information is provided
@@ -619,7 +633,9 @@ impl ActorRegistry {
             {
                 let mut actor_types = self.actor_types.write().await;
                 actor_types.insert(actor_id.clone(), actor_type.clone());
-                eprintln!("🟢 [ACTOR_REGISTRY] Stored actor_type: actor_id={}, actor_type={}", actor_id, actor_type);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("[ACTOR_REGISTRY] Stored actor_type: actor_id={}, actor_type={}", actor_id, actor_type);
+                }
             }
             
             let mut index = self.actor_type_index.write().await;
@@ -627,7 +643,8 @@ impl ActorRegistry {
             index.entry(key).or_insert_with(Vec::new).push(actor_id.clone());
             
             // OBSERVABILITY: Log actor registration with type
-            tracing::debug!(
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
                 actor_id = %actor_id,
                 actor_type = %actor_type,
                 tenant_id = %ctx.tenant_id(),
@@ -636,6 +653,7 @@ impl ActorRegistry {
                 has_instance = instance.is_some(),
                 "Actor registered with type in actor_type_index"
             );
+            }
         } else {
             // OBSERVABILITY: Warn if actor_type is missing (but don't remove existing actor_type)
             // This is important for suspended actors - we preserve their actor_type even when
@@ -650,10 +668,12 @@ impl ActorRegistry {
                     "Actor registered without actor_type - will not appear in 'Actors by Type' dashboard"
                 );
             } else {
-                tracing::debug!(
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
                     actor_id = %actor_id,
                     "Actor registered without actor_type, but existing actor_type preserved (suspended actor?)"
                 );
+                }
             }
         }
         
@@ -917,11 +937,13 @@ impl ActorRegistry {
         }
         
         // OBSERVABILITY: Log actor unregistration
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             actor_id = %actor_id,
             existed = existed,
             "Actor unregistered with cleanup"
         );
+        }
 
         Ok(())
     }
@@ -985,13 +1007,15 @@ impl ActorRegistry {
         let count = temp_senders.len();
         drop(temp_senders);
         
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             "ActorRegistry: Registered temporary sender ActorRef: temporary_sender_id={}, correlation_id={}, expires_at={:?}, total_temp_senders={}",
             temporary_sender_id,
             correlation_id,
             expires_at,
             count
         );
+        }
     }
     
     /// Lookup temporary sender entry
@@ -1030,11 +1054,13 @@ impl ActorRegistry {
         // Also remove from temporary_senders map
         let mut temp_senders = self.temporary_senders.write().await;
         if temp_senders.remove(temporary_sender_id).is_some() {
-            tracing::debug!(
-                "ActorRegistry: Removed temporary sender: temporary_sender_id={}, remaining={}",
-                temporary_sender_id,
-                temp_senders.len()
-            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    "ActorRegistry: Removed temporary sender: temporary_sender_id={}, remaining={}",
+                    temporary_sender_id,
+                    temp_senders.len()
+                );
+            }
         }
     }
     
@@ -1077,12 +1103,14 @@ impl ActorRegistry {
             }
             let after_count = temp_senders.len();
             
-            tracing::debug!(
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
                 "ActorRegistry: Cleaned up {} expired temporary senders (before: {}, after: {})",
                 expired_count,
                 expired_count + after_count,
                 after_count
             );
+            }
             
             // OBSERVABILITY: Track expired temporary sender cleanup
             #[cfg(feature = "metrics")]
@@ -1204,11 +1232,13 @@ impl ActorRegistry {
             "child_id" => child_id.clone()
         ).increment(1);
 
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             parent = %parent_id,
             child = %child_id,
             "Registered parent-child relationship"
         );
+        }
     }
 
     /// Unregister parent-child relationship
@@ -1255,11 +1285,13 @@ impl ActorRegistry {
             "child_id" => child_id.clone()
         ).increment(1);
 
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             parent = %parent_id,
             child = %child_id,
             "Unregistered parent-child relationship"
         );
+        }
     }
 
     /// Get all children of a parent
@@ -1396,11 +1428,13 @@ impl ActorRegistry {
                 // Cleanup expired temporary senders
                 let expired_count = registry.cleanup_expired_temporary_senders().await;
                 if expired_count > 0 {
-                    tracing::debug!(
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
                         "ActorRegistry: Cleaned up {} expired temporary senders (node_id={})",
                         expired_count,
                         local_node_id
                     );
+                    }
                 }
             }
         });
@@ -1459,11 +1493,13 @@ impl ActorRegistry {
             .push(actor1_id.clone());
 
         // OBSERVABILITY: Log link creation
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             actor1 = %actor1_id,
             actor2 = %actor2_id,
             "Linked actors (bidirectional death propagation)"
         );
+        }
 
         Ok(())
     }
@@ -1506,11 +1542,13 @@ impl ActorRegistry {
         }
 
         // OBSERVABILITY: Log link removal
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             actor1 = %actor1_id,
             actor2 = %actor2_id,
             "Unlinked actors"
         );
+        }
 
         Ok(())
     }
@@ -1572,12 +1610,14 @@ impl ActorRegistry {
             .push(monitor_link);
 
         // OBSERVABILITY: Log monitor creation
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             target = %target_id,
             monitor = %monitor_id,
             monitor_ref = %monitor_ref,
             "Registered monitor (one-way notification)"
         );
+        }
 
         Ok(())
     }
@@ -1613,12 +1653,14 @@ impl ActorRegistry {
         }
 
         // OBSERVABILITY: Log demonitor
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             target = %target_id,
             monitor = %monitor_id,
             monitor_ref = %monitor_ref,
             "Removed monitor"
         );
+        }
 
         Ok(())
     }
@@ -1665,25 +1707,31 @@ impl ActorRegistry {
         // 2. Propagate EXIT to linked actors (only for error exits)
         // Normal and Shutdown exits don't propagate to links (Erlang semantics)
         let is_error = reason.is_error();
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             actor_id = %actor_id,
             reason = ?reason,
             is_error = is_error,
             "Checking if exit reason should propagate to links"
         );
+        }
         if is_error {
-            tracing::debug!(
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
                 actor_id = %actor_id,
                 reason = ?reason,
                 "Exit reason is error, propagating to linked actors"
             );
+            }
             self.propagate_exit_to_links(actor_id, &reason).await;
         } else {
-            tracing::debug!(
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
                 actor_id = %actor_id,
                 reason = ?reason,
                 "Exit reason is not error, NOT propagating to linked actors"
             );
+            }
         }
 
         // 3. Clean up this actor's link/monitor entries
@@ -1781,22 +1829,26 @@ impl ActorRegistry {
                     );
                 }
                 Ok(_) => {
-                    tracing::debug!(
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
                         monitoring_actor_id = %monitor_link.monitor_ref,
                         monitored_actor_id = %actor_id,
                         duration_ms = facet_down_duration.as_millis(),
                         "All facets handled DOWN notification successfully"
                     );
+                    }
                 }
                 Err(e) => {
                     // FacetManager couldn't find facets for this actor (expected for regular actors)
                     // Facets will be called when the actor processes the DOWN notification via termination_sender channel
-                    tracing::debug!(
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
                         monitoring_actor_id = %monitor_link.monitor_ref,
                         monitored_actor_id = %actor_id,
                         error = %e,
                         "Facets not found in FacetManager (regular actor) - facets will be called when actor processes DOWN notification"
                     );
+                    }
                 }
             }
             
@@ -1810,12 +1862,14 @@ impl ActorRegistry {
             ).increment(1);
 
             // OBSERVABILITY: Log DOWN message
-            tracing::debug!(
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
                 from = %actor_id,
                 monitor_ref = %monitor_link.monitor_ref,
                 reason = %reason_str,
                 "Sent DOWN notification to monitor"
             );
+            }
         }
 
         // OBSERVABILITY: Metrics
@@ -1852,12 +1906,14 @@ impl ActorRegistry {
         }
 
         let linked_count = linked_actors.len();
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             from = %actor_id,
             linked_count = linked_count,
             reason = ?reason,
             "Propagating EXIT to linked actors"
         );
+        }
 
         // Create Linked exit reason for linked actors
         let linked_reason = ExitReason::Linked {
@@ -1894,13 +1950,15 @@ impl ActorRegistry {
                 // Send EXIT signal to linked actor's mailbox
                 // The actor's message loop will handle it based on trap_exit setting
                 // Note: tell() takes only the message, no RequestContext
-                tracing::debug!(
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
                     from = %actor_id,
                     to = %linked_id,
                     reason = ?reason,
                     reason_str = %reason_str,
                     "Attempting to send EXIT to linked actor"
                 );
+                }
                 if let Err(e) = actor_sender.tell(exit_message).await {
                     tracing::warn!(
                         from = %actor_id,
@@ -1910,21 +1968,25 @@ impl ActorRegistry {
                         "Failed to send EXIT to linked actor"
                     );
                 } else {
-                    tracing::debug!(
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
                         from = %actor_id,
                         to = %linked_id,
                         reason = ?reason,
                         reason_str = %reason_str,
                         "Successfully sent EXIT to linked actor"
                     );
+                    }
                 }
             } else {
                 // Linked actor doesn't exist (already terminated)
-                tracing::debug!(
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
                     from = %actor_id,
                     to = %linked_id,
                     "Linked actor not found (already terminated)"
                 );
+                }
             }
         }
 
@@ -1964,10 +2026,12 @@ impl ActorRegistry {
             links.remove(actor_id);
         }
 
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
             actor_id = %actor_id,
             "Cleaned up link/monitor entries for terminated actor"
         );
+        }
     }
 
 
@@ -1977,6 +2041,117 @@ impl ActorRegistry {
 impl Service for ActorRegistry {
     fn service_name(&self) -> String {
         crate::service_locator::service_names::ACTOR_REGISTRY.to_string()
+    }
+}
+
+// ============================================================================
+// LinkProvider Implementation (Phase 8.5: Link Semantics Integration)
+// ============================================================================
+
+/// LinkProvider implementation for ActorRegistry
+///
+/// ## Purpose
+/// Provides link/unlink functionality for local actors. This is the primary
+/// implementation used by supervisors and other components that need to link actors.
+///
+/// ## Design
+/// - Supports local actors only (actors registered in this ActorRegistry)
+/// - Remote actor linking is handled by Node (see TODO below)
+/// - Follows Erlang/OTP link semantics (bidirectional death propagation)
+///
+/// ## TODO: Remote Actor Linking
+/// Node currently supports remote actor linking via gRPC, but this is advanced
+/// functionality. For now, LinkProvider in ActorRegistry only supports local actors.
+/// Remote linking can be added later by:
+/// 1. Adding a Node reference to ActorRegistry (optional, for remote operations)
+/// 2. Checking if actors are local before linking
+/// 3. Delegating to Node for remote actor linking
+#[async_trait::async_trait]
+impl crate::LinkProvider for ActorRegistry {
+    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String> {
+        // TODO: Support remote actor linking
+        // For now, only support local actors. Remote linking requires:
+        // 1. Checking if actors are local (via lookup_routing)
+        // 2. If remote, delegating to Node for gRPC-based linking
+        // 3. This is advanced functionality and can be added later
+        
+        // Verify both actors are local (exist in this registry)
+        use crate::RequestContext;
+        let ctx = RequestContext::internal();
+        let routing1 = self.lookup_routing(&ctx, actor_id).await
+            .map_err(|e| format!("Failed to lookup actor {}: {}", actor_id, e))?;
+        if routing1.is_none() || !routing1.unwrap().is_local {
+            return Err(format!("Actor {} is not local or not found", actor_id));
+        }
+        
+        let routing2 = self.lookup_routing(&ctx, linked_actor_id).await
+            .map_err(|e| format!("Failed to lookup actor {}: {}", linked_actor_id, e))?;
+        if routing2.is_none() || !routing2.unwrap().is_local {
+            return Err(format!("Actor {} is not local or not found", linked_actor_id));
+        }
+        
+        // Both actors are local, delegate to ActorRegistry::link
+        self.link(actor_id, linked_actor_id).await
+            .map_err(|e| format!("Link failed: {}", e))
+    }
+
+    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String> {
+        // TODO: Support remote actor unlinking
+        // For now, only support local actors. Remote unlinking requires:
+        // 1. Checking if actors are local (via lookup_routing)
+        // 2. If remote, delegating to Node for gRPC-based unlinking
+        // 3. This is advanced functionality and can be added later
+        
+        // Both actors should be local (unlink is idempotent, so we don't check)
+        self.unlink(actor_id, linked_actor_id).await
+            .map_err(|e| format!("Unlink failed: {}", e))
+    }
+}
+
+// ============================================================================
+// ActivationProvider Implementation (Phase 8.5: Reminder-VirtualActor Integration)
+// ============================================================================
+
+/// ActivationProvider implementation for ActorRegistry
+///
+/// ## Purpose
+/// Provides activation functionality for virtual actors. This is used by
+/// ReminderFacet to activate deactivated virtual actors when reminders fire.
+///
+/// ## Design
+/// - Supports local actors only (actors registered in this ActorRegistry)
+/// - Uses ActorFactory to activate virtual actors
+/// - Checks actor status via lookup_routing
+#[async_trait::async_trait]
+impl crate::ActivationProvider for ActorRegistry {
+    async fn is_actor_active(&self, actor_id: &ActorId) -> bool {
+        // Check if actor is registered and active in this registry
+        use crate::RequestContext;
+        let ctx = RequestContext::internal();
+        let routing = self.lookup_routing(&ctx, actor_id).await.ok().flatten();
+        routing.map(|r| r.is_local).unwrap_or(false)
+    }
+
+    async fn activate_actor(&self, actor_id: &ActorId) -> Result<ActorRef, String> {
+        // Check if actor is already active
+        if self.is_actor_active(actor_id).await {
+            // Actor is already active, return its ActorRef
+            return ActorRef::new(actor_id.clone())
+                .map_err(|e| format!("Failed to create ActorRef: {}", e));
+        }
+        
+        // Actor is not active, need to activate it
+        // Since ActorRegistry doesn't have direct access to ServiceLocator/ActorFactory,
+        // we need to use a different approach. The typical pattern is:
+        // 1. ReminderFacet gets ActivationProvider (ActorRegistry) from ServiceLocator
+        // 2. ActivationProvider checks if actor is active (this method)
+        // 3. If not active, ReminderFacet can get ActorFactory from ServiceLocator and activate
+        //
+        // For now, we'll return an error. The caller (ReminderFacet) should handle activation
+        // by getting ActorFactory from ServiceLocator directly.
+        // TODO: Consider adding a method to pass ActorFactory to ActorRegistry for activation,
+        // or refactor ReminderFacet to get ActorFactory from ServiceLocator when activation is needed
+        Err(format!("Actor {} is not active. Activation should be handled by the caller (e.g., ReminderFacet) using ActorFactory from ServiceLocator.", actor_id))
     }
 }
 

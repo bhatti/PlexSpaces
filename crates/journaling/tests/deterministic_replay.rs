@@ -17,19 +17,20 @@ mod sqlite_tests {
     use plexspaces_journaling::sql::PostgresJournalStorage;
     use plexspaces_facet::Facet;
     use plexspaces_proto::prost_types;
+    use std::sync::Arc;
     use std::time::SystemTime;
 
     /// Helper to create a test storage (SQLite or PostgreSQL)
     #[cfg(feature = "sqlite-backend")]
-    async fn create_test_storage() -> SqliteJournalStorage {
-        SqliteJournalStorage::new(":memory:").await.unwrap()
+    async fn create_test_storage() -> Arc<dyn JournalStorage> {
+        Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap())
     }
 
     #[cfg(all(feature = "postgres-backend", not(feature = "sqlite-backend")))]
-    async fn create_test_storage() -> PostgresJournalStorage {
+    async fn create_test_storage() -> Arc<dyn JournalStorage> {
         let db_url = std::env::var("TEST_POSTGRES_URL")
             .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/plexspaces_test".to_string());
-        PostgresJournalStorage::new(&db_url).await.unwrap()
+        Arc::new(PostgresJournalStorage::new(&db_url).await.unwrap())
     }
 
     /// Helper to convert DurabilityConfig to Value

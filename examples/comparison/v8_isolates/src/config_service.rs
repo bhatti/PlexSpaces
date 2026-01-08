@@ -10,6 +10,8 @@ use plexspaces_actor::ActorRef;
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{Actor, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_journaling::{DurabilityFacet, MemoryJournalStorage};
+use std::sync::Arc;
+use plexspaces_core::JournalStorage;
 use plexspaces_mailbox::Message;
 use plexspaces_node::Node;
 use std::collections::HashMap;
@@ -66,8 +68,10 @@ impl GenServer for ConfigServiceActor {
 
         let reply = match config_msg {
             ConfigServiceMessage::RegisterWorker { worker_id, node_id, current_version } => {
-                info!("Registering worker: {} on node: {} (current_version: {})", 
-                    worker_id, node_id, current_version);
+                if tracing::enabled!(tracing::Level::INFO) {
+                    info!("Registering worker: {} on node: {} (current_version: {})", 
+                        worker_id, node_id, current_version);
+                }
                 
                 // Register worker
                 self.workers.insert(worker_id.clone(), (node_id, current_version));
@@ -100,7 +104,9 @@ impl GenServer for ConfigServiceActor {
             }
             
             ConfigServiceMessage::NotifyConfigChange { version, config } => {
-                info!("Config change notification: version {}", version);
+                if tracing::enabled!(tracing::Level::INFO) {
+                    info!("Config change notification: version {}", version);
+                }
                 
                 // Store new config
                 self.configs.insert(version, config.clone());
@@ -360,11 +366,17 @@ pub async fn run_control_plane_benchmark(node: &Node) -> Result<PerformanceMetri
     let config_service_id: ActorId = "config-service@v8-isolates-node-1".to_string();
     let ctx = plexspaces_core::RequestContext::internal();
     
-    // Create durability facet
-    let storage = MemoryJournalStorage::new();
+    // Create durability facet using journal storage from ServiceLocator
+    // If not available, create a default in-memory storage for this example
+    let storage: Arc<dyn JournalStorage> = service_locator
+        .get_journal_storage()
+        .await
+        .unwrap_or_else(|| Arc::new(MemoryJournalStorage::new()) as Arc<dyn JournalStorage>);
     let durability_facet = Box::new(DurabilityFacet::new(
         storage,
-        serde_json::json!({}),
+        serde_json::json!({
+            "checkpoint_interval": 1000,  // Checkpoint every 1000 messages instead of default 100
+        }),
         50,
     ));
     
@@ -388,37 +400,62 @@ pub async fn run_control_plane_benchmark(node: &Node) -> Result<PerformanceMetri
     
     tokio::time::sleep(Duration::from_millis(200)).await;
     
-    // Benchmark: Register multiple workers
+    // Benchmark: Register multiple workers concurrently (performance improvement)
     let num_workers = 100;
-    info!("Registering {} workers...", num_workers);
+    info!("Registering {} workers concurrently...", num_workers);
     
-    let mut _total_latency = 0u64;
+    // Process registrations concurrently for better throughput
+    let mut registration_tasks: Vec<tokio::task::JoinHandle<Result<(u64, u64), String>>> = Vec::new();
     for i in 0..num_workers {
-        let register_msg = ConfigServiceMessage::RegisterWorker {
-            worker_id: format!("worker-{}", i),
-            node_id: node.id().as_str().to_string(),
-            current_version: 0,
-        };
+        let config_service_clone = config_service.clone();
+        let config_service_id_clone = config_service_id.clone();
+        let node_id = node.id().as_str().to_string();
         
-        let request_start = Instant::now();
-        let mut request = Message::new(serde_json::to_vec(&register_msg)
-            .map_err(|e| format!("Failed to serialize register message: {}", e))?)
-            .with_message_type("call".to_string());
-        request.receiver = config_service_id.clone();
-        collector.record_message_sent();
-        
-        let coord_start = Instant::now();
-        let response = config_service.ask(request, Duration::from_secs(5)).await
-            .map_err(|e| format!("Failed to ask config service: {}", e))?;
-        collector.record_coordination(coord_start.elapsed().as_millis() as u64);
-        collector.record_message_received();
-        
-        let latency_us = request_start.elapsed().as_micros() as u64;
-        _total_latency += latency_us;
-        collector.record_event(latency_us);
-        
-        let _result: ConfigServiceMessage = serde_json::from_slice(response.payload())
-            .map_err(|e| format!("Failed to deserialize response: {}", e))?;
+        let task = tokio::spawn(async move {
+            let register_msg = ConfigServiceMessage::RegisterWorker {
+                worker_id: format!("worker-{}", i),
+                node_id,
+                current_version: 0,
+            };
+            
+            let request_start = Instant::now();
+            let mut request = Message::new(serde_json::to_vec(&register_msg)
+                .map_err(|e| format!("Failed to serialize register message: {}", e))?)
+                .with_message_type("call".to_string());
+            request.receiver = config_service_id_clone;
+            
+            let coord_start = Instant::now();
+            let response = config_service_clone.ask(request, Duration::from_secs(5)).await
+                .map_err(|e| format!("Failed to ask config service: {}", e))?;
+            let coord_time = coord_start.elapsed().as_millis() as u64;
+            
+            let latency_us = request_start.elapsed().as_micros() as u64;
+            let _result: ConfigServiceMessage = serde_json::from_slice(response.payload())
+                .map_err(|e| format!("Failed to deserialize response: {}", e))?;
+            
+            Ok((latency_us, coord_time))
+        });
+        registration_tasks.push(task);
+    }
+    
+    // Wait for all registrations to complete and collect metrics
+    for task in registration_tasks {
+        match task.await {
+            Ok(Ok((latency_us, coord_time))) => {
+                collector.record_message_sent();
+                collector.record_coordination(coord_time);
+                collector.record_message_received();
+                collector.record_event(latency_us);
+            }
+            Ok(Err(e)) => {
+                tracing::error!("Worker registration failed: {}", e);
+                collector.record_error();
+            }
+            Err(e) => {
+                tracing::error!("Registration task panicked: {}", e);
+                collector.record_error();
+            }
+        }
     }
     
     // Benchmark: Config change notification

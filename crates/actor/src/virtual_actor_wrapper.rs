@@ -94,9 +94,12 @@ impl VirtualActorWrapper {
 #[async_trait]
 impl MessageSender for VirtualActorWrapper {
     async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        eprintln!("🔵🔵🔵 [VIRTUAL_ACTOR_WRAPPER] tell() called: actor_id={}, message_id={}", self.actor_id, message.id);
-        eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] tell() called: actor_id={}, message_id={}, correlation_id={:?}, sender={:?}, receiver={}", 
-            self.actor_id, message.id, message.correlation_id, message.sender, message.receiver);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+            "[VIRTUAL_ACTOR_WRAPPER] tell() called: actor_id={}, message_id={}, correlation_id={:?}, sender={:?}, receiver={}",
+            self.actor_id, message.id, message.correlation_id, message.sender, message.receiver
+            );
+        }
         
         // VALIDATION: Check if actor is registered before processing
         // tell() should fail immediately if actor is not registered (synchronous check)
@@ -107,7 +110,7 @@ impl MessageSender for VirtualActorWrapper {
         
         // Check if actor is registered (VirtualActorWrapper should be in registry for virtual actors)
         if registry.lookup_actor(&self.actor_id).await.is_none() {
-            eprintln!("🔴 [VIRTUAL_ACTOR_WRAPPER] Actor not registered: actor_id={}", self.actor_id);
+            tracing::warn!("[VIRTUAL_ACTOR_WRAPPER] Actor not registered: actor_id={}", self.actor_id);
             return Err(format!(
                 "Virtual actor {} is not registered - cannot send message. Actor must be registered before tell() can be called.",
                 self.actor_id
@@ -124,7 +127,9 @@ impl MessageSender for VirtualActorWrapper {
         // - For suspended/passivated actors: false until reactivated
         // This check determines if we need to activate/reactivate the actor
         let is_active = manager.is_active(&self.actor_id).await;
-        eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] Actor active check: actor_id={}, is_active={}", self.actor_id, is_active);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] Actor active check: actor_id={}, is_active={}", self.actor_id, is_active);
+        }
         if !is_active {
             // ORLEANS: Actor is not active - activate/reactivate it
             // This handles both lazy activation (first message) and reactivation (after suspension)
@@ -149,7 +154,9 @@ impl MessageSender for VirtualActorWrapper {
             if !activation_started {
                 // Activation is in progress - queue message and return
                 // The in-progress activation will send pending messages when it completes
-                tracing::debug!(actor_id = %self.actor_id, "VirtualActorWrapper: Activation in progress, queueing message");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(actor_id = %self.actor_id, "VirtualActorWrapper: Activation in progress, queueing message");
+                }
                 manager.queue_message(&self.actor_id, message).await;
                 return Ok(());
             }
@@ -157,15 +164,19 @@ impl MessageSender for VirtualActorWrapper {
             // Queue message for processing after activation
             // IMPORTANT: Message preserves correlation_id and sender for reply routing
             // This is critical for ask() pattern - the reply must route back via correlation_id
-            eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] Queueing message for activation: id={}, correlation_id={:?}, sender={:?}, receiver={}", 
-                message.id, message.correlation_id, message.sender, message.receiver);
-            tracing::debug!(
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] Queueing message for activation: id={}, correlation_id={:?}, sender={:?}, receiver={}", 
+                    message.id, message.correlation_id, message.sender, message.receiver);
+            }
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
                 actor_id = %self.actor_id,
                 message_id = %message.id,
                 correlation_id = ?message.correlation_id,
                 sender = ?message.sender,
                 "VirtualActorWrapper: Queueing message for activation (preserves correlation_id and sender for reply routing)"
             );
+            }
             manager.queue_message(&self.actor_id, message).await;
             
             // Activate the virtual actor using ActorFactory
@@ -179,19 +190,23 @@ impl MessageSender for VirtualActorWrapper {
             // activate_virtual_actor will send all pending messages (including this one) after activation
             // The message's correlation_id and sender are preserved when sent to the ActorRef
             // CRITICAL: This await ensures activation is synchronous - actor is fully ready when this returns
-            eprintln!("🔵🔵🔵 [VIRTUAL_ACTOR_WRAPPER] Calling activate_virtual_actor (SYNC): actor_id={}", self.actor_id);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] Calling activate_virtual_actor (SYNC): actor_id={}", self.actor_id);
+            }
             factory.activate_virtual_actor(&self.actor_id).await
                 .map_err(|e| {
-                    eprintln!("🔴🔴🔴 [VIRTUAL_ACTOR_WRAPPER] Failed to activate virtual actor: actor_id={}, error={}", self.actor_id, e);
+                    tracing::warn!("[VIRTUAL_ACTOR_WRAPPER] Failed to activate virtual actor: actor_id={}, error={}", self.actor_id, e);
                     format!("Failed to activate virtual actor: {}", e)
                 })?;
             
             // Verify actor is now active after synchronous activation
             let is_active_after = manager.is_active(&self.actor_id).await;
-            eprintln!("🟢🟢🟢 [VIRTUAL_ACTOR_WRAPPER] activate_virtual_actor completed (SYNC): actor_id={}, is_active={}", self.actor_id, is_active_after);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] activate_virtual_actor completed (SYNC): actor_id={}, is_active={}", self.actor_id, is_active_after);
+            }
             
             if !is_active_after {
-                eprintln!("🔴🔴🔴 [VIRTUAL_ACTOR_WRAPPER] Actor not active after activation: actor_id={}", self.actor_id);
+                tracing::warn!("[VIRTUAL_ACTOR_WRAPPER] Actor not active after activation: actor_id={}", self.actor_id);
                 return Err(format!("Actor {} is not active after synchronous activation", self.actor_id).into());
             }
             
@@ -203,20 +218,26 @@ impl MessageSender for VirtualActorWrapper {
         
         // Actor is activated - use MessageSender from registry
         // Get MessageSender (which will be ActorRef for activated actors, replacing VirtualActorWrapper)
-        eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] Actor is already active, using MessageSender from registry: actor_id={}", self.actor_id);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] Actor is already active, using MessageSender from registry: actor_id={}", self.actor_id);
+        }
         // Note: registry was already obtained above for registration check, reuse it here (no duplicate import)
         let sender = registry.lookup_actor(&self.actor_id).await
             .ok_or_else(|| format!("Actor not found: {}", self.actor_id))?;
         
-        eprintln!("🔵 [VIRTUAL_ACTOR_WRAPPER] Found MessageSender, calling tell(): actor_id={}, correlation_id={:?}", 
-            self.actor_id, message.correlation_id);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] Found MessageSender, calling tell(): actor_id={}, correlation_id={:?}", 
+                self.actor_id, message.correlation_id);
+        }
         let result = sender.tell(message).await;
         match &result {
             Ok(_) => {
-                eprintln!("🟢 [VIRTUAL_ACTOR_WRAPPER] Successfully sent message via MessageSender");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] Successfully sent message via MessageSender");
+                }
             }
             Err(e) => {
-                eprintln!("🔴 [VIRTUAL_ACTOR_WRAPPER] Failed to send message via MessageSender: {}", e);
+                tracing::warn!("[VIRTUAL_ACTOR_WRAPPER] Failed to send message via MessageSender: {}", e);
             }
         }
         result.map_err(|e| format!("MessageSender.tell() failed: {}", e).into())

@@ -29,17 +29,80 @@ use tokio::time::{sleep, Duration};
 use wat;
 use plexspaces_core::application::ApplicationState;
 
+/// Shared WASM bytes cache (loaded once, reused for all tests)
+static SHARED_WASM_BYTES: std::sync::OnceLock<tokio::sync::Mutex<Option<Vec<u8>>>> = std::sync::OnceLock::new();
+static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Get the path to calculator_actor.wasm (Python-based WASM, large size)
 fn get_calculator_wasm_path() -> PathBuf {
+    // First try: test fixtures (preferred)
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop(); // crates/node
+    path.push("wasm-runtime");
+    path.push("tests");
+    path.push("fixtures");
+    path.push("calculator_actor.wasm");
+    if path.exists() {
+        return path;
+    }
+    
+    // Second try: examples directory (fallback)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../../examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm");
     path
 }
 
+/// Get or load shared WASM bytes
+/// Loads the 40MB WASM file once and caches it for all tests
+async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
+    let cache = SHARED_WASM_BYTES.get_or_init(|| tokio::sync::Mutex::new(None));
+    
+    // Fast path: already loaded
+    {
+        let guard = cache.lock().await;
+        if let Some(ref bytes) = *guard {
+            return Some(bytes.clone());
+        }
+    }
+    
+    // Slow path: need to load (use lock to ensure only one thread loads)
+    let _guard = INIT_LOCK.lock().unwrap();
+    
+    // Double-check after acquiring lock
+    {
+        let guard = cache.lock().await;
+        if let Some(ref bytes) = *guard {
+            return Some(bytes.clone());
+        }
+    }
+    
+    // Load WASM file (first time only)
+    let wasm_path = get_calculator_wasm_path();
+    if !wasm_path.exists() {
+        return None;
+    }
+    
+    eprintln!("📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)", wasm_path.display());
+    
+    let bytes = tokio::task::spawn_blocking(move || fs::read(&wasm_path))
+        .await
+        .ok()
+        .and_then(|r| r.ok())?;
+    
+    eprintln!("✅ WASM file loaded: {} bytes", bytes.len());
+    
+    // Cache the bytes
+    {
+        let mut guard = cache.lock().await;
+        *guard = Some(bytes.clone());
+    }
+    
+    Some(bytes)
+}
+
 /// Check if calculator WASM file exists
 fn calculator_wasm_exists() -> bool {
-    let path = get_calculator_wasm_path();
-    path.exists() && path.is_file()
+    get_calculator_wasm_path().exists()
 }
 
 
@@ -265,10 +328,10 @@ async fn test_http_deploy_wasm_application() {
         panic!("HTTP server not ready");
     }
 
-    // Read WASM file
-    let wasm_path = get_calculator_wasm_path();
-    let wasm_bytes = fs::read(&wasm_path).expect("Failed to read WASM file");
-    eprintln!("📦 Deploying WASM file: {} ({} bytes)", wasm_path.display(), wasm_bytes.len());
+    // Read WASM file (use shared module for performance)
+    let wasm_bytes = get_shared_wasm_bytes().await
+        .expect("WASM file not found. Please ensure calculator_actor.wasm is available.");
+    eprintln!("📦 Deploying WASM file: {} bytes", wasm_bytes.len());
     
     // Verify WASM magic number
     assert!(wasm_bytes.len() >= 4, "WASM file too small");

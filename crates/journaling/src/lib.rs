@@ -298,6 +298,10 @@ pub use plexspaces_proto::timer::v1::{
 // Core modules
 mod storage;
 pub use storage::*;
+// Re-export create_journal_storage for convenience
+pub use storage::create_journal_storage;
+// Re-export JournalStorage trait from core (trait is defined in core to avoid circular dependencies)
+pub use plexspaces_core::{JournalStorage, JournalError, JournalResult};
 
 // Phase 2: Execution context for deterministic replay
 mod execution_context;
@@ -334,77 +338,6 @@ pub use timer_facet::{TimerError, TimerFacet};
 
 // Phase 8.5: Reminder facet for Orleans-style durable reminders
 mod reminder_facet;
-pub use reminder_facet::{ActivationProvider, ReminderError, ReminderFacet};
-
-/// Journaling errors
-#[derive(Debug, thiserror::Error)]
-pub enum JournalError {
-    /// Storage backend error
-    #[error("Storage error: {0}")]
-    Storage(String),
-
-    /// Entry not found
-    #[error("Journal entry not found: actor_id={actor_id}, sequence={sequence}")]
-    EntryNotFound {
-        /// Actor ID
-        actor_id: String,
-        /// Sequence number
-        sequence: u64,
-    },
-
-    /// Checkpoint not found
-    #[error("Checkpoint not found: actor_id={0}")]
-    CheckpointNotFound(String),
-
-    /// Compression error
-    #[error("Compression error: {0}")]
-    Compression(String),
-
-    /// Decompression error
-    #[error("Decompression error: {0}")]
-    Decompression(String),
-
-    /// Serialization error
-    #[error("Serialization error: {0}")]
-    Serialization(String),
-
-    /// Configuration error
-    #[error("Configuration error: {0}")]
-    Configuration(String),
-
-    /// Replay error
-    #[error("Replay error: {0}")]
-    Replay(String),
-
-    /// Incompatible checkpoint schema version
-    ///
-    /// ## Purpose
-    /// Prevents loading checkpoints from newer actor versions that may have
-    /// incompatible state format.
-    ///
-    /// ## Why This Exists
-    /// - Forward compatibility not guaranteed (newer version may break old code)
-    /// - Protects against state corruption from schema mismatches
-    /// - Forces explicit migration for breaking schema changes
-    ///
-    /// ## Example
-    /// ```text
-    /// Actor v1 creates checkpoint with schema version 1
-    /// Actor v2 loads checkpoint → OK (backward compatible)
-    ///
-    /// Actor v2 creates checkpoint with schema version 2
-    /// Actor v1 loads checkpoint → ERROR (forward incompatible)
-    /// ```
-    #[error("Incompatible checkpoint schema version: checkpoint={checkpoint_version}, current={current_version}, actor_id={actor_id}")]
-    IncompatibleSchemaVersion {
-        /// Checkpoint schema version
-        checkpoint_version: u32,
-        /// Current actor schema version
-        current_version: u32,
-        /// Actor ID
-        actor_id: String,
-    },
-}
-
-/// Result type for journaling operations
-pub type JournalResult<T> = Result<T, JournalError>;
+pub use reminder_facet::{ReminderError, ReminderFacet};
+// ActivationProvider moved to plexspaces-core to avoid circular dependencies
+pub use plexspaces_core::ActivationProvider;

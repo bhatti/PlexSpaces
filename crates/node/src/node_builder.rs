@@ -34,14 +34,14 @@
 //! use plexspaces_node::{Node, NodeBuilder};
 //!
 //! let node = NodeBuilder::new("my-node")
-//!     .with_listen_address("0.0.0.0:8000")
+//!     .with_listen_addr("0.0.0.0:8000")
 //!     .build();
 //! ```
 //!
 //! ### Node with Custom Configuration
 //! ```rust,ignore
 //! let node = NodeBuilder::new("production-node")
-//!     .with_listen_address("0.0.0.0:8000")
+//!     .with_listen_addr("0.0.0.0:8000")
 //!     .with_max_connections(200)
 //!     .with_heartbeat_interval_ms(10000)
 //!     .with_clustering_enabled(true)
@@ -49,7 +49,7 @@
 //! ```
 
 use crate::{Node, NodeId, ReleaseSpec};
-use plexspaces_proto::node::v1::NodeRuntimeConfig;
+use plexspaces_proto::node::v1::NodeConfig;
 
 /// Builder for creating nodes with a fluent API
 ///
@@ -63,7 +63,7 @@ use plexspaces_proto::node::v1::NodeRuntimeConfig;
 /// - Single entry point for all node types
 pub struct NodeBuilder {
     node_id: NodeId,
-    config: NodeRuntimeConfig,
+    config: NodeConfig,
     release_spec: Option<ReleaseSpec>,
 }
 
@@ -78,10 +78,11 @@ impl NodeBuilder {
     /// let builder = NodeBuilder::new("my-node");
     /// ```
     pub fn new(node_id: impl Into<NodeId>) -> Self {
-        // Use default_node_config() helper which creates NodeRuntimeConfig with correct fields
+        let node_id = node_id.into();
         let mut config = crate::default_node_config();
+        config.id = node_id.as_str().to_string();
         Self {
-            node_id: node_id.into(),
+            node_id,
             config,
             release_spec: None,
         }
@@ -95,9 +96,9 @@ impl NodeBuilder {
     /// ## Example
     /// ```rust,ignore
     /// let builder = NodeBuilder::new("my-node")
-    ///     .with_listen_address("0.0.0.0:8000");
+    ///     .with_listen_addr("0.0.0.0:8000");
     /// ```
-    pub fn with_listen_address(mut self, address: impl Into<String>) -> Self {
+    pub fn with_listen_addr(mut self, address: impl Into<String>) -> Self {
         self.config.listen_addr = address.into();
         self
     }
@@ -297,7 +298,7 @@ impl NodeBuilder {
     /// ## Example
     /// ```rust,ignore
     /// let node = NodeBuilder::new("my-node")
-    ///     .with_listen_address("0.0.0.0:8000")
+    ///     .with_listen_addr("0.0.0.0:8000")
     ///     .build()
     ///     .await;
     /// // Node is ready to use - services are initialized
@@ -343,9 +344,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_node_builder_with_listen_address() {
+    async fn test_node_builder_with_listen_addr() {
         let node = NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:8080")
+            .with_listen_addr("127.0.0.1:8080")
             .build().await;
 
         assert_eq!(node.config().listen_addr, "127.0.0.1:8080");
@@ -393,7 +394,7 @@ mod tests {
     #[tokio::test]
     async fn test_node_builder_fluent_api() {
         let node = NodeBuilder::new("test-node")
-            .with_listen_address("0.0.0.0:8000")
+            .with_listen_addr("0.0.0.0:8000")
             .with_max_connections(150)
             .with_heartbeat_interval_ms(7500)
             .with_clustering_enabled(true)

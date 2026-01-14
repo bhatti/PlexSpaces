@@ -63,12 +63,6 @@ message Node {
   google.protobuf.Timestamp created_at = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   google.protobuf.Timestamp last_heartbeat = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 
-  // Type-specific configuration
-  oneof config {
-    ProcessConfig process_config = 10;
-    KubernetesConfig kubernetes_config = 11;
-    FirecrackerConfig firecracker_config = 12;
-  }
 
   // Current actors hosted on this node
   repeated string actor_ids = 20;
@@ -130,71 +124,6 @@ message NodeCapabilities {
   repeated string supported_runtimes = 6;
 }
 
-// Node runtime configuration
-//
-// ## Purpose
-// Runtime configuration for a PlexSpaces node, including network settings,
-// clustering options, and operational parameters.
-//
-// ## Design
-// Proto-first design: All node configuration is defined in proto for:
-// - Wire compatibility (gRPC configuration APIs)
-// - Language-agnostic configuration
-// - Consistent configuration semantics across implementations
-//
-// ## Note
-// This is different from NodeConfig in release.proto which is for release/deployment.
-// This NodeRuntimeConfig is for runtime operational settings.
-message NodeRuntimeConfig {
-  // Listen address for gRPC server (e.g., "0.0.0.0:8000")
-  string listen_addr = 1 [(google.api.field_behavior) = REQUIRED];
-
-  // Maximum number of concurrent connections
-  uint32 max_connections = 2;
-
-  // Heartbeat interval in milliseconds
-  uint64 heartbeat_interval_ms = 3;
-
-  // Enable clustering (multi-node coordination)
-  bool clustering_enabled = 4;
-
-  // Node metadata (key-value pairs for extensibility)
-  map<string, string> metadata = 5;
-}
-
-// Process-based node configuration
-message ProcessConfig {
-  string pid = 1;
-  string working_directory = 2;
-  map<string, string> environment = 3;
-}
-
-// Kubernetes-based node configuration
-message KubernetesConfig {
-  string namespace = 1;
-  string pod_name = 2;
-  string service_account = 3;
-  map<string, string> labels = 4;
-  map<string, string> annotations = 5;
-}
-
-// Firecracker-based node configuration
-message FirecrackerConfig {
-  string vm_id = 1;
-  string socket_path = 2;
-  uint64 memory_size_mib = 3;
-  uint32 vcpu_count = 4;
-  string kernel_image_path = 5;
-  string rootfs_path = 6;
-  repeated NetworkInterface network_interfaces = 7;
-}
-
-// Network interface for Firecracker VM
-message NetworkInterface {
-  string iface_id = 1;
-  string host_dev_name = 2;
-  string guest_mac = 3;
-}
 
 // Node metrics (combined resource usage and operational metrics)
 //
@@ -228,22 +157,17 @@ message NodeMetrics {
   uint64 remote_deliveries = 7;
   // Failed message deliveries
   uint64 failed_deliveries = 8;
-  // Total messages processed (legacy field, kept for compatibility)
-  uint64 messages_processed = 9;
-
   // Actor and connection metrics
   // Active actors on this node
-  uint32 active_actors = 10;
-  // Total actor count (legacy field, kept for compatibility)
-  uint32 actor_count = 11;
+  uint32 active_actors = 9;
   // Connected nodes in cluster
-  uint32 connected_nodes = 12;
+  uint32 connected_nodes = 10;
   
   // Node identity (for components that need node info without depending on Node type)
   // Node ID for this metrics instance
-  string node_id = 13;
+  string node_id = 11;
   // Cluster name for this node (from node config)
-  string cluster_name = 14;
+  string cluster_name = 12;
 }
 
 // Request to register a node
@@ -434,108 +358,3 @@ message DiscoverNodesResponse {
   repeated NodeDiscovery nodes = 1;
 }
 
-// Node management service (internal use only)
-service NodeService {
-  // Register a new node
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/nodes"
-      body: "*"
-    };
-  }
-
-  // Unregister a node
-  rpc UnregisterNode(UnregisterNodeRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/nodes/{node_id}"
-    };
-  }
-
-  // Get node information
-  rpc GetNode(GetNodeRequest) returns (Node) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes/{node_id}"
-    };
-  }
-
-  // List all nodes
-  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes"
-    };
-  }
-
-  // Assign an actor to a node
-  rpc AssignActor(AssignActorRequest) returns (AssignActorResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/nodes/{node_id}/actors"
-      body: "*"
-    };
-  }
-
-  // Remove an actor from a node
-  rpc RemoveActor(RemoveActorRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/nodes/{node_id}/actors/{actor_id.value}"
-    };
-  }
-
-  // ORBIT-INSPIRED: Actor lock operations
-  rpc AcquireActorLock(AcquireActorLockRequest) returns (AcquireActorLockResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/locks/actors"
-      body: "*"
-    };
-  }
-
-  rpc ReleaseActorLock(ReleaseActorLockRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/locks/actors/{actor_id.value}"
-    };
-  }
-
-  // WASMCLOUD-INSPIRED: Lattice mesh operations
-  rpc JoinLattice(JoinLatticeRequest) returns (JoinLatticeResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/lattice/join"
-      body: "*"
-    };
-  }
-
-  rpc LeaveLattice(LeaveLatticeRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      post: "/api/v1/lattice/leave"
-      body: "*"
-    };
-  }
-
-  rpc SendHeartbeat(Heartbeat) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      post: "/api/v1/lattice/heartbeat"
-      body: "*"
-    };
-  }
-
-  rpc DiscoverNodes(DiscoverNodesRequest) returns (DiscoverNodesResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes/discover"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Discover Nodes"
-      description: "Discover nodes in the cluster"
-      tags: "Node"
-    };
-  }
-
-  // Get node metrics
-  rpc GetNodeMetrics(GetNodeRequest) returns (NodeMetrics) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes/{node_id}/metrics"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Get Node Metrics"
-      description: "Returns metrics for a specific node"
-      tags: "Node"
-    };
-  }
-}

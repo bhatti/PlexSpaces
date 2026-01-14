@@ -472,7 +472,113 @@ impl WasmRuntime {
         let mut cache = self.module_cache.write().await;
         cache.clear();
     }
+}
 
+#[async_trait::async_trait]
+impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
+    async fn module_count(&self) -> usize {
+        self.module_count().await
+    }
+    
+    async fn clear_cache(&self) {
+        self.clear_cache().await
+    }
+    
+    async fn load_module(
+        &self,
+        name: &str,
+        version: &str,
+        bytes: &[u8],
+    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>> {
+        let module = self.load_module(name, version, bytes).await?;
+        Ok(Arc::new(module))
+    }
+    
+    async fn get_module(&self, hash: &str) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        self.get_module(hash).await.map(|m| Arc::new(m) as Arc<dyn std::any::Any + Send + Sync>)
+    }
+    
+    async fn resolve_module(&self, module_ref: &str) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        self.resolve_module(module_ref).await.map(|m| Arc::new(m) as Arc<dyn std::any::Any + Send + Sync>)
+    }
+    
+    async fn contains_module(&self, hash: &str) -> bool {
+        self.contains_module(hash).await
+    }
+    
+    async fn list_modules(&self) -> Vec<(String, String, String)> {
+        self.list_modules().await
+    }
+    
+    async fn evict_module(&self, hash: &str) -> bool {
+        self.evict_module(hash).await
+    }
+    
+    async fn instantiate(
+        &self,
+        module: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        actor_id: String,
+        initial_state: &[u8],
+        config: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        channel_service: Option<std::sync::Arc<dyn plexspaces_core::ChannelService>>,
+        message_sender: Option<std::sync::Arc<dyn plexspaces_core::MessageSender>>,
+        tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
+        keyvalue_store: Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>>,
+        process_group_registry: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager>>,
+        object_registry: Option<std::sync::Arc<dyn plexspaces_core::ObjectRegistry>>,
+        journal_storage: Option<std::sync::Arc<dyn plexspaces_core::JournalStorage>>,
+        blob_service: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>> {
+        let module = module.downcast::<Arc<WasmModule>>()
+            .map_err(|_| crate::WasmError::CompilationError("Failed to downcast WasmModule".to_string()))?;
+        let config = config.downcast::<Arc<crate::WasmConfig>>()
+            .map_err(|_| crate::WasmError::CompilationError("Failed to downcast WasmConfig".to_string()))?;
+        
+        // Convert plexspaces_core::MessageSender to wasm-runtime's MessageSender
+        // The wasm-runtime needs its own MessageSender trait for host functions.
+        // For now, we'll need to keep this as None or create an adapter.
+        // TODO: Create proper adapter or update wasm-runtime to use core::MessageSender directly
+        let message_sender: Option<Arc<dyn crate::MessageSender>> = None;
+        
+        // Downcast from Arc<dyn Any> to concrete types for services not in core
+        let process_group_registry = process_group_registry.and_then(|p| {
+            p.downcast::<Arc<plexspaces_process_groups::ProcessGroupRegistry>>()
+                .ok()
+                .map(|arc_arc| (*arc_arc).clone())
+        });
+        let blob_service = blob_service.and_then(|b| {
+            b.downcast::<Arc<plexspaces_blob::BlobService>>()
+                .ok()
+                .map(|arc_arc| (*arc_arc).clone())
+        });
+        
+        // Call the concrete instantiate method (not the trait method)
+        // Clone the module and config from Arc since we need owned values
+        let instance = self.instantiate(
+            (**module).clone(),
+            actor_id,
+            initial_state,
+            (**config).clone(),
+            channel_service,
+            message_sender,
+            tuplespace_provider,
+            keyvalue_store,
+            process_group_registry,
+            lock_manager,
+            object_registry,
+            journal_storage,
+            blob_service,
+        ).await?;
+        Ok(Arc::new(instance))
+    }
+    
+    fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync> {
+        self
+    }
+}
+
+impl WasmRuntime {
     /// Get reference to wasmtime Engine
     ///
     /// Used by WasmInstance for creating stores
@@ -507,10 +613,10 @@ impl WasmRuntime {
         channel_service: Option<std::sync::Arc<dyn plexspaces_core::ChannelService>>,
         message_sender: Option<std::sync::Arc<dyn crate::MessageSender>>,
         tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
-        keyvalue_store: Option<std::sync::Arc<dyn plexspaces_keyvalue::KeyValueStore>>,
+        keyvalue_store: Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>>,
         process_group_registry: Option<std::sync::Arc<plexspaces_process_groups::ProcessGroupRegistry>>,
-        lock_manager: Option<std::sync::Arc<dyn plexspaces_locks::LockManager>>,
-        object_registry: Option<std::sync::Arc<plexspaces_object_registry::ObjectRegistry>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager>>,
+        object_registry: Option<std::sync::Arc<dyn plexspaces_core::actor_context::ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
         blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>>,
     ) -> WasmResult<crate::WasmInstance> {

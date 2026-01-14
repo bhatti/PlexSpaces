@@ -91,14 +91,14 @@ message ReleaseSpec {
 // Node configuration
 //
 // ## Purpose
-// Defines node identity and cluster membership settings.
+// Defines node identity, cluster membership, and runtime operational settings.
 message NodeConfig {
   // Node ID (unique in cluster)
   // Can be environment variable like "${NODE_ID}"
   string id = 1;
 
   // Address this node listens on (e.g., "0.0.0.0:8000")
-  string listen_address = 2;
+  string listen_addr = 2;
 
   // Cluster seed nodes for discovery
   // e.g., ["node1.cluster.local:8000", "node2.cluster.local:8000"]
@@ -123,6 +123,25 @@ message NodeConfig {
   // or ZeroMQ channels. Used for service discovery and channel configuration.
   // If empty, node is not part of any cluster.
   string cluster_name = 6;
+
+  // gRPC connection pool size per service
+  //
+  // Number of connections to maintain in the pool for each remote service.
+  // Defaults to 2 if not set. Each service (e.g., ActorService, TupleSpaceService)
+  // will have its own connection pool of this size.
+  uint32 grpc_connection_pool_size = 7;
+
+  // Maximum number of concurrent connections
+  uint32 max_connections = 8;
+
+  // Heartbeat interval in milliseconds
+  uint64 heartbeat_interval_ms = 9;
+
+  // Enable clustering (multi-node coordination)
+  bool clustering_enabled = 10;
+
+  // Node metadata (key-value pairs for extensibility)
+  map<string, string> metadata = 11;
 }
 
 // Runtime configuration

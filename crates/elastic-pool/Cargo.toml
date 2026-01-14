@@ -15,7 +15,6 @@ plexspaces-proto = { workspace = true }
 plexspaces-channel = { workspace = true }
 plexspaces-actor = { workspace = true }
 plexspaces-core = { workspace = true }
-plexspaces-supervisor = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }

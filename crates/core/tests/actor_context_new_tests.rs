@@ -9,7 +9,8 @@ use std::sync::Arc;
 #[tokio::test]
 async fn test_actor_context_new() {
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "tenant-123".to_string(),  // tenant_id
@@ -30,7 +31,8 @@ async fn test_actor_context_new_with_config() {
     use plexspaces_proto::v1::actor::ActorConfig;
 
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let mut config = ActorConfig::default();
     config.max_mailbox_size = 5000;
     config.enable_persistence = true;
@@ -54,7 +56,8 @@ async fn test_actor_context_new_with_config() {
 #[tokio::test]
 async fn test_actor_context_new_with_metadata() {
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let mut ctx = ActorContext::new(
         "test-node".to_string(),
         "tenant-123".to_string(),  // tenant_id

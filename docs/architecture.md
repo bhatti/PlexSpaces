@@ -251,9 +251,9 @@ graph TB
             Firecracker["Firecracker<br/>(Isolation)"]
         end
         
-        subgraph ServiceLayer["Service Layer"]
-            GRPCServices["gRPC Services<br/>& Service Mesh"]
-            ServiceLocator["Service Locator<br/>(Discovery)"]
+        subgraph ServiceLayer["Service Layer (plexspaces-services)"]
+            GRPCServices["gRPC Services<br/>(Actor, Application, TupleSpace, etc.)"]
+            ServiceLocator["Service Locator<br/>(Discovery & Client Pooling)"]
         end
     end
     

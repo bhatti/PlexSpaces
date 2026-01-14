@@ -65,7 +65,7 @@ let actor = ActorBuilder::new(behavior)
 use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use std::sync::Arc;
 
-let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
     .ok_or_else(|| "ActorFactory not found")?;
 let actor_id = actor.id().clone();
 let ctx = plexspaces_core::RequestContext::internal();

@@ -12,7 +12,7 @@ plexspaces-actor = { path = "../../../crates/actor" }
 plexspaces-node = { path = "../../../crates/node" }
 plexspaces-proto = { path = "../../../crates/proto" }
 plexspaces-mailbox = { path = "../../../crates/mailbox" }
-plexspaces-actor-service = { path = "../../../crates/actor-service" }
+plexspaces-services = { path = "../../../crates/services" }
 plexspaces-object-registry = { path = "../../../crates/object-registry" }
 plexspaces-keyvalue = { path = "../../../crates/keyvalue" }
 plexspaces-tuplespace = { path = "../../../crates/tuplespace" }

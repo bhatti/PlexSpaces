@@ -32,19 +32,27 @@ use std::sync::Arc;
 pub use plexspaces_mailbox::{Mailbox, Message};
 
 // Public modules
-pub mod application;
-pub mod application_manager;
-pub use application_manager::ApplicationManager;
 pub mod behavior_factory;
 pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegistry};
 // registry module removed - replaced by object-registry
 pub mod actor_context;
 pub use actor_context::{LinkProvider, ActivationProvider};
 pub mod actor_registry;
-// Service wrappers moved to node crate to avoid circular dependencies
-// Only TupleSpaceProviderWrapper remains here since TupleSpace is in core
 pub mod service_wrappers;
+pub mod service_trait;
+pub use service_trait::{Service, service_names};
+pub mod service_locator_trait;
+pub use service_locator_trait::{ServiceLocator, ApplicationManager, ServiceLocatorInitialization, WasmRuntimeTrait};
 pub mod service_locator;
+pub mod keyvalue_store;
+pub use keyvalue_store::KeyValueStore;
+pub mod lock_manager;
+pub use lock_manager::{LockManager, Lock, LockError, LockResult, AcquireLockOptions, RenewLockOptions, ReleaseLockOptions};
+pub use service_locator::request_context_from_grpc_request;
+pub mod application_node_trait;
+pub use application_node_trait::ApplicationNode;
+pub mod grpc_connection_manager;
+pub use grpc_connection_manager::{GrpcConnectionManager, ServiceType};
 pub mod object_registry_helpers;
 pub mod patterns;
 pub mod actor_trait;
@@ -58,10 +66,16 @@ pub use facet_service_wrapper::{FacetRegistryServiceWrapper, FacetManagerService
 pub mod monitoring;
 pub mod message_metrics;
 pub mod reply_waiter;
-pub use monitoring::NodeMetricsAccessor;
+pub use monitoring::{NodeMetricsAccessor, NodeConnectionInfo};
 pub use message_metrics::{ActorMetrics, ActorMetricsHandle, ActorMetricsExt, new_actor_metrics};
 pub mod journal_storage;
 pub use journal_storage::{JournalStorage, JournalError, JournalResult};
+pub mod health_reporter;
+pub use health_reporter::HealthReporter;
+pub mod health_checker;
+pub use health_checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, run_health_check};
+pub mod health_service;
+pub use health_service::PlexSpacesHealthReporter;
 
 // Re-export enhanced ActorContext
 pub use actor_context::{
@@ -77,8 +91,6 @@ pub use actor_registry::{ActorRegistry, ActorRegistryError, ActorRoutingInfo, Mo
 pub use virtual_actor_manager::{VirtualActorManager, VirtualActorError, VirtualActorMetadata};
 // FacetManager re-exported from plexspaces-facet crate (for backward compatibility)
 pub use plexspaces_facet::FacetManager;
-// Re-export ServiceLocator
-pub use service_locator::{Service, ServiceLocator, request_context_from_grpc_request};
 // Re-export MessageSender trait (for sending messages to actors)
 pub use actor_trait::MessageSender;
 // Re-export ReplyWaiter and related types
@@ -92,62 +104,6 @@ pub type ActorId = String;
 // ActorContext is now in actor_context module with full service access
 // See actor_context.rs for the enhanced version with ActorService, ObjectRegistry, etc.
 
-use std::collections::HashMap;
-use tokio::sync::{oneshot, RwLock};
-
-/// Tracks pending ask() requests for reply routing
-///
-/// ## Purpose
-/// Stores correlation_id -> reply channel mappings for the ask() pattern.
-/// When a reply arrives with a matching correlation_id, it's routed to the waiting caller.
-#[derive(Clone, Debug)]
-pub struct ReplyTracker {
-    /// Map of correlation_id -> oneshot::Sender for pending replies
-    pending: Arc<RwLock<HashMap<String, oneshot::Sender<Message>>>>,
-}
-
-impl ReplyTracker {
-    /// Create a new ReplyTracker
-    pub fn new() -> Self {
-        Self {
-            pending: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Register a pending reply request
-    pub async fn register(&self, correlation_id: String, reply_tx: oneshot::Sender<Message>) {
-        let mut pending = self.pending.write().await;
-        pending.insert(correlation_id, reply_tx);
-    }
-
-    /// Try to route a reply to a waiting caller
-    ///
-    /// Returns true if reply was routed, false if no pending request found
-    pub async fn route_reply(&self, correlation_id: &str, reply: Message) -> bool {
-        let mut pending = self.pending.write().await;
-        if let Some(reply_tx) = pending.remove(correlation_id) {
-            // Ignore send error (caller may have timed out)
-            let _ = reply_tx.send(reply);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Remove a pending reply (for cleanup on timeout/error)
-    pub async fn remove(&self, correlation_id: &str) {
-        let mut pending = self.pending.write().await;
-        pending.remove(correlation_id);
-    }
-}
-
-impl Default for ReplyTracker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl service_locator::Service for ReplyTracker {}
 
 /// Lightweight actor reference - pure data, no methods, no service dependencies
 ///

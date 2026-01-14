@@ -24,7 +24,7 @@
 use std::sync::Arc;
 use plexspaces_node::{Node, NodeId};
 use plexspaces_mailbox::Message;
-use plexspaces_proto::ActorServiceServer;
+use plexspaces_proto::actor::v1::actor_service_server::ActorServiceServer;
 use tonic::transport::Server;
 use serde::{Serialize, Deserialize};
 
@@ -151,7 +151,7 @@ async fn register_node_in_object_registry(node: &Arc<Node>, remote_node_id: &str
     } else {
         address.to_string()
     };
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let timestamp = Timestamp {
         seconds: now.as_secs() as i64,
@@ -188,7 +188,7 @@ async fn register_actor_factory(node: &Arc<Node>) {
     // Wait for ActorRegistry to be registered
     use plexspaces_core::service_locator::service_names;
     for _ in 0..10 {
-        if service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
+        if service_locator.actor_registry().await.is_some() {
             break;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -206,7 +206,7 @@ async fn register_actor_factory(node: &Arc<Node>) {
 
     // Register ActorService for tests that need it
     use plexspaces_core::ActorService;
-    use plexspaces_actor_service::ActorServiceImpl;
+    use plexspaces_services::actor_service::ActorServiceImpl;
     let actor_service_impl = Arc::new(ActorServiceImpl::new(
         service_locator.clone(),
         node.id().as_str().to_string(),
@@ -223,16 +223,23 @@ async fn register_actor_factory(node: &Arc<Node>) {
 
 /// Helper to start a gRPC server for testing
 async fn start_test_server(node: Arc<Node>) -> String {
-    use plexspaces_node::grpc_service::ActorServiceImpl;
+    use plexspaces_services::actor_service::ActorServiceImpl;
+    use plexspaces_proto::actor::v1::actor_service_server::ActorServiceServer;
+    use tonic::transport::Server;
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let service = ActorServiceImpl::new(node.clone());
+    let service_locator = node.service_locator();
+    let service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        node.id().as_str().to_string(),
+    ));
+    let service_wrapper = plexspaces_services::actor_service::ActorServiceWrapper::from(service);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {
         Server::builder()
-            .add_service(ActorServiceServer::new(service))
+            .add_service(ActorServiceServer::new(service_wrapper))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await
             .expect("Server failed");
@@ -279,7 +286,7 @@ async fn test_byzantine_generals_two_nodes() {
     use plexspaces_core::RequestContext;
     use std::collections::HashMap;
     
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let service_locator1 = node1.service_locator();
     let service_locator2 = node2.service_locator();
     
@@ -399,7 +406,7 @@ async fn test_byzantine_connection_pooling() {
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use plexspaces_core::RequestContext;
     use std::collections::HashMap;
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let service_locator2 = node2.service_locator();
     use plexspaces_actor::get_actor_factory;
     let actor_factory2 = get_actor_factory(service_locator2.as_ref()).await
@@ -501,7 +508,7 @@ async fn test_cross_node_actor_discovery() {
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use plexspaces_core::RequestContext;
     use std::collections::HashMap;
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let service_locator2 = node2.service_locator();
     use plexspaces_actor::get_actor_factory;
     let actor_factory2 = get_actor_factory(service_locator2.as_ref()).await
@@ -528,7 +535,7 @@ async fn test_cross_node_actor_discovery() {
     // Node1 should discover actor on node2 via ActorRegistry lookup_routing
     let service_locator1 = node1.service_locator();
     use plexspaces_core::service_locator::service_names;
-    let registry1: Arc<plexspaces_core::ActorRegistry> = service_locator1.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.expect("ActorRegistry not found");
+    let registry1: Arc<plexspaces_core::ActorRegistry> = service_locator1.actor_registry().await.expect("ActorRegistry not found");
     let routing = registry1.lookup_routing(&ctx, &"general@node2".to_string()).await.expect("Should find routing info");
     
     assert!(routing.is_some(), "Should find actor on remote node");

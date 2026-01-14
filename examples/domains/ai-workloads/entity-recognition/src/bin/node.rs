@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
 
     // Create node using NodeBuilder
     let node = NodeBuilder::new(node_id.clone())
-        .with_listen_address(listen_addr)
+        .with_listen_addr(listen_addr)
         .with_clustering_enabled(true)
         .build().await;
 

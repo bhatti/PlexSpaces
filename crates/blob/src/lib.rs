@@ -63,9 +63,20 @@ pub mod repository;
 pub mod service;
 
 #[cfg(feature = "presigned-urls")]
-mod presigned;
+pub mod presigned;
 #[cfg(not(feature = "presigned-urls"))]
-mod presigned;
+mod presigned {
+    // Stub module when presigned-urls feature is disabled
+    use chrono::Duration;
+    pub async fn generate_presigned_url(
+        _config: &crate::BlobConfig,
+        _storage_path: &str,
+        _operation: &str,
+        _expires_after: Duration,
+    ) -> Result<String, crate::BlobError> {
+        Err(crate::BlobError::InvalidInput("Presigned URLs require presigned-urls feature".to_string()))
+    }
+}
 
 #[cfg(feature = "server")]
 pub mod server;

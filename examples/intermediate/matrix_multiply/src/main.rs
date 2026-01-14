@@ -88,9 +88,9 @@ async fn main() -> Result<()> {
         let behavior = Box::new(worker_behavior);
         
         // Build and spawn actor using ActorBuilder::spawn() which uses ActorFactory internally
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
         let actor_id = format!("worker-{}@{}", worker_id, node.id().as_str());
-        let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().get_service().await
+        let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
             .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
         let _message_sender = actor_factory.spawn_actor(
             &ctx,
@@ -136,8 +136,8 @@ async fn main() -> Result<()> {
     
     // Spawn master using ActorFactory
     let master_id = format!("master@{}", node.id().as_str());
-    let ctx = RequestContext::internal();
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
         .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
     let _message_sender = actor_factory.spawn_actor(
         &ctx,

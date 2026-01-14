@@ -44,26 +44,14 @@ pub use plexspaces_lattice as lattice;
 pub use plexspaces_mailbox as mailbox;
 pub use plexspaces_node as node; // Distribution and clustering
 pub use plexspaces_persistence as journal; // Pillar 3: Durable execution
-pub use plexspaces_supervisor as supervision; // Pillar 2: Fault tolerance
+pub use plexspaces_actor::supervisor as supervision; // Pillar 2: Fault tolerance (merged into actor crate)
 pub use plexspaces_tuplespace as tuplespace; // Pillar 1: Universal coordination // Storage backend for registry and coordination
 
 // Testing infrastructure for multi-environment support
 pub mod testing;
 
-// Simplified implementation (TDD approach) - currently broken, commented out
-// pub mod simplified;
-
-// Simple TDD module with minimal working implementation
-pub mod simple_tdd;
-
 // Release management (Erlang/OTP-inspired)
 pub mod release;
-
-// Application lifecycle management (Erlang/OTP-inspired)
-pub mod application;
-
-// PlexSpaces Node - top-level runtime (Erlang/OTP-inspired)
-pub mod plexspaces_node;
 
 // Re-export proto definitions from the proto crate (if available)
 pub use plexspaces_proto as proto;
@@ -84,8 +72,6 @@ pub use mailbox::{Mailbox, MailboxConfig, Message, MessagePriority, OrderingStra
 // TODO: Re-export node crate types when needed
 // pub use node::{Node, NodeId, NodeConfig};
 pub use supervision::{SupervisionStrategy, Supervisor};
-// Re-export from our plexspaces_node module
-pub use plexspaces_node::{NodeError, NodeState, PlexSpacesNode};
 pub use tuplespace::{Pattern, Tuple, TupleSpace};
 
 // Include tests module

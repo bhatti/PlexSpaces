@@ -91,6 +91,28 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
+    async fn unregister(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .unregister(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+    async fn heartbeat(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .heartbeat(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
 async fn create_test_registry() -> Arc<ActorRegistry> {

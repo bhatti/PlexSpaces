@@ -176,7 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use plexspaces_actor::ActorBuilder;
     let mut actors = Vec::new();
     for i in 1..=3 {
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
         let actor_ref = ActorBuilder::new(Box::new(MockBehavior::new()))
             .with_id(format!("worker-{}@{}", i, node.id().as_str()))
             .spawn(&ctx, node.service_locator().clone())

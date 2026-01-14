@@ -559,7 +559,7 @@ message Actor {
   // - Prevents data loss during rolling upgrades
   //
   // ## Version Rules
-  // - **Version 0** = unversioned (legacy actors, assume version 1, best-effort deserialization)
+  // - **Version 0** = unversioned (assume version 1, best-effort deserialization)
   // - **Version >= 1** = explicit schema version tracked with actor state
   // - **Same version** (e.g., both v2) → Load directly, no migration needed
   // - **Older version** (state v1, actor v2) → Attempt migration if migration exists, else reject
@@ -820,7 +820,7 @@ message ActorConfig {
   // - Prevents invalid configuration causing actor startup failures
   //
   // ## Version Rules
-  // - **Version 0** = unversioned (legacy config, assume version 1)
+  // - **Version 0** = unversioned (assume version 1)
   // - **Version >= 1** = explicit config schema version
   // - **Same version** → Use config directly
   // - **Older version** → Migrate config forward (e.g., add new defaults, remove deprecated)

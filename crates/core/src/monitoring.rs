@@ -53,6 +53,16 @@ pub trait NodeMetricsAccessor: Send + Sync {
     async fn increment_failed_deliveries(&self);
 }
 
+/// Trait for accessing node connection information
+///
+/// This allows components to access node connection information (connected nodes list)
+/// without directly depending on the Node type.
+#[async_trait]
+pub trait NodeConnectionInfo: Send + Sync {
+    /// Get list of connected node IDs (as strings)
+    async fn connected_nodes(&self) -> Vec<String>;
+}
+
 /// Record message routing metrics
 ///
 ///

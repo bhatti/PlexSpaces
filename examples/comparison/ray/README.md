@@ -280,7 +280,7 @@ use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor
 use plexspaces_mailbox::{mailbox_config_default, Mailbox};
 use std::sync::Arc;
 
-let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
     .ok_or_else(|| "ActorFactory not found")?;
 let mut processors = Vec::new();
 for i in 0..4 {

@@ -20,6 +20,7 @@ plexspaces-proto = { workspace = true }
 plexspaces-keyvalue = { workspace = true }
 plexspaces-tuplespace = { workspace = true }
 plexspaces-journaling = { path = "../journaling" }
+indexmap = { version = "2.0", features = ["serde"] }
 
 # Core dependencies
 tokio = { workspace = true }
@@ -42,7 +43,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
-plexspaces-actor-service = { path = "../actor-service" }
+plexspaces-services = { path = "../services" }
 plexspaces-object-registry = { path = "../object-registry" }
 plexspaces-node = { path = "../node" }
 plexspaces-behavior = { path = "../behavior" }

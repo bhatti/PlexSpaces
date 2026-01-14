@@ -204,66 +204,6 @@ pub mod application_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        pub async fn start_application(
-            &mut self,
-            request: impl tonic::IntoRequest<super::StartApplicationRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::StartApplicationResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.application.v1.ApplicationService/StartApplication",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "plexspaces.application.v1.ApplicationService",
-                        "StartApplication",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        pub async fn stop_application(
-            &mut self,
-            request: impl tonic::IntoRequest<super::StopApplicationRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::StopApplicationResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.application.v1.ApplicationService/StopApplication",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "plexspaces.application.v1.ApplicationService",
-                        "StopApplication",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
     }
 }
 /// Generated server implementations.
@@ -299,20 +239,6 @@ pub mod application_service_server {
             request: tonic::Request<super::GetApplicationStatusRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetApplicationStatusResponse>,
-            tonic::Status,
-        >;
-        async fn start_application(
-            &self,
-            request: tonic::Request<super::StartApplicationRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::StartApplicationResponse>,
-            tonic::Status,
-        >;
-        async fn stop_application(
-            &self,
-            request: tonic::Request<super::StopApplicationRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::StopApplicationResponse>,
             tonic::Status,
         >;
     }
@@ -580,103 +506,6 @@ pub mod application_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = GetApplicationStatusSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.application.v1.ApplicationService/StartApplication" => {
-                    #[allow(non_camel_case_types)]
-                    struct StartApplicationSvc<T: ApplicationService>(pub Arc<T>);
-                    impl<
-                        T: ApplicationService,
-                    > tonic::server::UnaryService<super::StartApplicationRequest>
-                    for StartApplicationSvc<T> {
-                        type Response = super::StartApplicationResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::StartApplicationRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as ApplicationService>::start_application(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = StartApplicationSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.application.v1.ApplicationService/StopApplication" => {
-                    #[allow(non_camel_case_types)]
-                    struct StopApplicationSvc<T: ApplicationService>(pub Arc<T>);
-                    impl<
-                        T: ApplicationService,
-                    > tonic::server::UnaryService<super::StopApplicationRequest>
-                    for StopApplicationSvc<T> {
-                        type Response = super::StopApplicationResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::StopApplicationRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as ApplicationService>::stop_application(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = StopApplicationSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

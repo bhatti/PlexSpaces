@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create node using NodeBuilder
     let node = Arc::new(
         NodeBuilder::new("finance-risk-node")
-            .with_listen_address("0.0.0.0:9000")
+            .with_listen_addr("0.0.0.0:9000")
             .build().await,
     );
     info!("✅ Node created: finance-risk-node");
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mailbox_config = plexspaces_mailbox::mailbox_config_default();
     mailbox_config.capacity = 10000;
     use plexspaces_actor::ActorBuilder;
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let coordinator_ref = ActorBuilder::new(coordinator_behavior)
         .with_id(format!("loan-coordinator@{}", node.id().as_str()))
         .with_mailbox_config(mailbox_config)
@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Credit check workers
     let mut worker_mailbox_config = plexspaces_mailbox::mailbox_config_default();
     worker_mailbox_config.capacity = 10000;
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     for i in 0..config.worker_pools.credit_check {
         let worker = CreditCheckWorker::new(format!("credit-worker-{}", i));
         let behavior = Box::new(worker);

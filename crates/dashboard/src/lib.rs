@@ -29,10 +29,10 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod dashboard_service;
 pub mod dashboard_handlers;
 
-pub use dashboard_service::{DashboardServiceImpl, HealthReporterAccess};
+// Dashboard service moved to plexspaces-services crate
+pub use plexspaces_services::dashboard_service::{DashboardServiceImpl, HealthReporterAccess};
 pub use dashboard_handlers::create_dashboard_router;
 
 

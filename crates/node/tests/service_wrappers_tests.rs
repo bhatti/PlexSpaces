@@ -38,9 +38,9 @@ use test_helpers::{spawn_actor_helper, find_actor_helper};
 
 #[tokio::test]
 async fn test_node_operations_wrapper() {
-    let node = Arc::new(
+    let node: Arc<plexspaces_node::Node> = Arc::new(
         NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:8000")
+            .with_listen_addr("127.0.0.1:8000")
             .build().await
     );
     // NodeOperationsWrapper has been removed - NodeOperations trait is no longer needed
@@ -86,9 +86,9 @@ async fn test_actor_service_wrapper_send_message_local() {
     use plexspaces_mailbox::{Mailbox, MailboxConfig};
 
     // Create node and spawn an actor
-    let node = Arc::new(
+    let node: Arc<plexspaces_node::Node> = Arc::new(
         NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:8000")
+            .with_listen_addr("127.0.0.1:8000")
             .build().await
     );
 
@@ -136,7 +136,7 @@ async fn test_actor_service_wrapper_send_message_local() {
         .expect("Actor should be registered within 5 seconds");
 
     // Use ActorServiceImpl directly (it implements ActorService trait)
-    use plexspaces_actor_service::ActorServiceImpl;
+    use plexspaces_services::actor_service::ActorServiceImpl;
     let service_locator = node.service_locator();
     let actor_service = Arc::new(ActorServiceImpl::new(service_locator, node.id().as_str().to_string()));
 
@@ -167,13 +167,13 @@ async fn test_actor_service_wrapper_send_message_local() {
 
 #[tokio::test]
 async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
-    let node = Arc::new(
+    let node: Arc<plexspaces_node::Node> = Arc::new(
         NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:8000")
+            .with_listen_addr("127.0.0.1:8000")
             .build().await
     );
 
-    use plexspaces_actor_service::ActorServiceImpl;
+    use plexspaces_services::actor_service::ActorServiceImpl;
     let service_locator = node.service_locator();
     let actor_service = Arc::new(ActorServiceImpl::new(service_locator, node.id().as_str().to_string()));
 

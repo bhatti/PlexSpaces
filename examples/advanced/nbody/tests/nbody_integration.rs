@@ -94,7 +94,7 @@ async fn test_spawn_body_actors() {
     );
 
     use plexspaces_actor::ActorBuilder;
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let body_ref = ActorBuilder::new(Box::new(BodyActor::new(body)))
         .with_id(format!("body-1@{}", node.id().as_str()))
         .spawn(&ctx, service_locator.clone())
@@ -121,7 +121,7 @@ async fn test_body_actor_responds_to_get_state() {
     );
 
     use plexspaces_actor::ActorBuilder;
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let body_ref = ActorBuilder::new(Box::new(BodyActor::new(body)))
         .with_id(format!("body-1@{}", node.id().as_str()))
         .spawn(&ctx, service_locator.clone())
@@ -163,7 +163,7 @@ async fn test_multiple_body_actors() {
     let mut body_refs = Vec::new();
     for body in bodies {
         use plexspaces_actor::ActorBuilder;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
         let body_ref = ActorBuilder::new(Box::new(BodyActor::new(body)))
             .with_id(format!("body-{}@{}", body_refs.len() + 1, node.id().as_str()))
             .spawn(&ctx, service_locator.clone())

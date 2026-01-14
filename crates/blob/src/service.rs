@@ -381,4 +381,8 @@ impl BlobService {
 }
 
 // Implement Service trait for ServiceLocator registration
-impl plexspaces_core::Service for BlobService {}
+impl plexspaces_core::Service for BlobService {
+    fn service_name(&self) -> String {
+        "BlobService".to_string()
+    }
+}

@@ -30,7 +30,7 @@
 //!   - Slower, requires WASM runtime
 
 use plexspaces_node::{NodeBuilder, Node};
-use plexspaces_node::application_service::ApplicationServiceImpl;
+use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, DeployApplicationRequest,
     ApplicationSpec, ApplicationType, SupervisorSpec, ChildSpec, ChildType,
@@ -38,7 +38,7 @@ use plexspaces_proto::application::v1::{
 };
 use plexspaces_proto::v1::common::Facet;
 use plexspaces_proto::wasm::v1::WasmModule;
-use plexspaces_core::{ActorRegistry, RequestContext, service_locator::service_names};
+use plexspaces_core::{ActorRegistry, RequestContext, service_names};
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
@@ -139,7 +139,7 @@ async fn create_test_node() -> Arc<Node> {
 async fn create_test_node_with_server() -> Arc<Node> {
     let node: Arc<Node> = Arc::new(
         NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:0") // Ephemeral port (HTTP gateway auto-uses 0 too)
+            .with_listen_addr("127.0.0.1:0") // Ephemeral port (HTTP gateway auto-uses 0 too)
             .build()
             .await
     );
@@ -206,7 +206,7 @@ async fn wait_for_actors_registered(
     timeout_duration: Duration,
 ) -> bool {
     let registry = node.service_locator()
-        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry not found");
     
@@ -241,7 +241,7 @@ async fn wait_for_eager_actors_active(
     timeout_duration: Duration,
 ) -> bool {
     let registry = node.service_locator()
-        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry not found");
     
@@ -345,7 +345,7 @@ async fn test_eager_virtual_actors_activation() {
         
         // Check if eager actor is active (should activate immediately)
         let registry = node.service_locator()
-            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .actor_registry()
             .await
             .expect("ActorRegistry not found");
         
@@ -395,7 +395,7 @@ async fn test_lazy_virtual_actors_registration() {
         
         // Lazy actor should be routable (registered) even if not active
         let registry = node.service_locator()
-            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .actor_registry()
             .await
             .expect("ActorRegistry not found");
         
@@ -472,7 +472,7 @@ async fn test_mixed_eager_lazy_virtual_actors() {
         
         // Check if eager actor is active (should activate immediately)
         let registry = node.service_locator()
-            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .actor_registry()
             .await
             .expect("ActorRegistry not found");
         
@@ -537,8 +537,8 @@ async fn test_application_deployment_with_eager_virtual_actors() {
         };
         
         // Deploy application
-        let application_manager = node.application_manager().await.expect("ApplicationManager not found");
-        let service = ApplicationServiceImpl::new(node.clone(), application_manager);
+        let application_manager = node.application_manager();
+        let service = ApplicationServiceImpl::new(node.service_locator().clone());
         let wasm_module_proto = WasmModule {
             name: "eager-virtual-app".to_string(),
             version: "1.0.0".to_string(),
@@ -587,7 +587,7 @@ async fn test_application_deployment_with_eager_virtual_actors() {
         
         // Check if eager actor is active (should activate immediately)
         let registry = node.service_locator()
-            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .actor_registry()
             .await
             .expect("ActorRegistry not found");
         

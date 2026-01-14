@@ -141,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mailbox_config.capacity = 10000; // Large capacity
         
         use plexspaces_actor::ActorBuilder;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
         let actor_ref = ActorBuilder::new(behavior)
             .with_id(format!("{}@{}", body.id, node.id().as_str()))
             .with_mailbox_config(mailbox_config)

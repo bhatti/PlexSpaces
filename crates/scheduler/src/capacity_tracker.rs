@@ -27,8 +27,7 @@
 //! - Extracts capacity from metrics map (sent via heartbeat)
 //! - Provides methods to get node capacities, filter by labels, etc.
 
-use plexspaces_object_registry::ObjectRegistry;
-use plexspaces_core::RequestContext;
+use plexspaces_core::{ObjectRegistry, RequestContext};
 use plexspaces_proto::{
     common::v1::ResourceSpec,
     node::v1::NodeCapacity,
@@ -55,12 +54,12 @@ pub type CapacityTrackerResult<T> = Result<T, CapacityTrackerError>;
 /// Capacity tracker for monitoring node resources
 pub struct CapacityTracker {
     /// ObjectRegistry for querying node registrations
-    registry: Arc<ObjectRegistry>,
+    registry: Arc<dyn ObjectRegistry>,
 }
 
 impl CapacityTracker {
     /// Create a new capacity tracker
-    pub fn new(registry: Arc<ObjectRegistry>) -> Self {
+    pub fn new(registry: Arc<dyn ObjectRegistry>) -> Self {
         Self { registry }
     }
 
@@ -78,7 +77,7 @@ impl CapacityTracker {
     ) -> CapacityTrackerResult<Option<NodeCapacity>> {
         let registration = self
             .registry
-            .lookup(ctx, ObjectType::ObjectTypeNode, node_id)
+            .lookup(ctx, node_id, Some(ObjectType::ObjectTypeNode))
             .await
             .map_err(|e| CapacityTrackerError::RegistryError(e.to_string()))?;
 
@@ -105,7 +104,7 @@ impl CapacityTracker {
     ) -> CapacityTrackerResult<HashMap<String, NodeCapacity>> {
         // Discover all nodes (registered as services)
         // For capacity tracking, use internal context to see all nodes
-        // Use the provided context (which should be RequestContext::internal() for tests)
+        // Use the provided context (which should be RequestContext::new_without_auth("internal".to_string(), "system".to_string()) for tests)
         let nodes = self
             .registry
             .discover(
@@ -359,8 +358,10 @@ mod tests {
     #[tokio::test]
     async fn test_get_node_capacity() {
         use plexspaces_core::RequestContext;
+        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
+        let registry: Arc<dyn ObjectRegistry> = registry_impl;
 
         // Register a node
         let mut metrics = HashMap::new();
@@ -371,7 +372,7 @@ mod tests {
 
         let labels = HashMap::new();
         let registration = create_test_registration("node-1", metrics, labels);
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         registry.register(&ctx, registration).await.unwrap();
 
         let tracker = CapacityTracker::new(registry);
@@ -383,10 +384,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_node_capacity_not_found() {
+        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
+        let registry: Arc<dyn ObjectRegistry> = registry_impl;
         let tracker = CapacityTracker::new(registry);
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         let capacity = tracker.get_node_capacity(&ctx, "nonexistent").await.unwrap();
         assert!(capacity.is_none());
@@ -395,8 +398,10 @@ mod tests {
     #[tokio::test]
     async fn test_list_node_capacities() {
         use plexspaces_core::RequestContext;
+        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
+        let registry: Arc<dyn ObjectRegistry> = registry_impl;
 
         // Register two nodes
         let mut metrics1 = HashMap::new();
@@ -408,7 +413,7 @@ mod tests {
         let mut labels1 = HashMap::new();
         labels1.insert("zone".to_string(), "us-west".to_string());
         let registration1 = create_test_registration("node-1", metrics1, labels1);
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         registry.register(&ctx, registration1).await.unwrap();
 
         let mut metrics2 = HashMap::new();
@@ -423,8 +428,8 @@ mod tests {
         registry.register(&ctx, registration2).await.unwrap();
 
         // Verify nodes are registered before creating tracker
-        let node1 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-1").await.unwrap();
-        let node2 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-2").await.unwrap();
+        let node1 = registry.lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode)).await.unwrap();
+        let node2 = registry.lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode)).await.unwrap();
         assert!(node1.is_some(), "node-1 should be registered");
         assert!(node2.is_some(), "node-2 should be registered");
         
@@ -438,14 +443,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_node_capacities_filter_by_labels() {
+        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
+        let registry: Arc<dyn ObjectRegistry> = registry_impl;
 
         // Register two nodes with different labels
         let mut metrics1 = HashMap::new();
         metrics1.insert("total_cpu_cores".to_string(), 4.0);
         metrics1.insert("total_memory_mb".to_string(), 8192.0);
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let mut labels1 = HashMap::new();
         labels1.insert("zone".to_string(), "us-west".to_string());
         let registration1 = create_test_registration("node-1", metrics1, labels1);
@@ -460,8 +467,8 @@ mod tests {
         registry.register(&ctx, registration2).await.unwrap();
 
         // Verify nodes are registered before creating tracker
-        let node1 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-1").await.unwrap();
-        let node2 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-2").await.unwrap();
+        let node1 = registry.lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode)).await.unwrap();
+        let node2 = registry.lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode)).await.unwrap();
         assert!(node1.is_some(), "node-1 should be registered");
         assert!(node2.is_some(), "node-2 should be registered");
         
@@ -470,7 +477,7 @@ mod tests {
         // Filter by zone=us-west
         let mut filter_labels = HashMap::new();
         filter_labels.insert("zone".to_string(), "us-west".to_string());
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let capacities = tracker
             .list_node_capacities(&ctx, Some(&filter_labels), None)
             .await
@@ -484,7 +491,9 @@ mod tests {
     #[tokio::test]
     async fn test_list_node_capacities_filter_by_min_resources() {
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
+        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
+        let registry: Arc<dyn ObjectRegistry> = registry_impl;
 
         // Register two nodes with different capacities
         let mut metrics1 = HashMap::new();
@@ -493,7 +502,7 @@ mod tests {
         metrics1.insert("allocated_cpu_cores".to_string(), 3.0);
         metrics1.insert("allocated_memory_mb".to_string(), 7000.0);
         // Available: 1 CPU, ~1GB memory
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let registration1 = create_test_registration("node-1", metrics1, HashMap::new());
         registry.register(&ctx, registration1).await.unwrap();
 
@@ -507,8 +516,8 @@ mod tests {
         registry.register(&ctx, registration2).await.unwrap();
 
         // Verify nodes are registered before creating tracker
-        let node1 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-1").await.unwrap();
-        let node2 = registry.lookup(&ctx, ObjectType::ObjectTypeNode, "node-2").await.unwrap();
+        let node1 = registry.lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode)).await.unwrap();
+        let node2 = registry.lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode)).await.unwrap();
         assert!(node1.is_some(), "node-1 should be registered");
         assert!(node2.is_some(), "node-2 should be registered");
         
@@ -524,7 +533,7 @@ mod tests {
         };
 
         let capacities = tracker
-            .list_node_capacities(&RequestContext::internal(), None, Some(&min_resources))
+            .list_node_capacities(&RequestContext::new_without_auth("internal".to_string(), "system".to_string()), None, Some(&min_resources))
             .await
             .unwrap();
 

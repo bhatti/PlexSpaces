@@ -27,7 +27,7 @@ use std::fs;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use wat;
-use plexspaces_core::application::ApplicationState;
+use plexspaces_proto::v1::application::ApplicationState;
 
 /// Shared WASM bytes cache (loaded once, reused for all tests)
 static SHARED_WASM_BYTES: std::sync::OnceLock<tokio::sync::Mutex<Option<Vec<u8>>>> = std::sync::OnceLock::new();
@@ -138,7 +138,7 @@ async fn test_http_deploy_wasm_application_small() {
 
     // Start node on a fixed port for testing (avoid permission issues with port < 1024)
     let node = Arc::new(NodeBuilder::new("test-node-http-wasm-small".to_string())
-        .with_listen_address("127.0.0.1:8000".to_string())
+        .with_listen_addr("127.0.0.1:8000".to_string())
         .build()
         .await);
 
@@ -245,7 +245,7 @@ async fn test_http_deploy_wasm_application_small() {
     
     // Verify application is registered by checking ApplicationManager
     // ApplicationManager stores by name, not application_id
-    let app_manager = node.application_manager().await.expect("ApplicationManager should be available");
+    let app_manager = node.application_manager();
     let app_state = app_manager.get_state(app_name).await;
     assert!(app_state.is_some(), "Application should be registered with name '{}'", app_name);
     eprintln!("✅ Application registered and running - state: {:?}", app_state);
@@ -299,7 +299,7 @@ async fn test_http_deploy_wasm_application() {
 
     // Start node on a fixed port for testing (avoid permission issues with port < 1024)
     let node = Arc::new(NodeBuilder::new("test-node-http-wasm".to_string())
-        .with_listen_address("127.0.0.1:8002".to_string()) // Use different port to avoid conflicts
+        .with_listen_addr("127.0.0.1:8002".to_string()) // Use different port to avoid conflicts
         .build()
         .await);
 
@@ -415,7 +415,7 @@ async fn test_http_deploy_wasm_application() {
 async fn test_http_deploy_wasm_size_limit() {
     // Start node
     let node = Arc::new(NodeBuilder::new("test-node-http-wasm-size".to_string())
-        .with_listen_address("127.0.0.1:9005".to_string()) // Use different port
+        .with_listen_addr("127.0.0.1:9005".to_string()) // Use different port
         .build()
         .await);
 

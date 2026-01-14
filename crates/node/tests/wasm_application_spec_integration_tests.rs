@@ -79,7 +79,7 @@
 //! ```
 
 use plexspaces_node::NodeBuilder;
-use plexspaces_core::application::ApplicationState;
+use plexspaces_proto::v1::application::ApplicationState;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService,
     GetSummaryRequest, GetApplicationsRequest,
@@ -94,7 +94,7 @@ use wat;
 /// Helper to create a test node
 async fn create_test_node(node_id: &str, listen_addr: &str) -> Arc<plexspaces_node::Node> {
     let node = NodeBuilder::new(node_id.to_string())
-        .with_listen_address(listen_addr.to_string())
+        .with_listen_addr(listen_addr.to_string())
         .build()
         .await;
     Arc::new(node)
@@ -116,9 +116,9 @@ async fn create_dashboard_service(node: Arc<plexspaces_node::Node>) -> Dashboard
     service_locator.register_node_metrics_accessor(metrics_accessor_trait).await;
     
     // Ensure ApplicationManager is registered
-    use plexspaces_core::ApplicationManager;
-    use plexspaces_core::service_locator::service_names;
-    if let Some(app_manager) = service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await {
+    // ApplicationManager is not in ServiceLocator - get from Node directly
+    // Note: In tests, we can access it via node.application_manager() if needed
+    // For now, this test doesn't actually use app_manager, so we can remove this
         service_locator.register_service(app_manager.clone()).await;
     }
     
@@ -376,7 +376,7 @@ async fn test_wasm_deployment_creates_applicationspec() {
     sleep(Duration::from_millis(1000)).await;
     
     // ASSERT: Verify ApplicationSpec was created and application is registered
-    let app_manager = node.application_manager().await.expect("ApplicationManager should be available");
+    let app_manager = node.application_manager();
     let app_state = app_manager.get_state("test-application").await;
     assert!(app_state.is_some(), "Application should be registered with name 'test-application'");
     
@@ -556,7 +556,7 @@ async fn test_wasm_deployment_applicationspec_fields() {
     sleep(Duration::from_millis(1000)).await;
     
     // ASSERT: Verify ApplicationSpec fields via ApplicationManager
-    let app_manager = node.application_manager().await.expect("ApplicationManager should be available");
+    let app_manager = node.application_manager();
     
     // Application should be registered by name (not application_id)
     let app_state = app_manager.get_state(app_name).await;
@@ -628,7 +628,7 @@ async fn test_wasm_deployment_undeployment_flow() {
     sleep(Duration::from_millis(1000)).await;
     
     // Verify deployed
-    let app_manager = node.application_manager().await.expect("ApplicationManager should be available");
+    let app_manager = node.application_manager();
     let app_state = app_manager.get_state(app_name).await;
     assert!(app_state.is_some(), "Application should be registered");
     
@@ -735,7 +735,7 @@ async fn test_wasm_deployment_multiple_applications() {
     }
     
     // ASSERT: All applications should be registered
-    let app_manager = node.application_manager().await.expect("ApplicationManager should be available");
+    let app_manager = node.application_manager();
     
     for (_, app_name, _) in &apps {
         let app_state = app_manager.get_state(app_name).await;
@@ -906,7 +906,7 @@ async fn test_wasm_deployment_applicationspec_auto_generation() {
     sleep(Duration::from_millis(1000)).await;
     
     // ASSERT: ApplicationSpec should be auto-generated and application should be registered
-    let app_manager = node.application_manager().await.expect("ApplicationManager should be available");
+    let app_manager = node.application_manager();
     let app_state = app_manager.get_state(app_name).await;
     assert!(app_state.is_some(), "Application should be registered (ApplicationSpec auto-generated)");
     assert_eq!(app_state, Some(ApplicationState::ApplicationStateRunning), 
@@ -975,7 +975,7 @@ async fn test_wasm_deployment_name_vs_application_id() {
     sleep(Duration::from_millis(1000)).await;
     
     // ASSERT: Application should be registered by name, not application_id
-    let app_manager = node.application_manager().await.expect("ApplicationManager should be available");
+    let app_manager = node.application_manager();
     
     // Should be found by name
     let app_state_by_name = app_manager.get_state(app_name).await;
@@ -1084,7 +1084,7 @@ async fn test_wasm_deployment_complete_workflow() {
     eprintln!("✅ Step 3: Dashboard verified (1 application)");
     
     // STEP 4: Verify ApplicationSpec was created and used
-    let app_manager = node.application_manager().await.expect("ApplicationManager should be available");
+    let app_manager = node.application_manager();
     let app_state = app_manager.get_state(app_name).await;
     assert!(app_state.is_some(), "Application should be registered");
     assert_eq!(app_state, Some(ApplicationState::ApplicationStateRunning), 

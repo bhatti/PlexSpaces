@@ -77,9 +77,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create order processor actor using ActorBuilder
     info!("🎭 Creating order processor actor...");
     let behavior = Box::new(OrderProcessorBehavior::new());
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let actor_id = format!("order-processor@{}", node.id().as_str());
-    let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().get_service().await
+    let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
         .ok_or_else(|| "ActorFactory not found".to_string())?;
     let _message_sender = actor_factory.spawn_actor(
         &ctx,

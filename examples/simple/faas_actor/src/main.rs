@@ -144,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create node with in-memory backends (for testing)
     // Use port 8001 to avoid conflict with MinIO (which uses 9000/9001)
     let node = NodeBuilder::new("counter-node")
-        .with_listen_address("0.0.0.0:8001")
+        .with_listen_addr("0.0.0.0:8001")
         .with_in_memory_backends()
         .build();
 
@@ -183,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
     
     // Spawn actor with type information using spawn_actor
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let _message_sender = actor_factory_impl.spawn_actor(
         &ctx,
         &actor_id,
@@ -200,7 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(Duration::from_millis(500)).await;
     
     // Verify registration by checking discover_actors_by_type
-    let actor_registry: Arc<ActorRegistry> = service_locator.get_service().await
+    let actor_registry: Arc<ActorRegistry> = service_locator.actor_registry().await
         .ok_or("ActorRegistry not found in ServiceLocator")?;
     
     let discovered = actor_registry.discover_actors_by_type("default", "default", "counter").await;

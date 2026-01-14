@@ -148,70 +148,6 @@ pub mod persistence_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Save state snapshot
-*/
-        pub async fn save_snapshot(
-            &mut self,
-            request: impl tonic::IntoRequest<super::SaveSnapshotRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::SaveSnapshotResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.persistence.prv.PersistenceService/SaveSnapshot",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "plexspaces.persistence.prv.PersistenceService",
-                        "SaveSnapshot",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /** Load state snapshot
-*/
-        pub async fn load_snapshot(
-            &mut self,
-            request: impl tonic::IntoRequest<super::LoadSnapshotRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::LoadSnapshotResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.persistence.prv.PersistenceService/LoadSnapshot",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "plexspaces.persistence.prv.PersistenceService",
-                        "LoadSnapshot",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
         /** Create checkpoint
 */
         pub async fn create_checkpoint(
@@ -605,24 +541,6 @@ pub mod persistence_service_server {
             tonic::Response<super::ReadEventsResponse>,
             tonic::Status,
         >;
-        /** Save state snapshot
-*/
-        async fn save_snapshot(
-            &self,
-            request: tonic::Request<super::SaveSnapshotRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::SaveSnapshotResponse>,
-            tonic::Status,
-        >;
-        /** Load state snapshot
-*/
-        async fn load_snapshot(
-            &self,
-            request: tonic::Request<super::LoadSnapshotRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::LoadSnapshotResponse>,
-            tonic::Status,
-        >;
         /** Create checkpoint
 */
         async fn create_checkpoint(
@@ -968,100 +886,6 @@ pub mod persistence_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = ReadEventsSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.persistence.prv.PersistenceService/SaveSnapshot" => {
-                    #[allow(non_camel_case_types)]
-                    struct SaveSnapshotSvc<T: PersistenceService>(pub Arc<T>);
-                    impl<
-                        T: PersistenceService,
-                    > tonic::server::UnaryService<super::SaveSnapshotRequest>
-                    for SaveSnapshotSvc<T> {
-                        type Response = super::SaveSnapshotResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::SaveSnapshotRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as PersistenceService>::save_snapshot(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = SaveSnapshotSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.persistence.prv.PersistenceService/LoadSnapshot" => {
-                    #[allow(non_camel_case_types)]
-                    struct LoadSnapshotSvc<T: PersistenceService>(pub Arc<T>);
-                    impl<
-                        T: PersistenceService,
-                    > tonic::server::UnaryService<super::LoadSnapshotRequest>
-                    for LoadSnapshotSvc<T> {
-                        type Response = super::LoadSnapshotResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::LoadSnapshotRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as PersistenceService>::load_snapshot(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = LoadSnapshotSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

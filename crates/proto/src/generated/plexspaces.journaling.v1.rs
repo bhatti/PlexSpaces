@@ -257,7 +257,7 @@ pub struct Checkpoint {
     /// - Prevents corrupt state from schema mismatches
     ///
     /// ## Version Rules
-    /// - Version 0 = unversioned (legacy checkpoints, assume version 1)
+    /// - Version 0 = unversioned (assume version 1)
     /// - Version >= 1 = explicit schema version
     /// - Reject checkpoints with version > current actor schema version
     ///

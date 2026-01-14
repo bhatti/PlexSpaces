@@ -534,7 +534,7 @@ pub async fn create_pipelines(
     num_pipelines: usize,
 ) -> Result<Vec<Pipeline>, Box<dyn std::error::Error>> {
     let service_locator = node.service_locator();
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let mut pipelines = Vec::new();
     
     use plexspaces_actor::ActorBuilder;

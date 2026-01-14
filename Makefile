@@ -355,14 +355,17 @@ run-all-standalone-examples:
 # Usage: make test                    # Uses all available cores (auto-detected)
 #        CARGO_BUILD_JOBS=4 make test # Uses 4 cores (slower but less resource intensive)
 #        VERBOSE=1 make test          # Shows detailed build output
+# Output is piped to test-out file for review
 test:
 	@echo "Running all tests (unit + integration tests)..."
-	@echo "Cleaning up any existing SQLite database files..."
-	@find . -maxdepth 3 -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) ! -path "./target/*" ! -path "./.git/*" -delete 2>/dev/null || true; \
+	@echo "Output will be saved to test-out"
+	@rm -f test-out; \
+	echo "Cleaning up any existing SQLite database files..." | tee test-out; \
+	find . -maxdepth 3 -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) ! -path "./target/*" ! -path "./.git/*" -delete 2>/dev/null || true; \
 	if [ -d "data" ]; then \
 		find data -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) -delete 2>/dev/null || true; \
 	fi; \
-	echo "SQLite database files cleaned up."; \
+	echo "SQLite database files cleaned up." | tee -a test-out; \
 	CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
@@ -371,7 +374,7 @@ test:
 	if [ "$$VERBOSE" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
 	fi; \
-	echo "Configuration: Using $$CARGO_JOBS CPU cores for building (override with CARGO_BUILD_JOBS env var)"; \
+	echo "Configuration: Using $$CARGO_JOBS CPU cores for building (override with CARGO_BUILD_JOBS env var)" | tee -a test-out; \
 	CERT_FILE=""; \
 	if [ -f "$$(pwd)/archived_docs/cert.pem" ]; then \
 		CERT_FILE="$$(pwd)/archived_docs/cert.pem"; \
@@ -381,40 +384,62 @@ test:
 	if [ -n "$$CERT_FILE" ]; then \
 		export SSL_CERT_FILE="$$CERT_FILE"; \
 		export CARGO_HTTP_CAINFO="$$CERT_FILE"; \
-		echo "Using SSL certificates from: $$SSL_CERT_FILE"; \
+		echo "Using SSL certificates from: $$SSL_CERT_FILE" | tee -a test-out; \
 	fi; \
 	if [ -n "$$RUSTC_WRAPPER" ] && command -v sccache >/dev/null 2>&1; then \
-		echo "Using sccache for compilation caching (RUSTC_WRAPPER=$$RUSTC_WRAPPER)"; \
+		echo "Using sccache for compilation caching (RUSTC_WRAPPER=$$RUSTC_WRAPPER)" | tee -a test-out; \
 		export RUSTC_WRAPPER=sccache; \
 	fi; \
-	echo "Building workspace first for faster test execution (incremental build enabled)..."; \
-	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT || true; \
-	echo ""; \
-	if command -v cargo-nextest >/dev/null 2>&1; then \
-		echo "Using cargo-nextest for faster test execution..."; \
-		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..."; \
-		cargo nextest run --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=1 || exit 1; \
-		echo ""; \
-		echo "Running all other tests with parallel execution..."; \
-		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
-			--exclude plexspaces-tuplespace || exit 1; \
-		echo ""; \
-		echo "Running WASM integration tests (offline, no AWS/MinIO required)..."; \
-		cargo nextest run --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast || exit 1; \
-	else \
-		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..."; \
-		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..."; \
-		$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 || exit 1; \
-		echo ""; \
-		echo "Running all other tests with parallel execution..."; \
-		$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
-			--exclude plexspaces-tuplespace || exit 1; \
-		echo ""; \
-		echo "Running WASM integration tests (offline, no AWS/MinIO required)..."; \
-		$(CARGO) test --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast || exit 1; \
+	echo "Building workspace first for faster test execution (incremental build enabled)..." | tee -a test-out; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
+	echo "" | tee -a test-out; \
+	TIMEOUT_CMD=""; \
+	if command -v timeout >/dev/null 2>&1; then \
+		TIMEOUT_CMD="timeout 300"; \
+	elif command -v gtimeout >/dev/null 2>&1; then \
+		TIMEOUT_CMD="gtimeout 300"; \
 	fi; \
-	echo ""; \
-	echo "All unit and integration tests passed!"
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		echo "Using cargo-nextest for faster test execution..." | tee -a test-out; \
+		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..." | tee -a test-out; \
+		echo "Note: Tests have a 5-minute timeout per test (build/compile time excluded)" | tee -a test-out; \
+		cargo nextest run --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=1 --test-timeout 300s 2>&1 | tee -a test-out || exit 1; \
+		echo "" | tee -a test-out; \
+		echo "Running all other tests with parallel execution..." | tee -a test-out; \
+		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			--exclude plexspaces-tuplespace --test-timeout 300s 2>&1 | tee -a test-out || exit 1; \
+		echo "" | tee -a test-out; \
+		echo "Running WASM integration tests (offline, no AWS/MinIO required)..." | tee -a test-out; \
+		cargo nextest run --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast --test-timeout 300s 2>&1 | tee -a test-out || exit 1; \
+	else \
+		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
+		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..." | tee -a test-out; \
+		echo "Note: Tests have a 5-minute timeout (build/compile time excluded)" | tee -a test-out; \
+		if [ -n "$$TIMEOUT_CMD" ]; then \
+			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
+		else \
+			echo "Warning: timeout command not found, running without timeout (install coreutils for timeout: brew install coreutils)" | tee -a test-out; \
+			$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
+		fi; \
+		echo "" | tee -a test-out; \
+		echo "Running all other tests with parallel execution..." | tee -a test-out; \
+		if [ -n "$$TIMEOUT_CMD" ]; then \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
+		else \
+			$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
+		fi; \
+		echo "" | tee -a test-out; \
+		echo "Running WASM integration tests (offline, no AWS/MinIO required)..." | tee -a test-out; \
+		if [ -n "$$TIMEOUT_CMD" ]; then \
+			$$TIMEOUT_CMD $(CARGO) test --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast 2>&1 | tee -a test-out || exit 1; \
+		else \
+			$(CARGO) test --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast 2>&1 | tee -a test-out || exit 1; \
+		fi; \
+	fi; \
+	echo "" | tee -a test-out; \
+	echo "All unit and integration tests passed!" | tee -a test-out
 
 # Run tests matching a filter pattern
 # Usage: make test-filter FILTER="test_name_pattern"

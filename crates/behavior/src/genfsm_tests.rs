@@ -73,7 +73,7 @@ mod tests {
     // Helper to create test context and message (Go-style)
     fn create_test_context_and_message(message: Message) -> (Arc<ActorContext>, Message) {
         use plexspaces_core::ServiceLocator;
-        let service_locator = Arc::new(ServiceLocator::new());
+        let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
             String::new(), // tenant_id (empty if auth disabled)

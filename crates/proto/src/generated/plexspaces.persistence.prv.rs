@@ -23,82 +23,6 @@ pub struct Event {
     #[prost(string, tag="9")]
     pub causation_id: ::prost::alloc::string::String,
 }
-/// State snapshot
-///
-/// ## DEPRECATION NOTICE
-/// This message is part of the legacy persistence API (prv package).
-/// For new implementations, use `Checkpoint` from plexspaces.journaling.v1 instead.
-///
-/// ## Why Checkpoint is Preferred
-/// - Checkpoint uses uint32 state_schema_version (clearer semantics)
-/// - Checkpoint has compression support (3-5x smaller)
-/// - Checkpoint has comprehensive versioning documentation
-/// - Checkpoint is part of the public v1 API (not prv)
-///
-/// ## Migration Path
-/// If you're using Snapshot, consider migrating to Checkpoint:
-/// ```rust
-/// // Old: Snapshot (prv)
-/// let snapshot = Snapshot {
-///      actor_id: "actor-123",
-///      data: state_bytes,
-///      version: "1",  // String version (unclear semantics)
-///      // ...
-/// };
-///
-/// // New: Checkpoint (v1)
-/// let checkpoint = Checkpoint {
-///      actor_id: "actor-123",
-///      state_data: state_bytes,
-///      state_schema_version: 1,  // uint32 version (clear semantics)
-///      compression: CompressionType::Zstd,
-///      // ...
-/// };
-/// ```
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct Snapshot {
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-    #[prost(bytes="vec", tag="2")]
-    pub data: ::prost::alloc::vec::Vec<u8>,
-    #[prost(uint64, tag="3")]
-    pub sequence_number: u64,
-    #[prost(message, optional, tag="4")]
-    pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
-    /// Snapshot version (DEPRECATED: semantics unclear)
-    ///
-    /// ## Purpose
-    /// Intended to track snapshot format version, but semantics are ambiguous.
-    ///
-    /// ## Issues with This Field
-    /// - **Unclear semantics**: Is this snapshot version, state version, or API version?
-    /// - **String type**: Hard to compare versions (is "v2" > "1.0" > "2"?)
-    /// - **No versioning strategy**: No documentation on compatibility rules
-    /// - **No migration examples**: Unclear how to handle version mismatches
-    ///
-    /// ## Recommended Alternative
-    /// Use `Checkpoint.state_schema_version` from plexspaces.journaling.v1:
-    /// - Clear semantics: Version of serialized state_data format
-    /// - uint32 type: Easy to compare (1 < 2 < 3)
-    /// - Documented compatibility rules (Same/Older/Newer)
-    /// - Migration examples provided
-    ///
-    /// ## If You Must Use This Field
-    /// Recommended interpretation:
-    /// - Use semantic versioning format: "1.0.0", "1.1.0", "2.0.0"
-    /// - Parse and compare major.minor.patch components
-    /// - Reject newer major versions (breaking changes)
-    /// - Accept older major versions with migration
-    ///
-    /// ## See Also
-    /// - `proto/plexspaces/v1/journaling.proto` - Checkpoint.state_schema_version (lines 241-321)
-    /// - `docs/SCHEMA_VERSIONING_REVIEW.md` - Section 1.4 for details on this field
-    #[prost(string, tag="5")]
-    pub version: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="6")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-}
 /// Message record for journaling
 ///
 /// ## Purpose
@@ -338,19 +262,8 @@ pub mod promise_result {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct JournalEntry {
-    #[prost(oneof="journal_entry::Entry", tags="1, 2")]
-    pub entry: ::core::option::Option<journal_entry::Entry>,
-}
-/// Nested message and enum types in `JournalEntry`.
-pub mod journal_entry {
-    #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Oneof)]
-    pub enum Entry {
-        #[prost(message, tag="1")]
-        Event(super::Event),
-        #[prost(message, tag="2")]
-        Snapshot(super::Snapshot),
-    }
+    #[prost(message, optional, tag="1")]
+    pub event: ::core::option::Option<Event>,
 }
 /// Request to append events
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -392,32 +305,6 @@ pub struct ReadEventsResponse {
     pub has_more: bool,
     #[prost(uint64, tag="3")]
     pub last_sequence: u64,
-}
-/// Request to save snapshot
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SaveSnapshotRequest {
-    #[prost(message, optional, tag="1")]
-    pub snapshot: ::core::option::Option<Snapshot>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SaveSnapshotResponse {
-    #[prost(uint64, tag="1")]
-    pub sequence_number: u64,
-}
-/// Request to load snapshot
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct LoadSnapshotRequest {
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct LoadSnapshotResponse {
-    #[prost(message, optional, tag="1")]
-    pub snapshot: ::core::option::Option<Snapshot>,
 }
 /// Request to create checkpoint
 #[allow(clippy::derive_partial_eq_without_eq)]

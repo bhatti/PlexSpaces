@@ -25,7 +25,7 @@
 //! - Facet lifecycle hooks during application operations
 //! - Observability/metrics for application lifecycle
 
-use plexspaces_core::application::{Application, ApplicationNode, ApplicationError};
+use plexspaces_application::{Application, ApplicationNode, ApplicationError};
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec, ChildSpec, ChildType, SupervisionStrategy, RestartPolicy};
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use std::sync::Arc;
@@ -145,7 +145,7 @@ async fn test_application_deploy_with_facets() {
     
     // Register test facet factory in FacetRegistry
     let service_locator = node.service_locator();
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     
     // Create a new registry with the test facet factory registered
     let factory = Arc::new(TestLifecycleFacetFactory);
@@ -162,12 +162,12 @@ async fn test_application_deploy_with_facets() {
     
     // ACT: Deploy application
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
     // Create SpecApplication from spec
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -226,7 +226,7 @@ async fn test_application_undeploy_with_facets() {
     
     // Register test facet factory in FacetRegistry
     let service_locator = node.service_locator();
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     
     // Create a new registry with the test facet factory registered
     let factory = Arc::new(TestLifecycleFacetFactory);
@@ -243,12 +243,12 @@ async fn test_application_undeploy_with_facets() {
     
     // ACT: Deploy application
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
     // Create SpecApplication from spec
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     

@@ -200,7 +200,7 @@ impl ConfigLoader {
         // Node listen address override
         if let Ok(listen_addr) = env::var("PLEXSPACES_LISTEN_ADDR") {
             if let Some(ref mut node) = spec.node {
-                node.listen_address = listen_addr;
+                node.listen_addr = listen_addr;
             }
         }
 

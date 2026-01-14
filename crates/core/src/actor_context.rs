@@ -172,20 +172,22 @@ pub trait LinkProvider: Send + Sync {
     /// ## Arguments
     /// * `actor_id` - First actor in the link
     /// * `linked_actor_id` - Second actor in the link
+    /// * `ctx` - RequestContext for tenant/namespace isolation
     ///
     /// ## Returns
     /// Success or error
-    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String>;
+    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId, ctx: &RequestContext) -> Result<(), String>;
 
     /// Unlink two actors
     ///
     /// ## Arguments
     /// * `actor_id` - First actor in the link
     /// * `linked_actor_id` - Second actor in the link
+    /// * `ctx` - RequestContext for tenant/namespace isolation
     ///
     /// ## Returns
     /// Success or error
-    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String>;
+    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId, ctx: &RequestContext) -> Result<(), String>;
 }
 
 /// Trait for activating virtual actors (used by ReminderFacet)
@@ -339,6 +341,32 @@ pub trait ObjectRegistry: Send + Sync {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Unregister an object
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `object_type` - Type of object
+    /// * `object_id` - Object ID to unregister
+    async fn unregister(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Send heartbeat for an object
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `object_type` - Type of object
+    /// * `object_id` - Object ID to heartbeat
+    async fn heartbeat(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
 // ObjectRegistration is re-exported from proto (see use statement above)
@@ -472,7 +500,7 @@ pub trait ProcessGroupService: Send + Sync {
 ///     async fn handle_message(&mut self, ctx: &ActorContext) -> Result<(), BehaviorError> {
 ///         // Get services via ServiceLocator (on-demand)
 ///         let actor_service: Arc<dyn ActorService> = ctx.service_locator
-///             .get_service()
+///             .actor_registry()
 ///             .await
 ///             .ok_or("ActorService not registered")?;
 ///         
@@ -483,7 +511,7 @@ pub trait ProcessGroupService: Send + Sync {
 ///
 ///         // Get tuplespace
 ///         let tuplespace: Arc<dyn TupleSpaceProvider> = ctx.service_locator
-///             .get_service()
+///             .actor_registry()
 ///             .await
 ///             .ok_or("TupleSpaceProvider not registered")?;
 ///         tuplespace.write(tuple).await?;
@@ -513,7 +541,7 @@ pub struct ActorContext {
 
     /// Service locator for accessing system services (Akka-style)
     /// Actors can get services on-demand via service_locator.get_service::<T>().await
-    pub service_locator: Arc<ServiceLocator>,
+    pub service_locator: Arc<dyn ServiceLocator>,
 
     /// Trap exit flag (Erlang process_flag(trap_exit, true))
     ///
@@ -565,7 +593,7 @@ impl ActorContext {
         node_id: String,
         tenant_id: String,
         namespace: String,
-        service_locator: Arc<ServiceLocator>,
+        service_locator: Arc<dyn ServiceLocator>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
     ) -> Self {
         Self {
@@ -846,6 +874,24 @@ impl ObjectRegistry for StubObjectRegistry {
         _limit: usize,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         Err("StubObjectRegistry: discover not implemented".into())
+    }
+
+    async fn unregister(
+        &self,
+        _ctx: &RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubObjectRegistry: unregister not implemented".into())
+    }
+
+    async fn heartbeat(
+        &self,
+        _ctx: &RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubObjectRegistry: heartbeat not implemented".into())
     }
 }
 

@@ -250,6 +250,31 @@ pub use instance_pool::{InstancePool, PoolStats, PooledInstance};
 pub use resource_limits::ResourceLimits;
 pub use runtime::{WasmModule, WasmRuntime};
 
+/// Helper functions to extract concrete types from WasmRuntimeTrait
+/// These functions handle downcasting internally, so user code doesn't need to.
+pub mod wasm_runtime_helpers {
+    use super::*;
+    use std::sync::Arc;
+    
+    /// Extract WasmModule from Arc<dyn Any>
+    pub fn extract_wasm_module(module_any: Arc<dyn std::any::Any + Send + Sync>) -> Result<Arc<WasmModule>, WasmError> {
+        module_any.downcast::<WasmModule>()
+            .map_err(|_| WasmError::CompilationError("Failed to downcast WasmModule".to_string()))
+    }
+    
+    /// Extract WasmConfig from Arc<dyn Any>
+    pub fn extract_wasm_config(config_any: Arc<dyn std::any::Any + Send + Sync>) -> Result<Arc<WasmConfig>, WasmError> {
+        config_any.downcast::<WasmConfig>()
+            .map_err(|_| WasmError::CompilationError("Failed to downcast WasmConfig".to_string()))
+    }
+    
+    /// Extract WasmInstance from Arc<dyn Any>
+    pub fn extract_wasm_instance(instance_any: Arc<dyn std::any::Any + Send + Sync>) -> Result<Arc<WasmInstance>, WasmError> {
+        instance_any.downcast::<WasmInstance>()
+            .map_err(|_| WasmError::CompilationError("Failed to downcast WasmInstance".to_string()))
+    }
+}
+
 /// WASM actor configuration combining limits and capabilities
 #[derive(Debug, Clone)]
 pub struct WasmConfig {

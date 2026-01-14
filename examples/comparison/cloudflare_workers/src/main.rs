@@ -208,19 +208,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for services to be registered
     use plexspaces_core::service_locator::service_names;
     for _ in 0..10 {
-        if service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
+        if service_locator.actor_registry().await.is_some() {
             break;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
     
-    let actor_registry: Arc<plexspaces_core::ActorRegistry> = service_locator.get_service().await
+    let actor_registry: Arc<plexspaces_core::ActorRegistry> = service_locator.actor_registry().await
         .ok_or("ActorRegistry not found in ServiceLocator")?;
-    let virtual_actor_manager: Arc<VirtualActorManager> = service_locator.get_service().await
+    let virtual_actor_manager: Arc<VirtualActorManager> = service_locator.virtual_actor_manager().await
         .ok_or("VirtualActorManager not found in ServiceLocator")?;
     
     // Register ActorFactory if not already registered
-    let actor_factory: Arc<ActorFactoryImpl> = if let Some(factory) = service_locator.get_service().await {
+    let actor_factory: Arc<ActorFactoryImpl> = if let Some(factory) = service_locator.actor_factory_impl().await {
         factory
     } else {
         let factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
@@ -252,7 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
         
         // Spawn using ActorFactory with facets
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
         let _message_sender = actor_factory.spawn_actor(
             &ctx,
             &actor_id,
@@ -445,7 +445,7 @@ mod tests {
             .await;
         
         // Spawn actor using ActorFactory with spawn_actor
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
         let actor_id = "test-counter@test-node".to_string();
         let _message_sender = actor_factory.spawn_actor(
             &ctx,

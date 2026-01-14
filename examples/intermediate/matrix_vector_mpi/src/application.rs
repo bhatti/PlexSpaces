@@ -159,14 +159,14 @@ impl Application for MatrixVectorApplication {
             // Spawn using ActorFactory directly (no need to create Actor first)
             let actor_factory: Arc<ActorFactoryImpl> = node.service_locator()
                 .ok_or_else(|| ApplicationError::StartupFailed("ServiceLocator not available".to_string()))?
-                .get_service().await
+                .actor_factory_impl().await
                 .ok_or_else(|| ApplicationError::StartupFailed("ActorFactory not found in ServiceLocator".to_string()))?;
             
             // Note: We need to use BehaviorFactory to create the actor from behavior
             // For now, we'll use spawn_built_actor with ActorBuilder
             use plexspaces_actor::ActorBuilder;
             use plexspaces_core::RequestContext;
-            let ctx = RequestContext::internal();
+            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
             let actor = ActorBuilder::new(behavior)
                 .with_id(actor_id.clone())
                 .build()

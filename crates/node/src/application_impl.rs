@@ -30,11 +30,10 @@
 //! - Provides health checks and metrics
 
 use async_trait::async_trait;
-use plexspaces_core::application::{
-    Application, ApplicationError, ApplicationNode, HealthStatus,
-};
+use plexspaces_application::{Application, ApplicationError, ApplicationNode};
+use plexspaces_proto::v1::application::HealthStatus;
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
-use plexspaces_supervisor::{Supervisor, SupervisionStrategy};
+use plexspaces_actor::{Supervisor, SupervisionStrategy};
 use plexspaces_core::{ActorId, ExitReason};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,7 +68,7 @@ pub struct SpecApplication {
     /// Root supervisor handle (for graceful shutdown with Supervisor::shutdown())
     root_supervisor_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
     /// Root supervisor (for shutdown)
-    root_supervisor: Arc<RwLock<Option<Arc<tokio::sync::RwLock<plexspaces_supervisor::Supervisor>>>>>,
+    root_supervisor: Arc<RwLock<Option<Arc<tokio::sync::RwLock<plexspaces_actor::Supervisor>>>>>,
 }
 
 impl SpecApplication {
@@ -152,7 +151,7 @@ impl SpecApplication {
     async fn initialize_supervisor_tree(
         &self,
         node: Arc<dyn ApplicationNode>,
-        service_locator: Arc<plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
         supervisor_spec: &SupervisorSpec,
     ) -> Result<Vec<String>, ApplicationError> {
         let mut actor_ids = Vec::new();
@@ -223,11 +222,11 @@ impl SpecApplication {
             // Use FacetRegistry to create facets from proto configurations
             let facets: Vec<Box<dyn plexspaces_facet::Facet>> = if !child.facets.is_empty() {
                 // Get FacetRegistry from ServiceLocator
-                use plexspaces_core::service_locator::service_names;
-                if let Some(facet_registry_wrapper) = service_locator.get_service_by_name::<plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper>(service_names::FACET_REGISTRY).await {
+                use plexspaces_core::service_names;
+                if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                     let facet_registry = facet_registry_wrapper.inner_clone();
                     // Use facet_helpers to create facets from proto
-                    use plexspaces_supervisor::create_facets_from_proto;
+                    use plexspaces_actor::create_facets_from_proto;
                     let facets = create_facets_from_proto(&child.facets, &facet_registry).await;
                     
                     debug!(
@@ -806,7 +805,7 @@ impl SpecApplication {
     async fn create_supervisor_hierarchy(
         &self,
         node: Arc<dyn ApplicationNode>,
-        service_locator: Arc<plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
         supervisor_spec: &SupervisorSpec,
     ) -> Result<(Arc<tokio::sync::RwLock<Supervisor>>, tokio::task::JoinHandle<()>), ApplicationError> {
         // Convert ApplicationSpec SupervisorSpec to Supervisor
@@ -916,7 +915,7 @@ mod tests {
         addr: String,
         spawned_actors: Arc<RwLock<Vec<String>>>,
         stopped_actors: Arc<RwLock<Vec<String>>>,
-        service_locator: Arc<plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
     }
 
     impl MockNode {

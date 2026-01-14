@@ -2853,6 +2853,6 @@ mod tests {
 #[cfg(feature = "sqlite-backend")]
 impl plexspaces_core::Service for SqliteJournalStorage {
     fn service_name(&self) -> String {
-        plexspaces_core::service_locator::service_names::JOURNAL_STORAGE.to_string()
+        plexspaces_core::service_names::JOURNAL_STORAGE.to_string()
     }
 }

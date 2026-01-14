@@ -47,14 +47,37 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
         metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
     service_locator.register_node_metrics_accessor(metrics_accessor_trait).await;
     
-    // Ensure ApplicationManager is registered
-    use plexspaces_core::ApplicationManager;
-    use plexspaces_core::service_locator::service_names;
-    if let Some(app_manager) = service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await {
-        service_locator.register_service(app_manager.clone()).await;
+    // Register ApplicationManager in ServiceLocator
+    use plexspaces_application::ApplicationManager;
+    let app_manager = Arc::new(ApplicationManager::new());
+    let app_manager_trait: Arc<dyn plexspaces_core::ApplicationManager> = app_manager.clone();
+    service_locator.register_application_manager(app_manager_trait).await;
+    
+    // Create HealthReporterAccess implementation
+    use plexspaces_node::health_service::PlexSpacesHealthReporter;
+    use plexspaces_dashboard::HealthReporterAccess;
+    let (health_reporter, _service) = PlexSpacesHealthReporter::new();
+    let health_reporter = Arc::new(health_reporter);
+    
+    struct HealthReporterAccessImpl {
+        health_reporter: Arc<PlexSpacesHealthReporter>,
     }
     
-    DashboardServiceImpl::new(service_locator)
+    #[async_trait::async_trait]
+    impl HealthReporterAccess for HealthReporterAccessImpl {
+        async fn get_detailed_health(&self, include_non_critical: bool) -> plexspaces_proto::system::v1::DetailedHealthCheck {
+            self.health_reporter.get_detailed_health(include_non_critical).await
+        }
+    }
+    
+    let health_access = Arc::new(HealthReporterAccessImpl {
+        health_reporter,
+    });
+    
+    DashboardServiceImpl::with_health_reporter(
+        service_locator,
+        health_access,
+    )
 }
 
 /// Shared WASM bytes cache (loaded once, reused for all tests)
@@ -416,11 +439,11 @@ async fn test_dashboard_wasm_deployment_flow() {
     
     // Wait for deployment to complete by checking ApplicationManager directly
     // This is more reliable than polling the dashboard service
-    use plexspaces_core::ApplicationManager;
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_application::ApplicationManager;
+    use plexspaces_core::service_names;
     let service_locator = node.service_locator();
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be available");
     

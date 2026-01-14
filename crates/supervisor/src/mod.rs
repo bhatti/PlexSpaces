@@ -38,7 +38,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use metrics;
 
 use plexspaces_actor::{Actor, ActorRef as ActorActorRef};
-use plexspaces_core::{ActorError, ActorId, ActorRef, ServiceLocator};
+use plexspaces_core::{ActorError, ActorId, ActorRef, ServiceLocator as ServiceLocatorTrait};
 
 // Import proto types
 use plexspaces_proto::supervision::v1::{SupervisionError as ProtoError, SupervisorStats};
@@ -126,7 +126,7 @@ pub struct Supervisor {
     node: Option<Arc<dyn LinkProvider + Send + Sync>>,
     /// ServiceLocator for creating ActorRefs with service access
     /// Required for creating ActorRefs (both local and remote need ServiceLocator)
-    service_locator: Option<Arc<ServiceLocator>>,
+    service_locator: Option<Arc<dyn ServiceLocatorTrait>>,
     /// Default shutdown timeout for "infinity" shutdowns (prevents deadlocks)
     /// None = use default (1 second), Some(duration) = use custom timeout
     /// This is configurable for testing purposes
@@ -339,7 +339,7 @@ impl Supervisor {
     /// ## Example
     /// ```rust,ignore
     /// use plexspaces_core::{ActorRegistry, ServiceLocator};
-    /// let actor_registry: Arc<ActorRegistry> = service_locator.get_service().await.unwrap();
+    /// let actor_registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
     /// supervisor.with_link_provider(actor_registry as Arc<dyn LinkProvider + Send + Sync>);
     /// ```
     ///
@@ -364,7 +364,7 @@ impl Supervisor {
     ///
     /// ## Returns
     /// Self for method chaining
-    pub fn with_service_locator(mut self, service_locator: Arc<ServiceLocator>) -> Self {
+    pub fn with_service_locator(mut self, service_locator: Arc<dyn ServiceLocatorTrait>) -> Self {
         self.service_locator = Some(service_locator);
         self
     }
@@ -433,7 +433,7 @@ impl Supervisor {
 
         // Phase 3: Register parent-child relationship in ActorRegistry
         if let Some(service_locator) = &self.service_locator {
-            if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
+            if let Some(registry) = service_locator.actor_registry().await {
                 let supervisor_id = ActorId::from(self.id.clone());
                 registry.register_parent_child(&supervisor_id, &spec.id).await;
                 
@@ -448,9 +448,27 @@ impl Supervisor {
 
         // Phase 8.5: Link Semantics - Link supervisor to child
         // This enables cascading failures (Erlang/OTP pattern)
+        // System supervision operation - linking supervisor to child for fault tolerance
+        // Use NodeConfig defaults for system operations
         if let Some(node) = &self.node {
+            use plexspaces_core::RequestContext;
             let supervisor_id = ActorId::from(self.id.clone());
-            if let Err(e) = node.link(&supervisor_id, &spec.id).await {
+            let ctx = if let Some(service_locator) = &self.service_locator {
+                if let Some(node_config) = service_locator.get_node_config().await {
+                    RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
+                        .with_admin(true)
+                        .with_internal(true)
+                } else {
+                    RequestContext::new_without_auth(String::new(), String::new())
+                        .with_admin(true)
+                        .with_internal(true)
+                }
+            } else {
+                RequestContext::new_without_auth(String::new(), String::new())
+                    .with_admin(true)
+                    .with_internal(true)
+            };
+            if let Err(e) = node.link(&supervisor_id, &spec.id, &ctx).await {
                 // Log error but don't fail - supervision can work without links
                 warn!(
                     supervisor_id = %self.id,
@@ -493,12 +511,30 @@ impl Supervisor {
         // Phase 8.5: Unlink supervisor from child before removing
         if let Some(node) = &self.node {
             let supervisor_id = ActorId::from(self.id.clone());
-            let _ = node.unlink(&supervisor_id, id).await; // Ignore errors (idempotent)
+            // System supervision operation - unlinking supervisor from child
+            // Use NodeConfig defaults for system operations
+            use plexspaces_core::RequestContext;
+            let ctx = if let Some(service_locator) = &self.service_locator {
+                if let Some(node_config) = service_locator.get_node_config().await {
+                    RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
+                        .with_admin(true)
+                        .with_internal(true)
+                } else {
+                    RequestContext::new_without_auth(String::new(), String::new())
+                        .with_admin(true)
+                        .with_internal(true)
+                }
+            } else {
+                RequestContext::new_without_auth(String::new(), String::new())
+                    .with_admin(true)
+                    .with_internal(true)
+            };
+            let _ = node.unlink(&supervisor_id, id, &ctx).await; // Ignore errors (idempotent)
         }
 
         // Phase 3: Unregister parent-child relationship in ActorRegistry
         if let Some(service_locator) = &self.service_locator {
-            if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
+            if let Some(registry) = service_locator.actor_registry().await {
                 let supervisor_id = ActorId::from(self.id.clone());
                 registry.unregister_parent_child(&supervisor_id, id).await;
                 
@@ -645,7 +681,7 @@ impl Supervisor {
 
         // Phase 3: Register parent-child relationship in ActorRegistry
         if let Some(service_locator) = &self.service_locator {
-            if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
+            if let Some(registry) = service_locator.actor_registry().await {
                 let supervisor_id = ActorId::from(self.id.clone());
                 let child_supervisor_id = ActorId::from(child_id.clone());
                 registry.register_parent_child(&supervisor_id, &child_supervisor_id).await;
@@ -661,10 +697,28 @@ impl Supervisor {
 
         // Phase 8.5: Link Semantics - Link parent supervisor to child supervisor
         // This enables cascading failures in supervision trees
+        // System supervision operation - linking supervisor to child supervisor for fault tolerance
+        // Use NodeConfig defaults for system operations
         if let Some(node) = &self.node {
+            use plexspaces_core::RequestContext;
             let supervisor_id = ActorId::from(self.id.clone());
             let child_supervisor_id = ActorId::from(child_id.clone());
-            if let Err(e) = node.link(&supervisor_id, &child_supervisor_id).await {
+            let ctx = if let Some(service_locator) = &self.service_locator {
+                if let Some(node_config) = service_locator.get_node_config().await {
+                    RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
+                        .with_admin(true)
+                        .with_internal(true)
+                } else {
+                    RequestContext::new_without_auth(String::new(), String::new())
+                        .with_admin(true)
+                        .with_internal(true)
+                }
+            } else {
+                RequestContext::new_without_auth(String::new(), String::new())
+                    .with_admin(true)
+                    .with_internal(true)
+            };
+            if let Err(e) = node.link(&supervisor_id, &child_supervisor_id, &ctx).await {
                 warn!(
                     supervisor_id = %self.id,
                     child_supervisor_id = %child_id,
@@ -709,14 +763,32 @@ impl Supervisor {
         
         // Phase 8.5: Unlink supervisor from child supervisor before removing
         if let Some(node) = &self.node {
+            // System supervision operation - unlinking supervisor from child supervisor
+            // Use NodeConfig defaults for system operations
+            use plexspaces_core::RequestContext;
             let supervisor_id_actor = ActorId::from(self.id.clone());
             let child_supervisor_id_actor = ActorId::from(supervisor_id.to_string());
-            let _ = node.unlink(&supervisor_id_actor, &child_supervisor_id_actor).await; // Ignore errors (idempotent)
+            let ctx = if let Some(service_locator) = &self.service_locator {
+                if let Some(node_config) = service_locator.get_node_config().await {
+                    RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
+                        .with_admin(true)
+                        .with_internal(true)
+                } else {
+                    RequestContext::new_without_auth(String::new(), String::new())
+                        .with_admin(true)
+                        .with_internal(true)
+                }
+            } else {
+                RequestContext::new_without_auth(String::new(), String::new())
+                    .with_admin(true)
+                    .with_internal(true)
+            };
+            let _ = node.unlink(&supervisor_id_actor, &child_supervisor_id_actor, &ctx).await; // Ignore errors (idempotent)
         }
 
         // Phase 3: Unregister parent-child relationship in ActorRegistry
         if let Some(service_locator) = &self.service_locator {
-            if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
+            if let Some(registry) = service_locator.actor_registry().await {
                 let supervisor_id_actor = ActorId::from(self.id.clone());
                 let child_supervisor_id_actor = ActorId::from(supervisor_id.to_string());
                 registry.unregister_parent_child(&supervisor_id_actor, &child_supervisor_id_actor).await;
@@ -1353,8 +1425,8 @@ impl Supervisor {
         if !child.facets.is_empty() {
             // Get FacetRegistry from ServiceLocator to create facets from proto
             if let Some(service_locator) = &self.service_locator {
-                use plexspaces_core::service_locator::service_names;
-                if let Some(facet_registry_wrapper) = service_locator.get_service_by_name::<plexspaces_core::FacetRegistryServiceWrapper>(service_names::FACET_REGISTRY).await {
+                use plexspaces_core::service_names;
+                if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                     let facet_registry = facet_registry_wrapper.inner_clone();
                     // Use facet_helpers to create facets from proto
                     use crate::create_facets_from_proto;
@@ -1521,7 +1593,7 @@ impl Supervisor {
         for (id, supervisor_arc, handle, shutdown_timeout) in supervisor_info {
             // Phase 3: Unregister parent-child relationship in ActorRegistry
             if let Some(service_locator) = &self.service_locator {
-                if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
+                if let Some(registry) = service_locator.actor_registry().await {
                     let supervisor_id = ActorId::from(self.id.clone());
                     let child_supervisor_id = ActorId::from(id.clone());
                     registry.unregister_parent_child(&supervisor_id, &child_supervisor_id).await;
@@ -1555,7 +1627,7 @@ impl Supervisor {
         // Phase 2: Shutdown child actors (in reverse start order)
         // Phase 3: Unregister parent-child relationships for actors
         if let Some(service_locator) = &self.service_locator {
-            if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
+            if let Some(registry) = service_locator.actor_registry().await {
                 let supervisor_id = ActorId::from(self.id.clone());
                 let children = self.children.read().await;
                 let child_ids: Vec<ActorId> = children.keys().cloned().collect();
@@ -2032,8 +2104,8 @@ impl Supervisor {
                 if !spec.facets.is_empty() {
                     // Get FacetRegistry from ServiceLocator to create facets from proto
                     if let Some(service_locator) = &self.service_locator {
-                        use plexspaces_core::service_locator::service_names;
-                        if let Some(facet_registry_wrapper) = service_locator.get_service_by_name::<plexspaces_core::FacetRegistryServiceWrapper>(service_names::FACET_REGISTRY).await {
+                        use plexspaces_core::service_names;
+                        if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                             let facet_registry = facet_registry_wrapper.inner_clone();
                             // Use facet_helpers to create facets from proto
                             use crate::create_facets_from_proto;
@@ -2133,7 +2205,7 @@ impl Supervisor {
 
                 // Phase 3: Register parent-child relationship
                 if let Some(service_locator) = &self.service_locator {
-                    if let Some(registry) = service_locator.get_service::<plexspaces_core::ActorRegistry>().await {
+                    if let Some(registry) = service_locator.actor_registry().await {
                         let supervisor_id = ActorId::from(self.id.clone());
                         registry.register_parent_child(&supervisor_id, &spec.actor_or_supervisor_id).await;
                     }
@@ -2400,7 +2472,7 @@ impl Supervisor {
     pub async fn from_config(
         supervisor_id: String,
         config: plexspaces_proto::supervision::v1::SupervisorConfig,
-        service_locator: Arc<ServiceLocator>,
+        service_locator: Arc<dyn ServiceLocatorTrait>,
     ) -> Result<(Self, mpsc::Receiver<SupervisorEvent>), SupervisorError> {
         // Convert proto SupervisionStrategy to Rust SupervisionStrategy
         // Proto enum: ONE_FOR_ONE = 1, ONE_FOR_ALL = 2, REST_FOR_ONE = 3
@@ -2634,6 +2706,7 @@ impl SupervisorBuilder {
         // Set ServiceLocator for the supervisor (required for add_child)
         // For tests, create a minimal ServiceLocator
         // Tests that need full services should register them explicitly
+        use plexspaces_services::ServiceLocator;
         let service_locator = Arc::new(ServiceLocator::new());
         supervisor = supervisor.with_service_locator(service_locator);
 
@@ -2698,7 +2771,8 @@ mod tests {
         strategy: SupervisionStrategy,
     ) -> (Supervisor, mpsc::Receiver<SupervisorEvent>) {
         let (supervisor, event_rx) = Supervisor::new(id, strategy);
-        let service_locator = Arc::new(ServiceLocator::new());
+        use plexspaces_node::create_default_service_locator;
+        let service_locator = create_default_service_locator(None, None, None).await;
         (supervisor.with_service_locator(service_locator), event_rx)
     }
 

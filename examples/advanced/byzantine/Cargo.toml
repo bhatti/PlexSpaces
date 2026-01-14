@@ -15,7 +15,7 @@ plexspaces-core = { path = "../../../crates/core" }
 plexspaces-mailbox = { path = "../../../crates/mailbox" }
 plexspaces-behavior = { path = "../../../crates/behavior" }
 plexspaces-actor = { path = "../../../crates/actor" }
-plexspaces-actor-service = { path = "../../../crates/actor-service" }
+plexspaces-services = { path = "../../../crates/services" }
 plexspaces-supervisor = { path = "../../../crates/supervisor" }
 plexspaces-persistence = { path = "../../../crates/persistence" }
 plexspaces-tuplespace = { path = "../../../crates/tuplespace", features = ["redis-backend", "sql-backend"] }

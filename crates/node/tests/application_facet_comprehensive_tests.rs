@@ -32,7 +32,7 @@
 //! - Verify metrics are recorded
 //! - Verify graceful shutdown with all facets
 
-use plexspaces_core::application::{Application, ApplicationNode, ApplicationError};
+use plexspaces_application::{Application, ApplicationNode, ApplicationError};
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec, ChildSpec, ChildType, SupervisionStrategy, RestartPolicy};
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use std::sync::Arc;
@@ -152,8 +152,8 @@ impl FacetFactory for VirtualActorFacetFactory {
 }
 
 /// Helper: Register all facet factories in FacetRegistry
-async fn register_all_facet_factories(service_locator: &plexspaces_core::ServiceLocator) {
-    use plexspaces_core::service_locator::service_names;
+async fn register_all_facet_factories(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) {
+    use plexspaces_core::service_names;
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
     
     // Create new registry with all factories
@@ -183,19 +183,19 @@ async fn test_application_deploy_with_multiple_facet_types() {
     
     // Register all facet factories
     let service_locator = node.service_locator();
-    register_all_facet_factories(&*service_locator).await;
+    register_all_facet_factories(service_locator.clone()).await;
     
     // Create ApplicationSpec with multiple facet types
     let app_spec = create_application_spec_with_multiple_facets("test-app-multi", "1.0.0");
     
     // ACT: Deploy application
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(plexspaces_core::service_locator::service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
     // Create SpecApplication from spec
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -217,7 +217,7 @@ async fn test_application_deploy_with_multiple_facet_types() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -254,19 +254,19 @@ async fn test_application_undeploy_with_multiple_facets_cleanup() {
     
     // Register all facet factories
     let service_locator = node.service_locator();
-    register_all_facet_factories(&*service_locator).await;
+    register_all_facet_factories(service_locator.clone()).await;
     
     // Create ApplicationSpec with multiple facet types
     let app_spec = create_application_spec_with_multiple_facets("test-app-undeploy-multi", "1.0.0");
     
     // ACT: Deploy application
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(plexspaces_core::service_locator::service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
     // Create SpecApplication from spec
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -288,7 +288,7 @@ async fn test_application_undeploy_with_multiple_facets_cleanup() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -333,7 +333,7 @@ async fn test_application_with_timer_facet_only() {
     
     // Register TimerFacet factory
     let service_locator = node.service_locator();
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
     
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
@@ -347,11 +347,11 @@ async fn test_application_with_timer_facet_only() {
     
     // ACT: Deploy and undeploy
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -371,7 +371,7 @@ async fn test_application_with_timer_facet_only() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -410,7 +410,7 @@ async fn test_application_with_reminder_facet_only() {
     node.initialize_services().await.expect("Failed to initialize services");
     
     let service_locator = node.service_locator();
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
     
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
@@ -423,11 +423,11 @@ async fn test_application_with_reminder_facet_only() {
     
     // ACT & ASSERT
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -447,7 +447,7 @@ async fn test_application_with_reminder_facet_only() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -482,7 +482,7 @@ async fn test_application_with_durability_facet_only() {
     node.initialize_services().await.expect("Failed to initialize services");
     
     let service_locator = node.service_locator();
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
     
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
@@ -494,11 +494,11 @@ async fn test_application_with_durability_facet_only() {
     let app_spec = create_application_spec_with_single_facet("test-app-durability", "1.0.0", "durability");
     
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -518,7 +518,7 @@ async fn test_application_with_durability_facet_only() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -553,7 +553,7 @@ async fn test_application_with_virtual_actor_facet_only() {
     node.initialize_services().await.expect("Failed to initialize services");
     
     let service_locator = node.service_locator();
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
     
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
@@ -565,11 +565,11 @@ async fn test_application_with_virtual_actor_facet_only() {
     let app_spec = create_application_spec_with_single_facet("test-app-virtual", "1.0.0", "virtual_actor");
     
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -589,7 +589,7 @@ async fn test_application_with_virtual_actor_facet_only() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -768,18 +768,18 @@ async fn test_observability_metrics_for_facet_lifecycle() {
     
     // Register all facet factories
     let service_locator = node.service_locator();
-    register_all_facet_factories(&*service_locator).await;
+    register_all_facet_factories(service_locator.clone()).await;
     
     // Create ApplicationSpec with multiple facet types
     let app_spec = create_application_spec_with_multiple_facets("test-app-observability", "1.0.0");
     
     // ACT: Deploy application
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(plexspaces_core::service_locator::service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -799,7 +799,7 @@ async fn test_observability_metrics_for_facet_lifecycle() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -848,18 +848,18 @@ async fn test_application_metrics_for_deploy_undeploy() {
     
     // Register all facet factories
     let service_locator = node.service_locator();
-    register_all_facet_factories(&*service_locator).await;
+    register_all_facet_factories(service_locator.clone()).await;
     
     // Create ApplicationSpec
     let app_spec = create_application_spec_with_multiple_facets("test-app-metrics", "1.0.0");
     
     // ACT: Deploy application
     let app_manager: Arc<ApplicationManager> = service_locator
-        .get_service_by_name(plexspaces_core::service_locator::service_names::APPLICATION_MANAGER)
+        .application_manager()
         .await
         .expect("ApplicationManager should be registered");
     
-    use plexspaces_node::application_impl::SpecApplication;
+    use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
     
@@ -879,7 +879,7 @@ async fn test_application_metrics_for_deploy_undeploy() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }

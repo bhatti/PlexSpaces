@@ -83,11 +83,11 @@ async fn main() -> Result<()> {
         let worker_actor = WorkerActor::new(space.clone(), worker_id, num_cols);
         let behavior = Box::new(worker_actor);
         
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
         let worker_id_str = format!("worker-{}", worker_id);
         let actor_id = format!("{}@{}", worker_id_str, node.id().as_str());
         let service_locator = node.service_locator().clone();
-        let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service().await
+        let actor_factory: Arc<ActorFactoryImpl> = service_locator.actor_factory_impl().await
             .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
         let _message_sender = actor_factory.spawn_actor(
             &ctx,

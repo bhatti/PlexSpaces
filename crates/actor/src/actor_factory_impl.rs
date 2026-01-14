@@ -30,9 +30,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::task::JoinHandle;
-use plexspaces_core::{ActorId, Service, ServiceLocator, ActorRegistry, MessageSender, VirtualActorManager, FacetManagerServiceWrapper, ActorContext, RequestContext, ExitReason};
+use plexspaces_core::{ActorId, Service, ServiceLocator as ServiceLocatorTrait, ActorRegistry, MessageSender, VirtualActorManager, FacetManagerServiceWrapper, ActorContext, RequestContext, ExitReason};
 use plexspaces_facet::FacetManager;
-use plexspaces_core::service_locator::service_names;
+use plexspaces_core::service_names;
 use plexspaces_proto::ActorLifecycleEvent;
 use prost_types::Timestamp;
 use crate::{ActorFactory, Actor, ActorRef};
@@ -44,11 +44,11 @@ use crate::{VirtualActorWrapper};
 /// Uses ServiceLocator to access ActorRegistry, VirtualActorManager, and other services
 /// needed for spawning actors. This decouples ActorFactory from Node directly.
 pub struct ActorFactoryImpl {
-    service_locator: Arc<ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocatorTrait>,
 }
 
 impl ActorFactoryImpl {
-    pub fn new(service_locator: Arc<ServiceLocator>) -> Self {
+    pub fn new(service_locator: Arc<dyn ServiceLocatorTrait>) -> Self {
         Self { service_locator }
     }
     
@@ -104,7 +104,7 @@ impl ActorFactoryImpl {
         join_handle: JoinHandle<()>,
         exit_reason_arc: Arc<tokio::sync::RwLock<Option<ExitReason>>>,
     ) {
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+        let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
             .unwrap_or_else(|| panic!("ActorRegistry not registered in ServiceLocator"));
         let actor_id_clone = actor_id.clone();
         
@@ -351,9 +351,9 @@ impl ActorFactoryImpl {
 impl ActorFactory for ActorFactoryImpl {
     async fn activate_virtual_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Get services from ServiceLocator
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(service_names::ACTOR_REGISTRY).await
+        let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
-        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER).await
+        let manager: Arc<VirtualActorManager> = self.service_locator.virtual_actor_manager().await
             .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
         
         // Normalize actor ID
@@ -438,7 +438,7 @@ impl ActorFactory for ActorFactoryImpl {
             let actor_arc = Arc::new(actor);
             
             // Store facets after activation (unregister_with_cleanup may have removed them)
-            let facet_manager_wrapper = self.service_locator.get_service_by_name::<plexspaces_core::FacetManagerServiceWrapper>(service_names::FACET_MANAGER).await
+            let facet_manager_wrapper = self.service_locator.get_facet_manager().await
                 .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
             let facet_manager = facet_manager_wrapper.inner_clone();
             let facets_clone = actor_arc.facets();
@@ -577,7 +577,7 @@ impl ActorFactory for ActorFactoryImpl {
             
             // Retrieve and reattach all other facets from FacetManager
             // This ensures facets like DurabilityFacet are preserved across suspension/reactivation
-            let facet_manager_wrapper = self.service_locator.get_service_by_name::<plexspaces_core::FacetManagerServiceWrapper>(service_names::FACET_MANAGER).await
+            let facet_manager_wrapper = self.service_locator.get_facet_manager().await
                 .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
             let facet_manager = facet_manager_wrapper.inner_clone();
             
@@ -706,7 +706,7 @@ impl ActorFactory for ActorFactoryImpl {
                         ).await;
                         
                         // Store facets
-                        let facet_manager_wrapper = self.service_locator.get_service_by_name::<plexspaces_core::FacetManagerServiceWrapper>(service_names::FACET_MANAGER).await
+                        let facet_manager_wrapper = self.service_locator.get_facet_manager().await
                             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
                         let facet_manager = facet_manager_wrapper.inner_clone();
                         let facets_clone = actor_arc.facets();
@@ -836,7 +836,7 @@ impl ActorFactory for ActorFactoryImpl {
         // But ServiceLocator stores by TypeId, so we need to check if BehaviorRegistry is registered
         let behavior: Box<dyn ActorTrait> = {
             // Try to get BehaviorRegistry (which implements BehaviorFactory) from ServiceLocator
-            if let Some(behavior_registry) = self.service_locator.get_service::<plexspaces_core::behavior_factory::BehaviorRegistry>().await {
+            if let Some(behavior_registry) = self.service_locator.get_behavior_registry().await {
                 // BehaviorFactory is registered - try to create behavior from it
                 match behavior_registry.create(actor_type, &initial_state).await {
                     Ok(b) => b,
@@ -958,11 +958,11 @@ impl ActorFactory for ActorFactoryImpl {
         let mut actor = Arc::try_unwrap(actor)
             .map_err(|_| "Actor Arc has multiple references - cannot unwrap")?;
         // Get services from ServiceLocator
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(service_names::ACTOR_REGISTRY).await
+        let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
-        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER).await
+        let manager: Arc<VirtualActorManager> = self.service_locator.virtual_actor_manager().await
             .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
-        let facet_manager_wrapper = self.service_locator.get_service_by_name::<plexspaces_core::FacetManagerServiceWrapper>(service_names::FACET_MANAGER).await
+        let facet_manager_wrapper = self.service_locator.get_facet_manager().await
             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
         let facet_manager = facet_manager_wrapper.inner_clone();
         
@@ -1271,7 +1271,7 @@ impl ActorFactory for ActorFactoryImpl {
         
         // CRITICAL: Check actor state before calling start() to ensure we only call it once
         use crate::ActorState;
-        let current_state = actor.state().await;
+        let _current_state = actor.state().await;
         
         // Start actor (calls init() internally, then registers in ActorRegistry)
         // If init() fails, actor is not registered (prevents memory leaks)
@@ -1340,7 +1340,7 @@ impl ActorFactory for ActorFactoryImpl {
     
     async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Get services from ServiceLocator
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(service_names::ACTOR_REGISTRY).await
+        let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
         
         let local_node_id = registry.local_node_id();
@@ -1479,6 +1479,6 @@ impl ActorFactory for ActorFactoryImpl {
 // Implement Service trait so ActorFactoryImpl can be registered in ServiceLocator
 impl Service for ActorFactoryImpl {
     fn service_name(&self) -> String {
-        plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL.to_string()
+        plexspaces_core::service_names::ACTOR_FACTORY_IMPL.to_string()
     }
 }

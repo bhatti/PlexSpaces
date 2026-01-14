@@ -59,7 +59,7 @@ mod ddb_tests {
             return;
         }
         let store = create_ddb_store().await;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         // Set a value
         store.set(&ctx, "key1", b"value1".to_vec(), None).await.unwrap();
@@ -75,7 +75,7 @@ mod ddb_tests {
             return;
         }
         let store = create_ddb_store().await;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         let value = store.get(&ctx, "nonexistent").await.unwrap();
         assert_eq!(value, None);
@@ -87,7 +87,7 @@ mod ddb_tests {
             return;
         }
         let store = create_ddb_store().await;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         store.set(&ctx, "key1", b"value1".to_vec(), None).await.unwrap();
         store.set(&ctx, "key1", b"value2".to_vec(), None).await.unwrap();
@@ -102,7 +102,7 @@ mod ddb_tests {
             return;
         }
         let store = create_ddb_store().await;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         store.set(&ctx, "key1", b"value1".to_vec(), None).await.unwrap();
         let deleted = store.delete(&ctx, "key1").await.unwrap();
@@ -118,7 +118,7 @@ mod ddb_tests {
             return;
         }
         let store = create_ddb_store().await;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         let deleted = store.delete(&ctx, "nonexistent").await.unwrap();
         assert!(!deleted);
@@ -130,7 +130,7 @@ mod ddb_tests {
             return;
         }
         let store = create_ddb_store().await;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         assert!(!store.exists(&ctx, "key1").await.unwrap());
         store.set(&ctx, "key1", b"value1".to_vec(), None).await.unwrap();
@@ -145,7 +145,7 @@ mod ddb_tests {
             return;
         }
         let store = create_ddb_store().await;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         store.set(&ctx, "actor:alice", b"ref1".to_vec(), None).await.unwrap();
         store.set(&ctx, "actor:bob", b"ref2".to_vec(), None).await.unwrap();
@@ -163,7 +163,7 @@ mod ddb_tests {
             return;
         }
         let store = create_ddb_store().await;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         store.set(&ctx, "key1", b"value1".to_vec(), Some(1)).await.unwrap();
 

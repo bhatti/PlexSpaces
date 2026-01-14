@@ -71,7 +71,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify, RwLock};
 use plexspaces_mailbox::Message;
-use crate::service_locator::Service;
+use crate::Service;
 
 /// Reply waiter using async condition variables for high-performance ask pattern
 ///
@@ -336,7 +336,7 @@ impl Default for ReplyWaiterRegistry {
 // Implement Service trait for ServiceLocator
 impl Service for ReplyWaiterRegistry {
     fn service_name(&self) -> String {
-        crate::service_locator::service_names::REPLY_WAITER_REGISTRY.to_string()
+        crate::service_names::REPLY_WAITER_REGISTRY.to_string()
     }
 }
 

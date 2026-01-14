@@ -163,7 +163,17 @@ mod postgres_integration_tests {
         };
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.set_replay_handler(Box::new(handler)).await;
+        // Create test ActorContext for replay
+        use plexspaces_services::ServiceLocatorImpl;
+        let service_locator: Arc<dyn ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+        let test_context = Arc::new(ActorContext::new(
+            "local".to_string(),
+            "default".to_string(),
+            "default".to_string(),
+            service_locator,
+            None,
+        ));
+        new_facet.set_replay_handler(Box::new(handler), test_context).await;
         new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
 
         let entries_after = storage.replay_from(actor_id, 0).await.unwrap();

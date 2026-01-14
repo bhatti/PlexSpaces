@@ -40,7 +40,7 @@
 //! the standard service. For custom service name handling, we update the
 //! HealthReporter status based on dependency checks.
 
-use crate::health_service::PlexSpacesHealthReporter;
+use plexspaces_core::PlexSpacesHealthReporter;
 use std::sync::Arc;
 use tokio::time::Duration;
 

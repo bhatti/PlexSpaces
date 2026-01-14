@@ -33,6 +33,7 @@
 //! - Limited scalability (all data in RAM)
 
 use crate::{KVError, KVEvent, KVEventType, KVResult, KVStats, KeyValueStore};
+use plexspaces_core::KeyValueStore as CoreKeyValueStore;
 use async_trait::async_trait;
 use plexspaces_common::RequestContext;
 use std::collections::HashMap;
@@ -99,8 +100,8 @@ impl Watch {
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let kv = InMemoryKVStore::new();
 ///
-/// kv.put("key", b"value".to_vec()).await?;
-/// let value = kv.get("key").await?;
+/// KeyValueStore::put(&kv, "key", b"value".to_vec()).await?;
+/// let value = KeyValueStore::get(&kv, "key").await?;
 /// assert_eq!(value, Some(b"value".to_vec()));
 /// # Ok(())
 /// # }
@@ -277,7 +278,7 @@ impl KeyValueStore for InMemoryKVStore {
 
     async fn multi_put(&self, ctx: &RequestContext, pairs: &[(&str, Vec<u8>)]) -> KVResult<()> {
         for (key, value) in pairs {
-            self.put(ctx, key, value.clone()).await?;
+            <Self as KeyValueStore>::put(self, ctx, key, value.clone()).await?;
         }
         Ok(())
     }
@@ -390,7 +391,7 @@ impl KeyValueStore for InMemoryKVStore {
     }
 
     async fn decrement(&self, ctx: &RequestContext, key: &str, delta: i64) -> KVResult<i64> {
-        self.increment(ctx, key, -delta).await
+        <Self as KeyValueStore>::increment(self, ctx, key, -delta).await
     }
 
     async fn watch(&self, ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
@@ -491,17 +492,17 @@ mod tests {
         let ctx = test_ctx();
 
         // Put and get
-        kv.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
-        let value = kv.get(&ctx, "key1").await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "key1", b"value1".to_vec()).await.unwrap();
+        let value = KeyValueStore::get(&kv, &ctx, "key1").await.unwrap();
         assert_eq!(value, Some(b"value1".to_vec()));
 
         // Exists
-        assert!(kv.exists(&ctx, "key1").await.unwrap());
-        assert!(!kv.exists(&ctx, "nonexistent").await.unwrap());
+        assert!(KeyValueStore::exists(&kv, &ctx, "key1").await.unwrap());
+        assert!(!KeyValueStore::exists(&kv, &ctx, "nonexistent").await.unwrap());
 
         // Delete
-        kv.delete(&ctx, "key1").await.unwrap();
-        assert!(!kv.exists(&ctx, "key1").await.unwrap());
+        KeyValueStore::delete(&kv, &ctx, "key1").await.unwrap();
+        assert!(!KeyValueStore::exists(&kv, &ctx, "key1").await.unwrap());
     }
 
     #[tokio::test]
@@ -511,17 +512,17 @@ mod tests {
         let ctx2 = plexspaces_common::RequestContext::new_without_auth("tenant2".to_string(), "default".to_string());
 
         // Put same key for different tenants
-        kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
-        kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx1, "key1", b"value1".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each tenant should see their own value
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(KeyValueStore::get(&kv, &ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
+        assert_eq!(KeyValueStore::get(&kv, &ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
 
         // Delete from tenant1 should not affect tenant2
-        kv.delete(&ctx1, "key1").await.unwrap();
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), None);
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        KeyValueStore::delete(&kv, &ctx1, "key1").await.unwrap();
+        assert_eq!(KeyValueStore::get(&kv, &ctx1, "key1").await.unwrap(), None);
+        assert_eq!(KeyValueStore::get(&kv, &ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
     }
 
     #[tokio::test]
@@ -531,12 +532,12 @@ mod tests {
         let ctx2 = plexspaces_common::RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string());
 
         // Put same key for different namespaces
-        kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
-        kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx1, "key1", b"value1".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each namespace should see their own value
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(KeyValueStore::get(&kv, &ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
+        assert_eq!(KeyValueStore::get(&kv, &ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
     }
 
     #[tokio::test]
@@ -544,11 +545,11 @@ mod tests {
         let kv = InMemoryKVStore::new();
         let ctx = test_ctx();
 
-        kv.put(&ctx, "actor:alice", b"ref1".to_vec()).await.unwrap();
-        kv.put(&ctx, "actor:bob", b"ref2".to_vec()).await.unwrap();
-        kv.put(&ctx, "node:node1", b"info".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "actor:alice", b"ref1".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "actor:bob", b"ref2".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "node:node1", b"info".to_vec()).await.unwrap();
 
-        let actors = kv.list(&ctx, "actor:").await.unwrap();
+        let actors = KeyValueStore::list(&kv, &ctx, "actor:").await.unwrap();
         assert_eq!(actors.len(), 2);
         assert!(actors.contains(&"actor:alice".to_string()));
         assert!(actors.contains(&"actor:bob".to_string()));
@@ -559,8 +560,8 @@ mod tests {
         let kv = InMemoryKVStore::new();
         let ctx = test_ctx();
 
-        kv.put(&ctx, "k1", b"v1".to_vec()).await.unwrap();
-        kv.put(&ctx, "k2", b"v2".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "k1", b"v1".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "k2", b"v2".to_vec()).await.unwrap();
 
         let values = kv.multi_get(&ctx, &["k1", "k2", "k3"]).await.unwrap();
         assert_eq!(values[0], Some(b"v1".to_vec()));
@@ -577,8 +578,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(kv.get(&ctx, "k1").await.unwrap(), Some(b"v1".to_vec()));
-        assert_eq!(kv.get(&ctx, "k2").await.unwrap(), Some(b"v2".to_vec()));
+        assert_eq!(KeyValueStore::get(&kv, &ctx, "k1").await.unwrap(), Some(b"v1".to_vec()));
+        assert_eq!(KeyValueStore::get(&kv, &ctx, "k2").await.unwrap(), Some(b"v2".to_vec()));
     }
 
     #[tokio::test]
@@ -586,12 +587,12 @@ mod tests {
         let kv = InMemoryKVStore::new();
         let ctx = test_ctx();
 
-        kv.put_with_ttl(&ctx, "key", b"value".to_vec(), Duration::from_secs(1))
+        KeyValueStore::put_with_ttl(&kv, &ctx, "key", b"value".to_vec(), Duration::from_secs(1))
             .await
             .unwrap();
 
         // Should exist immediately
-        assert!(kv.exists(&ctx, "key").await.unwrap());
+        assert!(KeyValueStore::exists(&kv, &ctx, "key").await.unwrap());
 
         // Check TTL
         let ttl = kv.get_ttl(&ctx, "key").await.unwrap();
@@ -600,7 +601,7 @@ mod tests {
 
         // Wait for expiry
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(!kv.exists(&ctx, "key").await.unwrap());
+        assert!(!KeyValueStore::exists(&kv, &ctx, "key").await.unwrap());
     }
 
     #[tokio::test]
@@ -608,7 +609,7 @@ mod tests {
         let kv = InMemoryKVStore::new();
         let ctx = test_ctx();
 
-        kv.put_with_ttl(&ctx, "key", b"value".to_vec(), Duration::from_secs(1))
+        KeyValueStore::put_with_ttl(&kv, &ctx, "key", b"value".to_vec(), Duration::from_secs(1))
             .await
             .unwrap();
 
@@ -619,7 +620,7 @@ mod tests {
 
         // Should still exist after original TTL
         tokio::time::sleep(Duration::from_secs(1)).await;
-        assert!(kv.exists(&ctx, "key").await.unwrap());
+        assert!(KeyValueStore::exists(&kv, &ctx, "key").await.unwrap());
     }
 
     #[tokio::test]
@@ -628,22 +629,19 @@ mod tests {
         let ctx = test_ctx();
 
         // Acquire lock (only if not held)
-        let acquired = kv
-            .cas(&ctx, "lock:resource", None, b"node1".to_vec())
+        let acquired = KeyValueStore::cas(&kv, &ctx, "lock:resource", None, b"node1".to_vec())
             .await
             .unwrap();
         assert!(acquired);
 
         // Try to acquire again (should fail)
-        let acquired2 = kv
-            .cas(&ctx, "lock:resource", None, b"node2".to_vec())
+        let acquired2 = KeyValueStore::cas(&kv, &ctx, "lock:resource", None, b"node2".to_vec())
             .await
             .unwrap();
         assert!(!acquired2);
 
         // Release lock (expected value matches)
-        let released = kv
-            .cas(&ctx, "lock:resource", Some(b"node1".to_vec()), b"node2".to_vec())
+        let released = KeyValueStore::cas(&kv, &ctx, "lock:resource", Some(b"node1".to_vec()), b"node2".to_vec())
             .await
             .unwrap();
         assert!(released);
@@ -655,10 +653,10 @@ mod tests {
         let ctx = test_ctx();
 
         // Increment from 0
-        let count = kv.increment(&ctx, "counter", 1).await.unwrap();
+        let count = KeyValueStore::increment(&kv, &ctx, "counter", 1).await.unwrap();
         assert_eq!(count, 1);
 
-        let count = kv.increment(&ctx, "counter", 5).await.unwrap();
+        let count = KeyValueStore::increment(&kv, &ctx, "counter", 5).await.unwrap();
         assert_eq!(count, 6);
 
         // Decrement
@@ -673,7 +671,7 @@ mod tests {
         let mut watcher = kv.watch(&ctx, "config:timeout").await.unwrap();
 
         // Put value
-        kv.put(&ctx, "config:timeout", b"30s".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "config:timeout", b"30s".to_vec()).await.unwrap();
 
         // Should receive event
         let event = tokio::time::timeout(Duration::from_secs(1), watcher.recv())
@@ -693,7 +691,7 @@ mod tests {
         let mut watcher = kv.watch_prefix(&ctx, "config:actor.").await.unwrap();
 
         // Put value
-        kv.put(&ctx, "config:actor.timeout", b"30s".to_vec())
+        KeyValueStore::put(&kv, &ctx, "config:actor.timeout", b"30s".to_vec())
             .await
             .unwrap();
 
@@ -712,16 +710,16 @@ mod tests {
         let kv = InMemoryKVStore::new();
         let ctx = test_ctx();
 
-        kv.put(&ctx, "temp:1", b"a".to_vec()).await.unwrap();
-        kv.put(&ctx, "temp:2", b"b".to_vec()).await.unwrap();
-        kv.put(&ctx, "keep:1", b"c".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "temp:1", b"a".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "temp:2", b"b".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "keep:1", b"c".to_vec()).await.unwrap();
 
         let deleted = kv.clear_prefix(&ctx, "temp:").await.unwrap();
         assert_eq!(deleted, 2);
 
-        assert!(!kv.exists(&ctx, "temp:1").await.unwrap());
-        assert!(!kv.exists(&ctx, "temp:2").await.unwrap());
-        assert!(kv.exists(&ctx, "keep:1").await.unwrap());
+        assert!(!KeyValueStore::exists(&kv, &ctx, "temp:1").await.unwrap());
+        assert!(!KeyValueStore::exists(&kv, &ctx, "temp:2").await.unwrap());
+        assert!(KeyValueStore::exists(&kv, &ctx, "keep:1").await.unwrap());
     }
 
     #[tokio::test]
@@ -729,9 +727,9 @@ mod tests {
         let kv = InMemoryKVStore::new();
         let ctx = test_ctx();
 
-        kv.put(&ctx, "actor:a", b"1".to_vec()).await.unwrap();
-        kv.put(&ctx, "actor:b", b"2".to_vec()).await.unwrap();
-        kv.put(&ctx, "node:n1", b"3".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "actor:a", b"1".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "actor:b", b"2".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "node:n1", b"3".to_vec()).await.unwrap();
 
         let count = kv.count_prefix(&ctx, "actor:").await.unwrap();
         assert_eq!(count, 2);
@@ -742,12 +740,52 @@ mod tests {
         let kv = InMemoryKVStore::new();
         let ctx = test_ctx();
 
-        kv.put(&ctx, "k1", b"v1".to_vec()).await.unwrap();
-        kv.put(&ctx, "k2", b"v2".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "k1", b"v1".to_vec()).await.unwrap();
+        KeyValueStore::put(&kv, &ctx, "k2", b"v2".to_vec()).await.unwrap();
 
         let stats = kv.get_stats(&ctx).await.unwrap();
         assert_eq!(stats.total_keys, 2);
         assert_eq!(stats.backend_type, "InMemory");
         assert!(stats.total_size_bytes > 0);
+    }
+}
+
+// Implement core trait for compatibility
+#[async_trait]
+impl CoreKeyValueStore for InMemoryKVStore {
+    async fn get(&self, ctx: &RequestContext, key: &str) -> Result<Option<Vec<u8>>, String> {
+        <Self as KeyValueStore>::get(self, ctx, key).await.map_err(|e| e.to_string())
+    }
+
+    async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>) -> Result<(), String> {
+        <Self as KeyValueStore>::put(self, ctx, key, value).await.map_err(|e| e.to_string())
+    }
+
+    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> Result<(), String> {
+        <Self as KeyValueStore>::put_with_ttl(self, ctx, key, value, ttl).await.map_err(|e| e.to_string())
+    }
+
+    async fn delete(&self, ctx: &RequestContext, key: &str) -> Result<(), String> {
+        <Self as KeyValueStore>::delete(self, ctx, key).await.map_err(|e| e.to_string())
+    }
+
+    async fn exists(&self, ctx: &RequestContext, key: &str) -> Result<bool, String> {
+        <Self as KeyValueStore>::exists(self, ctx, key).await.map_err(|e| e.to_string())
+    }
+
+    async fn list_keys(&self, ctx: &RequestContext, prefix: &str) -> Result<Vec<String>, String> {
+        <Self as KeyValueStore>::list(self, ctx, prefix).await.map_err(|e| e.to_string())
+    }
+
+    async fn list(&self, ctx: &RequestContext, prefix: &str) -> Result<Vec<String>, String> {
+        <Self as KeyValueStore>::list(self, ctx, prefix).await.map_err(|e| e.to_string())
+    }
+
+    async fn cas(&self, ctx: &RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> Result<bool, String> {
+        <Self as KeyValueStore>::cas(self, ctx, key, expected, new_value).await.map_err(|e| e.to_string())
+    }
+
+    async fn increment(&self, ctx: &RequestContext, key: &str, delta: i64) -> Result<i64, String> {
+        <Self as KeyValueStore>::increment(self, ctx, key, delta).await.map_err(|e| e.to_string())
     }
 }

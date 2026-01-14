@@ -12,8 +12,8 @@ use tonic_health::pb::HealthCheckRequest;
 use tokio_stream::StreamExt;
 
 /// Test helper to create a health reporter (standalone for testing)
-fn create_health_reporter() -> Arc<plexspaces_node::health_service::PlexSpacesHealthReporter> {
-    let (health_reporter, _) = plexspaces_node::health_service::PlexSpacesHealthReporter::new();
+fn create_health_reporter() -> Arc<plexspaces_core::PlexSpacesHealthReporter> {
+    let (health_reporter, _) = plexspaces_core::PlexSpacesHealthReporter::new();
     Arc::new(health_reporter)
 }
 
@@ -181,7 +181,7 @@ async fn test_health_check_get_all_service_statuses() {
 #[tokio::test]
 async fn test_metrics_service_export_prometheus() {
     // Test: Prometheus metrics export
-    use plexspaces_node::metrics_service::MetricsServiceImpl;
+    use plexspaces_services::metrics_service::MetricsServiceImpl;
     use plexspaces_proto::metrics::v1::metrics_service_server::MetricsService;
     
     let metrics_service = MetricsServiceImpl::new();
@@ -200,7 +200,7 @@ async fn test_metrics_service_export_prometheus() {
 #[tokio::test]
 async fn test_metrics_service_list_definitions() {
     // Test: List metric definitions
-    use plexspaces_node::metrics_service::MetricsServiceImpl;
+    use plexspaces_services::metrics_service::MetricsServiceImpl;
     use plexspaces_proto::metrics::v1::metrics_service_server::MetricsService;
     
     let metrics_service = MetricsServiceImpl::new();
@@ -223,7 +223,7 @@ async fn test_metrics_service_list_definitions() {
 #[tokio::test]
 async fn test_metrics_service_get_metrics() {
     // Test: Get structured metrics
-    use plexspaces_node::metrics_service::MetricsServiceImpl;
+    use plexspaces_services::metrics_service::MetricsServiceImpl;
     use plexspaces_proto::metrics::v1::metrics_service_server::MetricsService;
     
     let metrics_service = MetricsServiceImpl::new();
@@ -325,20 +325,23 @@ async fn test_standard_health_service_watch() {
 #[tokio::test]
 async fn test_grpc_service_rejects_requests_during_shutdown() {
     // Test: gRPC services reject new requests during shutdown
-    use plexspaces_node::grpc_service::ActorServiceImpl;
-    use plexspaces_proto::v1::actor::actor_service_server::ActorService;
+    use plexspaces_services::actor_service::ActorServiceImpl;
+    use plexspaces_proto::actor::v1::actor_service_server::ActorService;
     
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let health_reporter = create_health_reporter();
-    health_reporter.mark_startup_complete(None).await;
+    node.initialize_services().await.unwrap();
+    let service_locator = node.service_locator();
     
-    let actor_service = ActorServiceImpl::with_health_reporter(node, health_reporter.clone());
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        node.id().as_str().to_string(),
+    ));
     
-    // Begin shutdown
-    health_reporter.begin_shutdown(Some(Duration::from_secs(1))).await;
+    // Begin shutdown via service locator
+    service_locator.request_shutdown();
     
     // Try to create an actor - should be rejected
-    let request = tonic::Request::new(plexspaces_proto::v1::actor::CreateActorRequest {
+    let request = tonic::Request::new(plexspaces_proto::actor::v1::CreateActorRequest {
         actor_type: "TestActor".to_string(),
         initial_state: vec![],
         config: None,
@@ -358,17 +361,20 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
 #[tokio::test]
 async fn test_grpc_service_accepts_requests_when_serving() {
     // Test: gRPC services accept requests when not shutting down
-    use plexspaces_node::grpc_service::ActorServiceImpl;
-    use plexspaces_proto::v1::actor::actor_service_server::ActorService;
+    use plexspaces_services::actor_service::ActorServiceImpl;
+    use plexspaces_proto::actor::v1::actor_service_server::ActorService;
     
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let health_reporter = create_health_reporter();
-    health_reporter.mark_startup_complete(None).await;
+    node.initialize_services().await.unwrap();
+    let service_locator = node.service_locator();
     
-    let actor_service = ActorServiceImpl::with_health_reporter(node, health_reporter.clone());
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        node.id().as_str().to_string(),
+    ));
     
     // Try to create an actor - should be accepted (may fail for other reasons, but not shutdown)
-    let request = tonic::Request::new(plexspaces_proto::v1::actor::CreateActorRequest {
+    let request = tonic::Request::new(plexspaces_proto::actor::v1::CreateActorRequest {
         actor_type: "TestActor".to_string(),
         initial_state: vec![],
         config: None,

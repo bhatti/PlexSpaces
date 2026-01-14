@@ -223,7 +223,7 @@ impl SchedulingService for SchedulingServiceImpl {
         // Create RequestContext from request metadata (before consuming request)
         // Scheduler uses internal context for system-level operations
         // Scheduler operations always use internal context
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         
         // Now consume request
         let req = request.into_inner();
@@ -248,7 +248,7 @@ impl SchedulingService for SchedulingServiceImpl {
         // Create RequestContext from request metadata (before consuming request)
         // Scheduler uses internal context for system-level operations
         // Scheduler operations always use internal context
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         
         // Now consume request
         let req = request.into_inner();

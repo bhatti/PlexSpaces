@@ -23,10 +23,8 @@
 //! the TupleSpaceProvider trait defined in actor_context.rs.
 //!
 //! ## Design Decision
-//! Most service wrappers are now in the `node` crate to avoid circular dependencies:
-//! - `core` defines the traits (no dependencies on node/actor-service)
-//! - `node` implements the wrappers (depends on core, which is fine)
-//! - Only TupleSpaceProviderWrapper remains here since TupleSpace is already in core
+//! Most service wrappers are in the `node` crate.
+//! Only TupleSpaceProviderWrapper remains here since TupleSpace is in core.
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -65,7 +63,11 @@ impl TupleSpaceProviderWrapper {
     }
 }
 
-impl crate::service_locator::Service for TupleSpaceProviderWrapper {}
+impl crate::Service for TupleSpaceProviderWrapper {
+    fn service_name(&self) -> String {
+        "TupleSpaceProviderWrapper".to_string()
+    }
+}
 
 #[async_trait]
 impl TupleSpaceProvider for TupleSpaceProviderWrapper {

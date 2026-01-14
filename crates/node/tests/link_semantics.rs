@@ -16,7 +16,7 @@ use test_helpers::{find_actor_helper, unregister_actor_helper};
 async fn create_test_node() -> Node {
     use plexspaces_node::NodeBuilder;
     NodeBuilder::new("test-node")
-        .with_listen_address("127.0.0.1:0")
+        .with_listen_addr("127.0.0.1:0")
         .with_max_connections(10)
         .with_heartbeat_interval_ms(1000)
         .with_clustering_enabled(false)
@@ -69,15 +69,17 @@ async fn test_link_basic() {
     let actor1 = create_test_actor_ref(&node, "actor-1").await;
     let actor2 = create_test_actor_ref(&node, "actor-2").await;
     
-    // Link actor1 to actor2
-    node.link(actor1.id(), actor2.id()).await.unwrap();
+    // Link actor1 to actor2 (use test context for tenant isolation)
+    use plexspaces_core::RequestContext;
+    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+    node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
     
     // Verify bidirectional linking: unlink should work from either direction
     // This confirms that linking is bidirectional (actor1->actor2 and actor2->actor1)
     node.unlink(actor2.id(), actor1.id()).await.unwrap();
     
     // Re-link to test unlinking from original direction
-    node.link(actor1.id(), actor2.id()).await.unwrap();
+    node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
     node.unlink(actor1.id(), actor2.id()).await.unwrap();
 }
 
@@ -88,7 +90,9 @@ async fn test_link_self_fails() {
     let actor1 = create_test_actor_ref(&node, "actor-1").await;
     
     // Linking actor to itself should fail
-    let result = node.link(actor1.id(), actor1.id()).await;
+    use plexspaces_core::RequestContext;
+    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+    let result = node.link(actor1.id(), actor1.id(), &ctx).await;
     assert!(result.is_err());
 }
 
@@ -155,8 +159,8 @@ async fn terminate_actor(
     
     unregister_actor_helper(node, &actor_id_parsed).await.unwrap();
     use plexspaces_core::ActorRegistry;
-    use plexspaces_core::service_locator::service_names;
-    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service_by_name(service_names::ACTOR_REGISTRY).await.unwrap();
+    use plexspaces_core::service_names;
+    let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await.unwrap();
     actor_registry.handle_actor_termination(&actor_id_parsed, reason).await;
 }
 
@@ -171,7 +175,9 @@ async fn test_exit_condition_cascading() {
         let actor1 = create_test_actor_ref(&node, "exit-test-1").await;
         let actor2 = create_test_actor_ref(&node, "exit-test-2").await;
         
-        node.link(actor1.id(), actor2.id()).await.unwrap();
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
         tokio::task::yield_now().await; // Give link time to register
         
         // Verify both actors are alive before termination
@@ -191,7 +197,9 @@ async fn test_exit_condition_cascading() {
         let actor1 = create_test_actor_ref(&node, "normal-test-1").await;
         let actor2 = create_test_actor_ref(&node, "normal-test-2").await;
         
-        node.link(actor1.id(), actor2.id()).await.unwrap();
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
         tokio::task::yield_now().await; // Give link time to register
         
         // Verify both actors are alive before termination
@@ -215,8 +223,10 @@ async fn test_exit_condition_cascading() {
         let actor2 = create_test_actor_ref(&node, "chain-2").await;
         let actor3 = create_test_actor_ref(&node, "chain-3").await;
         
-        node.link(actor1.id(), actor2.id()).await.unwrap();
-        node.link(actor2.id(), actor3.id()).await.unwrap();
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
+        node.link(actor2.id(), actor3.id(), &ctx).await.unwrap();
         
         // Give links time to register
         tokio::task::yield_now().await;
@@ -247,8 +257,10 @@ async fn test_exit_condition_cascading() {
         let actor2 = create_test_actor_ref(&node, "multi-2").await;
         let actor3 = create_test_actor_ref(&node, "multi-3").await;
         
-        node.link(actor1.id(), actor2.id()).await.unwrap();
-        node.link(actor1.id(), actor3.id()).await.unwrap();
+        use plexspaces_core::RequestContext;
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
+        node.link(actor1.id(), actor3.id(), &ctx).await.unwrap();
         node.unlink(actor1.id(), actor2.id()).await.unwrap(); // Unlink actor2
         tokio::task::yield_now().await; // Give unlink time to process
         

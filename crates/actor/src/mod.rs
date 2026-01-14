@@ -408,7 +408,7 @@ async fn set_replay_handler_for_facet(
 
     // Downcast to DurabilityFacet (no longer generic, uses trait objects)
     if let Some(durability_facet) = facet.as_any_mut().downcast_mut::<plexspaces_journaling::DurabilityFacet>() {
-        durability_facet.set_replay_handler(Box::new(handler)).await;
+        durability_facet.set_replay_handler(Box::new(handler), Arc::clone(context)).await;
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!("ReplayHandler set for DurabilityFacet");
         }
@@ -477,10 +477,10 @@ impl Actor {
     ) -> Self {
         // Create context with ServiceLocator - Node will update it with full services when spawning
         let node_id_str = node_id.clone().unwrap_or_else(|| "local".to_string());
-        // Note: This is a sync function, so we create a minimal ServiceLocator
+        // Note: This is a sync function, so we create a minimal ServiceLocator stub
         // Node will replace it with full services when spawning
-        use plexspaces_core::ServiceLocator;
-        let service_locator = Arc::new(ServiceLocator::new());
+        use crate::TestServiceLocatorStub;
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
         let context = Arc::new(ActorContext::new(
             node_id_str,
             tenant_id.clone(),
@@ -1861,9 +1861,7 @@ impl Actor {
         use std::sync::Arc;
         
         // Get ActorRegistry from ServiceLocator
-        if let Some(registry) = self.context.service_locator
-            .get_service::<ActorRegistry>().await
-        {
+        if let Some(registry) = self.context.service_locator.actor_registry().await {
             let ctx = RequestContext::new_without_auth(
                 self.context.tenant_id.clone(),
                 self.context.namespace.clone(),

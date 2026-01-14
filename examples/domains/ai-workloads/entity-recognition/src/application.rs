@@ -90,7 +90,7 @@ impl Application for EntityRecognitionApplication {
         use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
         
-        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
             .ok_or_else(|| ApplicationError::StartupFailed("ActorFactory not found in ServiceLocator".to_string()))?;
         
         // Create mailbox config
@@ -112,7 +112,7 @@ impl Application for EntityRecognitionApplication {
             
             let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
             
-            let ctx = plexspaces_core::RequestContext::internal();
+            let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
             actor_factory.spawn_actor(
                 &ctx,
                 &actor_id,
@@ -139,7 +139,7 @@ impl Application for EntityRecognitionApplication {
             
             let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
             
-            let ctx = plexspaces_core::RequestContext::internal();
+            let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
             actor_factory.spawn_actor(
                 &ctx,
                 &actor_id,
@@ -166,7 +166,7 @@ impl Application for EntityRecognitionApplication {
             
             let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
             
-            let ctx = plexspaces_core::RequestContext::internal();
+            let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
             actor_factory.spawn_actor(
                 &ctx,
                 &actor_id,

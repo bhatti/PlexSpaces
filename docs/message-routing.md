@@ -285,7 +285,7 @@ The routing logic is greatly simplified:
 // In ActorRef::tell_impl()
 // Get ReplyWaiterRegistry once for all reply routing checks
 let waiter_registry: Option<Arc<ReplyWaiterRegistry>> = 
-    service_locator.get_service_by_name::<ReplyWaiterRegistry>(...).await;
+    service_locator.reply_waiter_registry().await;
 
 // SIMPLIFIED ROUTING: Since we always create temporary sender for ask(), routing is simple:
 // - If receiver is temporary sender → REPLY → route to ReplyWaiter (bypass mailbox)
@@ -349,7 +349,7 @@ When `tell()` is called on a temporary ActorRef, it routes messages directly to 
 ```rust
 // In ActorRef::tell_impl()
 // Get ReplyWaiterRegistry once for all reply routing checks
-let waiter_registry = service_locator.get_service_by_name::<ReplyWaiterRegistry>(...).await;
+let waiter_registry = service_locator.reply_waiter_registry().await;
 
 // If this ActorRef is a temporary sender, route directly to ReplyWaiter
 if Self::is_temporary_sender_id(&actor_id) {

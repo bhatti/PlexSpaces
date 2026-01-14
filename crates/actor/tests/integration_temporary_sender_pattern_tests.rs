@@ -9,7 +9,7 @@ use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorError, Actor, BehaviorType, ActorRegistry, ActorService};
 use plexspaces_mailbox::{Message, Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
-use plexspaces_actor_service::ActorServiceImpl;
+use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_proto::actor::v1::actor_service_server::ActorServiceServer;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -209,10 +209,8 @@ async fn create_test_actor_service(
 ) -> ActorServiceImpl {
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let reply_tracker = Arc::new(plexspaces_core::ReplyTracker::new());
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator.register_service(actor_registry.clone()).await;
-    service_locator.register_service(reply_tracker).await;
     service_locator.register_service(reply_waiter_registry).await;
     ActorServiceImpl::new(service_locator, node_id)
 }
@@ -231,7 +229,7 @@ async fn register_test_actor(
         mailbox,
         service_locator,
     ));
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 }
 
@@ -337,7 +335,7 @@ async fn test_outside_sender_calling_ask() {
     // Create and spawn counter actor using ActorBuilder (simpler setup)
     let actor_id = "counter-1@test-node-outside-ask".to_string();
     let behavior: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let counter_ref = ActorBuilder::new(behavior)
         .with_id(actor_id.clone())
         .with_namespace("default".to_string())
@@ -388,7 +386,7 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     let behavior1: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
     let behavior2: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
     
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let _counter1_ref = ActorBuilder::new(behavior1)
         .with_id(actor1_id.clone())
         .with_namespace("default".to_string())
@@ -445,10 +443,10 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let node1_service_locator = node1.service_locator().clone();
     
     // Get node1's ActorRegistry
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_core::MessageSender;
     let actor_registry1: Arc<ActorRegistry> = node1_service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry should be registered");
     
@@ -562,10 +560,10 @@ async fn test_chained_asks_multi_node() {
     let node1_service_locator = node1.service_locator().clone();
     
     // Get node1's ActorRegistry
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_core::MessageSender;
     let actor_registry1: Arc<ActorRegistry> = node1_service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry should be registered");
     
@@ -674,10 +672,10 @@ async fn test_concurrent_asks_multi_node() {
     let node1_service_locator = node1.service_locator().clone();
     
     // Get node1's ActorRegistry
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_core::MessageSender;
     let actor_registry1: Arc<ActorRegistry> = node1_service_locator
-        .get_service_by_name(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry should be registered");
     

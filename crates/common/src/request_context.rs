@@ -292,20 +292,6 @@ impl RequestContext {
         self.metadata.contains_key(key)
     }
 
-    /// Create RequestContext for internal/system operations
-    ///
-    /// ## Purpose
-    /// Creates a RequestContext for internal operations that bypass authn/authz and tenant filtering.
-    /// Uses "internal" as tenant_id and "system" as namespace.
-    ///
-    /// ## Usage
-    /// Use this for system-level operations like heartbeats, node registration, etc.
-    pub fn internal() -> Self {
-        Self::new("internal".to_string(), "system".to_string(), false)
-            .unwrap()
-            .with_admin(true)
-            .with_internal(true)
-    }
 
     /// Create RequestContext from auth config and tenant/namespace
     ///

@@ -49,7 +49,7 @@ fn create_supervisor_with_locator(
     id: String,
     strategy: SupervisionStrategy,
 ) -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     let (mut supervisor, event_rx) = Supervisor::new(id, strategy);
     supervisor = supervisor.with_service_locator(service_locator);
     (supervisor, event_rx)
@@ -115,7 +115,7 @@ fn create_actor_spec(
 #[tokio::test]
 async fn test_two_level_supervision_tree() {
     // Create root supervisor (OneForOne)
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     let (mut root_supervisor, mut root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {

@@ -46,7 +46,7 @@ pub trait ActorContext {
 Centralized service registration and gRPC client caching:
 
 ```rust
-use plexspaces_core::ServiceLocator;
+use plexspaces_services::ServiceLocator;
 use std::sync::Arc;
 
 let service_locator = Arc::new(ServiceLocator::new());
@@ -56,7 +56,7 @@ let actor_registry = Arc::new(ActorRegistry::new());
 service_locator.register_service(actor_registry.clone()).await;
 
 // Retrieve services
-let registry: Arc<ActorRegistry> = service_locator.get_service().await
+let registry: Arc<ActorRegistry> = service_locator.actor_registry().await
     .ok_or("ActorRegistry not registered")?;
 
 // Get gRPC client for remote node (with caching)
@@ -73,6 +73,8 @@ let client = service_locator.get_node_client("remote-node").await?;
 - Eliminates need to pass individual services to every component
 - Efficient connection reuse (scalable to hundreds of thousands of ActorRefs)
 - Lightweight `Arc<ServiceLocator>` can be stored in ActorRef for remote messaging
+
+**Note**: The `ServiceLocator` trait is defined in `plexspaces-core`, but the concrete implementation (`ServiceLocatorImpl`) is in `plexspaces-services`. This separation allows `plexspaces-core` to remain dependency-free while `plexspaces-services` provides the full implementation. See [Services Crate README](../services/README.md) for details.
 
 ### Service Traits
 

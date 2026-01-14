@@ -40,8 +40,14 @@ use crate::ActorFactory;
 ///
 /// ## Returns
 /// `Some(Arc<dyn ActorFactory>)` if registered, `None` otherwise
+///
+/// ## Example
+/// ```rust,ignore
+/// use plexspaces_actor::get_actor_factory;
+/// let factory: Arc<dyn ActorFactory> = get_actor_factory(&service_locator).await?;
+/// ```
 pub async fn get_actor_factory(
-    service_locator: &plexspaces_core::ServiceLocator,
+    service_locator: &dyn plexspaces_core::ServiceLocator,
 ) -> Option<Arc<dyn ActorFactory>> {
     let factory_any = service_locator.get_actor_factory().await?;
     

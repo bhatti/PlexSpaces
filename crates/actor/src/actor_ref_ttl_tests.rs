@@ -75,8 +75,8 @@ mod tests {
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
-        if let Some(registry) = service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
-            let ctx = RequestContext::internal();
+        if let Some(registry) = service_locator.actor_registry().await {
+            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
             registry.register_actor(&ctx, "test@node1".to_string(), sender, None, None, None).await;
         }

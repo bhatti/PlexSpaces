@@ -137,7 +137,11 @@ pub struct ProcessGroupRegistry {
     node_id: String,
 }
 
-impl Service for ProcessGroupRegistry {}
+impl Service for ProcessGroupRegistry {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_names::PROCESS_GROUP_REGISTRY.to_string()
+    }
+}
 
 impl ProcessGroupRegistry {
     /// Create a new process group registry

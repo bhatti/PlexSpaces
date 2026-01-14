@@ -55,17 +55,17 @@ use std::sync::Arc;
 /// - Compiles and caches modules
 /// - Instantiates actors from cached modules
 /// - Migrates actors between nodes
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WasmDeploymentService {
     /// WASM runtime for compilation and instantiation
-    runtime: Arc<WasmRuntime>,
+    runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
 }
 
 impl WasmDeploymentService {
     /// Create new deployment service
     ///
     /// ## Arguments
-    /// * `runtime` - WASM runtime instance
+    /// * `runtime` - WASM runtime instance (trait object)
     ///
     /// ## Examples
     /// ```rust,no_run
@@ -77,7 +77,7 @@ impl WasmDeploymentService {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(runtime: Arc<WasmRuntime>) -> Self {
+    pub fn new(runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>) -> Self {
         Self { runtime }
     }
 
@@ -140,7 +140,7 @@ impl WasmDeploymentService {
             "Compiling WASM module"
         );
 
-        let module = self
+        let module_any = self
             .runtime
             .load_module(name, version, module_bytes)
             .await
@@ -149,6 +149,7 @@ impl WasmDeploymentService {
                     "Failed to compile module {name}@{version}: {e}"
                 ))
             })?;
+        let module = crate::wasm_runtime_helpers::extract_wasm_module(module_any)?;
 
         // Verify hash matches
         let actual_hash = Self::compute_hash(module_bytes);
@@ -209,13 +210,14 @@ impl WasmDeploymentService {
         config: Option<WasmConfig>,
     ) -> WasmResult<String> {
         // Resolve module reference (name@version or hash)
-        let module = self
+        let module_any = self
             .runtime
             .resolve_module(module_ref)
             .await
             .ok_or_else(|| {
                 WasmError::ModuleNotFound(format!("Module not found: {}", module_ref))
             })?;
+        let module = crate::wasm_runtime_helpers::extract_wasm_module(module_any)?;
 
         // Use provided config or default
         let config = config.unwrap_or_default();
@@ -228,23 +230,24 @@ impl WasmDeploymentService {
         );
 
         // Create instance
-        let _instance = self
+        let module_any: Arc<dyn std::any::Any + Send + Sync> = module;
+        let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(config);
+        let _instance_any = self
             .runtime
             .instantiate(
-                module,
+                module_any,
                 actor_id.to_string(),
                 initial_state,
-                config,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                
-                None,
+                config_any,
+                None, // channel_service
+                None, // message_sender
+                None, // tuplespace_provider
+                None, // keyvalue_store
+                None, // process_group_registry
+                None, // lock_manager
+                None, // object_registry
+                None, // journal_storage
+                None, // blob_service
             )
             .await
             .map_err(|e| {
@@ -252,6 +255,7 @@ impl WasmDeploymentService {
                     "Failed to instantiate actor {actor_id}: {e}"
                 ))
             })?;
+        let _instance = crate::wasm_runtime_helpers::extract_wasm_instance(_instance_any)?;
 
         tracing::info!(
             actor_id = actor_id,

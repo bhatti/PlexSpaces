@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     // Create node using NodeBuilder
     let node = Arc::new(
         NodeBuilder::new(node_id.clone())
-            .with_listen_address(listen_addr.clone())
+            .with_listen_addr(listen_addr.clone())
             .build()
             .await
     );

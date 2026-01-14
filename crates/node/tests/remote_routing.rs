@@ -18,7 +18,8 @@
 use plexspaces_actor::ActorRef;
 use plexspaces_core::{Message, MessageSender};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use plexspaces_node::{grpc_service::ActorServiceImpl, Node, NodeBuilder, NodeId};
+use plexspaces_node::{Node, NodeBuilder, NodeId};
+use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_proto::ActorServiceServer;
 use std::sync::Arc;
 use tonic::transport::Server;
@@ -30,7 +31,7 @@ use test_helpers::lookup_actor_ref;
 /// Helper to start a gRPC server for testing
 async fn start_test_server(node: Arc<Node>) -> String {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let service = ActorServiceImpl::new(node.clone());
+    let service = ActorServiceImpl::new(node.service_locator().clone(), node.id().to_string());
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
@@ -73,7 +74,7 @@ async fn test_node_route_local_message() {
         mailbox.clone(),
         service_locator.clone(),
     ));
-    let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+    let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator().actor_registry().await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())).unwrap();
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     actor_registry.register_actor(&ctx, "test-actor@node1".to_string(), wrapper, None, None, None).await;
@@ -116,13 +117,13 @@ async fn test_node_route_remote_message() {
         mailbox2.clone(),
         service_locator2.clone(),
     ));
-    let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+    let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2.service_locator().actor_registry().await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())).unwrap();
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     actor_registry2.register_actor(&ctx, "remote-actor@node2".to_string(), wrapper2, None, None, None).await;
     
     // Register actor config - use the actual actor_ref2 which implements MessageSender
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let actor_id = actor_ref2.id().clone();
     let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
     actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -135,7 +136,7 @@ async fn test_node_route_remote_message() {
     // Also register node2 in ObjectRegistry (required for ActorRef::remote to find the node)
     // Use the same tenant/namespace that get_node_client will use (from NodeConfig defaults: "internal"/"system")
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let object_registry = node1.object_registry().await.unwrap();
+    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = node1.service_locator().object_registry().await.unwrap();
     // NodeConfig defaults are "internal"/"system" (not "default"/"default")
     let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     // Ensure address format is correct (host:port, not http://host:port)
@@ -231,13 +232,13 @@ async fn test_connection_pooling() {
         mailbox2.clone(),
         service_locator2.clone(),
     ));
-    let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2.service_locator().get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+    let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2.service_locator().actor_registry().await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())).unwrap();
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     actor_registry2.register_actor(&ctx, "pooled-actor@node2".to_string(), wrapper_pooled, None, None, None).await;
     
     // Register actor config - use the actual actor_ref2 which implements MessageSender
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let actor_id = actor_ref2.id().clone();
     let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
     actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -250,7 +251,7 @@ async fn test_connection_pooling() {
     // Also register node2 in ObjectRegistry (required for ActorRef::remote to find the node)
     // Use the same tenant/namespace that get_node_client will use (from NodeConfig defaults: "internal"/"system")
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let object_registry = node1.object_registry().await.unwrap();
+    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = node1.service_locator().object_registry().await.unwrap();
     // NodeConfig defaults are "internal"/"system" (not "default"/"default")
     let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     // Ensure address format is correct (host:port, not http://host:port)

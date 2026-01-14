@@ -32,7 +32,7 @@ pub struct Node {
 (accessed via `ServiceLocator`) for better separation of concerns and encapsulation. The `Node` no longer 
 directly exposes internal actor storage maps.
 
-**ServiceLocator Integration**: The `Node` creates and manages a `ServiceLocator` that registers core services (`ActorRegistry`, `ReplyTracker`) and provides gRPC client caching for remote node communication. This enables efficient connection reuse across all `ActorRef`s.
+**ServiceLocator Integration**: The `Node` creates and manages a `ServiceLocator` that registers core services (`ActorRegistry`, `ReplyWaiterRegistry`) and provides gRPC client caching for remote node communication. This enables efficient connection reuse across all `ActorRef`s.
 
 ### NodeBuilder
 
@@ -71,11 +71,19 @@ let report = tracker.finalize();
 
 ### gRPC Services
 
-- **ActorService**: Remote actor communication
-- **ApplicationService**: Application deployment and management
-- **HealthService**: Health checks for Kubernetes probes
-- **SystemService**: System information and statistics
-- **TupleSpaceService**: Distributed TupleSpace operations
+All gRPC services are implemented in the `plexspaces-services` crate:
+
+- **ActorService**: Remote actor communication (`plexspaces-services::actor_service`)
+- **ApplicationService**: Application deployment and management (`plexspaces-services::application_service`)
+- **HealthService**: Health checks for Kubernetes probes (`plexspaces-core::health_service`)
+- **SystemService**: System information and statistics (`plexspaces-services::system_service`)
+- **TupleSpaceService**: Distributed TupleSpace operations (`plexspaces-services::tuple_service`)
+- **BlobService**: Blob storage operations (`plexspaces-services::blob_service`)
+- **WorkflowService**: Workflow orchestration (`plexspaces-services::workflow_service`)
+- **MetricsService**: Metrics collection and export (`plexspaces-services::metrics_service`)
+- **FirecrackerService**: Firecracker VM management (`plexspaces-services::firecracker_service`) - Optional
+
+**Note**: Services are accessed via `ServiceLocator` and don't depend directly on `Node`. This design eliminates circular dependencies and enables better testability. See [Services Crate README](../services/README.md) for details.
 
 ### Application Management
 

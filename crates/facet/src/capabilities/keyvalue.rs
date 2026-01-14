@@ -217,7 +217,7 @@ impl KeyValueFacet {
                 metrics.gets += 1;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::internal();
+                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 match store.get(&ctx, &key).await {
                     Ok(Some(value)) => {
                         metrics.hits += 1;
@@ -244,7 +244,7 @@ impl KeyValueFacet {
                 self.metrics.write().await.sets += 1;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::internal();
+                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 store
                     .set(&ctx, &args.key, args.value, args.ttl.or(self.config.default_ttl))
                     .await
@@ -259,7 +259,7 @@ impl KeyValueFacet {
                 self.metrics.write().await.deletes += 1;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::internal();
+                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 let deleted = store
                     .delete(&ctx, &key)
                     .await
@@ -272,7 +272,7 @@ impl KeyValueFacet {
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::internal();
+                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 let exists = store
                     .exists(&ctx, &key)
                     .await
@@ -285,7 +285,7 @@ impl KeyValueFacet {
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::internal();
+                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 let keys = store
                     .list_keys(&ctx, &prefix)
                     .await

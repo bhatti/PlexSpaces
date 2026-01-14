@@ -42,9 +42,8 @@ use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use futures::stream::BoxStream;
 use std::time::Duration;
 
-use crate::grpc_service::ActorServiceImpl as NodeActorServiceImpl;
 use crate::{ActorLocation, Node};
-use plexspaces_actor_service::ActorServiceImpl;
+use plexspaces_services::actor_service::ActorServiceImpl;
 use futures::StreamExt;
 
 
@@ -68,7 +67,11 @@ impl TupleSpaceProviderWrapper {
     }
 }
 
-impl Service for TupleSpaceProviderWrapper {}
+impl Service for TupleSpaceProviderWrapper {
+    fn service_name(&self) -> String {
+        "TupleSpaceProviderWrapper".to_string()
+    }
+}
 
 #[async_trait]
 impl TupleSpaceProvider for TupleSpaceProviderWrapper {
@@ -151,7 +154,11 @@ impl Default for ChannelServiceWrapper {
     }
 }
 
-impl Service for ChannelServiceWrapper {}
+impl Service for ChannelServiceWrapper {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_names::CHANNEL_SERVICE.to_string()
+    }
+}
 
 #[async_trait]
 impl ChannelService for ChannelServiceWrapper {
@@ -348,7 +355,11 @@ impl ProcessGroupServiceWrapper {
     }
 }
 
-impl Service for ProcessGroupServiceWrapper {}
+impl Service for ProcessGroupServiceWrapper {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_names::PROCESS_GROUP_REGISTRY.to_string()
+    }
+}
 
 #[async_trait]
 impl ProcessGroupService for ProcessGroupServiceWrapper {
@@ -446,7 +457,11 @@ impl FacetServiceWrapper {
     }
 }
 
-impl Service for FacetServiceWrapper {}
+impl Service for FacetServiceWrapper {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_names::FACET_SERVICE.to_string()
+    }
+}
 
 #[async_trait]
 impl FacetService for FacetServiceWrapper {
@@ -474,14 +489,19 @@ impl FacetService for FacetServiceWrapper {
 ///
 /// ## Purpose
 /// Allows FirecrackerVmServiceImpl to be registered in ServiceLocator
-/// and accessed by actors via ctx.service_locator.get_service()
+/// and accessed by actors via ctx.service_locator.actor_registry() or other helper methods
 #[cfg(feature = "firecracker")]
 pub struct FirecrackerVmServiceWrapper {
-    inner: Arc<crate::firecracker_service::FirecrackerVmServiceImpl>,
+    #[cfg(feature = "firecracker")]
+    inner: Arc<plexspaces_services::firecracker_service::FirecrackerVmServiceImpl>,
 }
 
 #[cfg(feature = "firecracker")]
-impl Service for FirecrackerVmServiceWrapper {}
+impl Service for FirecrackerVmServiceWrapper {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_names::FIRECRACKER_VM_SERVICE.to_string()
+    }
+}
 
 /// NodeMetricsAccessor wrapper - provides read and write access to NodeMetrics
 ///
@@ -499,7 +519,11 @@ impl NodeMetricsAccessorWrapper {
     }
 }
 
-impl plexspaces_core::Service for NodeMetricsAccessorWrapper {}
+impl plexspaces_core::Service for NodeMetricsAccessorWrapper {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_names::NODE_METRICS_ACCESSOR.to_string()
+    }
+}
 
 #[async_trait::async_trait]
 impl plexspaces_core::NodeMetricsAccessor for NodeMetricsAccessorWrapper {
@@ -534,15 +558,47 @@ impl plexspaces_core::NodeMetricsAccessor for NodeMetricsAccessorWrapper {
     }
 }
 
+/// NodeConnectionInfo wrapper - provides access to node connection information
+///
+/// ## Purpose
+/// Allows components to access node connection information (connected nodes list)
+/// without depending on Node type.
+pub struct NodeConnectionInfoWrapper {
+    node: Arc<crate::Node>,
+}
+
+impl NodeConnectionInfoWrapper {
+    /// Create a new wrapper
+    pub fn new(node: Arc<crate::Node>) -> Self {
+        Self { node }
+    }
+}
+
+impl plexspaces_core::Service for NodeConnectionInfoWrapper {
+    fn service_name(&self) -> String {
+        "NodeConnectionInfo".to_string()
+    }
+}
+
+#[async_trait::async_trait]
+impl plexspaces_core::NodeConnectionInfo for NodeConnectionInfoWrapper {
+    async fn connected_nodes(&self) -> Vec<String> {
+        self.node.connected_nodes().await
+            .into_iter()
+            .map(|node_id| node_id.as_str().to_string())
+            .collect()
+    }
+}
+
 #[cfg(feature = "firecracker")]
 impl FirecrackerVmServiceWrapper {
     /// Create a new wrapper from FirecrackerVmServiceImpl
-    pub fn new(inner: Arc<crate::firecracker_service::FirecrackerVmServiceImpl>) -> Self {
+    pub fn new(inner: Arc<plexspaces_services::firecracker_service::FirecrackerVmServiceImpl>) -> Self {
         Self { inner }
     }
 
     /// Get a reference to the inner FirecrackerVmServiceImpl
-    pub fn inner(&self) -> &Arc<crate::firecracker_service::FirecrackerVmServiceImpl> {
+    pub fn inner(&self) -> &Arc<plexspaces_services::firecracker_service::FirecrackerVmServiceImpl> {
         &self.inner
     }
 }

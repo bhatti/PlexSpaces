@@ -230,8 +230,8 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
     assert!(facets.is_some(), "Facets should be stored");
     
     // Unregister actor
-    use plexspaces_core::service_locator::service_names;
-    let actor_registry = node.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
+    use plexspaces_core::service_names;
+    let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry.unregister_with_cleanup(&actor_id).await.unwrap();
     
     // Verify facets are cleaned up

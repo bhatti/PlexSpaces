@@ -14,7 +14,8 @@ async fn test_stub_channel_service() {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(),  // tenant_id
@@ -34,7 +35,8 @@ async fn test_stub_actor_service() {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(),  // tenant_id
@@ -53,7 +55,8 @@ async fn test_stub_object_registry() {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(),  // tenant_id
@@ -72,7 +75,8 @@ async fn test_stub_tuplespace_provider() {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(),  // tenant_id
@@ -91,7 +95,8 @@ async fn test_stub_process_group_service() {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(),  // tenant_id
@@ -110,7 +115,8 @@ async fn test_stub_node_operations() {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(),  // tenant_id
@@ -129,7 +135,8 @@ async fn test_stub_facet_service() {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(),  // tenant_id

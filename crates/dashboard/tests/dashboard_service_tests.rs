@@ -47,15 +47,37 @@ mod tests {
         
         // Metrics are updated in initialize_services() - no need to update manually
         
-        // Ensure ApplicationManager is registered as both by-name and by-type
-        use plexspaces_core::ApplicationManager;
-        use plexspaces_core::service_locator::service_names;
-        if let Some(app_manager) = service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await {
-            // Also register as generic service for get_service() lookup
-            service_locator.register_service(app_manager.clone()).await;
+        // Create HealthReporterAccess implementation
+        use plexspaces_node::health_service::PlexSpacesHealthReporter;
+        use plexspaces_dashboard::HealthReporterAccess;
+        let (health_reporter, _service) = PlexSpacesHealthReporter::new();
+        let health_reporter = Arc::new(health_reporter);
+        
+        struct HealthReporterAccessImpl {
+            health_reporter: Arc<PlexSpacesHealthReporter>,
         }
         
-        DashboardServiceImpl::new(service_locator)
+        #[async_trait::async_trait]
+        impl HealthReporterAccess for HealthReporterAccessImpl {
+            async fn get_detailed_health(&self, include_non_critical: bool) -> plexspaces_proto::system::v1::DetailedHealthCheck {
+                self.health_reporter.get_detailed_health(include_non_critical).await
+            }
+        }
+        
+        let health_access = Arc::new(HealthReporterAccessImpl {
+            health_reporter,
+        });
+        
+        // Register ApplicationManager in ServiceLocator
+        use plexspaces_application::ApplicationManager;
+        let app_manager = Arc::new(ApplicationManager::new());
+        let app_manager_trait: Arc<dyn plexspaces_core::ApplicationManager> = app_manager.clone();
+        service_locator.register_application_manager(app_manager_trait).await;
+        
+        DashboardServiceImpl::with_health_reporter(
+            service_locator,
+            health_access,
+        )
     }
 
     #[tokio::test]

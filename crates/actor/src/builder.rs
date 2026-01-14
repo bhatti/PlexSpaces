@@ -627,10 +627,10 @@ impl ActorBuilder {
             let node_id_str = node_id.clone().unwrap_or_else(|| "local".to_string());
             // Create ServiceLocator for context
             // Note: This is a sync function, so we can't use create_default_service_locator
-            // For ActorBuilder, we create a minimal ServiceLocator that will be replaced
+            // For ActorBuilder, we create a minimal ServiceLocator stub that will be replaced
             // when the actor is actually spawned by Node
-            use plexspaces_core::ServiceLocator;
-            let service_locator = Arc::new(ServiceLocator::new());
+            use crate::TestServiceLocatorStub;
+            let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
             let context = Arc::new(ActorContext::new(
                 node_id_str,
                 tenant_id.clone(),
@@ -684,7 +684,7 @@ impl ActorBuilder {
     pub async fn spawn(
         mut self,
         ctx: &plexspaces_core::RequestContext,
-        service_locator: Arc<plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
     ) -> Result<crate::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         // Use tenant_id and namespace from RequestContext
         // If auth is disabled, tenant_id will be empty string
@@ -911,9 +911,9 @@ mod tests {
         assert_eq!(actor_ref.id(), "spawned-actor@test-node-spawn");
         
         // Verify actor is registered in the node's registry (with retry for async registration)
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
+            .actor_registry().await
             .expect("ActorRegistry not found");
         
         // Retry lookup with timeout (actor registration is async)
@@ -963,9 +963,9 @@ mod tests {
         assert_eq!(actor_ref.id(), "resource-spawned-actor@test-node-resource-spawn");
         
         // Verify actor is registered (with retry for async registration)
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
+            .actor_registry().await
             .expect("ActorRegistry not found");
         
         // Retry lookup with timeout (actor registration is async)
@@ -1010,9 +1010,9 @@ mod tests {
         assert_eq!(actor_ref.id(), "mailbox-actor@test-node-mailbox-spawn");
         
         // Verify actor is registered (with retry for async registration)
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
+            .actor_registry().await
             .expect("ActorRegistry not found");
         
         // Retry lookup with timeout (actor registration is async)
@@ -1079,9 +1079,9 @@ mod tests {
         assert_eq!(actor_refs.len(), 5);
         
         // Verify all actors are registered (with retry for async registration)
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
+            .actor_registry().await
             .expect("ActorRegistry not found");
         
         for i in 0..5 {

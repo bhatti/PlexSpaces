@@ -102,10 +102,10 @@ impl Coordinator {
                 let service_locator = node.as_ref().service_locator().clone();
                 use plexspaces_core::service_locator::service_names;
                 let actor_factory: Arc<ActorFactoryImpl> = service_locator
-                    .get_service_by_name::<ActorFactoryImpl>(service_names::ACTOR_FACTORY_IMPL)
+                    .actor_factory_impl()
                     .await
                     .ok_or_else(|| anyhow::anyhow!("ActorFactory not found in ServiceLocator"))?;
-                let ctx = RequestContext::internal();
+                let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
                 let _message_sender = actor_factory.spawn_actor(
                     &ctx,
                     &actor_id,

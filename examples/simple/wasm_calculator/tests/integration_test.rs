@@ -54,7 +54,7 @@ async fn test_node_creation() {
 async fn test_node_startup() {
     // ARRANGE
     let node = NodeBuilder::new("test-wasm-node-startup")
-        .with_listen_address("127.0.0.1:0") // Use port 0 for dynamic allocation
+        .with_listen_addr("127.0.0.1:0") // Use port 0 for dynamic allocation
         .build()
         .await;
     
@@ -81,7 +81,7 @@ async fn test_node_startup() {
 async fn test_application_service_connection() {
     // ARRANGE
     let node = NodeBuilder::new("test-wasm-node-conn")
-        .with_listen_address("127.0.0.1:0") // Use port 0 for dynamic allocation
+        .with_listen_addr("127.0.0.1:0") // Use port 0 for dynamic allocation
         .build()
         .await;
     
@@ -114,7 +114,7 @@ async fn test_application_service_connection() {
 async fn test_deploy_wasm_application() {
     // ARRANGE
     let node = NodeBuilder::new("test-wasm-node-deploy")
-        .with_listen_address("127.0.0.1:0") // Use port 0 for dynamic allocation
+        .with_listen_addr("127.0.0.1:0") // Use port 0 for dynamic allocation
         .build()
         .await;
     
@@ -212,7 +212,7 @@ async fn test_deploy_wasm_application() {
 async fn test_tuplespace_access() {
     // ARRANGE
     let node = NodeBuilder::new("test-wasm-node-tuplespace")
-        .with_listen_address("127.0.0.1:0") // Use port 0 for dynamic allocation
+        .with_listen_addr("127.0.0.1:0") // Use port 0 for dynamic allocation
         .build()
         .await;
     

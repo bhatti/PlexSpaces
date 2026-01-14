@@ -68,7 +68,7 @@ mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as
 let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await?;
 let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(), None);
 
-let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
     .ok_or_else(|| "ActorFactory not found")?;
 let ctx = plexspaces_core::RequestContext::internal();
 let _message_sender = actor_factory.spawn_actor(

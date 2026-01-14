@@ -62,3 +62,22 @@ pub use r#mod::register_state_fetcher_callback;
 
 // Actor registry
 // pub mod registry; // TEMPORARILY DISABLED - awaiting migration to object_registry proto
+
+// Test stub for ServiceLocator (avoids dependency on services crate)
+mod test_service_locator;
+pub use test_service_locator::TestServiceLocatorStub;
+
+// Supervision tree implementation (merged from supervisor crate)
+pub mod supervisor;
+pub use supervisor::*;
+
+// Child specification module
+pub mod child_spec;
+pub use child_spec::{ChildSpec, StartedChild, StartFn, ShutdownSpec};
+
+// Facet helpers module
+pub mod facet_helpers;
+pub use facet_helpers::{create_facet_from_proto, create_facets_from_proto};
+
+// Re-export SupervisorStats from proto (for public API)
+pub use plexspaces_proto::supervision::v1::SupervisorStats;

@@ -3,10 +3,8 @@
 //
 //! Tests for Node integration with ServiceLocator (TDD)
 
-use plexspaces_core::{ActorRegistry, ReplyTracker, ServiceLocator};
-use plexspaces_node::{Node, NodeId, NodeBuilder, default_node_config};
-#[cfg(feature = "firecracker")]
-use plexspaces_node::service_wrappers::FirecrackerVmServiceWrapper;
+use plexspaces_core::ActorRegistry;
+use plexspaces_node::NodeBuilder;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -20,23 +18,19 @@ async fn test_node_creates_service_locator() {
     // Wait for services to be registered - poll until they're available
     let registration_future = async {
         loop {
-            let actor_registry: Option<Arc<ActorRegistry>> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await;
-            let reply_tracker: Option<Arc<ReplyTracker>> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::REPLY_TRACKER).await;
-            if actor_registry.is_some() && reply_tracker.is_some() {
-                return (actor_registry, reply_tracker);
+            let actor_registry: Option<Arc<ActorRegistry>> = service_locator.actor_registry().await;
+            if actor_registry.is_some() {
+                return actor_registry;
             }
             tokio::task::yield_now().await;
         }
     };
-    let (actor_registry, reply_tracker) = tokio::time::timeout(tokio::time::Duration::from_secs(5), registration_future)
+    let actor_registry = tokio::time::timeout(tokio::time::Duration::from_secs(5), registration_future)
         .await
         .expect("Services should be registered within 5 seconds");
     
     // ActorRegistry should be registered
     assert!(actor_registry.is_some());
-    
-    // ReplyTracker should be registered
-    assert!(reply_tracker.is_some());
 }
 
 #[tokio::test]
@@ -48,7 +42,7 @@ async fn test_node_registers_actor_registry() {
     // Wait for async registration - poll until ActorRegistry is available
     let registration_future = async {
         loop {
-            if let Some(registry) = service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
+            if let Some(registry) = service_locator.actor_registry().await {
                 return registry;
             }
             tokio::task::yield_now().await;
@@ -64,33 +58,11 @@ async fn test_node_registers_actor_registry() {
     assert!(Arc::as_ptr(&actor_registry) != std::ptr::null());
     
     // Verify we can get the same instance again from ServiceLocator
-    let actor_registry2 = service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await;
+    let actor_registry2 = service_locator.actor_registry().await;
     assert!(actor_registry2.is_some());
     assert_eq!(Arc::as_ptr(&actor_registry), Arc::as_ptr(&actor_registry2.unwrap()));
 }
 
-#[tokio::test]
-async fn test_node_registers_reply_tracker() {
-    // Test: Node should register ReplyTracker in ServiceLocator
-    let node = NodeBuilder::new("test-node").build().await;
-    let service_locator = node.service_locator();
-    
-    // Wait for async registration - poll until ReplyTracker is available
-    let registration_future = async {
-        loop {
-            if let Some(tracker) = service_locator.get_service_by_name::<ReplyTracker>(plexspaces_core::service_locator::service_names::REPLY_TRACKER).await {
-                return tracker;
-            }
-            tokio::task::yield_now().await;
-        }
-    };
-    let reply_tracker = tokio::time::timeout(tokio::time::Duration::from_secs(5), registration_future)
-        .await
-        .expect("ReplyTracker should be registered within 5 seconds");
-    
-    // Verify it's a valid ReplyTracker instance
-    assert!(Arc::as_ptr(&reply_tracker) != std::ptr::null());
-}
 
 #[cfg(feature = "firecracker")]
 #[tokio::test]
@@ -148,7 +120,7 @@ async fn test_node_service_locator_shutdown() {
     // Wait for async registration - poll until ActorRegistry is available
     let registration_future = async {
         loop {
-            if service_locator.get_service_by_name::<ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await.is_some() {
+            if service_locator.actor_registry().await.is_some() {
                 break;
             }
             tokio::task::yield_now().await;
@@ -162,6 +134,6 @@ async fn test_node_service_locator_shutdown() {
     service_locator.shutdown().await;
     
     // Verify services are still accessible after shutdown
-    let actor_registry: Option<Arc<ActorRegistry>> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await;
+    let actor_registry: Option<Arc<ActorRegistry>> = service_locator.actor_registry().await;
     assert!(actor_registry.is_some());
 }

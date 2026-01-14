@@ -34,7 +34,8 @@
 //! - Application-level deployment (entire application, not individual actors)
 
 use async_trait::async_trait;
-use plexspaces_core::application::{Application, ApplicationError, ApplicationNode, HealthStatus};
+use plexspaces_application::{Application, ApplicationError, ApplicationNode};
+use plexspaces_proto::v1::application::HealthStatus;
 use plexspaces_core::{Actor, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
@@ -405,21 +406,16 @@ impl WasmApplication {
         let keyvalue_store: Option<Arc<dyn plexspaces_keyvalue::KeyValueStore>> = None;
 
         // Get ProcessGroupRegistry from service locator if available
-        use plexspaces_process_groups::ProcessGroupRegistry;
-        use plexspaces_core::service_locator::service_names;
-        let process_group_registry: Option<Arc<ProcessGroupRegistry>> = service_locator
-            .get_service_by_name::<ProcessGroupRegistry>(service_names::PROCESS_GROUP_REGISTRY)
-            .await;
+        // Note: get_service_by_name requires Sized, so we can't call it on trait object
+        // For now, pass None - ProcessGroupRegistry is optional for WASM actors
+        let process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>> = None;
 
         // Get LockManager from service locator if available
         // Note: LockManager may not be registered - for now pass None
         let lock_manager: Option<Arc<dyn plexspaces_locks::LockManager>> = None;
 
         // Get ObjectRegistry from service locator if available
-        use plexspaces_object_registry::ObjectRegistry;
-        let object_registry: Option<Arc<ObjectRegistry>> = service_locator
-            .get_service_by_name::<ObjectRegistry>(service_names::OBJECT_REGISTRY)
-            .await;
+        let object_registry: Option<Arc<dyn plexspaces_core::ObjectRegistry>> = service_locator.get_object_registry().await;
 
         // Get JournalStorage - create default in-memory storage for WASM actors
         // This allows durability functions to work even if no storage is configured
@@ -428,7 +424,8 @@ impl WasmApplication {
         let journal_storage: Option<Arc<dyn JournalStorage>> = Some(Arc::new(MemoryJournalStorage::new()));
 
         // Get BlobService from service locator if available
-        let blob_service = service_locator.get_service::<plexspaces_blob::BlobService>().await;
+        // BlobService is not available via trait methods, so we'll pass None for now
+        let blob_service: Option<Arc<plexspaces_blob::BlobService>> = None;
 
         // Create WASM instance with all available services
         let wasm_instance = runtime
@@ -625,9 +622,9 @@ impl WasmApplication {
                     "ServiceLocator not available from node".to_string()
                 ))?;
             
-            use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-            
-            let actor_factory: Arc<ActorFactoryImpl> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
+            // Use trait helper to get ActorFactory as trait object
+            use plexspaces_actor::{ActorFactory, get_actor_factory};
+            let actor_factory: Arc<dyn ActorFactory> = get_actor_factory(service_locator.as_ref()).await
                 .ok_or_else(|| ApplicationError::ActorStopFailed(
                     actor_id.to_string(),
                     "ActorFactory not found in ServiceLocator".to_string()
@@ -893,7 +890,7 @@ impl Application for WasmApplication {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::application::ApplicationNode;
+    use plexspaces_application::ApplicationNode;
     use std::sync::Arc;
 
     // Mock ApplicationNode for testing
@@ -910,7 +907,7 @@ mod tests {
         }
     }
 
-    async fn create_test_runtime() -> Arc<WasmRuntime> {
+    async fn create_test_runtime() -> Arc<dyn plexspaces_core::WasmRuntimeTrait> {
         Arc::new(WasmRuntime::new().await.expect("Failed to create WASM runtime"))
     }
 

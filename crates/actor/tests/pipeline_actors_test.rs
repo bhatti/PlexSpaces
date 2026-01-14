@@ -252,7 +252,7 @@ impl GenServer for OutputWorkerActor {
 #[tokio::test]
 async fn test_input_actor_processes_messages() {
     let (_node, service_locator) = setup_test_node("test-node").await;
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
     // Create input actor
     let input_actor = InputWorkerActor::new();
@@ -292,7 +292,7 @@ async fn test_input_actor_processes_messages() {
 #[tokio::test]
 async fn test_processor_actor_filters_events() {
     let (_node, service_locator) = setup_test_node("test-node").await;
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
     // Create processor actor
     let processor_actor = ProcessorWorkerActor::new();
@@ -332,7 +332,7 @@ async fn test_processor_actor_filters_events() {
 #[tokio::test]
 async fn test_output_actor_sends_events() {
     let (_node, service_locator) = setup_test_node("test-node").await;
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
     // Create output actor
     let output_actor = OutputWorkerActor::new();
@@ -370,7 +370,7 @@ async fn test_output_actor_sends_events() {
 #[tokio::test]
 async fn test_full_pipeline() {
     let (_node, service_locator) = setup_test_node("test-node").await;
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
     // Create all actors
     let input_actor = InputWorkerActor::new();
@@ -458,7 +458,7 @@ async fn test_full_pipeline() {
 #[tokio::test]
 async fn test_concurrent_pipeline_processing() {
     let (_node, service_locator) = setup_test_node("test-node").await;
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
     // Create actors
     let input_actor = InputWorkerActor::new();

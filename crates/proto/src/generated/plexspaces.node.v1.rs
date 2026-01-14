@@ -48,7 +48,7 @@ pub struct ReleaseSpec {
 /// Node configuration
 ///
 /// ## Purpose
-/// Defines node identity and cluster membership settings.
+/// Defines node identity, cluster membership, and runtime operational settings.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NodeConfig {
@@ -58,7 +58,7 @@ pub struct NodeConfig {
     pub id: ::prost::alloc::string::String,
     /// Address this node listens on (e.g., "0.0.0.0:8000")
     #[prost(string, tag="2")]
-    pub listen_address: ::prost::alloc::string::String,
+    pub listen_addr: ::prost::alloc::string::String,
     /// Cluster seed nodes for discovery
     /// e.g., \["node1.cluster.local:8000", "node2.cluster.local:8000"\]
     #[prost(string, repeated, tag="3")]
@@ -83,6 +83,25 @@ pub struct NodeConfig {
     /// If empty, node is not part of any cluster.
     #[prost(string, tag="6")]
     pub cluster_name: ::prost::alloc::string::String,
+    /// gRPC connection pool size per service
+    ///
+    /// Number of connections to maintain in the pool for each remote service.
+    /// Defaults to 2 if not set. Each service (e.g., ActorService, TupleSpaceService)
+    /// will have its own connection pool of this size.
+    #[prost(uint32, tag="7")]
+    pub grpc_connection_pool_size: u32,
+    /// Maximum number of concurrent connections
+    #[prost(uint32, tag="8")]
+    pub max_connections: u32,
+    /// Heartbeat interval in milliseconds
+    #[prost(uint64, tag="9")]
+    pub heartbeat_interval_ms: u64,
+    /// Enable clustering (multi-node coordination)
+    #[prost(bool, tag="10")]
+    pub clustering_enabled: bool,
+    /// Node metadata (key-value pairs for extensibility)
+    #[prost(map="string, string", tag="11")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// Runtime configuration
 ///
@@ -492,23 +511,6 @@ pub struct Node {
     /// If empty, node is not part of any cluster.
     #[prost(string, tag="25")]
     pub cluster_name: ::prost::alloc::string::String,
-    /// Type-specific configuration
-    #[prost(oneof="node::Config", tags="10, 11, 12")]
-    pub config: ::core::option::Option<node::Config>,
-}
-/// Nested message and enum types in `Node`.
-pub mod node {
-    /// Type-specific configuration
-    #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Oneof)]
-    pub enum Config {
-        #[prost(message, tag="10")]
-        ProcessConfig(super::ProcessConfig),
-        #[prost(message, tag="11")]
-        KubernetesConfig(super::KubernetesConfig),
-        #[prost(message, tag="12")]
-        FirecrackerConfig(super::FirecrackerConfig),
-    }
 }
 /// Node capabilities
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -526,96 +528,6 @@ pub struct NodeCapabilities {
     pub supports_isolation: bool,
     #[prost(string, repeated, tag="6")]
     pub supported_runtimes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-/// Node runtime configuration
-///
-/// ## Purpose
-/// Runtime configuration for a PlexSpaces node, including network settings,
-/// clustering options, and operational parameters.
-///
-/// ## Design
-/// Proto-first design: All node configuration is defined in proto for:
-/// - Wire compatibility (gRPC configuration APIs)
-/// - Language-agnostic configuration
-/// - Consistent configuration semantics across implementations
-///
-/// ## Note
-/// This is different from NodeConfig in release.proto which is for release/deployment.
-/// This NodeRuntimeConfig is for runtime operational settings.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct NodeRuntimeConfig {
-    /// Listen address for gRPC server (e.g., "0.0.0.0:8000")
-    #[prost(string, tag="1")]
-    pub listen_addr: ::prost::alloc::string::String,
-    /// Maximum number of concurrent connections
-    #[prost(uint32, tag="2")]
-    pub max_connections: u32,
-    /// Heartbeat interval in milliseconds
-    #[prost(uint64, tag="3")]
-    pub heartbeat_interval_ms: u64,
-    /// Enable clustering (multi-node coordination)
-    #[prost(bool, tag="4")]
-    pub clustering_enabled: bool,
-    /// Node metadata (key-value pairs for extensibility)
-    #[prost(map="string, string", tag="5")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-}
-/// Process-based node configuration
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ProcessConfig {
-    #[prost(string, tag="1")]
-    pub pid: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub working_directory: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="3")]
-    pub environment: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-}
-/// Kubernetes-based node configuration
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct KubernetesConfig {
-    #[prost(string, tag="1")]
-    pub namespace: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub pod_name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub service_account: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="4")]
-    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(map="string, string", tag="5")]
-    pub annotations: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-}
-/// Firecracker-based node configuration
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct FirecrackerConfig {
-    #[prost(string, tag="1")]
-    pub vm_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub socket_path: ::prost::alloc::string::String,
-    #[prost(uint64, tag="3")]
-    pub memory_size_mib: u64,
-    #[prost(uint32, tag="4")]
-    pub vcpu_count: u32,
-    #[prost(string, tag="5")]
-    pub kernel_image_path: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
-    pub rootfs_path: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="7")]
-    pub network_interfaces: ::prost::alloc::vec::Vec<NetworkInterface>,
-}
-/// Network interface for Firecracker VM
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct NetworkInterface {
-    #[prost(string, tag="1")]
-    pub iface_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub host_dev_name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub guest_mac: ::prost::alloc::string::String,
 }
 /// Node metrics (combined resource usage and operational metrics)
 ///
@@ -658,25 +570,19 @@ pub struct NodeMetrics {
     /// Failed message deliveries
     #[prost(uint64, tag="8")]
     pub failed_deliveries: u64,
-    /// Total messages processed (legacy field, kept for compatibility)
-    #[prost(uint64, tag="9")]
-    pub messages_processed: u64,
     /// Actor and connection metrics
     /// Active actors on this node
-    #[prost(uint32, tag="10")]
+    #[prost(uint32, tag="9")]
     pub active_actors: u32,
-    /// Total actor count (legacy field, kept for compatibility)
-    #[prost(uint32, tag="11")]
-    pub actor_count: u32,
     /// Connected nodes in cluster
-    #[prost(uint32, tag="12")]
+    #[prost(uint32, tag="10")]
     pub connected_nodes: u32,
     /// Node identity (for components that need node info without depending on Node type)
     /// Node ID for this metrics instance
-    #[prost(string, tag="13")]
+    #[prost(string, tag="11")]
     pub node_id: ::prost::alloc::string::String,
     /// Cluster name for this node (from node config)
-    #[prost(string, tag="14")]
+    #[prost(string, tag="12")]
     pub cluster_name: ::prost::alloc::string::String,
 }
 /// Request to register a node
@@ -1063,5 +969,4 @@ impl NodeHealthStatus {
         }
     }
 }
-include!("plexspaces.node.v1.tonic.rs");
 // @@protoc_insertion_point(module)

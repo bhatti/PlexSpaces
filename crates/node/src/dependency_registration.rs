@@ -35,10 +35,9 @@
 //! - Uses object-registry to discover services by name/type
 //! - Supports both critical and non-critical dependencies
 
-use crate::health_checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult};
+use plexspaces_core::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, PlexSpacesHealthReporter};
 use crate::health_checker_circuit_breaker::CircuitBreakerHealthChecker;
 use crate::external_dependency_checkers::{MinIOHealthChecker, DynamoDBHealthChecker, SQSHealthChecker};
-use crate::health_service::PlexSpacesHealthReporter;
 use plexspaces_core::ObjectRegistry;
 use plexspaces_proto::object_registry::v1::ObjectType;
 use plexspaces_proto::system::v1::DependencyRegistrationConfig;

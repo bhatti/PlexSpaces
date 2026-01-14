@@ -62,7 +62,7 @@ impl plexspaces_core::Actor for TestActor {
 }
 
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<plexspaces_supervisor::SupervisorEvent>) {
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     let (mut supervisor, event_rx) = Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {

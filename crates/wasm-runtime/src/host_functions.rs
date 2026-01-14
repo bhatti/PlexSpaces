@@ -6,12 +6,10 @@
 //! Host functions provided to WASM actors
 
 use async_trait::async_trait;
-use plexspaces_core::{ChannelService, RequestContext};
-use plexspaces_keyvalue::KeyValueStore;
+use plexspaces_core::{ChannelService, RequestContext, KeyValueStore, LockManager};
+use plexspaces_core::actor_context::ObjectRegistry;
+use plexspaces_core::JournalStorage;
 use plexspaces_process_groups::ProcessGroupRegistry;
-use plexspaces_locks::LockManager;
-use plexspaces_object_registry::ObjectRegistry;
-use plexspaces_journaling::JournalStorage;
 use plexspaces_mailbox::Message;
 use std::sync::Arc;
 
@@ -174,7 +172,7 @@ pub struct HostFunctions {
     /// Lock manager for distributed locks (optional)
     lock_manager: Option<Arc<dyn LockManager>>,
     /// Object registry for service discovery (optional)
-    object_registry: Option<Arc<ObjectRegistry>>,
+    object_registry: Option<Arc<dyn ObjectRegistry>>,
     /// Journal storage for durability (optional)
     journal_storage: Option<Arc<dyn JournalStorage>>,
     /// Blob service for object storage (optional)
@@ -248,7 +246,7 @@ impl HostFunctions {
         keyvalue_store: Option<Arc<dyn KeyValueStore>>,
         process_group_registry: Option<Arc<ProcessGroupRegistry>>,
         lock_manager: Option<Arc<dyn LockManager>>,
-        object_registry: Option<Arc<ObjectRegistry>>,
+        object_registry: Option<Arc<dyn ObjectRegistry>>,
         journal_storage: Option<Arc<dyn JournalStorage>>,
         blob_service: Option<Arc<BlobService>>,
     ) -> Self {
@@ -295,7 +293,7 @@ impl HostFunctions {
     }
 
     /// Get object registry if available
-    pub fn object_registry(&self) -> Option<&Arc<ObjectRegistry>> {
+    pub fn object_registry(&self) -> Option<&Arc<dyn ObjectRegistry>> {
         self.object_registry.as_ref()
     }
 

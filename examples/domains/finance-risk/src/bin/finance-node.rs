@@ -118,7 +118,7 @@ async fn main() -> Result<()> {
     // Create and start node using NodeBuilder
     use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new(node_id.clone())
-        .with_listen_address(listen_addr.clone())
+        .with_listen_addr(listen_addr.clone())
         .with_max_connections(100)
         .with_heartbeat_interval_ms(5000)
         .with_clustering_enabled(true)

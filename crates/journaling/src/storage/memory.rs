@@ -1234,6 +1234,6 @@ mod tests {
 // Implement Service trait for registration in ServiceLocator
 impl plexspaces_core::Service for MemoryJournalStorage {
     fn service_name(&self) -> String {
-        plexspaces_core::service_locator::service_names::JOURNAL_STORAGE.to_string()
+        plexspaces_core::service_names::JOURNAL_STORAGE.to_string()
     }
 }

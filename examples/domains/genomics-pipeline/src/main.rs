@@ -68,7 +68,7 @@ async fn main() -> Result<()> {
     // Create node using NodeBuilder
     let node = Arc::new(
         NodeBuilder::new("genomics-pipeline-node")
-            .with_listen_address("0.0.0.0:9000")
+            .with_listen_addr("0.0.0.0:9000")
             .build()
             .await,
     );
@@ -82,9 +82,9 @@ async fn main() -> Result<()> {
     info!("🎭 Spawning coordinator...");
     metrics_tracker.start_coordinate();
     let coordinator_id = format!("coordinator@{}", node.id().as_str());
-    let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().get_service().await
+    let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
         .ok_or_else(|| anyhow::anyhow!("ActorFactory not found in ServiceLocator"))?;
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let _message_sender = actor_factory.spawn_actor(
         &ctx,
         &coordinator_id,

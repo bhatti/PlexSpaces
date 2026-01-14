@@ -78,13 +78,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Creating Node 1...");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     let node1 = NodeBuilder::new("node1")
-        .with_listen_address("127.0.0.1:8000".to_string())
+        .with_listen_addr("127.0.0.1:8000".to_string())
         .build().await;
 
     // Spawn counter actor on node1
     use plexspaces_actor::ActorBuilder;
     println!("\nSpawning counter@node1...");
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string())
+        .with_internal(true)
+        .with_admin(true);
     let counter1_ref = ActorBuilder::new(Box::new(Counter { count: 0 }))
         .with_id("counter@node1".to_string())
         .spawn(&ctx, node1.service_locator().clone())

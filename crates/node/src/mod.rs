@@ -27,22 +27,20 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
-use plexspaces_core::application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_core::{ActorId, ActorRef as CoreActorRef, ActorRegistry, ReplyTracker, ServiceLocator, VirtualActorManager, FacetManager, RequestContext, ExitReason};
+use plexspaces_application::{Application, ApplicationError, ApplicationNode, ApplicationManager};
+use plexspaces_core::{ActorId, ActorRef as CoreActorRef, ActorRegistry, ServiceLocator as ServiceLocatorTrait, ServiceLocatorInitialization, VirtualActorManager, FacetManager, RequestContext, ExitReason, ApplicationManager as ApplicationManagerTrait};
+use plexspaces_services::ServiceLocatorImpl;
 use plexspaces_core::actor_context::ObjectRegistry;
 use plexspaces_actor::ActorRef;
 use plexspaces_journaling::{ActivationProvider, VirtualActorFacet};
 use plexspaces_mailbox::Message;
 use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
-use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics, NodeRuntimeConfig};
+use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics};
 use plexspaces_core::LinkProvider;
 use std::time::{Duration, SystemTime};
 
 // Import gRPC client for remote messaging
 use crate::grpc_client::RemoteActorClient;
-
-// Import application manager from core (moved to break cyclic dependency)
-use plexspaces_core::ApplicationManager;
 
 /// Monitor reference (ULID for uniqueness)
 pub type MonitorRef = String;
@@ -102,7 +100,7 @@ pub struct Node {
     /// Connection health tracking: node_id -> (last_used, last_error, consecutive_failures)
     connection_health: Arc<RwLock<HashMap<NodeId, (tokio::time::Instant, Option<String>, u32)>>>,
     /// Node configuration
-    config: NodeConfig,
+    config: plexspaces_proto::node::v1::NodeConfig,
     /// Node metrics (combined resource and operational metrics)
     metrics: Arc<RwLock<NodeMetrics>>,
     /// Start time for uptime calculation
@@ -121,24 +119,29 @@ pub struct Node {
     /// Shutdown trigger for programmatic shutdown (allows shutdown() to stop gRPC server)
     shutdown_tx: Arc<RwLock<Option<tokio::sync::oneshot::Sender<()>>>>,
     /// ServiceLocator for centralized service registration and gRPC client caching
-    service_locator: Arc<ServiceLocator>,
+    service_locator: Arc<ServiceLocatorImpl>,
     /// Health reporter for health checks and graceful shutdown 
     /// Set in Node::start(), None before start
-    health_reporter: Arc<RwLock<Option<Arc<crate::health_service::PlexSpacesHealthReporter>>>>,
+    health_reporter: Arc<RwLock<Option<Arc<plexspaces_core::PlexSpacesHealthReporter>>>>,
     /// ReleaseSpec configuration (optional, loaded from release config files)
     /// If provided, NodeConfig will be extracted from release_spec.node in start()
     release_spec: Arc<RwLock<Option<plexspaces_proto::node::v1::ReleaseSpec>>>,
+    /// ApplicationManager for managing application lifecycle
+    /// NOT registered in ServiceLocator - managed directly by Node
+    application_manager: Arc<ApplicationManager>,
 }
 
-/// Node configuration
-// Use proto-generated NodeRuntimeConfig instead of custom struct
-pub type NodeConfig = NodeRuntimeConfig;
-
 /// Helper function to create default NodeConfig
-/// (Can't implement Default trait for type aliases to external types)
-pub fn default_node_config() -> NodeRuntimeConfig {
-    NodeRuntimeConfig {
+/// (Can't implement Default trait for proto-generated types)
+pub fn default_node_config() -> plexspaces_proto::node::v1::NodeConfig {
+    plexspaces_proto::node::v1::NodeConfig {
+        grpc_connection_pool_size: 2,
+        id: "default-node".to_string(),
         listen_addr: "0.0.0.0:8000".to_string(),
+        cluster_seed_nodes: vec![],
+        default_tenant_id: "default".to_string(),
+        default_namespace: "default".to_string(),
+        cluster_name: String::new(),
         max_connections: 100,
         heartbeat_interval_ms: 5000,
         clustering_enabled: true,
@@ -188,9 +191,7 @@ fn default_node_metrics(node_id: &str, cluster_name: &str) -> NodeMetrics {
         local_deliveries: 0,
         remote_deliveries: 0,
         failed_deliveries: 0,
-        messages_processed: 0,
         active_actors: 0,
-        actor_count: 0,
         connected_nodes: 0,
         node_id: node_id.to_string(),
         cluster_name: cluster_name.to_string(),
@@ -203,10 +204,10 @@ impl Node {
     /// ## Note
     /// This creates a Node with a ServiceLocator that will be populated in `start()`.
     /// For tests/examples, use `create_default_service_locator()` directly.
-    pub fn new(id: NodeId, config: NodeConfig) -> Self {
+    pub fn new(id: NodeId, config: plexspaces_proto::node::v1::NodeConfig) -> Self {
         // Create ServiceLocator - services will be registered in start() using create_default_service_locator
         // This ensures production-ready service initialization
-        let service_locator = Arc::new(ServiceLocator::new());
+        let service_locator = Arc::new(ServiceLocatorImpl::new());
         let node_id_str = id.as_str().to_string();
 
         Node {
@@ -224,6 +225,7 @@ impl Node {
             connection_health: Arc::new(RwLock::new(HashMap::new())), // Connection health tracking
             health_reporter: Arc::new(RwLock::new(None)), // Health reporter (created in start())
             release_spec: Arc::new(RwLock::new(None)), // ReleaseSpec (optional, loaded from config)
+            application_manager: Arc::new(ApplicationManager::new()), // ApplicationManager (NOT in ServiceLocator)
         }
     }
 
@@ -238,8 +240,7 @@ impl Node {
     pub async fn initialize_services(&self) -> Result<(), NodeError> {
         // Use a static check to avoid re-initialization
         // Since we can't use OnceCell with async, we check if services are already registered
-        use plexspaces_core::service_locator::service_names;
-        if self.service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
+        if self.service_locator.actor_registry().await.is_some() {
             return Ok(());
         }
 
@@ -254,40 +255,65 @@ impl Node {
                     // ReleaseSpec exists but node is None - create default
                     plexspaces_proto::node::v1::NodeConfig {
                         id: self.id.as_str().to_string(),
-                        listen_address: self.config.listen_addr.clone(),
+                        listen_addr: self.config.listen_addr.clone(),
                         cluster_seed_nodes: vec![],
                         default_tenant_id: "internal".to_string(),
                         default_namespace: "system".to_string(),
                         cluster_name: String::new(),
+                        max_connections: self.config.max_connections,
+                        heartbeat_interval_ms: self.config.heartbeat_interval_ms,
+                        clustering_enabled: self.config.clustering_enabled,
+                        grpc_connection_pool_size: self.config.grpc_connection_pool_size,
+                        metadata: self.config.metadata.clone(),
                     }
                 }
             } else {
                 // No ReleaseSpec - create default from Node config
                 plexspaces_proto::node::v1::NodeConfig {
                     id: self.id.as_str().to_string(),
-                    listen_address: self.config.listen_addr.clone(),
+                    listen_addr: self.config.listen_addr.clone(),
                     cluster_seed_nodes: vec![],
                     default_tenant_id: "internal".to_string(),
                     default_namespace: "system".to_string(),
                     cluster_name: String::new(),
+                    max_connections: self.config.max_connections,
+                    heartbeat_interval_ms: self.config.heartbeat_interval_ms,
+                    clustering_enabled: self.config.clustering_enabled,
+                    grpc_connection_pool_size: self.config.grpc_connection_pool_size,
+                    metadata: self.config.metadata.clone(),
                 }
             }
         };
 
         // Initialize all services directly in self.service_locator (shared initialization logic)
         // This avoids creating a new ServiceLocator and copying services, eliminating duplication
-        use crate::service_locator_helpers::initialize_services_in_locator;
-        initialize_services_in_locator(
-            self.service_locator.clone(),
+        let service_locator_init: &dyn ServiceLocatorInitialization = self.service_locator.as_ref() as &dyn ServiceLocatorInitialization;
+        service_locator_init.initialize_services(
             Some(self.id.as_str().to_string()),
             Some(proto_node_config.clone()),
             self.release_spec.read().await.clone(),
         ).await;
+        
+        // Register ActorFactoryImpl after core services are initialized
+        // (This is done here to avoid circular dependency - services crate can't depend on actor crate)
+        use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
+        use plexspaces_core::service_names;
+        let service_locator_trait: Arc<dyn ServiceLocatorTrait> = self.service_locator.clone() as Arc<dyn ServiceLocatorTrait>;
+        let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator_trait));
+        
+        // Register ActorFactoryImpl (it implements Service trait)
+        self.service_locator.register_service_by_name(service_names::ACTOR_FACTORY_IMPL, actor_factory_impl).await;
 
         // Register TupleSpaceProvider (create default for tests)
+        // System initialization - creating default TupleSpaceProvider during Node setup
+        // Use defaults from NodeConfig for system operations
         use plexspaces_core::service_wrappers::TupleSpaceProviderWrapper;
         use plexspaces_core::RequestContext;
-        let ctx = RequestContext::internal();
+        let tenant_id = proto_node_config.default_tenant_id.clone();
+        let namespace = proto_node_config.default_namespace.clone();
+        let ctx = RequestContext::new_without_auth(tenant_id, namespace)
+            .with_admin(true)
+            .with_internal(true);
         let tuplespace = TupleSpaceProviderWrapper::from_context(&ctx);
         let tuplespace_provider = Arc::new(TupleSpaceProviderWrapper::new(tuplespace));
         self.service_locator.register_tuplespace_provider(
@@ -324,6 +350,26 @@ impl Node {
     pub async fn get_release_spec(&self) -> Option<plexspaces_proto::node::v1::ReleaseSpec> {
         let spec = self.release_spec.read().await;
         spec.clone()
+    }
+    
+    /// Get release name from ReleaseSpec
+    ///
+    /// ## Returns
+    /// * `Some(name)` - Release name if ReleaseSpec is set
+    /// * `None` - No ReleaseSpec configured
+    pub async fn release_name(&self) -> Option<String> {
+        let spec = self.release_spec.read().await;
+        spec.as_ref().map(|s| s.name.clone())
+    }
+    
+    /// Get release version from ReleaseSpec
+    ///
+    /// ## Returns
+    /// * `Some(version)` - Release version if ReleaseSpec is set
+    /// * `None` - No ReleaseSpec configured
+    pub async fn release_version(&self) -> Option<String> {
+        let spec = self.release_spec.read().await;
+        spec.as_ref().map(|s| s.version.clone())
     }
     
     /// Load release config from file or environment variable
@@ -373,13 +419,13 @@ impl Node {
     }
 
     /// Get node configuration
-    pub fn config(&self) -> &NodeConfig {
+    pub fn config(&self) -> &plexspaces_proto::node::v1::NodeConfig {
         &self.config
     }
 
     /// Get ServiceLocator
-    pub fn service_locator(&self) -> Arc<ServiceLocator> {
-        self.service_locator.clone()
+    pub fn service_locator(&self) -> Arc<dyn plexspaces_core::ServiceLocator> {
+        self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
     }
     
     /// Register proto NodeConfig in ServiceLocator
@@ -399,10 +445,10 @@ impl Node {
     }
 
 
-    /// Get ActorRegistry (internal use only - use service_locator.get_service_by_name() instead)
+    /// Get ActorRegistry (internal use only - use service_locator.actor_registry() instead)
     pub(crate) async fn actor_registry(&self) -> Result<Arc<ActorRegistry>, NodeError> {
-        use plexspaces_core::service_locator::service_names;
-        self.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
+        use plexspaces_core::service_names;
+        self.service_locator.actor_registry().await
             .ok_or_else(|| NodeError::ConfigError("ActorRegistry not found in ServiceLocator".to_string()))
     }
     
@@ -446,8 +492,7 @@ impl Node {
     /// VirtualActorManager is now registered in ServiceLocator instead of stored directly in Node.
     /// This removes Node as a middleman for actor management, simplifying the design.
     pub async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
-        use plexspaces_core::service_locator::service_names;
-        self.service_locator.get_service_by_name::<VirtualActorManager>(service_names::VIRTUAL_ACTOR_MANAGER).await
+        self.service_locator.virtual_actor_manager().await
     }
     
     /// Get virtual actor manager from ServiceLocator or return error
@@ -455,8 +500,8 @@ impl Node {
     /// ## Returns
     /// Arc<VirtualActorManager> if found, NodeError::ActorNotFound if not registered
     async fn get_virtual_actor_manager(&self) -> Result<Arc<VirtualActorManager>, NodeError> {
-        use plexspaces_core::service_locator::service_names;
-        self.service_locator.get_service_by_name::<VirtualActorManager>(service_names::VIRTUAL_ACTOR_MANAGER).await
+        use plexspaces_core::service_names;
+        self.service_locator.virtual_actor_manager().await
             .ok_or_else(|| NodeError::ActorNotFound("VirtualActorManager not registered in ServiceLocator".to_string()))
     }
     
@@ -468,9 +513,9 @@ impl Node {
     /// ActorRegistry only tracks active instances and MessageSenders.
     pub async fn virtual_actors(&self) -> Result<Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>>, NodeError> {
         use plexspaces_core::VirtualActorManager;
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         let manager: Arc<VirtualActorManager> = self.service_locator()
-            .get_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER)
+            .virtual_actor_manager()
             .await
             .ok_or_else(|| NodeError::ConfigError("VirtualActorManager not found".to_string()))?;
         // VirtualActorManager has its own registry - return that
@@ -480,9 +525,9 @@ impl Node {
     /// Get pending activations (from VirtualActorManager - source of truth)
     pub async fn pending_activations(&self) -> Result<Arc<RwLock<HashMap<ActorId, Vec<Message>>>>, NodeError> {
         use plexspaces_core::VirtualActorManager;
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         let manager: Arc<VirtualActorManager> = self.service_locator()
-            .get_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER)
+            .virtual_actor_manager()
             .await
             .ok_or_else(|| NodeError::ConfigError("VirtualActorManager not found".to_string()))?;
         // VirtualActorManager has its own registry - return that
@@ -512,22 +557,9 @@ impl Node {
         facet_box.downcast_ref::<VirtualActorFacet>()
     }
     
-    /// Get ObjectRegistry from ServiceLocator
-    pub async fn object_registry(&self) -> Result<Arc<plexspaces_object_registry::ObjectRegistry>, NodeError> {
-        use plexspaces_core::service_locator::service_names;
-        self.service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await
-            .ok_or_else(|| NodeError::ConfigError("ObjectRegistry not found in ServiceLocator".to_string()))
-    }
-    
-    /// Get ProcessGroupRegistry from ServiceLocator
-    pub async fn process_group_registry(&self) -> Result<Arc<plexspaces_process_groups::ProcessGroupRegistry>, NodeError> {
-        use plexspaces_core::service_locator::service_names;
-        self.service_locator.get_service_by_name::<plexspaces_process_groups::ProcessGroupRegistry>(service_names::PROCESS_GROUP_REGISTRY).await
-            .ok_or_else(|| NodeError::ConfigError("ProcessGroupRegistry not found in ServiceLocator".to_string()))
-    }
     
     /// Get health reporter (for tests and advanced usage)
-    pub async fn health_reporter(&self) -> Option<Arc<crate::health_service::PlexSpacesHealthReporter>> {
+    pub async fn health_reporter(&self) -> Option<Arc<plexspaces_core::PlexSpacesHealthReporter>> {
         let guard = self.health_reporter.read().await;
         guard.clone()
     }
@@ -612,7 +644,8 @@ impl Node {
     /// ## Returns
     /// `u32` - Number of pending messages (0 if actor is not being activated or has no pending messages)
     pub async fn get_pending_activation_count(&self, actor_id: &ActorId) -> u32 {
-        if let Ok(pending_activations) = self.pending_activations().await {
+        if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+            let pending_activations = manager.registry().pending_activations();
             pending_activations
                 .read()
                 .await
@@ -741,21 +774,22 @@ impl Node {
         };
         
         // Get actor counts from ActorRegistry
-        let (active_actors, actor_count) = if let Some(actor_registry) = self.service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await {
+        let active_actors = if let Some(actor_registry) = self.service_locator.actor_registry().await {
             let registered_ids = actor_registry.registered_actor_ids().read().await;
-            let count = registered_ids.len() as u32;
-            (count, count) // active_actors = actor_count for now (all registered actors are active)
+            registered_ids.len() as u32
         } else {
-            (0, 0)
+            0
         };
         
         // Get connected nodes count (explicitly connected + discovered from ObjectRegistry)
         let connected_nodes = {
             let explicit_connections = self.connections.read().await.len();
             // Also count nodes discovered via ObjectRegistry
-            let discovered_count = if let Some(object_registry) = self.service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(plexspaces_core::service_locator::service_names::OBJECT_REGISTRY).await {
+            // System metrics collection - discovering nodes for metrics reporting
+            // This is a system-level operation for observability, not user-initiated, so node.service_locator().request_context_for_system_operations().await is appropriate
+            let discovered_count = if let Some(object_registry) = self.service_locator.get_object_registry().await {
                 use plexspaces_core::RequestContext;
-                let ctx = RequestContext::internal();
+                let ctx = self.service_locator.request_context_for_system_operations().await;
                 use plexspaces_proto::object_registry::v1::ObjectType;
                 // Discover all nodes (excluding self)
                 // Note: discover returns Vec<ObjectRegistration>
@@ -782,7 +816,6 @@ impl Node {
         metrics.cpu_usage_percent = cpu_usage;
         metrics.uptime_seconds = uptime_seconds;
         metrics.active_actors = active_actors;
-        metrics.actor_count = actor_count;
         metrics.connected_nodes = connected_nodes;
     }
     
@@ -939,11 +972,13 @@ impl Node {
         metrics.insert("active_actors".to_string(), active_actors as f64);
 
         // Send heartbeat to ObjectRegistry using ObjectTypeNode
-        let internal_ctx = RequestContext::internal();
-        use plexspaces_core::service_locator::service_names;
+        // System heartbeat operation - periodic health check to ObjectRegistry
+        // This is a system-level background operation, not user-initiated, so self.service_locator.request_context_for_system_operations().await is appropriate
+        let internal_ctx = self.service_locator.request_context_for_system_operations().await;
+        use plexspaces_core::service_names;
                 use crate::object_registry_helpers::heartbeat_node;
-        if let Some(object_registry) = self.service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
-            if let Err(e) = heartbeat_node(&object_registry, &internal_ctx, self.id.as_str()).await {
+        if let Some(object_registry) = self.service_locator.get_object_registry().await {
+            if let Err(e) = heartbeat_node(object_registry.as_ref(), &internal_ctx, self.id.as_str()).await {
                 return Err(NodeError::NetworkError(format!("ObjectRegistry heartbeat failed: {}", e)));
             }
         } else {
@@ -1082,8 +1117,8 @@ impl Node {
     /// ## Returns
     /// Never returns normally - runs until shutdown signal received
     pub async fn start(self: Arc<Self>) -> Result<(), NodeError> {
-        use crate::grpc_service::ActorServiceImpl;
-        use crate::tuplespace_service::TuplePlexSpaceServiceImpl;
+        use plexspaces_services::actor_service::ActorServiceImpl;
+        use plexspaces_services::tuple_service::TuplePlexSpaceServiceImpl;
         use plexspaces_proto::{ActorServiceServer, TuplePlexSpaceServiceServer};
         use tonic::transport::Server;
 
@@ -1099,11 +1134,8 @@ impl Node {
         // Initialize services if not already done (idempotent)
         self.initialize_services().await?;
         
-        // Set node context for application manager (from ServiceLocator)
-        use plexspaces_core::service_locator::service_names;
-        let application_manager: Arc<ApplicationManager> = self.service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await
-            .ok_or_else(|| NodeError::ConfigError("ApplicationManager not found in ServiceLocator".to_string()))?;
-        application_manager.set_node_context(self.clone()).await;
+        // Set node context for application manager
+        self.application_manager.set_node_context(self.clone()).await;
         
         // Load release config if not already set
         // Check if release_spec is already set
@@ -1118,6 +1150,45 @@ impl Node {
                 } else {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!("No release config found, using defaults");
+                    }
+                }
+            }
+        }
+
+        // Auto-start applications from Release if configured
+        {
+            let release_spec = self.release_spec.read().await;
+            if let Some(ref spec) = *release_spec {
+                // Iterate through applications (simple approach - dependency ordering would require Release helper)
+                for app_config in &spec.applications {
+                    // Only auto-start if enabled and auto_start is true
+                    if !app_config.enabled || !app_config.auto_start {
+                        continue;
+                    }
+                    
+                    // Check if application is registered
+                    let app_state = ApplicationManagerTrait::get_state(self.application_manager.as_ref(), &app_config.name).await;
+                    if app_state.is_none() {
+                        tracing::warn!(
+                            application = %app_config.name,
+                            "Application in release config is not registered, skipping auto-start"
+                        );
+                        continue;
+                    }
+                    
+                        // Start application (environment variables are already in ApplicationSpec)
+                        if let Err(e) = self.application_manager.start(&app_config.name).await {
+                        tracing::error!(
+                            application = %app_config.name,
+                            error = %e,
+                            "Failed to auto-start application from release config"
+                        );
+                        // Continue with other applications even if one fails
+                    } else {
+                        tracing::info!(
+                            application = %app_config.name,
+                            "Auto-started application from release config"
+                        );
                     }
                 }
             }
@@ -1142,7 +1213,7 @@ impl Node {
             // Use default tenant/namespace from NodeConfig (not internal())
             use plexspaces_core::RequestContext;
             use crate::object_registry_helpers::register_node;
-            use plexspaces_core::service_locator::service_names;
+            use plexspaces_core::service_names;
             
             // Get default tenant/namespace from NodeConfig
             let ctx = if let Some(node_config) = node_for_registration.service_locator.get_node_config().await {
@@ -1162,9 +1233,9 @@ impl Node {
                 RequestContext::new_without_auth("default".to_string(), "default".to_string())
             };
             
-            if let Some(object_registry) = node_for_registration.service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
+            if let Some(object_registry) = node_for_registration.service_locator.get_object_registry().await {
                 let grpc_address = format!("http://{}", listen_addr);
-                if let Err(e) = register_node(&object_registry, &ctx, &node_id_str, &grpc_address, None).await {
+                if let Err(e) = register_node(object_registry.as_ref(), &ctx, &node_id_str, &grpc_address, None).await {
                     tracing::warn!("Node {}: Failed to register in ObjectRegistry: {}", node_id_str, e);
                 } else {
                     tracing::info!(node_id = %node_id_str, "Node registered in ObjectRegistry");
@@ -1258,7 +1329,7 @@ impl Node {
         // for gRPC server (idempotent - won't register twice if already registered)
         if self.service_locator.get_actor_service().await.is_none() {
             let actor_service_for_context = Arc::new(
-                plexspaces_actor_service::ActorServiceImpl::new(
+                plexspaces_services::actor_service::ActorServiceImpl::new(
                     self.service_locator.clone(),
                     self.id.as_str().to_string(),
                 )
@@ -1267,13 +1338,19 @@ impl Node {
         }
         
         // Register NodeMetricsAccessor for monitoring helpers and dashboard
-        use crate::service_wrappers::NodeMetricsAccessorWrapper;
+        use crate::service_wrappers::{NodeMetricsAccessorWrapper, NodeConnectionInfoWrapper};
         let metrics_accessor = Arc::new(NodeMetricsAccessorWrapper::new(self.clone()));
         self.service_locator.register_service(metrics_accessor.clone()).await;
         let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> = metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
         self.service_locator.register_node_metrics_accessor(metrics_accessor_trait).await;
         
-        let tuplespace_service = TuplePlexSpaceServiceImpl::new(self.clone());
+        // Register NodeConnectionInfo for services that need connection information
+        let connection_info = Arc::new(NodeConnectionInfoWrapper::new(self.clone()));
+        self.service_locator.register_service(connection_info.clone()).await;
+        let connection_info_trait: Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync> = connection_info.clone() as Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>;
+        self.service_locator.register_node_connection_info(connection_info_trait).await;
+        
+        let tuplespace_service = TuplePlexSpaceServiceImpl::new(self.service_locator.clone());
         
         // Start background cleanup task for expired temporary senders (in ActorRegistry)
         let actor_registry = self.actor_registry().await?;
@@ -1295,10 +1372,10 @@ impl Node {
         
         // Create capacity tracker
         // CapacityTracker needs ObjectRegistry, get it from ServiceLocator
-        let object_registry: Arc<plexspaces_object_registry::ObjectRegistry> = self.service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(service_names::OBJECT_REGISTRY).await
-            .ok_or_else(|| NodeError::ConfigError("ObjectRegistry not found".to_string()))?;
-        // CapacityTracker expects Arc<ObjectRegistry>
-        let capacity_tracker = Arc::new(CapacityTracker::new(object_registry.clone()));
+        let object_registry = self.service_locator.get_object_registry().await
+            .ok_or_else(|| NodeError::ConfigError("ObjectRegistry not found in ServiceLocator".to_string()))?;
+        // CapacityTracker uses trait ObjectRegistry
+        let capacity_tracker = Arc::new(CapacityTracker::new(object_registry));
         
         // Create scheduling:requests channel
         let request_channel_config = ChannelConfig {
@@ -1453,8 +1530,8 @@ impl Node {
         };
 
         // Create health reporter and services
-        use crate::health_service::PlexSpacesHealthReporter;
-        use crate::system_service::SystemServiceImpl;
+        use plexspaces_core::PlexSpacesHealthReporter;
+        use plexspaces_services::system_service::SystemServiceImpl;
         use plexspaces_proto::system::v1::system_service_server::SystemServiceServer;
         use tonic_health::server::health_reporter;
         use tonic_web::GrpcWebLayer;
@@ -1473,13 +1550,12 @@ impl Node {
             *health_reporter_guard = Some(plexspaces_health_reporter.clone());
         }
         
-        // Create ActorServiceImpl with health reporter for shutdown checks
-        // This ensures all gRPC handlers can check shutdown status
+        // Create ActorServiceImpl
         // This must be created after HealthService is initialized
-        let actor_service = ActorServiceImpl::with_health_reporter(
-            self.clone(),
-            plexspaces_health_reporter.clone(),
-        );
+        let actor_service = Arc::new(ActorServiceImpl::new(
+            self.service_locator.clone(),
+            self.id.as_str().to_string(),
+        ));
         
         // Create standard gRPC health service (for Kubernetes probes)
         // Use our custom implementation that integrates with PlexSpacesHealthReporter
@@ -1506,12 +1582,12 @@ impl Node {
         // via environment variables or object-registry discovery as configured in HealthProbeConfig.
         
         // Create SystemService (provides HTTP endpoints via gRPC-Gateway)
-        let system_service = SystemServiceImpl::with_node(plexspaces_health_reporter.clone(), self.clone());
+        let system_service = SystemServiceImpl::new(plexspaces_health_reporter.clone());
         
         // Create MetricsService for Prometheus export
-        use crate::metrics_service::MetricsServiceImpl;
+        use plexspaces_services::metrics_service::MetricsServiceImpl;
         use plexspaces_proto::metrics::v1::metrics_service_server::MetricsServiceServer;
-        let metrics_service = MetricsServiceImpl::with_node(self.clone());
+        let metrics_service = MetricsServiceImpl::new();
         
         // Start connection health monitoring and stale connection cleanup
         // Connection health monitoring is handled by gRPC client pool
@@ -1526,33 +1602,38 @@ impl Node {
             NodeError::ConfigError(format!("Failed to create WASM runtime: {}", e))
         })?);
         
-        // Store WASM runtime in Node for ApplicationService access
+        // Register WASM runtime in ServiceLocator (as trait object)
+        let wasm_runtime_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> = wasm_runtime.clone();
+        self.service_locator.register_wasm_runtime(wasm_runtime_trait).await;
+        
+        // Store WASM runtime in Node for backward compatibility (if needed)
         {
             let mut stored_runtime = self.wasm_runtime.write().await;
             *stored_runtime = Some(wasm_runtime.clone());
         }
         
-        let wasm_runtime_service = WasmRuntimeServiceImpl::new(wasm_runtime);
+        let wasm_runtime_trait_for_service: Arc<dyn plexspaces_core::WasmRuntimeTrait> = wasm_runtime.clone();
+        let wasm_runtime_service = WasmRuntimeServiceImpl::new(wasm_runtime_trait_for_service);
         
         // Create ApplicationService for application-level deployment
-        use crate::application_service::ApplicationServiceImpl;
+        use plexspaces_services::application_service::ApplicationServiceImpl;
         use plexspaces_proto::application::v1::application_service_server::ApplicationServiceServer;
-        let application_manager: Arc<ApplicationManager> = self.service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await
-            .ok_or_else(|| NodeError::ConfigError("ApplicationManager not found in ServiceLocator".to_string()))?;
-        // Node context and service locator are already set in start() above
+        // ApplicationServiceImpl now gets ApplicationManager and WASM runtime from ServiceLocator
         let application_service = Arc::new(ApplicationServiceImpl::new(
-            self.clone(),
-            application_manager.clone(),
+            self.service_locator(),
         ));
 
         // Create Firecracker VM Service (if Firecracker support is enabled)
         #[cfg(feature = "firecracker")]
         let firecracker_service = {
-            use crate::firecracker_service::FirecrackerVmServiceImpl;
-            use plexspaces_proto::firecracker::v1::firecracker_vm_service_server::FirecrackerVmServiceServer;
-            Some(FirecrackerVmServiceServer::new(
-                FirecrackerVmServiceImpl::new(self.clone())
-            ))
+            #[cfg(feature = "firecracker")]
+            {
+                use plexspaces_services::firecracker_service::FirecrackerVmServiceImpl;
+                use plexspaces_proto::firecracker::v1::firecracker_vm_service_server::FirecrackerVmServiceServer;
+                Some(FirecrackerVmServiceServer::new(
+                    FirecrackerVmServiceImpl::new()
+                ))
+            }
         };
         #[cfg(not(feature = "firecracker"))]
         let firecracker_service: Option<()> = None;
@@ -1607,7 +1688,7 @@ impl Node {
         let server_builder = Server::builder()
             .accept_http1(true)  // Enable HTTP for gRPC-Web
             .add_service(
-                ActorServiceServer::new(actor_service)
+                ActorServiceServer::new(plexspaces_services::actor_service::ActorServiceWrapper::from(actor_service))
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
             )
@@ -1680,7 +1761,7 @@ impl Node {
             let node_id_for_http = self.id.as_str().to_string();
             let grpc_addr = addr;
             let node_for_http = self.clone();
-            let application_manager_for_http = application_manager.clone();
+            let application_manager_for_http = self.application_manager.clone();
             
             tokio::spawn(async move {
                 use axum::{
@@ -1695,7 +1776,7 @@ impl Node {
                 use url::form_urlencoded;
                 
                 // Create ActorServiceImpl for HTTP gateway
-                use plexspaces_actor_service::ActorServiceImpl as ActorServiceImplHttp;
+                use plexspaces_services::actor_service::ActorServiceImpl as ActorServiceImplHttp;
                 let actor_service_http = Arc::new(ActorServiceImplHttp::new(
                     service_locator_for_http.clone(),
                     node_id_for_http.clone(),
@@ -1708,7 +1789,7 @@ impl Node {
                     query: Option<Query<HashMap<String, String>>>,
                     body: Option<axum::body::Bytes>,
                     headers: axum::http::HeaderMap,
-                    actor_service: Arc<plexspaces_actor_service::ActorServiceImpl>,
+                    actor_service: Arc<plexspaces_services::actor_service::ActorServiceImpl>,
                 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
                     // Parse path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
                     let path_parts: Vec<&str> = path
@@ -2160,9 +2241,9 @@ impl Node {
                     }
                     
                     // Call ApplicationService directly (create instance same as gRPC service)
-                    use crate::application_service::ApplicationServiceImpl;
+                    use plexspaces_services::application_service::ApplicationServiceImpl;
                     use plexspaces_proto::application::v1::application_service_server::ApplicationService;
-                    let app_service = ApplicationServiceImpl::new(node_clone.clone(), app_mgr_clone.clone());
+                    let app_service = ApplicationServiceImpl::new(service_locator_for_http.clone());
                     let grpc_request = tonic::Request::new(request);
                     let response = app_service.deploy_application(grpc_request).await.map_err(|e| {
                         tracing::error!(error = %e, "ApplicationService::deploy_application failed");
@@ -2182,9 +2263,9 @@ impl Node {
                 // Body limit is already applied globally above (100MB)
                 // The route-specific limit below ensures it's definitely applied
                 let app_mgr_for_undeploy = application_manager_for_http.clone();
-                let node_for_undeploy = node_for_http.clone();
+                let service_locator_for_undeploy = self.service_locator().clone();
                 let undeploy_handler = move |Path(application_id): Path<String>| async move {
-                    use crate::application_service::ApplicationServiceImpl;
+                    use plexspaces_services::application_service::ApplicationServiceImpl;
                     use plexspaces_proto::application::v1::{
                         application_service_server::ApplicationService,
                         UndeployApplicationRequest,
@@ -2194,7 +2275,7 @@ impl Node {
                     
                     // Note: application_id in the path is used as the identifier
                     // The ApplicationService will look up the application by this ID
-                    let app_service = ApplicationServiceImpl::new(node_for_undeploy.clone(), app_mgr_for_undeploy.clone());
+                    let app_service = ApplicationServiceImpl::new(service_locator_for_undeploy.clone());
                     let grpc_request = tonic::Request::new(UndeployApplicationRequest {
                         application_id: application_id.clone(),
                         timeout: None, // Use default timeout from application config
@@ -2406,6 +2487,7 @@ impl Node {
     /// ## Arguments
     /// * `actor_id` - First actor in the link
     /// * `linked_actor_id` - Second actor in the link (bidirectional)
+    /// * `ctx` - RequestContext for tenant/namespace isolation
     ///
     /// ## Returns
     /// Success or error
@@ -2422,8 +2504,9 @@ impl Node {
     ///
     /// ## Example
     /// ```rust
-    /// // Link two actors
-    /// node.link("actor-1", "actor-2").await?;
+    /// // Link two actors (with RequestContext for tenant isolation)
+    /// let ctx = RequestContext::new_without_auth("tenant-1".to_string(), "namespace-1".to_string());
+    /// node.link("actor-1", "actor-2", &ctx).await?;
     ///
     /// // If actor-1 dies abnormally, actor-2 automatically dies
     /// // If actor-2 dies abnormally, actor-1 automatically dies
@@ -2432,6 +2515,7 @@ impl Node {
         &self,
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
+        ctx: &RequestContext,
     ) -> Result<(), NodeError> {
         // Prevent self-linking
         if actor_id == linked_actor_id {
@@ -2452,16 +2536,15 @@ impl Node {
         if is_local1 && is_local2 {
             // Both actors are local
             // Verify both actors exist in ActorRegistry
-            // Use internal context for routing lookup (system-level operation)
-            let internal_ctx = RequestContext::internal();
+            // Use provided RequestContext for routing lookup (respects tenant/namespace)
             let actor_registry = self.actor_registry().await?;
-            let routing1 = actor_registry.lookup_routing(&internal_ctx, actor_id).await
+            let routing1 = actor_registry.lookup_routing(ctx, actor_id).await
                 .map_err(|_| NodeError::ActorNotFound(actor_id.clone()))?;
             if routing1.is_none() || !routing1.unwrap().is_local {
                 return Err(NodeError::ActorNotFound(actor_id.clone()));
             }
             
-            let routing2 = actor_registry.lookup_routing(&internal_ctx, linked_actor_id).await
+            let routing2 = actor_registry.lookup_routing(ctx, linked_actor_id).await
                 .map_err(|_| NodeError::ActorNotFound(linked_actor_id.clone()))?;
             if routing2.is_none() || !routing2.unwrap().is_local {
                 return Err(NodeError::ActorNotFound(linked_actor_id.clone()));
@@ -2882,66 +2965,8 @@ impl Node {
     /// ## Example
     /// ```ignore
     /// let app = Box::new(MyApplication::new());
-    /// node.register_application(app).await?;
+    /// node.application_manager().register(app).await?;
     /// ```
-    pub async fn register_application(
-        &self,
-        app: Box<dyn Application>,
-    ) -> Result<(), ApplicationError> {
-        let application_manager = self.application_manager().await
-            .map_err(|e| ApplicationError::ConfigError(format!("Config error: {}", e)))?;
-        application_manager.register(app).await
-    }
-
-    /// Start a registered application
-    ///
-    /// ## Purpose
-    /// Starts a previously registered application by calling its `start()` method.
-    ///
-    /// ## Arguments
-    /// * `name` - Application name to start
-    ///
-    /// ## Returns
-    /// * `Ok(())` - Application started successfully
-    /// * `Err(ApplicationError)` - Start failed
-    ///
-    /// ## Example
-    /// ```ignore
-    /// node.start_application("genomics-pipeline").await?;
-    /// ```
-    pub async fn start_application(&self, name: &str) -> Result<(), ApplicationError> {
-        // Get ApplicationManager from ServiceLocator (with fallback for tests)
-        let application_manager = self.application_manager().await
-            .map_err(|e| ApplicationError::Other(format!("ApplicationManager not found in ServiceLocator: {}", e)))?;
-        // Ensure node context is set (idempotent)
-        // Note: self is &Node, so we need Arc::new, but we're in a method that takes &self, not Arc<Self>
-        // So we need to clone the Node and wrap it
-        let node_arc = Arc::new(self.clone());
-        application_manager.ensure_node_context(node_arc).await;
-        application_manager.start(name).await
-    }
-
-    /// Stop a running application gracefully
-    ///
-    /// ## Purpose
-    /// Stops an application with timeout-based graceful shutdown.
-    ///
-    /// ## Arguments
-    /// * `name` - Application name to stop
-    /// * `timeout` - Maximum time to wait for graceful shutdown
-    ///
-    /// ## Returns
-    /// * `Ok(())` - Application stopped successfully
-    /// * `Err(ApplicationError)` - Stop failed or timed out
-    pub async fn stop_application(
-        &self,
-        name: &str,
-        timeout: tokio::time::Duration,
-    ) -> Result<(), ApplicationError> {
-        let application_manager = self.application_manager().await
-            .map_err(|e| ApplicationError::Other(format!("ApplicationManager not found in ServiceLocator: {}", e)))?;
-        application_manager.stop(name, timeout).await
-    }
 
     /// Gracefully shutdown the node and all applications
     ///
@@ -2995,7 +3020,7 @@ impl Node {
                 tracing::warn!("   ✓ Requests drained: {} | Duration: {:?} | Completed: {}", drained, duration, completed);
             } else {
                 // Fallback: if health reporter not available, set ServiceLocator flag directly
-                self.service_locator.set_shutdown(true).await;
+                self.service_locator.request_shutdown();
                 tracing::warn!("🛑 Phase 1: Health Status");
                 tracing::warn!("   ✓ ServiceLocator shutdown flag set (health reporter not available)");
             }
@@ -3023,20 +3048,53 @@ impl Node {
             }
         }
 
-        // Stop all applications (reverse order)
-        use plexspaces_core::service_locator::service_names;
-        let application_manager: Arc<ApplicationManager> = self.service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await
-            .ok_or_else(|| ApplicationError::Other("ApplicationManager not found in ServiceLocator".to_string()))?;
-        
+        // Stop all applications (use Release order if available, otherwise reverse registration order)
         tracing::warn!("🛑 Phase 3: Stopping Applications");
-        let apps_before = application_manager.list_applications().await.len();
+        let apps_before = ApplicationManagerTrait::list_applications(self.application_manager.as_ref()).await.len();
         tracing::warn!("   • Stopping {} applications...", apps_before);
         
         let stop_start = std::time::Instant::now();
-        application_manager.stop_all(timeout).await?;
+        
+        // Try to use Release shutdown order if ReleaseSpec is available
+        let release_spec = self.release_spec.read().await;
+        if let Some(ref spec) = *release_spec {
+            // Stop applications in reverse order (simple approach - proper dependency ordering would require Release helper)
+            // Reverse iterate to stop dependents before dependencies
+            for app_config in spec.applications.iter().rev() {
+                if !app_config.enabled {
+                    continue;
+                }
+                
+                // Check if application is running
+                let app_state = ApplicationManagerTrait::get_state(self.application_manager.as_ref(), &app_config.name).await;
+                if app_state != Some(plexspaces_proto::v1::application::ApplicationState::ApplicationStateRunning) {
+                    continue;
+                }
+                
+                // Use app-specific timeout or fall back to global timeout
+                let app_timeout = if app_config.shutdown_timeout_seconds > 0 {
+                    tokio::time::Duration::from_secs(app_config.shutdown_timeout_seconds as u64)
+                } else {
+                    timeout
+                };
+                
+                if let Err(e) = self.application_manager.stop(&app_config.name, app_timeout).await {
+                    tracing::warn!(
+                        application = %app_config.name,
+                        error = %e,
+                        "Failed to stop application during shutdown (continuing with others)"
+                    );
+                    // Continue with other applications even if one fails
+                }
+            }
+        } else {
+            // No ReleaseSpec - use default stop_all (reverse registration order)
+            self.application_manager.stop_all(timeout).await?;
+        }
+        
         let stop_duration = stop_start.elapsed();
         
-        let apps_after = application_manager.list_applications().await.len();
+        let apps_after = ApplicationManagerTrait::list_applications(self.application_manager.as_ref()).await.len();
         let apps_stopped = apps_before - apps_after;
         
         // Collect metrics after stopping applications
@@ -3077,17 +3135,13 @@ impl Node {
 
     /// Collect shutdown metrics for logging
     async fn collect_shutdown_metrics(&self) -> (usize, usize, usize, usize, usize) {
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         
         // Get application count
-        let application_count = if let Some(app_manager) = self.service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await {
-            app_manager.list_applications().await.len()
-        } else {
-            0
-        };
+        let application_count = ApplicationManagerTrait::list_applications(self.application_manager.as_ref()).await.len();
         
         // Get actor count and mailbox queue sizes
-        let (actor_count, total_mailbox_queue_size) = if let Some(actor_registry) = self.service_locator.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await {
+        let (actor_count, total_mailbox_queue_size) = if let Some(actor_registry) = self.service_locator.actor_registry().await {
             let registered_ids = actor_registry.registered_actor_ids().read().await;
             let actor_count = registered_ids.len();
             
@@ -3119,21 +3173,9 @@ impl Node {
 
     /// Check if shutdown has been requested
     pub async fn is_shutdown_requested(&self) -> bool {
-        // Get ApplicationManager from ServiceLocator
-        use plexspaces_core::service_locator::service_names;
-        if let Some(application_manager) = self.service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await {
-            application_manager.is_shutdown_requested().await
-        } else {
-            false // ApplicationManager should always be in ServiceLocator
-        }
+        self.application_manager.is_shutdown_requested().await
     }
 
-    /// Get application manager reference (for advanced usage)
-    pub async fn application_manager(&self) -> Result<Arc<ApplicationManager>, NodeError> {
-        use plexspaces_core::service_locator::service_names;
-        self.service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await
-            .ok_or_else(|| NodeError::ConfigError("ApplicationManager not found in ServiceLocator".to_string()))
-    }
 
     /// Get task router (Phase 5: Task routing)
     ///
@@ -3151,6 +3193,18 @@ impl Node {
     pub async fn background_scheduler(&self) -> Option<Arc<plexspaces_scheduler::background::BackgroundScheduler>> {
         let scheduler = self.background_scheduler.read().await;
         scheduler.clone()
+    }
+
+    /// Get ApplicationManager
+    ///
+    /// ## Purpose
+    /// Returns the ApplicationManager for this node.
+    /// ApplicationManager is NOT registered in ServiceLocator - it's managed directly by Node.
+    ///
+    /// ## Returns
+    /// Arc<ApplicationManager> for this node
+    pub fn application_manager(&self) -> Arc<ApplicationManager> {
+        self.application_manager.clone()
     }
 
     // ============================================================================
@@ -3410,19 +3464,19 @@ impl Node {
                 interval.tick().await;
                 
                 // Get list of virtual actors to check
-                let actor_ids = match node.virtual_actors().await {
-                    Ok(virtual_actors_arc) => {
-                        let virtual_actors = virtual_actors_arc.read().await;
+                let actor_ids = match node.service_locator().virtual_actor_manager().await {
+                    Some(manager) => {
+                        let virtual_actors = manager.registry().virtual_actors().read().await;
                         virtual_actors.keys().cloned().collect::<Vec<ActorId>>()
                     }
-                    Err(_) => continue, // If virtual_actors not available, skip this iteration
+                    None => continue, // If virtual_actors not available, skip this iteration
                 };
 
                 // Check each virtual actor for idle timeout
                 for actor_id in actor_ids {
-                    let should_deactivate = match node.virtual_actors().await {
-                        Ok(virtual_actors_arc) => {
-                            let virtual_actors = virtual_actors_arc.read().await;
+                    let should_deactivate = match node.service_locator().virtual_actor_manager().await {
+                        Some(manager) => {
+                            let virtual_actors = manager.registry().virtual_actors().read().await;
                             if let Some(virtual_meta) = virtual_actors.get(&actor_id) {
                                 // Downcast facet from Box<dyn Any> to VirtualActorFacet
                                 let facet_guard = virtual_meta.facet.read().await;
@@ -3441,7 +3495,7 @@ impl Node {
                                 false
                             }
                         }
-                        Err(_) => false, // If virtual_actors not available, don't deactivate
+                        None => false, // If virtual_actors not available, don't deactivate
                     };
                     
                     if should_deactivate {
@@ -3455,8 +3509,8 @@ impl Node {
                                 }
                             }
                             // Use service_locator to get ActorRegistry
-                            use plexspaces_core::service_locator::service_names;
-                            if let Some(actor_registry) = node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await {
+                            use plexspaces_core::service_names;
+                            if let Some(actor_registry) = node.service_locator().actor_registry().await {
                                 if let Err(e) = actor_registry.unregister_with_cleanup(&actor_id).await {
                                     tracing::warn!("Failed to deactivate idle virtual actor {}: {}", actor_id, e);
                                 }
@@ -3591,8 +3645,8 @@ impl ApplicationNode for Node {
     }
 
     /// Get ServiceLocator
-    fn service_locator(&self) -> Option<Arc<ServiceLocator>> {
-        Some(self.service_locator.clone())
+    fn service_locator(&self) -> Option<Arc<dyn ServiceLocatorTrait>> {
+        Some(self.service_locator.clone() as Arc<dyn ServiceLocatorTrait>)
     }
 }
 
@@ -3765,8 +3819,8 @@ mod tests {
         let actor_id = normalize_actor_id_helper(node, actor_id);
         
         // Get ActorRegistry
-        use plexspaces_core::service_locator::service_names;
-        let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
+        use plexspaces_core::service_names;
+        let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await
             .ok_or_else(|| NodeError::ConfigError("ActorRegistry not found".to_string()))?;
         
         // Check if actor exists
@@ -3778,8 +3832,9 @@ mod tests {
             )))
         } else {
             // Check routing
-            // Use internal context for routing lookup (system-level operation)
-            let internal_ctx = RequestContext::internal();
+            // Test helper function - routing lookup for test actor references
+            // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+            let internal_ctx = node.service_locator().request_context_for_system_operations().await;
             let routing = actor_registry.lookup_routing(&internal_ctx, &actor_id).await
                 .map_err(|e| NodeError::ActorRefCreationFailed(actor_id.clone(), e.to_string()))?;
             
@@ -3830,6 +3885,8 @@ mod tests {
     }
     
     // Helper to register actor with MessageSender (replaces register_local)
+    // Test helper function - registering test actors
+    // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
     async fn register_actor_for_test(node: &Node, actor_id: &str, mailbox: Arc<Mailbox>) {
         let wrapper = Arc::new(ActorRef::local(
             actor_id.to_string(),
@@ -3837,8 +3894,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_id.to_string(), wrapper, None, None, None).await;
     }
 
@@ -3870,14 +3926,15 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering and looking up test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         // Register actor (idempotent - can be called multiple times)
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Should find local actor via ActorRegistry
-        let internal_ctx = RequestContext::internal();
-        match actor_registry.lookup_routing(&internal_ctx, &"test-actor@test-node".to_string()).await {
+        let internal_ctx2 = node.service_locator().request_context_for_system_operations().await;
+        match actor_registry.lookup_routing(&internal_ctx2, &"test-actor@test-node".to_string()).await {
             Ok(Some(routing_info)) => {
                 assert!(routing_info.is_local);
                 assert_eq!(routing_info.node_id, "test-node");
@@ -3915,8 +3972,9 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Update actor registration with config (idempotent - actor already registered)
@@ -3925,8 +3983,10 @@ mod tests {
             let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
             actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None).await;
         }
-        let internal_ctx = RequestContext::internal();
-        assert!(actor_registry.lookup_routing(&internal_ctx, &"test-actor@test-node".to_string()).await.is_ok());
+        // Test code - looking up test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx2 = node.service_locator().request_context_for_system_operations().await;
+        assert!(actor_registry.lookup_routing(&internal_ctx2, &"test-actor@test-node".to_string()).await.is_ok());
 
         // Unregister
         actor_registry.unregister_with_cleanup(&"test-actor@test-node".to_string())
@@ -3975,7 +4035,7 @@ mod tests {
         let node_arc = Arc::new(NodeBuilder::new("test-node").build().await);
         
         // Register NodeMetricsAccessor early for tests (normally done in create_actor_context_arc)
-        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(node_arc.clone()));
+        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(node.clone()));
         node_arc.service_locator().register_service(metrics_accessor.clone()).await;
         let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> = metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
         node_arc.service_locator().register_node_metrics_accessor(metrics_accessor_trait).await;
@@ -3988,7 +4048,7 @@ mod tests {
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
         actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -4186,7 +4246,9 @@ mod tests {
         let actor_factory = get_actor_factory(service_locator.as_ref()).await
             .expect("ActorFactoryImpl should be registered after initialize_services()");
         
-        let internal_ctx = RequestContext::internal();
+        // Test code - spawning test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = "test-actor@test-node".to_string();
           let _message_sender = actor_factory.spawn_actor(
             &internal_ctx,
@@ -4206,8 +4268,10 @@ mod tests {
 
         // Verify actor registered in ActorRegistry
         let actor_registry = get_actor_registry(&node).await;
-        let internal_ctx = RequestContext::internal();
-        match actor_registry.lookup_routing(&internal_ctx, &"test-actor@test-node".to_string()).await {
+        // Test code - looking up test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx2 = node.service_locator().request_context_for_system_operations().await;
+        match actor_registry.lookup_routing(&internal_ctx2, &"test-actor@test-node".to_string()).await {
             Ok(Some(routing_info)) => {
                 assert!(routing_info.is_local);
                 assert_eq!(routing_info.node_id, "test-node");
@@ -4252,7 +4316,9 @@ mod tests {
         let actor_factory = get_actor_factory(service_locator.as_ref()).await
             .expect("ActorFactoryImpl should be registered after initialize_services()");
         
-        let internal_ctx = RequestContext::internal();
+        // Test code - spawning test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         let _message_sender = actor_factory.spawn_built_actor(&internal_ctx, Arc::new(actor), None).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());
@@ -4342,7 +4408,9 @@ mod tests {
         let actor_factory = get_actor_factory(service_locator.as_ref()).await
             .expect("ActorFactoryImpl should be registered after initialize_services()");
         
-        let internal_ctx = RequestContext::internal();
+        // Test code - spawning test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         let _message_sender = actor_factory.spawn_built_actor(&internal_ctx, Arc::new(actor), None).await.unwrap();
         // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
         let mailbox_for_ref = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-ref-{}", ulid::Ulid::new())).await.unwrap());
@@ -4403,7 +4471,7 @@ mod tests {
         // Register actor with ActorRegistry on node2
         register_actor_for_test(&node2, actor_ref.id().as_str(), mailbox.clone()).await;
         let actor_registry2 = get_actor_registry(&node2).await;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = node2.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -4418,7 +4486,7 @@ mod tests {
             object_category: "Node".to_string(),
             ..Default::default()
         };
-        let object_registry = node1.object_registry().await.unwrap();
+        let object_registry = node1.service_locator.get_object_registry().await.unwrap();
         object_registry.register(&ctx, registration).await.unwrap();
 
         // Try to route message from node1 to actor on node2
@@ -4457,7 +4525,7 @@ mod tests {
 
         // Register remote node in ObjectRegistry (ActorRegistry looks up nodes here)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = node.service_locator().request_context_for_system_operations().await;
         let registration = ObjectRegistration {
             object_type: ObjectType::ObjectTypeNode as i32,
             object_id: "node2".to_string(),
@@ -4465,12 +4533,14 @@ mod tests {
             object_category: "Node".to_string(),
             ..Default::default()
         };
-        let object_registry = node.object_registry().await.unwrap();
+        let object_registry = node.service_locator.get_object_registry().await.unwrap();
         object_registry.register(&ctx, registration).await.unwrap();
 
         // Try to find actor with @node2 suffix
         let actor_registry = get_actor_registry(&node).await;
-        let internal_ctx = RequestContext::internal();
+        // Test code - looking up test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         let result = actor_registry.lookup_routing(&internal_ctx, &"test-actor@node2".to_string()).await;
 
         // Should find it as remote (because node2 is registered in ObjectRegistry)
@@ -4491,7 +4561,7 @@ mod tests {
         // Try to find actor that doesn't exist anywhere
         let actor_registry = get_actor_registry(&node).await;
         let result = actor_registry
-            .lookup_routing(&RequestContext::internal(), &"nonexistent@unknown-node".to_string())
+            .lookup_routing(&node.service_locator().request_context_for_system_operations().await, &"nonexistent@unknown-node".to_string())
             .await;
 
         // lookup_routing returns Ok(None) when node is not found in ObjectRegistry
@@ -4515,14 +4585,14 @@ mod tests {
         // Register actor with ActorRegistry on node2
         register_actor_for_test(&node2, actor_ref.id().as_str(), mailbox.clone()).await;
         let actor_registry2 = get_actor_registry(&node2).await;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = node2.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         // Register node2 in ObjectRegistry on node1 (so node1 can find it via lookup_routing)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = node1.service_locator().request_context_for_system_operations().await;
         let registration = ObjectRegistration {
             object_type: ObjectType::ObjectTypeNode as i32,
             object_id: "node2".to_string(),
@@ -4530,12 +4600,14 @@ mod tests {
             object_category: "Node".to_string(),
             ..Default::default()
         };
-        let object_registry = node1.object_registry().await.unwrap();
+        let object_registry = node1.service_locator.get_object_registry().await.unwrap();
         object_registry.register(&ctx, registration).await.unwrap();
 
         // Now node1 should find the actor via ObjectRegistry (lookup_routing uses ObjectRegistry, not TupleSpace)
         let actor_registry1 = get_actor_registry(&node1).await;
-        let internal_ctx = RequestContext::internal();
+        // Test code - looking up test actors
+        // This is test code, so node1.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node1.service_locator().request_context_for_system_operations().await;
         let result = actor_registry1.lookup_routing(&internal_ctx, &"test-actor@node2".to_string()).await;
 
         assert!(result.is_ok());
@@ -4581,7 +4653,7 @@ mod tests {
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -4698,7 +4770,7 @@ mod tests {
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -4846,15 +4918,16 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -4913,15 +4986,16 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -4989,7 +5063,7 @@ mod tests {
         let node_arc = Arc::new(NodeBuilder::new("test-node").build().await);
         
         // Register NodeMetricsAccessor early for tests (normally done in create_actor_context_arc)
-        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(node_arc.clone()));
+        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(node.clone()));
         node_arc.service_locator().register_service(metrics_accessor.clone()).await;
         let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> = metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
         node_arc.service_locator().register_node_metrics_accessor(metrics_accessor_trait).await;
@@ -5009,7 +5083,7 @@ mod tests {
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
         actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
@@ -5114,8 +5188,9 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
@@ -5155,8 +5230,9 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         // Actor already registered - no need to update config
@@ -5185,8 +5261,9 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
 
         let config = create_actor_config_with_resources(1.0, 1024 * 1024 * 256, 0, 0);
@@ -5234,7 +5311,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        let internal_ctx = plexspaces_core::RequestContext::internal();
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor1_ref.id().clone(), wrapper1, None, None, None).await;
         let config1 = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
         let actor_registry = get_actor_registry(&node).await;
@@ -5254,7 +5331,7 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        let internal_ctx = plexspaces_core::RequestContext::internal();
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor2_ref.id().clone(), wrapper2, None, None, None).await;
         let actor_registry = get_actor_registry(&node).await;
         if let Some(sender2) = actor_registry.lookup_actor(&actor2_ref.id().clone()).await {
@@ -5328,8 +5405,9 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
         let mut config = plexspaces_proto::v1::actor::ActorConfig::default();
         config.resource_requirements = None; // No resource requirements
@@ -5425,8 +5503,9 @@ mod tests {
             node.service_locator().clone(),
         ));
         let actor_registry = get_actor_registry(&node).await;
-        // Use internal context for test actor registration (system-level operation)
-        let internal_ctx = RequestContext::internal();
+        // Test code - registering test actors
+        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
+        let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
         let actor_registry = get_actor_registry(&node).await;
         if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
@@ -5449,9 +5528,8 @@ mod tests {
     // ============================================================================
 
     use async_trait::async_trait;
-    use plexspaces_core::application::{
-        Application, ApplicationError, ApplicationNode, ApplicationState, HealthStatus,
-    };
+    use plexspaces_application::{Application, ApplicationError, ApplicationNode};
+    use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
 
     // Mock application for testing
     struct MockTestApplication {
@@ -5546,13 +5624,11 @@ mod tests {
         let node = NodeBuilder::new("test-node").build().await;
 
         let app = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app).await.unwrap();
+        node.application_manager().register(app).await.unwrap();
 
         // Verify application is registered
         let state = node
             .application_manager()
-            .await
-            .unwrap()
             .get_state("test-app")
             .await;
         assert_eq!(state, Some(ApplicationState::ApplicationStateCreated));
@@ -5563,10 +5639,10 @@ mod tests {
         let node = NodeBuilder::new("test-node").build().await;
 
         let app1 = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app1).await.unwrap();
+        node.application_manager().register(app1).await.unwrap();
 
         let app2 = Box::new(MockTestApplication::new("test-app"));
-        let result = node.register_application(app2).await;
+        let result = node.application_manager().register(app2).await;
 
         // Should fail with duplicate error
         assert!(result.is_err());
@@ -5583,14 +5659,14 @@ mod tests {
         let app = Box::new(MockTestApplication::new("test-app"));
         let start_called = app.start_called.clone();
 
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
+        node.application_manager().register(app).await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("test-app").await.unwrap();
 
         // Verify application started
         let state = node
             .application_manager()
-            .await
-            .unwrap()
             .get_state("test-app")
             .await;
         assert_eq!(state, Some(ApplicationState::ApplicationStateRunning));
@@ -5604,9 +5680,11 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let app = Box::new(MockTestApplication::new_failing_start("test-app"));
-        node.register_application(app).await.unwrap();
+        node.application_manager().register(app).await.unwrap();
 
-        let result = node.start_application("test-app").await;
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        let result = node.application_manager().start("test-app").await;
 
         // Should fail
         assert!(result.is_err());
@@ -5628,9 +5706,11 @@ mod tests {
         let app = Box::new(MockTestApplication::new("test-app"));
         let stop_called = app.stop_called.clone();
 
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
-        node.stop_application("test-app", tokio::time::Duration::from_secs(5))
+        node.application_manager().register(app).await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("test-app").await.unwrap();
+        node.application_manager().stop("test-app", tokio::time::Duration::from_secs(5))
             .await
             .unwrap();
 
@@ -5652,8 +5732,10 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let app = Box::new(MockTestApplication::new_failing_stop("test-app"));
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
+        node.application_manager().register(app).await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("test-app").await.unwrap();
 
         let result = node
             .stop_application("test-app", tokio::time::Duration::from_secs(5))
@@ -5684,12 +5766,16 @@ mod tests {
         ];
 
         for app in apps {
-            node.register_application(app).await.unwrap();
+            node.application_manager().register(app).await.unwrap();
         }
 
-        node.start_application("app1").await.unwrap();
-        node.start_application("app2").await.unwrap();
-        node.start_application("app3").await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone()).await;
+        node.application_manager().start("app1").await.unwrap();
+        node.application_manager().ensure_node_context(node.clone()).await;
+        node.application_manager().start("app2").await.unwrap();
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("app3").await.unwrap();
 
         // Shutdown all applications
         node.shutdown(tokio::time::Duration::from_secs(10))
@@ -5698,19 +5784,19 @@ mod tests {
 
         // Verify all applications stopped
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("app1")
                 .await,
             Some(ApplicationState::ApplicationStateStopped)
         );
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("app2")
                 .await,
             Some(ApplicationState::ApplicationStateStopped)
         );
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("app3")
                 .await,
             Some(ApplicationState::ApplicationStateStopped)
@@ -5724,7 +5810,7 @@ mod tests {
     async fn test_application_node_trait_implementation() {
         use crate::NodeBuilder;
         let node = NodeBuilder::new("test-node")
-            .with_listen_address("0.0.0.0:9999")
+            .with_listen_addr("0.0.0.0:9999")
             .build().await;
 
         // Test ApplicationNode trait methods (uses trait methods, not Node methods)
@@ -5737,7 +5823,9 @@ mod tests {
     async fn test_start_nonexistent_application() {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
-        let result = node.start_application("nonexistent").await;
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        let result = node.application_manager().start("nonexistent").await;
 
         // Should fail with not found error
         assert!(result.is_err());
@@ -5766,28 +5854,30 @@ mod tests {
         let stop_called = app.stop_called.clone();
 
         // Full lifecycle: register -> start -> stop
-        node.register_application(app).await.unwrap();
+        node.application_manager().register(app).await.unwrap();
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("lifecycle-test")
                 .await,
             Some(ApplicationState::ApplicationStateCreated)
         );
 
-        node.start_application("lifecycle-test").await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("lifecycle-test").await.unwrap();
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("lifecycle-test")
                 .await,
             Some(ApplicationState::ApplicationStateRunning)
         );
         assert!(*start_called.read().await);
 
-        node.stop_application("lifecycle-test", tokio::time::Duration::from_secs(5))
+        node.application_manager().stop("lifecycle-test", tokio::time::Duration::from_secs(5))
             .await
             .unwrap();
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("lifecycle-test")
                 .await,
             Some(ApplicationState::ApplicationStateStopped)
@@ -5804,11 +5894,14 @@ mod tests {
         let app2 =
             Box::new(MockTestApplication::new_failing_stop("bad-app")) as Box<dyn Application>;
 
-        node.register_application(app1).await.unwrap();
-        node.register_application(app2).await.unwrap();
+        node.application_manager().register(app1).await.unwrap();
+        node.application_manager().register(app2).await.unwrap();
 
-        node.start_application("good-app").await.unwrap();
-        node.start_application("bad-app").await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone()).await;
+        node.application_manager().start("good-app").await.unwrap();
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("bad-app").await.unwrap();
 
         // Shutdown should fail due to bad-app
         let result = node.shutdown(tokio::time::Duration::from_secs(5)).await;
@@ -5816,7 +5909,7 @@ mod tests {
 
         // good-app should still be stopped
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("good-app")
                 .await,
             Some(ApplicationState::ApplicationStateStopped)
@@ -5824,7 +5917,7 @@ mod tests {
 
         // bad-app should be in Failed state
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("bad-app")
                 .await,
             Some(ApplicationState::ApplicationStateFailed)
@@ -5840,8 +5933,10 @@ mod tests {
 
         // Register and start an app
         let app = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
+        node.application_manager().register(app).await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("test-app").await.unwrap();
 
         // Shutdown
         node.shutdown(tokio::time::Duration::from_secs(5))
@@ -5884,19 +5979,23 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let app = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app).await.unwrap();
+        node.application_manager().register(app).await.unwrap();
 
         // First start succeeds
-        node.start_application("test-app").await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("test-app").await.unwrap();
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("test-app")
                 .await,
             Some(ApplicationState::ApplicationStateRunning)
         );
 
         // Second start should fail (not in Created state)
-        let result = node.start_application("test-app").await;
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        let result = node.application_manager().start("test-app").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("state"));
     }
@@ -5906,15 +6005,17 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let app = Box::new(MockTestApplication::new("test-app"));
-        node.register_application(app).await.unwrap();
-        node.start_application("test-app").await.unwrap();
+        node.application_manager().register(app).await.unwrap();
+        // node_arc removed - use node.clone() directly
+        node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+        node.application_manager().start("test-app").await.unwrap();
 
         // First stop succeeds
-        node.stop_application("test-app", tokio::time::Duration::from_secs(5))
+        node.application_manager().stop("test-app", tokio::time::Duration::from_secs(5))
             .await
             .unwrap();
         assert_eq!(
-            node            .application_manager().await.unwrap()
+            node            .application_manager()
                 .get_state("test-app")
                 .await,
             Some(ApplicationState::ApplicationStateStopped)
@@ -5977,8 +6078,10 @@ mod tests {
                 name: format!("app{}", i),
                 stopped_apps: stopped_apps.clone(),
             }) as Box<dyn Application>;
-            node.register_application(app).await.unwrap();
-            node.start_application(&format!("app{}", i)).await.unwrap();
+            node.application_manager().register(app).await.unwrap();
+            // node_arc removed - use node.clone() directly
+            node.application_manager().ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>).await;
+            node.application_manager().start(&format!("app{}", i)).await.unwrap();
         }
 
         // Shutdown

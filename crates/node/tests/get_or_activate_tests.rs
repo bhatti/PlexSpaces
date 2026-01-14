@@ -59,8 +59,8 @@ async fn test_get_or_activate_actor_new_actor() {
     
     // Additional verification: Check ActorRegistry registration
     use plexspaces_core::{ActorRegistry, RequestContext};
-    use plexspaces_core::service_locator::service_names;
-    let actor_registry = node.service_locator().get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
+    use plexspaces_core::service_names;
+    let actor_registry = node.service_locator().actor_registry().await.unwrap();
     let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let routing = actor_registry.lookup_routing(&ctx, &actor_id.to_string())
         .await

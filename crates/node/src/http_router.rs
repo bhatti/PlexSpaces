@@ -310,7 +310,7 @@ where
                         }
                         
                         // Call InvokeActor via ActorService
-                        use plexspaces_actor_service::ActorServiceImpl;
+                        use plexspaces_services::actor_service::ActorServiceImpl;
                         let actor_service = ActorServiceImpl::new(service_locator.clone(), node_id.clone());
                         use tonic::Request as TonicRequest;
                         let grpc_req = TonicRequest::new(invoke_req);

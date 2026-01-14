@@ -9,7 +9,7 @@ edition.workspace = true
 [dependencies]
 plexspaces-core.workspace = true
 plexspaces-actor.workspace = true
-plexspaces-actor-service = { path = "../../../crates/actor-service" }
+plexspaces-services = { path = "../../../crates/services" }
 plexspaces-behavior.workspace = true
 plexspaces-facet.workspace = true
 plexspaces-journaling = { workspace = true, features = ["sqlite-backend"] }

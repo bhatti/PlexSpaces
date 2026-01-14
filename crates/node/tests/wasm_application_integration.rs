@@ -25,7 +25,8 @@
 //! - Application lifecycle (start/stop/health)
 //! - Error handling (invalid modules, missing runtime, etc.)
 
-use plexspaces_node::{application_service::ApplicationServiceImpl, Node, NodeId};
+use plexspaces_node::{Node, NodeId};
+use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
     ChildSpec, ChildType, DeployApplicationRequest, GetApplicationStatusRequest,
@@ -52,7 +53,7 @@ const SIMPLE_WASM: &[u8] = &[
 async fn create_test_node() -> Arc<Node> {
     use plexspaces_node::NodeBuilder;
     Arc::new(NodeBuilder::new("test-node")
-        .with_listen_address("127.0.0.1:0")
+        .with_listen_addr("127.0.0.1:0")
         .build().await)
 }
 
@@ -155,9 +156,9 @@ async fn test_deploy_wasm_application_success() {
     });
     sleep(Duration::from_millis(500)).await;
 
-    // Create ApplicationService using node's application_manager
-    let application_manager = node.application_manager().await.unwrap();
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
+    // Create ApplicationService - gets ApplicationManager from ServiceLocator
+    use plexspaces_services::application_service::ApplicationServiceImpl;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone());
 
     // Create WASM module
     let wasm_module = WasmModule {
@@ -208,9 +209,9 @@ async fn test_deploy_wasm_application_invalid_module() {
     });
     sleep(Duration::from_millis(500)).await;
 
-    // Create ApplicationService using node's application_manager
-    let application_manager = node.application_manager().await.unwrap();
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
+    // Create ApplicationService - gets ApplicationManager from ServiceLocator
+    use plexspaces_services::application_service::ApplicationServiceImpl;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone());
 
     // Create invalid WASM module (empty bytes)
     let wasm_module = WasmModule {
@@ -260,9 +261,9 @@ async fn test_deploy_wasm_application_missing_fields() {
     });
     sleep(Duration::from_millis(500)).await;
 
-    // Create ApplicationService using node's application_manager
-    let application_manager = node.application_manager().await.unwrap();
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
+    // Create ApplicationService - gets ApplicationManager from ServiceLocator
+    use plexspaces_services::application_service::ApplicationServiceImpl;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone());
 
     // Test missing application_id
     let request = DeployApplicationRequest {
@@ -309,8 +310,8 @@ async fn test_get_wasm_application_status() {
     sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService - use same instance for deploy and status
-    let application_manager = node.application_manager().await.unwrap();
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager.clone());
+    use plexspaces_services::application_service::ApplicationServiceImpl;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone());
 
     // Deploy application first
     let wasm_module = WasmModule {
@@ -347,7 +348,8 @@ async fn test_get_wasm_application_status() {
     // Get application status - ApplicationManager stores by name, not application_id
     // For now, we use the application name for lookup
     // TODO: Enhance ApplicationManager to support multiple instances per application name
-    let status_service = ApplicationServiceImpl::new(node.clone(), application_manager);
+    use plexspaces_services::application_service::ApplicationServiceImpl;
+    let status_service = ApplicationServiceImpl::new(node.service_locator().clone());
     let status_request = GetApplicationStatusRequest {
         application_id: "test-app".to_string(), // Use name for lookup
     };
@@ -379,7 +381,7 @@ async fn test_list_wasm_applications() {
     sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService
-    let application_manager = node.application_manager().await.unwrap();
+    let application_manager = node.application_manager();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager.clone());
 
     // Deploy multiple applications
@@ -444,9 +446,9 @@ async fn test_get_nonexistent_wasm_application_status() {
     });
     sleep(Duration::from_millis(500)).await;
 
-    // Create ApplicationService using node's application_manager
-    let application_manager = node.application_manager().await.unwrap();
-    let service = ApplicationServiceImpl::new(node.clone(), application_manager);
+    // Create ApplicationService - gets ApplicationManager from ServiceLocator
+    use plexspaces_services::application_service::ApplicationServiceImpl;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone());
 
     // Get status for non-existent application
     let status_request = GetApplicationStatusRequest {
@@ -474,7 +476,7 @@ async fn test_deploy_wasm_application_with_supervisor_tree() {
     // Test deploying WASM application with supervisor tree from ApplicationSpec
     let (node, _) = create_test_node_with_service().await;
     
-    let application_manager = node.application_manager().await.unwrap();
+    let application_manager = node.application_manager();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager);
 
     // Create WASM module with supervisor spec
@@ -502,12 +504,12 @@ async fn test_deploy_wasm_application_with_supervisor_tree() {
     sleep(Duration::from_millis(500)).await;
 
     // Verify application is running
-    let app_manager = node.application_manager().await.unwrap();
+    let app_manager = node.application_manager();
     let app_state = app_manager.get_state("test-app").await;
     assert!(app_state.is_some());
     assert_eq!(
         app_state.unwrap(),
-        plexspaces_core::application::ApplicationState::ApplicationStateRunning
+        plexspaces_proto::v1::application::ApplicationState::ApplicationStateRunning
     );
 }
 
@@ -516,7 +518,7 @@ async fn test_undeploy_wasm_application_with_supervisor_tree() {
     // Test undeploying WASM application with supervisor tree (graceful shutdown)
     let (node, _) = create_test_node_with_service().await;
     
-    let application_manager = node.application_manager().await.unwrap();
+    let application_manager = node.application_manager();
     let service = ApplicationServiceImpl::new(node.clone(), application_manager);
 
     // Deploy application with supervisor tree
@@ -557,12 +559,12 @@ async fn test_undeploy_wasm_application_with_supervisor_tree() {
     sleep(Duration::from_millis(500)).await;
 
     // Verify application is stopped
-    let app_manager = node.application_manager().await.unwrap();
-    let app_state = app_manager.get_state("shutdown-app").await;
+    let app_manager = node.application_manager();
+    let app_state: Option<plexspaces_proto::v1::application::ApplicationState> = app_manager.get_state("shutdown-app").await;
     assert!(app_state.is_some());
     assert_eq!(
         app_state.unwrap(),
-        plexspaces_core::application::ApplicationState::ApplicationStateStopped
+        plexspaces_proto::v1::application::ApplicationState::ApplicationStateStopped
     );
 }
 

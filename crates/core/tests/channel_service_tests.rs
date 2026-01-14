@@ -54,7 +54,24 @@ mod tests {
         }
         async fn register(&self, _ctx: &plexspaces_core::RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
-        }
+        
+    async fn unregister(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+    async fn heartbeat(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+}
         async fn discover(
             &self,
             _ctx: &plexspaces_core::RequestContext,

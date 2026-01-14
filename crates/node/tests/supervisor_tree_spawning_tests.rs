@@ -27,15 +27,15 @@
 //! 6. The entire tree is spawned when an application is deployed
 
 use plexspaces_node::{NodeBuilder, Node};
-use plexspaces_node::application_service::ApplicationServiceImpl;
+use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, DeployApplicationRequest,
     ApplicationSpec, ApplicationType, SupervisorSpec, ChildSpec, ChildType,
     SupervisionStrategy, RestartPolicy,
 };
 use plexspaces_proto::wasm::v1::WasmModule;
-use plexspaces_core::application::ApplicationState;
-use plexspaces_core::service_locator::service_names;
+use plexspaces_proto::v1::application::ApplicationState;
+use plexspaces_core::service_names;
 use prost_types::Duration as ProstDuration;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -117,7 +117,7 @@ async fn create_test_node() -> Arc<Node> {
 async fn create_test_node_with_server() -> Arc<Node> {
     let node = Arc::new(
         NodeBuilder::new("test-node")
-            .with_listen_address("127.0.0.1:0") // Ephemeral port to avoid conflicts
+            .with_listen_addr("127.0.0.1:0") // Ephemeral port to avoid conflicts
             .build()
             .await
     );
@@ -141,7 +141,7 @@ async fn wait_for_actors_activated(
 ) -> bool {
     // Get ActorRegistry
     let registry = node.service_locator()
-        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry not found");
     
@@ -182,13 +182,13 @@ async fn wait_for_actors_activated(
 async fn wait_for_application_state(
     node: &Node,
     app_name: &str,
-    expected_state: plexspaces_core::application::ApplicationState,
+    expected_state: plexspaces_proto::v1::application::ApplicationState,
     timeout_duration: Duration,
 ) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout_duration {
-        let app_manager = node.application_manager().await.expect("ApplicationManager not found");
-        let current_state = app_manager.get_state(app_name).await;
+        let app_manager = node.application_manager();
+        let current_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), app_name).await;
         // Compare by matching the enum variant directly
         match (current_state, &expected_state) {
             (Some(current), expected) if current == *expected => return true,
@@ -208,7 +208,7 @@ async fn wait_for_min_actors_activated(
 ) -> bool {
     // Get ActorRegistry
     let registry = node.service_locator()
-        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry not found");
     
@@ -340,7 +340,7 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
 /// Get all actor IDs from ActorRegistry
 async fn get_all_actor_ids(node: &Node) -> Vec<String> {
     let actor_registry = node.service_locator()
-        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry not found");
     
@@ -351,7 +351,7 @@ async fn get_all_actor_ids(node: &Node) -> Vec<String> {
 /// Get actor type for an actor ID
 async fn get_actor_type(node: &Node, actor_id: &str) -> Option<String> {
     let actor_registry = node.service_locator()
-        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry not found");
     
@@ -416,8 +416,8 @@ async fn deploy_application_mock(
     app_name: &str,
     app_spec: ApplicationSpec,
 ) -> Result<(), String> {
-    use plexspaces_node::application_impl::SpecApplication;
-    use plexspaces_core::application::Application;
+    use plexspaces_application::SpecApplication;
+    use plexspaces_application::Application;
     use std::sync::Arc;
     
     tracing::debug!(
@@ -436,7 +436,7 @@ async fn deploy_application_mock(
     let app: Box<dyn Application> = Box::new(spec_app);
     
     // Register application
-    node.register_application(app).await
+    node.application_manager().register(app).await
         .map_err(|e| format!("Failed to register application: {}", e))?;
     
     tracing::debug!(
@@ -445,7 +445,7 @@ async fn deploy_application_mock(
     );
     
     // Start application (spawns supervisor tree)
-    node.start_application(app_name).await
+    node.application_manager().start(app_name).await
         .map_err(|e| format!("Failed to start application: {}", e))?;
     
     tracing::debug!(
@@ -483,7 +483,7 @@ async fn deploy_application_with_wasm(
     app_spec: ApplicationSpec,
     wasm_module: WasmModule,
 ) -> Result<(), String> {
-    use plexspaces_node::application_service::ApplicationServiceImpl;
+    use plexspaces_services::application_service::ApplicationServiceImpl;
     use tonic::Request;
     use std::sync::Arc;
     
@@ -493,12 +493,11 @@ async fn deploy_application_with_wasm(
     );
     
     // Get ApplicationManager
-    let application_manager = node.application_manager().await
-        .map_err(|e| format!("ApplicationManager not found: {}", e))?;
+    let application_manager = node.application_manager();
     
     // Create ApplicationServiceImpl (doesn't require gRPC server to be running)
     let node_arc = Arc::new(node.clone());
-    let service = ApplicationServiceImpl::new(node_arc, application_manager);
+    let service = ApplicationServiceImpl::new(node_arc.service_locator().clone());
     
     // Create deployment request (same as gRPC would receive)
     let request = DeployApplicationRequest {
@@ -639,8 +638,8 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
         assert!(actors_activated, "At least 4 actors should be activated within 5 seconds");
 
         // Verify application is running
-        let app_manager = node.application_manager().await.expect("ApplicationManager not found");
-        let app_state = app_manager.get_state("nested-app").await;
+        let app_manager = node.application_manager();
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "nested-app").await;
         assert_eq!(
         app_state,
         Some(ApplicationState::ApplicationStateRunning),
@@ -938,7 +937,7 @@ async fn test_deeply_nested_supervisor_tree() {
 async fn test_actors_tracked_in_application() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        let application_manager = node.application_manager().await.expect("ApplicationManager not found");
+        let application_manager = node.application_manager();
             // Deploy directly via ApplicationServiceImpl (no gRPC server needed)
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
@@ -961,8 +960,8 @@ async fn test_actors_tracked_in_application() {
         assert!(actors_activated, "At least 1 actor should be activated within 5 seconds");
 
         // Verify application is running
-        let app_manager = node.application_manager().await.expect("ApplicationManager not found");
-        let app_state = app_manager.get_state("actors_tracked_in_-app").await;
+        let app_manager = node.application_manager();
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "actors_tracked_in_-app").await;
         assert_eq!(
         app_state,
         Some(ApplicationState::ApplicationStateRunning),
@@ -1017,8 +1016,8 @@ async fn test_complex_supervisor_hierarchy() {
         }
 
         // Verify application is running
-        let app_manager = node.application_manager().await.expect("ApplicationManager not found");
-        let app_state = app_manager.get_state("complex-app").await;
+        let app_manager = node.application_manager();
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "complex-app").await;
         assert_eq!(
         app_state,
         Some(ApplicationState::ApplicationStateRunning),
@@ -1228,8 +1227,8 @@ async fn test_auto_generated_supervisor_tree() {
         assert!(actors_activated, "At least 3 actors should be activated within 5 seconds");
 
         // Verify application is running
-        let app_manager = node.application_manager().await.expect("ApplicationManager not found");
-        let app_state = app_manager.get_state("auto-app").await;
+        let app_manager = node.application_manager();
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "auto-app").await;
         assert_eq!(
         app_state,
         Some(ApplicationState::ApplicationStateRunning),
@@ -1290,7 +1289,7 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
         );
 
         // Stop application directly (mock/simulated setup - no WASM runtime needed)
-        let app_manager = node.application_manager().await.expect("ApplicationManager not found");
+        let app_manager = node.application_manager();
         app_manager.stop("shutdown-app", Duration::from_secs(1)).await
             .expect("Application stop should succeed");
 
@@ -1299,8 +1298,8 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
         assert!(app_stopped, "Application should stop within 10 seconds");
 
         // Verify application is stopped
-        let app_manager = node.application_manager().await.expect("ApplicationManager not found");
-        let app_state = app_manager.get_state("shutdown-app").await;
+        let app_manager = node.application_manager();
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "shutdown-app").await;
         assert_eq!(
             app_state,
             Some(ApplicationState::ApplicationStateStopped),
@@ -1323,7 +1322,7 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
 async fn test_actor_type_tracking_complex_tree() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        let application_manager = node.application_manager().await.expect("ApplicationManager not found");
+        let application_manager = node.application_manager();
             // Deploy directly via ApplicationServiceImpl (no gRPC server needed)
         let supervisor_spec = create_complex_supervisor_hierarchy_spec();
         let app_spec = ApplicationSpec {
@@ -1469,8 +1468,8 @@ async fn test_erlang_style_supervision_structure() {
         assert!(actors_activated, "At least 4 actors should be activated within 5 seconds");
 
         // Verify application is running
-        let app_manager = node.application_manager().await.expect("ApplicationManager not found");
-        let app_state = app_manager.get_state("my_app").await;
+        let app_manager = node.application_manager();
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "my_app").await;
         assert_eq!(
         app_state,
         Some(ApplicationState::ApplicationStateRunning),
@@ -1540,7 +1539,7 @@ async fn test_erlang_style_supervision_structure() {
         
         // Verify actors are actually spawned (check ActorRegistry directly)
         let actor_registry = node.service_locator()
-        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry not found");
         
@@ -1562,8 +1561,8 @@ async fn test_erlang_style_supervision_structure() {
         // Note: tracked_actor_count might not be updated automatically
         // The important thing is that actors are spawned and registered
             tracing::debug!(
-                "Application metrics: actor_count={}, but {} actors are actually registered",
-                metrics.actor_count,
+                "Application metrics: active_actors={}, but {} actors are actually registered",
+                metrics.active_actors,
                 spawned_count
             );
         }

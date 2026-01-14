@@ -70,7 +70,7 @@ impl Application for ByzantineApplication {
         // Wait for services to be registered
         use plexspaces_core::service_locator::service_names;
         for _ in 0..10 {
-            if service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.is_some() {
+            if service_locator.actor_registry().await.is_some() {
                 break;
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -94,7 +94,7 @@ impl Application for ByzantineApplication {
         service_locator.register_service(Arc::new(behavior_registry)).await;
         
         // Register ActorService
-        use plexspaces_actor_service::ActorServiceImpl;
+        use plexspaces_services::actor_service::ActorServiceImpl;
         use plexspaces_core::ActorService;
         let actor_service_impl = Arc::new(ActorServiceImpl::new(
             service_locator.clone(),
@@ -124,7 +124,7 @@ impl Application for ByzantineApplication {
                 "num_rounds": num_rounds
             });
             
-            let request_ctx = plexspaces_core::RequestContext::internal();
+            let request_ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
             actor_factory_impl.spawn_actor(
                 &request_ctx,
                 &actor_id,

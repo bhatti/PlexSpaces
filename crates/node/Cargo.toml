@@ -22,9 +22,9 @@ plexspaces-keyvalue = { workspace = true }
 plexspaces-object-registry = { workspace = true }
 plexspaces-channel = { workspace = true }
 plexspaces-process-groups = { workspace = true }
-plexspaces-supervisor = { workspace = true }
 plexspaces-facet = { workspace = true }
-plexspaces-actor-service = { path = "../actor-service" }
+plexspaces-application = { path = "../application" }
+plexspaces-services = { path = "../services" }
 plexspaces-scheduler = { workspace = true, features = ["memory-backend"] }
 plexspaces-locks = { workspace = true }
 plexspaces-wasm-runtime = { workspace = true }
@@ -74,7 +74,7 @@ anyhow = "1.0"
 
 [features]
 default = ["dashboard", "firecracker"]
-firecracker = ["plexspaces-firecracker"]
+firecracker = ["plexspaces-firecracker", "plexspaces-services/firecracker"]
 dashboard = ["plexspaces-dashboard"]
 
 [dev-dependencies]

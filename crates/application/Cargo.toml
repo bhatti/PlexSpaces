@@ -1,0 +1,46 @@
+[package]
+name = "plexspaces-application"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Application lifecycle management for PlexSpaces (Erlang/OTP-inspired)"
+
+[dependencies]
+plexspaces-core = { path = "../core" }
+plexspaces-proto = { workspace = true }
+plexspaces-actor = { path = "../actor" }
+plexspaces-wasm-runtime = { path = "../wasm-runtime" }
+plexspaces-channel = { workspace = true }
+plexspaces-mailbox = { workspace = true }
+plexspaces-journaling = { path = "../journaling" }
+plexspaces-keyvalue = { workspace = true }
+plexspaces-process-groups = { workspace = true }
+plexspaces-locks = { workspace = true }
+plexspaces-blob = { path = "../blob" }
+plexspaces-facet = { workspace = true }
+plexspaces-tuplespace = { path = "../tuplespace" }
+
+# Core dependencies
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+ulid = { workspace = true }
+tracing = { workspace = true }
+prost-types = "0.12"  # For proto Duration/Timestamp types
+prost = { workspace = true }  # For protobuf decoding
+metrics = "0.23"  # For observability
+chrono = { workspace = true }  # For timestamps
+futures = "0.3"  # For stream handling
+
+[dev-dependencies]
+tokio-test = { version = "0.4" }
+plexspaces-node = { path = "../node" }
+
+[lib]
+name = "plexspaces_application"
+path = "src/lib.rs"
+

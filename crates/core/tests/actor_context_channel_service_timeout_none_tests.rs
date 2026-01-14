@@ -69,7 +69,8 @@ async fn test_channel_service_receive_from_queue_no_timeout() {
     // Create context with service locator and register channel service
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     service_locator.register_channel_service(channel_service.clone()).await;
     let context = ActorContext::new(
         "node1".to_string(),
@@ -93,7 +94,8 @@ async fn test_channel_service_receive_from_queue_no_timeout_returns_none() {
     // Create context with service locator and register channel service
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     service_locator.register_channel_service(channel_service.clone()).await;
     let context = ActorContext::new(
         "node1".to_string(),

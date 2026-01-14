@@ -90,7 +90,7 @@ async fn test_actors_by_type_on_home_page() {
     node.initialize_services().await.expect("Failed to initialize services");
     
     // Spawn actors with different types
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let actor_factory = get_actor_factory(service_locator.as_ref()).await
         .expect("ActorFactory should be available");
     
@@ -138,9 +138,9 @@ async fn test_actors_by_type_on_home_page() {
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     
     // Verify actors are registered by checking ActorRegistry directly
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     let actor_registry: Arc<plexspaces_core::ActorRegistry> = service_locator
-        .get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY)
+        .actor_registry()
         .await
         .expect("ActorRegistry should be available");
     
@@ -197,7 +197,7 @@ async fn test_actors_by_type_on_node_page() {
     node.initialize_services().await.expect("Failed to initialize services");
     
     // Spawn actors
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let actor_factory = get_actor_factory(service_locator.as_ref()).await
         .expect("ActorFactory should be available");
     

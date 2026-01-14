@@ -29,7 +29,7 @@
 //! - Tracks dependency state transitions (healthy → degraded → unhealthy)
 //! - Provides metrics for dashboard monitoring
 
-use crate::health_checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult};
+use plexspaces_core::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult};
 use plexspaces_circuit_breaker::CircuitBreaker;
 use plexspaces_proto::circuitbreaker::prv::{CircuitBreakerConfig, CircuitBreakerMetrics, CircuitState, FailureStrategy};
 use plexspaces_proto::system::v1::{CircuitBreakerHealthMetrics, DependencyCircuitBreakerInfo};
@@ -228,7 +228,8 @@ impl HealthChecker for CircuitBreakerHealthChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health_checker::{PingChecker, HealthCheckContext};
+    use plexspaces_core::health_checker::PingChecker;
+    use plexspaces_core::HealthCheckContext;
     
     #[tokio::test]
     async fn test_circuit_breaker_health_checker_success() {

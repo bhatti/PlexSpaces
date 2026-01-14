@@ -402,41 +402,6 @@ pub struct GetApplicationStatusResponse {
     #[prost(string, optional, tag="3")]
     pub error: ::core::option::Option<::prost::alloc::string::String>,
 }
-/// Request to start an application (legacy).
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StartApplicationRequest {
-    /// Application name to start
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-}
-/// Response from starting an application (legacy).
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StartApplicationResponse {
-    /// Started application instance
-    #[prost(message, optional, tag="1")]
-    pub application: ::core::option::Option<Application>,
-}
-/// Request to stop an application (legacy).
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StopApplicationRequest {
-    /// Application name to stop
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-    /// Force immediate shutdown (ignore graceful strategy)
-    #[prost(bool, tag="2")]
-    pub force: bool,
-}
-/// Response from stopping an application (legacy).
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StopApplicationResponse {
-    /// Stopped application instance
-    #[prost(message, optional, tag="1")]
-    pub application: ::core::option::Option<Application>,
-}
 /// Application type
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

@@ -15,6 +15,8 @@ plexspaces-core = { workspace = true }
 plexspaces-proto = { workspace = true }
 plexspaces-object-registry = { workspace = true }
 plexspaces-facet = { workspace = true }
+plexspaces-application = { path = "../application" }
+plexspaces-services = { path = "../services" }
 plexspaces-workflow = { workspace = true, optional = true }
 
 # Async runtime

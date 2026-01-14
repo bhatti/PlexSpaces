@@ -25,7 +25,7 @@ async fn test_register_vm_in_object_registry() {
     };
 
     // Register in object registry
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     VmRegistry::register_in_object_registry(&ctx, &object_registry, &vm_entry)
         .await
         .unwrap();
@@ -65,7 +65,7 @@ async fn test_discover_vms_from_object_registry() {
         config: None,
     };
 
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     VmRegistry::register_in_object_registry(&ctx, &object_registry, &vm1)
         .await
         .unwrap();
@@ -98,7 +98,7 @@ async fn test_vm_health_status_mapping() {
         config: None,
     };
 
-    let ctx = RequestContext::internal();
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     VmRegistry::register_in_object_registry(&ctx, &object_registry, &vm_running)
         .await
         .unwrap();

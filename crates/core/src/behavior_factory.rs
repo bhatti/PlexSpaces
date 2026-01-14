@@ -206,7 +206,11 @@ impl Default for BehaviorRegistry {
 }
 
 // Implement Service trait so BehaviorRegistry can be registered in ServiceLocator
-impl crate::Service for BehaviorRegistry {}
+impl crate::Service for BehaviorRegistry {
+    fn service_name(&self) -> String {
+        "BehaviorRegistry".to_string()
+    }
+}
 
 #[async_trait::async_trait]
 impl BehaviorFactory for BehaviorRegistry {

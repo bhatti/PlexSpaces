@@ -29,7 +29,7 @@ use tokio::sync::{mpsc, RwLock};
 use crate::{ActorId, ActorRef, MessageSender, RequestContext, ActorMetricsHandle, ActorMetrics, ActorMetricsExt, ExitReason, actor_state_checker};
 use crate::actor_context::ObjectRegistry;
 use crate::actor_context::ObjectRegistration;
-use crate::service_locator::Service;
+use crate::Service;
 use plexspaces_mailbox::{Mailbox, Message};
 use plexspaces_proto::object_registry::v1::ObjectType;
 use plexspaces_proto::ActorLifecycleEvent;
@@ -2040,7 +2040,7 @@ impl ActorRegistry {
 // Implement Service trait for ActorRegistry
 impl Service for ActorRegistry {
     fn service_name(&self) -> String {
-        crate::service_locator::service_names::ACTOR_REGISTRY.to_string()
+        crate::service_names::ACTOR_REGISTRY.to_string()
     }
 }
 
@@ -2068,7 +2068,7 @@ impl Service for ActorRegistry {
 /// 3. Delegating to Node for remote actor linking
 #[async_trait::async_trait]
 impl crate::LinkProvider for ActorRegistry {
-    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String> {
+    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId, ctx: &crate::RequestContext) -> Result<(), String> {
         // TODO: Support remote actor linking
         // For now, only support local actors. Remote linking requires:
         // 1. Checking if actors are local (via lookup_routing)
@@ -2076,15 +2076,14 @@ impl crate::LinkProvider for ActorRegistry {
         // 3. This is advanced functionality and can be added later
         
         // Verify both actors are local (exist in this registry)
-        use crate::RequestContext;
-        let ctx = RequestContext::internal();
-        let routing1 = self.lookup_routing(&ctx, actor_id).await
+        // Use provided RequestContext for tenant/namespace isolation
+        let routing1 = self.lookup_routing(ctx, actor_id).await
             .map_err(|e| format!("Failed to lookup actor {}: {}", actor_id, e))?;
         if routing1.is_none() || !routing1.unwrap().is_local {
             return Err(format!("Actor {} is not local or not found", actor_id));
         }
         
-        let routing2 = self.lookup_routing(&ctx, linked_actor_id).await
+        let routing2 = self.lookup_routing(ctx, linked_actor_id).await
             .map_err(|e| format!("Failed to lookup actor {}: {}", linked_actor_id, e))?;
         if routing2.is_none() || !routing2.unwrap().is_local {
             return Err(format!("Actor {} is not local or not found", linked_actor_id));
@@ -2095,7 +2094,7 @@ impl crate::LinkProvider for ActorRegistry {
             .map_err(|e| format!("Link failed: {}", e))
     }
 
-    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId) -> Result<(), String> {
+    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId, ctx: &crate::RequestContext) -> Result<(), String> {
         // TODO: Support remote actor unlinking
         // For now, only support local actors. Remote unlinking requires:
         // 1. Checking if actors are local (via lookup_routing)
@@ -2126,8 +2125,11 @@ impl crate::LinkProvider for ActorRegistry {
 impl crate::ActivationProvider for ActorRegistry {
     async fn is_actor_active(&self, actor_id: &ActorId) -> bool {
         // Check if actor is registered and active in this registry
+        // Use empty tenant/namespace for internal operations (auth disabled)
         use crate::RequestContext;
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth(String::new(), String::new())
+            .with_admin(true)
+            .with_internal(true);
         let routing = self.lookup_routing(&ctx, actor_id).await.ok().flatten();
         routing.map(|r| r.is_local).unwrap_or(false)
     }

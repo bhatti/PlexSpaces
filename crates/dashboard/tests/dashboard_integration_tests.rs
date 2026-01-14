@@ -25,7 +25,8 @@
 
 use plexspaces_dashboard::{DashboardServiceImpl, HealthReporterAccess};
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_core::{RequestContext, application::{Application, ApplicationError, ApplicationNode}};
+use plexspaces_core::RequestContext;
+use plexspaces_application::{Application, ApplicationError, ApplicationNode};
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService,
     GetSummaryRequest, GetNodesRequest, GetNodeDashboardRequest, GetApplicationsRequest,
@@ -86,17 +87,15 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
         metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
     service_locator.register_node_metrics_accessor(metrics_accessor_trait).await;
     
-    // Ensure ApplicationManager is registered as both by-name and by-type
-    // (initialize_services registers it by name, but get_service() needs it by type)
-    use plexspaces_core::ApplicationManager;
-    use plexspaces_core::service_locator::service_names;
-    if let Some(app_manager) = service_locator.get_service_by_name::<ApplicationManager>(service_names::APPLICATION_MANAGER).await {
-        // Also register as generic service for get_service() lookup
-        service_locator.register_service(app_manager.clone()).await;
-    }
+    // Register ApplicationManager in ServiceLocator
+    use plexspaces_application::ApplicationManager;
+    let app_manager = Arc::new(ApplicationManager::new());
+    let app_manager_trait: Arc<dyn plexspaces_core::ApplicationManager> = app_manager.clone();
+    service_locator.register_application_manager(app_manager_trait).await;
     
     // Ensure ObjectRegistry is registered (needed for query_remote_nodes)
     use plexspaces_object_registry::ObjectRegistry;
+    use plexspaces_core::service_names;
     if let Some(object_registry) = service_locator.get_service_by_name::<ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
         // Also register as generic service for get_service() lookup
         service_locator.register_service(object_registry.clone()).await;
@@ -121,10 +120,14 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
         }
     }
     
-    let health_reporter_access: Arc<dyn HealthReporterAccess + Send + Sync> = 
-        Arc::new(HealthReporterAccessImpl { health_reporter });
+    let health_access: Arc<dyn HealthReporterAccess + Send + Sync> = Arc::new(HealthReporterAccessImpl {
+        health_reporter,
+    });
     
-    DashboardServiceImpl::with_health_reporter(service_locator, health_reporter_access)
+    DashboardServiceImpl::with_health_reporter(
+        service_locator,
+        health_access,
+    )
 }
 
 /// Helper to register a mock application

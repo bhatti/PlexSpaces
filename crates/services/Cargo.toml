@@ -1,0 +1,80 @@
+[package]
+name = "plexspaces-services"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Centralized service infrastructure and implementations for PlexSpaces"
+
+[dependencies]
+# Core dependencies
+plexspaces-core = { path = "../core" }
+plexspaces-proto = { workspace = true }
+plexspaces-mailbox = { workspace = true }
+plexspaces-tuplespace = { path = "../tuplespace" }
+plexspaces-channel = { workspace = true }
+plexspaces-common = { path = "../common" }
+plexspaces-keyvalue = { workspace = true }
+plexspaces-object-registry = { workspace = true }
+plexspaces-process-groups = { workspace = true }
+plexspaces-facet = { workspace = true }
+plexspaces-application = { path = "../application" }
+plexspaces-wasm-runtime = { path = "../wasm-runtime" }
+plexspaces-actor = { workspace = true }
+plexspaces-blob = { path = "../blob" }
+plexspaces-workflow = { workspace = true }
+plexspaces-firecracker = { workspace = true, optional = true }
+sysinfo = "0.30"
+
+# Blob service dependencies
+bytes = "1.5"
+object_store = { version = "0.10", features = ["aws", "gcp", "azure"] }
+sha2 = "0.10"
+regex = "1.10"
+hex = "0.4"
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+tokio-stream = "0.1"
+async-trait = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = "1.0"
+
+# Observability
+metrics = "0.23"
+tracing = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+ulid = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = "1.0"
+rand = "0.8"
+
+[dev-dependencies]
+tokio-test = "0.4"
+plexspaces-grpc-middleware = { path = "../grpc-middleware" }
+jsonwebtoken = "9.0"
+reqwest = { version = "0.11", features = ["json"] }
+tempfile = "3.8"
+plexspaces-node = { path = "../node" }
+
+[features]
+default = []
+firecracker = ["plexspaces-firecracker"]
+
+[lib]
+name = "plexspaces_services"
+path = "src/lib.rs"
+

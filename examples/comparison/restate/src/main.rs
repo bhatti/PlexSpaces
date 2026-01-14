@@ -174,10 +174,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn using ActorFactory with facets
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
     use std::sync::Arc;
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let actor_id = "payment-service@comparison-node-1".to_string();
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     let _message_sender = actor_factory.spawn_actor(
         &ctx,
         &actor_id,
@@ -299,10 +299,10 @@ mod tests {
         // Spawn using ActorFactory with facets
         use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
         use std::sync::Arc;
-        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().get_service().await
+        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
             .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
         let actor_id = "test-payment@test-node".to_string();
-        let ctx = plexspaces_core::RequestContext::internal();
+        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
         let _message_sender = actor_factory.spawn_actor(
             &ctx,
             &actor_id,

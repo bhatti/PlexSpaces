@@ -94,7 +94,7 @@ async fn create_test_node(node_id: &str) -> Arc<Node> {
     
     let node = Arc::new(
         NodeBuilder::new(node_id)
-            .with_listen_address(format!("127.0.0.1:{}", port))
+            .with_listen_addr(format!("127.0.0.1:{}", port))
             .build()
             .await
     );
@@ -174,10 +174,10 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
                 eprintln!("✅ WASM component deployment succeeded!");
                 
                 // Verify application is registered
-                use plexspaces_core::ApplicationManager;
-                use plexspaces_core::service_locator::service_names;
+                use plexspaces_application::ApplicationManager;
+                use plexspaces_core::service_names;
                 let app_manager: Arc<ApplicationManager> = node.service_locator()
-                    .get_service_by_name(service_names::APPLICATION_MANAGER)
+                    .application_manager()
                     .await
                     .expect("ApplicationManager should be available");
                 
@@ -294,10 +294,10 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
                 eprintln!("✅ WASM component deployment with supervisor tree succeeded!");
                 
                 // Verify application is registered
-                use plexspaces_core::ApplicationManager;
-                use plexspaces_core::service_locator::service_names;
+                use plexspaces_application::ApplicationManager;
+                use plexspaces_core::service_names;
                 let app_manager: Arc<ApplicationManager> = node.service_locator()
-                    .get_service_by_name(service_names::APPLICATION_MANAGER)
+                    .application_manager()
                     .await
                     .expect("ApplicationManager should be available");
                 
@@ -312,7 +312,7 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
                 // The auto-generated ApplicationSpec creates one worker actor with the application name as actor ID
                 use plexspaces_core::ActorRegistry;
                 let actor_registry: Arc<ActorRegistry> = node.service_locator()
-                    .get_service_by_name(service_names::ACTOR_REGISTRY)
+                    .actor_registry()
                     .await
                     .expect("ActorRegistry should be available");
                 

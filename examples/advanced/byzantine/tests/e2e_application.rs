@@ -19,12 +19,12 @@
 //! End-to-End Application Framework Tests
 //!
 //! ## Purpose
-//! Tests the full Application/Release framework using PlexSpacesNode with the
+//! Tests the full Application/Release framework using Node with the
 //! Byzantine Generals example.
 //!
 //! ## What This Tests
 //! - Loading release.toml configuration
-//! - Creating PlexSpacesNode with Release
+//! - Creating Node with Release
 //! - Registering ByzantineApplication
 //! - Starting node (loads and starts application)
 //! - Verifying application is running
@@ -33,15 +33,16 @@
 //! ## Phase 2.5 Verification
 //! These tests verify the Application/Release framework (70% complete → 100%)
 
+use std::sync::Arc;
 use plexspaces::release::Release;
-use plexspaces::plexspaces_node::PlexSpacesNode;
+use plexspaces_node::{Node, NodeBuilder};
 use byzantine_generals::application::ByzantineApplication;
 
-/// Test: Create PlexSpacesNode from release.toml and start/stop
+/// Test: Create Node from release.toml and start/stop
 ///
 /// ## Scenario
 /// 1. Load release.toml configuration
-/// 2. Create PlexSpacesNode
+/// 2. Create Node with Release
 /// 3. Register ByzantineApplication
 /// 4. Start node (should load and start application)
 /// 5. Verify application state
@@ -56,7 +57,7 @@ use byzantine_generals::application::ByzantineApplication;
 /// - Application stop() is called
 #[tokio::test]
 async fn test_byzantine_application_e2e() {
-    println!("🧪 TEST: Byzantine Application E2E with PlexSpacesNode");
+    println!("🧪 TEST: Byzantine Application E2E with Node");
 
     // 1. Load release.toml
     println!("\n📂 Step 1: Loading release.toml...");
@@ -71,19 +72,24 @@ async fn test_byzantine_application_e2e() {
         release.spec().version
     );
 
-    // 2. Create PlexSpacesNode
-    println!("\n🖥️  Step 2: Creating PlexSpacesNode...");
-    let node = PlexSpacesNode::new(release);
-    println!("   ✅ PlexSpacesNode created");
+    // 2. Create Node with Release
+    println!("\n🖥️  Step 2: Creating Node with Release...");
+    let node = Arc::new(
+        NodeBuilder::new("byzantine-node")
+            .with_release_spec(release.spec().clone())
+            .build()
+            .await
+    );
+    println!("   ✅ Node created");
 
     // 3. Register ByzantineApplication
     println!("\n📝 Step 3: Registering ByzantineApplication...");
-    let app = ByzantineApplication::new(4, 1); // 4 generals, 1 Byzantine
-    node.register_application("byzantine-generals", Box::new(app)).await;
+    let app = Box::new(ByzantineApplication::new(4, 1)); // 4 generals, 1 Byzantine
+    node.register_application(app).await.expect("Failed to register application");
     println!("   ✅ Application registered");
 
-    // 4. Start node
-    println!("\n🚀 Step 4: Starting PlexSpacesNode...");
+    // 4. Start node (will auto-start applications from Release)
+    println!("\n🚀 Step 4: Starting Node...");
     node.start().await.expect("Failed to start node");
     println!("   ✅ Node started successfully");
 
@@ -97,8 +103,8 @@ async fn test_byzantine_application_e2e() {
     println!("   ✅ Application is running");
 
     // 6. Shutdown node
-    println!("\n🛑 Step 6: Shutting down PlexSpacesNode...");
-    node.shutdown().await.expect("Failed to shutdown node");
+    println!("\n🛑 Step 6: Shutting down Node...");
+    node.shutdown(tokio::time::Duration::from_secs(30)).await.expect("Failed to shutdown node");
     println!("   ✅ Node shutdown complete");
 
     println!("\n✅ TEST PASSED: Byzantine Application E2E");
@@ -132,14 +138,19 @@ async fn test_application_environment_configuration() {
     println!("   ✅ Environment variables present in release spec");
 
     // Create node and register app
-    let node = PlexSpacesNode::new(release);
-    let app = ByzantineApplication::new(4, 1);
-    node.register_application("byzantine-generals", Box::new(app)).await;
+    let node = Arc::new(
+        NodeBuilder::new("byzantine-node")
+            .with_release_spec(release.spec().clone())
+            .build()
+            .await
+    );
+    let app = Box::new(ByzantineApplication::new(4, 1));
+    node.register_application(app).await.expect("Failed to register application");
 
     // Start and shutdown
     node.start().await.expect("Failed to start");
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    node.shutdown().await.expect("Failed to shutdown");
+    node.shutdown(tokio::time::Duration::from_secs(30)).await.expect("Failed to shutdown");
 
     println!("✅ TEST PASSED: Environment Configuration");
 }
@@ -211,9 +222,14 @@ async fn test_graceful_shutdown_with_timeout() {
     println!("   ⏱️  Global timeout: {}s", shutdown.global_timeout_seconds);
     println!("   ⏱️  Grace period: {}s", shutdown.grace_period_seconds);
 
-    let node = PlexSpacesNode::new(release);
-    let app = ByzantineApplication::new(4, 1);
-    node.register_application("byzantine-generals", Box::new(app)).await;
+    let node = Arc::new(
+        NodeBuilder::new("byzantine-node")
+            .with_release_spec(release.spec().clone())
+            .build()
+            .await
+    );
+    let app = Box::new(ByzantineApplication::new(4, 1));
+    node.register_application(app).await.expect("Failed to register application");
 
     // Start
     let _start_time = std::time::Instant::now();
@@ -222,7 +238,7 @@ async fn test_graceful_shutdown_with_timeout() {
 
     // Shutdown and measure duration
     let shutdown_start = std::time::Instant::now();
-    node.shutdown().await.expect("Failed to shutdown");
+    node.shutdown(tokio::time::Duration::from_secs(30)).await.expect("Failed to shutdown");
     let shutdown_duration = shutdown_start.elapsed();
 
     println!("   ⏱️  Shutdown completed in: {:?}", shutdown_duration);
@@ -239,7 +255,7 @@ async fn test_graceful_shutdown_with_timeout() {
 //
 // ## Current Status
 // ✅ Byzantine Application framework integration complete
-// ✅ E2E tests with PlexSpacesNode working
+// ✅ E2E tests with Node working
 // ✅ Environment configuration verified
 // ✅ Dependency resolution tested
 // ✅ Graceful shutdown verified

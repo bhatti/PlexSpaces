@@ -21,7 +21,7 @@ use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{grpc_service::ActorServiceImpl, Node, NodeBuilder, NodeConfig, NodeId};
 use plexspaces_proto::ActorServiceServer;
 use plexspaces_core::ExitReason;
-use plexspaces_core::service_locator::service_names;
+use plexspaces_core::service_names;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -186,7 +186,7 @@ async fn test_local_actor_termination_notification() {
     .unwrap();
 
     // Act: Terminate the actor (unregister simulates termination)
-    let actor_registry = node.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
+    let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Normal).await;
 
     // Assert: Supervisor receives termination notification
@@ -211,12 +211,12 @@ async fn test_remote_actor_termination_notification() {
     // which may not match the actual bound gRPC server address.
     use plexspaces_node::NodeBuilder;
     let node1 = Arc::new(NodeBuilder::new("node1")
-        .with_listen_address("127.0.0.1:0")
+        .with_listen_addr("127.0.0.1:0")
         .build()
         .await);
 
     let node2 = Arc::new(NodeBuilder::new("node2")
-        .with_listen_address("127.0.0.1:0")
+        .with_listen_addr("127.0.0.1:0")
         .build()
         .await);
 
@@ -258,7 +258,7 @@ async fn test_remote_actor_termination_notification() {
         .unwrap();
 
     // Act: Actor on node2 terminates (node2 sends notification to node1)
-    let actor_registry2 = node2.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
+    let actor_registry2 = node2.service_locator().actor_registry().await.unwrap();
     actor_registry2.handle_actor_termination(&"worker@node2".to_string(), ExitReason::Shutdown).await;
 
     // Assert: Supervisor on node1 receives notification
@@ -338,7 +338,7 @@ async fn test_multiple_monitors_same_actor() {
     assert!(mon2.is_ok(), "Second monitor should succeed");
 
     // Terminate actor
-    let actor_registry = node.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
+    let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Error("crash".to_string())).await;
 
     // Assert: BOTH supervisors receive notification
@@ -424,7 +424,7 @@ async fn test_actor_crash_reason_propagation() {
 
     // Act: Terminate with specific error reason
     let crash_reason = "panic: index out of bounds at line 42";
-    let actor_registry = node.service_locator().get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await.unwrap();
+    let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry.handle_actor_termination(&"worker@node1".to_string(), ExitReason::Error(crash_reason.to_string())).await;
 
     // Assert: Exact crash reason received

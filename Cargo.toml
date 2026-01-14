@@ -7,14 +7,13 @@ members = [
     "crates/persistence",
     "crates/journaling",
     "crates/tuplespace",
-    "crates/tuplespace-service",
     "crates/common",
     "crates/keyvalue",
     "crates/facet",
     "crates/core",
+    "crates/application",
     "crates/behavior",
     "crates/actor",
-    "crates/actor-service",
     "crates/node",
     "crates/supervisor",
     "crates/grpc-middleware",
@@ -30,6 +29,7 @@ members = [
     "crates/scheduler",
     "crates/cli",
     "crates/dashboard",
+    "crates/services",
 ]
 # Default members: Exclude rarely-changed or optional crates from default builds
 # This speeds up default `cargo build` and `cargo test` by only building frequently-changed crates
@@ -43,14 +43,13 @@ default-members = [
     "crates/persistence",
     "crates/journaling",
     "crates/tuplespace",
-    "crates/tuplespace-service",
     "crates/common",
     "crates/keyvalue",
     "crates/facet",
     "crates/core",
+    "crates/application",
     "crates/behavior",
     "crates/actor",
-    "crates/actor-service",
     "crates/node",
     "crates/supervisor",
     "crates/grpc-middleware",
@@ -67,6 +66,7 @@ default-members = [
     # "crates/firecracker",     # Only needed for Firecracker integration
     # "crates/cli",             # Only needed for CLI tools
     # "crates/dashboard",       # Only needed for dashboard UI
+    "crates/services",        # Service implementations (consolidated)
 ]
 exclude = [
     "examples/*",  # Examples are standalone, not part of workspace
@@ -93,7 +93,7 @@ description = "Distributed actor framework with 5 foundational pillars"
 # plexspaces-actor = { path = "crates/actor" }
 # plexspaces-mailbox = { path = "crates/mailbox" }
 # plexspaces-tuplespace = { path = "crates/tuplespace" }
-# plexspaces-supervisor = { path = "crates/supervisor" }
+# # plexspaces-supervisor merged into plexspaces-actor
 # plexspaces-persistence = { path = "crates/persistence" }
 
 # Independent crates - no circular dependencies
@@ -104,9 +104,10 @@ plexspaces-persistence = { path = "crates/persistence" }
 plexspaces-tuplespace = { path = "crates/tuplespace" }
 plexspaces-facet = { path = "crates/facet" }
 plexspaces-core = { path = "crates/core" }
+plexspaces-application = { path = "crates/application" }
 plexspaces-behavior = { path = "crates/behavior" }
 plexspaces-actor = { path = "crates/actor" }
-plexspaces-supervisor = { path = "crates/supervisor" }
+# plexspaces-supervisor merged into plexspaces-actor
 plexspaces-node = { path = "crates/node" }
 plexspaces-keyvalue = { path = "crates/keyvalue" }
 
@@ -259,10 +260,11 @@ plexspaces-tuplespace = { path = "crates/tuplespace" }
 plexspaces-keyvalue = { path = "crates/keyvalue" }
 plexspaces-facet = { path = "crates/facet" }
 plexspaces-core = { path = "crates/core" }
+plexspaces-application = { path = "crates/application" }
 plexspaces-behavior = { path = "crates/behavior" }
 plexspaces-actor = { path = "crates/actor" }
 plexspaces-node = { path = "crates/node" }
-plexspaces-supervisor = { path = "crates/supervisor" }
+# plexspaces-supervisor merged into plexspaces-actor
 plexspaces-wasm-runtime = { path = "crates/wasm-runtime" }
 plexspaces-firecracker = { path = "crates/firecracker" }
 plexspaces-workflow = { path = "crates/workflow" }
@@ -274,7 +276,6 @@ plexspaces-scheduler = { path = "crates/scheduler" }
 plexspaces-object-registry = { path = "crates/object-registry" }
 plexspaces-process-groups = { path = "crates/process-groups" }
 plexspaces-journaling = { path = "crates/journaling" }
-plexspaces-actor-service = { path = "crates/actor-service" }
 plexspaces-dashboard = { path = "crates/dashboard" }
 
 # Add more workspace dependencies

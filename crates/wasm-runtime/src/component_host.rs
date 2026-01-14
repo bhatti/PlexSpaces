@@ -27,13 +27,11 @@ use std::sync::Arc;
 use wasmtime::Result as WasmtimeResult;
 
 /// Helper function to convert WIT context to RequestContext
-/// Empty strings use internal context, non-empty strings create tenant-scoped context
+/// Uses tenant_id/namespace from WIT context (from gRPC request), or empty strings if not provided
 fn context_to_request_context(ctx: &plexspaces::actor::types::Context) -> RequestContext {
-    if ctx.tenant_id.is_empty() && ctx.namespace.is_empty() {
-        RequestContext::internal()
-    } else {
-        RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone())
-    }
+    // Use tenant_id/namespace from WIT context (which comes from gRPC request)
+    // If empty, use empty strings (works when auth is disabled)
+    RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone())
 }
 
 /// Host implementation for plexspaces host interfaces
@@ -2337,8 +2335,11 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Get blob metadata first to extract tenant/namespace for proper RequestContext
-            // Use internal context temporarily to get metadata
-            let temp_ctx = RequestContext::internal();
+            // Use empty tenant/namespace for metadata lookup (works when auth is disabled)
+            // The metadata will contain the actual tenant/namespace for the blob
+            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true)
+                .with_internal(true);
             let metadata = blob_service.get_metadata(&temp_ctx, &effective_blob_id).await
                 .map_err(|e| {
                     let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
@@ -2440,8 +2441,11 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Get blob metadata first to extract tenant/namespace for proper RequestContext
-            // Use internal context temporarily to get metadata
-            let temp_ctx = RequestContext::internal();
+            // Use empty tenant/namespace for metadata lookup (works when auth is disabled)
+            // The metadata will contain the actual tenant/namespace for the blob
+            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true)
+                .with_internal(true);
             let metadata = blob_service.get_metadata(&temp_ctx, &effective_blob_id).await
                 .map_err(|e| {
                     let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
@@ -2530,8 +2534,10 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Get blob metadata to check existence and extract tenant/namespace for proper RequestContext
-            // Use internal context temporarily to get metadata
-            let temp_ctx = RequestContext::internal();
+            // Use empty tenant/namespace for metadata lookup (works when auth is disabled)
+            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true)
+                .with_internal(true);
             match blob_service.get_metadata(&temp_ctx, &effective_blob_id).await {
                 Ok(metadata) => {
                     // Blob exists - return true (we could use the metadata to create proper context
@@ -2692,9 +2698,11 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 blob_id
             };
             
-            // Get metadata using BlobService - use internal context to get metadata first
+            // Get metadata using BlobService - use empty tenant/namespace for metadata lookup
             // then we can use the metadata's tenant/namespace for proper context if needed
-            let temp_ctx = RequestContext::internal();
+            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true)
+                .with_internal(true);
             match blob_service.get_metadata(&temp_ctx, &effective_blob_id).await {
                 Ok(m) => {
                     let last_modified = m.created_at
@@ -2792,9 +2800,10 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             // Create RequestContext from context (empty strings use defaults)
             let request_ctx = if ctx.tenant_id.is_empty() && ctx.namespace.is_empty() {
                 // If not provided, we need to look up metadata first to get tenant/namespace
-                // This requires a system-level lookup, so we use the repository's internal lookup
-                // which allows looking up by blob_id only when context is internal
-                let temp_ctx = RequestContext::internal();
+                // Use empty tenant/namespace for metadata lookup (works when auth is disabled)
+                let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
+                    .with_admin(true)
+                    .with_internal(true);
                 let source_metadata = blob_service.get_metadata(&temp_ctx, &effective_source_blob_id).await
                     .map_err(|e| {
                         let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
@@ -4728,7 +4737,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
 
-        let options = plexspaces_proto::locks::prv::AcquireLockOptions {
+        let options = plexspaces_core::AcquireLockOptions {
             lock_key: lock_key.clone(),
             holder_id: holder_id.clone(),
             lease_duration_secs,
@@ -4814,7 +4823,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
 
-        let options = plexspaces_proto::locks::prv::RenewLockOptions {
+        let options = plexspaces_core::RenewLockOptions {
             lock_key: lock_key.clone(),
             holder_id: holder_id.clone(),
             version: version.clone(),
@@ -4900,7 +4909,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
 
         let request_ctx = context_to_request_context(&ctx);
 
-        let options = plexspaces_proto::locks::prv::ReleaseLockOptions {
+        let options = plexspaces_core::ReleaseLockOptions {
             lock_key: lock_key.clone(),
             holder_id: holder_id.clone(),
             version: version.clone(),
@@ -4967,7 +4976,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
 
-        let options = plexspaces_proto::locks::prv::AcquireLockOptions {
+        let options = plexspaces_core::AcquireLockOptions {
             lock_key: lock_key.clone(),
             holder_id: holder_id.clone(),
             lease_duration_secs,
@@ -5390,7 +5399,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
 
         // Drop span before await to ensure Send
         drop(_span);
-        match registry.lookup(&request_ctx, proto_object_type, &object_id).await {
+        match registry.lookup_full(&request_ctx, proto_object_type, &object_id).await {
             Ok(Some(proto_reg)) => {
                 let wit_reg = Self::proto_to_wit_registration(&proto_reg);
                 let duration = start_time.elapsed();

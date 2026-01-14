@@ -114,7 +114,24 @@ mod tests {
             _registration: plexspaces_core::ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
-        }
+        
+    async fn unregister(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+    async fn heartbeat(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+}
         async fn discover(&self, _ctx: &plexspaces_core::RequestContext, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>, _name_pattern: Option<String>, _tags: Option<Vec<String>>, _metadata: Option<Vec<String>>, _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>, _offset: usize, _limit: usize) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }

@@ -63,7 +63,7 @@
 //!
 //! ### Basic Usage - Register Actor
 //! ```rust,no_run
-//! use plexspaces_object_registry::ObjectRegistry;
+//! use plexspaces_object_registry::ObjectRegistryImpl;
 //! use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 //! use plexspaces_keyvalue::InMemoryKVStore;
 //! use plexspaces_core::RequestContext;
@@ -71,7 +71,7 @@
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let kv = Arc::new(InMemoryKVStore::new());
-//! let registry = ObjectRegistry::new(kv);
+//! let registry = ObjectRegistryImpl::new(kv);
 //!
 //! // Create RequestContext for tenant isolation
 //! let ctx = RequestContext::new_without_auth("default".to_string(), "production".to_string());
@@ -92,7 +92,7 @@
 //!
 //! ### Discover Objects by Type
 //! ```rust,no_run
-//! # use plexspaces_object_registry::ObjectRegistry;
+//! # use plexspaces_object_registry::ObjectRegistryImpl;
 //! # use plexspaces_proto::object_registry::v1::ObjectType;
 //! # use plexspaces_keyvalue::InMemoryKVStore;
 //! # use plexspaces_core::RequestContext;
@@ -179,7 +179,7 @@ impl From<KVError> for ObjectRegistryError {
     }
 }
 
-/// Unified ObjectRegistry for actors, tuplespaces, and services
+/// Unified ObjectRegistry implementation for actors, tuplespaces, and services
 ///
 /// ## Purpose
 /// Provides centralized registration and discovery for all distributed objects
@@ -193,17 +193,17 @@ impl From<KVError> for ObjectRegistryError {
 ///
 /// ## Examples
 /// ```rust,no_run
-/// # use plexspaces_object_registry::ObjectRegistry;
+/// # use plexspaces_object_registry::ObjectRegistryImpl;
 /// # use plexspaces_keyvalue::InMemoryKVStore;
 /// # use std::sync::Arc;
 /// let kv = Arc::new(InMemoryKVStore::new());
-/// let registry = ObjectRegistry::new(kv);
+/// let registry = ObjectRegistryImpl::new(kv);
 /// ```
-pub struct ObjectRegistry {
+pub struct ObjectRegistryImpl {
     kv_store: Arc<dyn KeyValueStore>,
 }
 
-impl ObjectRegistry {
+impl ObjectRegistryImpl {
     /// Create new ObjectRegistry with given KeyValueStore backend
     ///
     /// ## Arguments
@@ -682,11 +682,15 @@ impl ObjectRegistry {
     }
 }
 
-// ObjectRegistry now implements the trait directly - no wrapper needed!
-impl plexspaces_core::Service for ObjectRegistry {}
+// ObjectRegistryImpl implements the ObjectRegistry trait
+impl plexspaces_core::Service for ObjectRegistryImpl {
+    fn service_name(&self) -> String {
+        "ObjectRegistry".to_string()
+    }
+}
 
 #[async_trait::async_trait]
-impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistry {
+impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
     async fn lookup(
         &self,
         ctx: &RequestContext,
@@ -734,6 +738,28 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistry {
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
+
+    async fn unregister(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.unregister(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn heartbeat(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.heartbeat(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
 #[cfg(test)]
@@ -755,7 +781,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_and_lookup() {
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistry::new(kv);
+        let registry = ObjectRegistryImpl::new(kv);
 
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
@@ -775,7 +801,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_duplicate_fails() {
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistry::new(kv);
+        let registry = ObjectRegistryImpl::new(kv);
 
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
@@ -793,7 +819,7 @@ mod tests {
     #[tokio::test]
     async fn test_unregister() {
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistry::new(kv);
+        let registry = ObjectRegistryImpl::new(kv);
 
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
@@ -815,7 +841,7 @@ mod tests {
     #[tokio::test]
     async fn test_heartbeat() {
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistry::new(kv);
+        let registry = ObjectRegistryImpl::new(kv);
 
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
@@ -842,7 +868,7 @@ mod tests {
     #[tokio::test]
     async fn test_discover_by_type() {
         let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistry::new(kv);
+        let registry = ObjectRegistryImpl::new(kv);
 
         // Note: discover() uses default:default prefix, so we need to register with default tenant/namespace
         let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
@@ -863,3 +889,6 @@ mod tests {
         assert_eq!(actors.len(), 2);
     }
 }
+
+// Type alias for convenience (ObjectRegistryImpl implements ObjectRegistry trait)
+pub type ObjectRegistry = ObjectRegistryImpl;

@@ -28,22 +28,18 @@
 mod r#mod;
 pub use r#mod::*;
 
-// Application manager moved to core crate to break cyclic dependency
-// Re-export for backward compatibility
-pub use plexspaces_core::ApplicationManager;
+// Re-export ApplicationManager for backward compatibility
+pub use plexspaces_application::ApplicationManager;
 
-// Extension trait for node-specific ApplicationManager functionality
-pub mod application_manager_ext;
-pub use application_manager_ext::ApplicationManagerExt;
+// Extension trait moved to plexspaces-application crate
+pub use plexspaces_application::ApplicationManagerExt;
 
-// gRPC service for remote actor communication
-pub mod grpc_service;
+// gRPC service moved to plexspaces-services/actor_service
 
 // gRPC client for remote actor communication
 pub mod grpc_client;
 
-// gRPC service for distributed TupleSpace operations (Phase 3)
-pub mod tuplespace_service;
+// gRPC service for distributed TupleSpace operations moved to plexspaces-services/tuple_service
 
 // HTTP router for blob service endpoints
 pub mod blob_http_router;
@@ -54,17 +50,14 @@ pub mod blob_http_router;
 
 // Node registry removed - replaced by object-registry
 
-// Health service for K8s probes (Phase 5)
-pub mod health_service;
+// Health service moved to plexspaces-core
 
-// Health checker trait for dependency checks
-pub mod health_checker;
+// Health checker moved to plexspaces-core
 
 // Circuit breaker wrapper for health checkers
 pub mod health_checker_circuit_breaker;
 
-// Metrics service for Prometheus export (Phase 5)
-pub mod metrics_service;
+// Metrics service moved to plexspaces-services/metrics_service
 
 // OpenTelemetry tracing setup (Phase 5)
 pub mod tracing_setup;
@@ -75,8 +68,7 @@ pub mod standard_health_service;
 // gRPC health service with dependency checks
 pub mod grpc_health_service;
 
-// System service implementation
-pub mod system_service;
+// System service moved to plexspaces-services/system_service
 
 // Automatic dependency registration (includes built-in dependencies)
 pub mod dependency_registration;
@@ -84,15 +76,11 @@ pub mod dependency_registration;
 // External dependency health checkers (MinIO, DynamoDB, SQS)
 pub mod external_dependency_checkers;
 
-// Application service for application-level deployment
-pub mod application_service;
-pub mod application_impl;
-pub mod wasm_application;
-pub mod wasm_message_sender;
+// Application implementations moved to plexspaces-application crate
+// Re-export for backward compatibility
+pub use plexspaces_application::{WasmApplication, SpecApplication};
 
-// Firecracker VM service for VM management and application deployment
-#[cfg(feature = "firecracker")]
-pub mod firecracker_service;
+// Firecracker VM service moved to plexspaces-services/firecracker_service
 
 // Graceful shutdown coordinator (Phase 5)
 pub mod shutdown_coordinator;
@@ -108,7 +96,11 @@ pub mod virtual_actor_wrapper;
 pub use node_builder::NodeBuilder;
 
 // Make Node implement Service trait for ServiceLocator
-impl plexspaces_core::Service for Node {}
+impl plexspaces_core::Service for Node {
+    fn service_name(&self) -> String {
+        plexspaces_core::service_names::NODE.to_string()
+    }
+}
 
 // Configuration bootstrap (Erlang/OTP-inspired)
 pub mod config_bootstrap;
@@ -119,9 +111,9 @@ mod config_loader_yaml;
 mod config_loader_convert;
 pub mod metrics_helper;
 pub mod service_locator_helpers;
+pub use service_locator_helpers::create_default_service_locator;
 pub use config_bootstrap::{ConfigBootstrap, ConfigError};
 pub use metrics_helper::CoordinationComputeTracker;
-pub use service_locator_helpers::create_default_service_locator;
 pub mod health_service_helpers;
 pub use health_service_helpers::{create_and_register_health_service, create_default_health_service};
 

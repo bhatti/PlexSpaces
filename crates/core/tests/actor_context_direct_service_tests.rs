@@ -52,7 +52,24 @@ impl ObjectRegistry for MockObjectRegistry {
     }
     async fn register(&self, _ctx: &plexspaces_core::RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
+    
+    async fn unregister(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
     }
+    async fn heartbeat(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+}
     async fn discover(
         &self,
         _ctx: &plexspaces_core::RequestContext,
@@ -157,10 +174,9 @@ async fn create_test_context_with_services_custom(
     tenant_id: String,
     namespace: String,
 ) -> ActorContext {
-    use plexspaces_core::ServiceLocator;
-    use std::sync::Arc;
-    // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    // Create a ServiceLocator with all default services for testing
+    let service_locator = create_default_service_locator(None, None, None).await;
     
     // Register services in ServiceLocator (if needed for tests)
     // For now, just create context with ServiceLocator

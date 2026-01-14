@@ -63,6 +63,22 @@ impl ObjectRegistry for MockObjectRegistry {
     ) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(vec![])
     }
+    async fn unregister(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+    async fn heartbeat(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
 }
 
 struct MockTupleSpaceProvider;
@@ -115,7 +131,8 @@ async fn create_test_context() -> ActorContext {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     ActorContext::new(
         "test-node".to_string(),
         "tenant-123".to_string(),  // tenant_id
@@ -141,7 +158,8 @@ async fn test_actor_context_new_with_config() {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_node::service_locator_helpers::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "tenant-123".to_string(),  // tenant_id

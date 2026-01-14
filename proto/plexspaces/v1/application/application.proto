@@ -570,21 +570,6 @@ service ApplicationService {
     };
   }
 
-  // Start an application (legacy, use DeployApplication for new deployments)
-  rpc StartApplication(StartApplicationRequest) returns (StartApplicationResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/applications/{name}:start"
-      body: "*"
-    };
-  }
-
-  // Stop an application (legacy, use UndeployApplication for new deployments)
-  rpc StopApplication(StopApplicationRequest) returns (StopApplicationResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/applications/{name}:stop"
-      body: "*"
-    };
-  }
 }
 
 // Deploy application request
@@ -714,29 +699,3 @@ message GetApplicationStatusResponse {
   optional string error = 3;
 }
 
-// Request to start an application (legacy).
-message StartApplicationRequest {
-  // Application name to start
-  string name = 1;
-}
-
-// Response from starting an application (legacy).
-message StartApplicationResponse {
-  // Started application instance
-  Application application = 1;
-}
-
-// Request to stop an application (legacy).
-message StopApplicationRequest {
-  // Application name to stop
-  string name = 1;
-
-  // Force immediate shutdown (ignore graceful strategy)
-  bool force = 2;
-}
-
-// Response from stopping an application (legacy).
-message StopApplicationResponse {
-  // Stopped application instance
-  Application application = 1;
-}

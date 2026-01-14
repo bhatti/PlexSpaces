@@ -22,7 +22,7 @@
 //! Provides node-specific extensions to ApplicationManager that require
 //! knowledge of node-specific application types (SpecApplication, WasmApplication).
 
-use plexspaces_core::ApplicationManager;
+use plexspaces_application::ApplicationManager;
 use plexspaces_proto::application::v1::ApplicationSpec;
 use std::sync::Arc;
 
@@ -41,8 +41,7 @@ pub trait ApplicationManagerExt {
 
 impl ApplicationManagerExt for Arc<ApplicationManager> {
     async fn get_application_spec(&self, name: &str) -> Option<ApplicationSpec> {
-        use crate::application_impl::SpecApplication;
-        use crate::wasm_application::WasmApplication;
+        use plexspaces_application::{SpecApplication, WasmApplication};
         
         self.with_application(name, |app_any| {
             // Try to downcast to SpecApplication

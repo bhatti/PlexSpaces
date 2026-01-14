@@ -152,6 +152,9 @@ pub struct DurabilityFacet {
     /// Replay handler for deterministic message replay
     replay_handler: Arc<RwLock<Option<Box<dyn ReplayHandler>>>>,
 
+    /// Actor context (stored when replay handler is set, used for replay)
+    actor_context: Arc<RwLock<Option<Arc<ActorContext>>>>,
+
     /// State loader for automatic checkpoint state deserialization (optional)
     state_loader: Arc<RwLock<Option<Box<dyn StateLoader>>>>,
 }
@@ -227,6 +230,7 @@ impl DurabilityFacet {
             pending_promises: Arc::new(RwLock::new(HashSet::new())),
             resolved_promises: Arc::new(RwLock::new(HashMap::new())),
             replay_handler: Arc::new(RwLock::new(None)),
+            actor_context: Arc::new(RwLock::new(None)),
             state_loader: Arc::new(RwLock::new(None)),
         }
     }
@@ -283,13 +287,17 @@ impl DurabilityFacet {
     ///
     /// ## Arguments
     /// * `handler` - Replay handler that will replay messages through actor's handler
+    /// * `context` - Actor context to use during replay (should match the handler's stored context)
     ///
     /// ## Notes
     /// - Must be called before `on_attach()` if replay is enabled
     /// - Handler will be used during `replay_journal_with_handler()`
-    pub async fn set_replay_handler(&self, handler: Box<dyn ReplayHandler>) {
+    /// - Context is stored and used instead of creating a dummy context
+    pub async fn set_replay_handler(&self, handler: Box<dyn ReplayHandler>, context: Arc<ActorContext>) {
         let mut h = self.replay_handler.write().await;
         *h = Some(handler);
+        let mut ctx = self.actor_context.write().await;
+        *ctx = Some(context);
     }
 
 
@@ -429,7 +437,7 @@ impl DurabilityFacet {
     /// - Replays MessageReceived entries through ReplayHandler (if set)
     /// - Side effects are cached (not re-executed)
     /// - ExecutionContext is in REPLAY mode during replay
-    /// - Gets ActorContext from ReplayHandler (handler stores it)
+    /// - Uses ActorContext passed to set_replay_handler (no hacks, clean design)
     async fn replay_journal_with_handler(
         &self,
         actor_id: &str,
@@ -479,9 +487,6 @@ impl DurabilityFacet {
         // happens when we replay MessageReceived through the handler
         let replay_handler = self.replay_handler.read().await;
         if let Some(handler) = replay_handler.as_ref() {
-            // Get ActorContext from handler (it's stored in ActorReplayHandler)
-            // We'll use a dummy context for now - the handler has the real context
-            // The handler's replay_message will use its own stored context
             for entry in &entries {
                 use plexspaces_proto::v1::journaling::journal_entry::Entry;
                 if let Some(Entry::MessageReceived(ref msg_received)) = entry.entry {
@@ -498,28 +503,12 @@ impl DurabilityFacet {
                     message.idempotency_key = None;
 
                     // Replay message through handler (ExecutionContext is in REPLAY mode)
-                    // Handler will use its stored ActorContext (ignores the context parameter)
-                    // ExecutionContext will automatically return cached side effects
-                    // instead of executing them (deterministic replay)
-                    // Note: We pass a dummy context here - handler uses its own stored context
-                    // For replay, we need tenant_id from the actor's context
-                    // This is a placeholder - in production, tenant_id should come from actor's actual context
-                    // Note: This is acceptable here as it's internal replay logic
-                    // Use internal context for system operations
-                    use plexspaces_core::RequestContext;
-                    let internal_ctx = RequestContext::internal();
-                    // Create minimal ServiceLocator for replay context
-                    // This is used internally for replay operations, not for production actor context
-                    use plexspaces_core::ServiceLocator;
-                    let service_locator = Arc::new(ServiceLocator::new());
-                    let dummy_context = ActorContext::new(
-                        "local".to_string(),
-                        internal_ctx.tenant_id().to_string(),  // tenant_id
-                        internal_ctx.namespace().to_string(),  // namespace
-                        service_locator,
-                        None,
-                    );
-                    handler.replay_message(message, &dummy_context).await
+                    // Use the stored ActorContext instead of creating a dummy one
+                    let stored_context = self.actor_context.read().await;
+                    let context = stored_context.as_ref().ok_or_else(|| {
+                        JournalError::Replay("ActorContext not set - call set_replay_handler with context first".to_string())
+                    })?;
+                    handler.replay_message(message, context).await
                         .map_err(|e| JournalError::Replay(format!("Replay failed: {}", e)))?;
                 }
             }

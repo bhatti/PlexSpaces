@@ -46,12 +46,12 @@ pub struct VirtualActorWrapper {
     /// Actor ID
     actor_id: ActorId,
     /// ServiceLocator for accessing VirtualActorManager and ActorFactory
-    service_locator: Arc<ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
 }
 
 impl VirtualActorWrapper {
     /// Create a new VirtualActorWrapper
-    pub fn new(actor_id: ActorId, service_locator: Arc<ServiceLocator>) -> Self {
+    pub fn new(actor_id: ActorId, service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Self {
         Self {
             actor_id,
             service_locator,
@@ -65,7 +65,7 @@ impl MessageSender for VirtualActorWrapper {
         tracing::warn!("🔵 [VIRTUAL_ACTOR_WRAPPER] tell() called: actor_id={}, message_id={}, message_type={:?}", 
             self.actor_id, message.id, message.message_type);
         // Get VirtualActorManager from ServiceLocator
-        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::VIRTUAL_ACTOR_MANAGER).await
+        let manager: Arc<VirtualActorManager> = self.service_locator.virtual_actor_manager().await
             .ok_or_else(|| "VirtualActorManager not registered in ServiceLocator".to_string())?;
         
         // Check if actor is activated (has mailbox)
@@ -99,7 +99,7 @@ impl MessageSender for VirtualActorWrapper {
             // CRITICAL: After activation, get the ActorRef and send the message
             // activate_virtual_actor is synchronous (awaits actor.start()), so actor is ready
             use plexspaces_core::ActorRegistry;
-            let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+            let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
                 .ok_or_else(|| "ActorRegistry not registered in ServiceLocator".to_string())?;
             
             // Get ActorRef (should be available now since activation is synchronous)
@@ -128,7 +128,7 @@ impl MessageSender for VirtualActorWrapper {
         // Get MessageSender (which will be ActorRef for activated actors)
         tracing::warn!("🔵 [VIRTUAL_ACTOR_WRAPPER] Actor is active, using ActorRef: actor_id={}", self.actor_id);
         use plexspaces_core::ActorRegistry;
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+        let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not registered in ServiceLocator".to_string())?;
         
         let sender = registry.lookup_actor(&self.actor_id).await

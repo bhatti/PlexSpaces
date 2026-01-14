@@ -247,9 +247,9 @@ async fn test_wasm_deployment_with_applicationspec_creates_actors() {
     };
     
     // Deploy via gRPC ApplicationService (more reliable than HTTP for ApplicationSpec)
-    use plexspaces_node::application_service::ApplicationServiceImpl;
+    use plexspaces_services::application_service::ApplicationServiceImpl;
     let application_manager = node.application_manager().await.expect("ApplicationManager should be available");
-    let app_service = ApplicationServiceImpl::new(node.clone(), application_manager);
+    let app_service = ApplicationServiceImpl::new(node.service_locator().clone());
     
     let wasm_module = WasmModule {
         name: "test-wasm-app".to_string(),

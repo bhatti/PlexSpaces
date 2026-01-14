@@ -205,10 +205,10 @@ async fn test_lifecycle_event_subscription_receives_termination() {
     // Unregister actor to trigger termination
     // Manually publish lifecycle event since watch_actor_termination only fires when join handle completes
     use plexspaces_core::{ActorRegistry, ExitReason};
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_proto::{ActorLifecycleEvent, actor_lifecycle_event::EventType as LifecycleEventType, v1::actor::ActorTerminated};
     use prost_types::Timestamp;
-    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service_by_name(service_names::ACTOR_REGISTRY).await.unwrap();
+    let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await.unwrap();
     let actor_id = actor_ref.id().clone();
     drop(actor_ref);
     
@@ -318,10 +318,10 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
 
     // Terminate actor
     use plexspaces_core::{ActorRegistry, ExitReason};
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_proto::{ActorLifecycleEvent, actor_lifecycle_event::EventType as LifecycleEventType, v1::actor::ActorTerminated};
     use prost_types::Timestamp;
-    let actor_registry: Arc<ActorRegistry> = node.service_locator().get_service_by_name(service_names::ACTOR_REGISTRY).await.unwrap();
+    let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await.unwrap();
     let actor_id = actor_ref.id().clone();
     drop(actor_ref);
     
@@ -535,7 +535,7 @@ async fn test_lifecycle_event_unsubscribe() {
 async fn test_remote_actor_termination_with_lifecycle_events() {
     use plexspaces_actor::Actor;
     use plexspaces_behavior::MockBehavior;
-    use plexspaces_node::grpc_service::ActorServiceImpl;
+    use plexspaces_services::actor_service::ActorServiceImpl;
     use plexspaces_persistence::MemoryJournal;
     use plexspaces_proto::ActorServiceServer;
     use tonic::transport::Server;
@@ -626,10 +626,10 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
         .expect("Message processing should complete quickly");
     // Terminate actor on node2
     use plexspaces_core::{ActorRegistry, ExitReason};
-    use plexspaces_core::service_locator::service_names;
+    use plexspaces_core::service_names;
     use plexspaces_proto::{ActorLifecycleEvent, actor_lifecycle_event::EventType as LifecycleEventType, v1::actor::ActorTerminated};
     use prost_types::Timestamp;
-    let actor_registry_node2: Arc<ActorRegistry> = node2.service_locator().get_service_by_name(service_names::ACTOR_REGISTRY).await.unwrap();
+    let actor_registry_node2: Arc<ActorRegistry> = node2.service_locator().actor_registry().await.unwrap();
     let actor_id = actor_ref.id().clone();
     drop(actor_ref);
     

@@ -140,11 +140,11 @@ impl WasmInstance {
         channel_service: Option<Arc<dyn ChannelService>>,
         message_sender: Option<Arc<dyn crate::MessageSender>>,
         tuplespace_provider: Option<Arc<dyn plexspaces_core::TupleSpaceProvider>>,
-        keyvalue_store: Option<Arc<dyn plexspaces_keyvalue::KeyValueStore>>,
+        keyvalue_store: Option<Arc<dyn plexspaces_core::KeyValueStore>>,
         process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>>,
-        lock_manager: Option<Arc<dyn plexspaces_locks::LockManager>>,
-        object_registry: Option<Arc<plexspaces_object_registry::ObjectRegistry>>,
-        journal_storage: Option<Arc<dyn plexspaces_journaling::JournalStorage>>,
+        lock_manager: Option<Arc<dyn plexspaces_core::LockManager>>,
+        object_registry: Option<Arc<dyn plexspaces_core::actor_context::ObjectRegistry>>,
+        journal_storage: Option<Arc<dyn plexspaces_core::JournalStorage>>,
         
         blob_service: Option<Arc<plexspaces_blob::BlobService>>,
     ) -> WasmResult<Self> {

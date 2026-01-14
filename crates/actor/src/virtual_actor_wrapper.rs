@@ -61,7 +61,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use plexspaces_core::{MessageSender, ActorId, VirtualActorManager, ServiceLocator};
+use plexspaces_core::{MessageSender, ActorId, VirtualActorManager, ServiceLocator as ServiceLocatorTrait};
 use crate::ActorFactory;
 use plexspaces_mailbox::Message;
 
@@ -78,12 +78,12 @@ pub struct VirtualActorWrapper {
     /// Actor ID
     actor_id: ActorId,
     /// ServiceLocator for accessing VirtualActorManager and ActorFactory
-    service_locator: Arc<ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocatorTrait>,
 }
 
 impl VirtualActorWrapper {
     /// Create a new VirtualActorWrapper
-    pub fn new(actor_id: ActorId, service_locator: Arc<ServiceLocator>) -> Self {
+    pub fn new(actor_id: ActorId, service_locator: Arc<dyn ServiceLocatorTrait>) -> Self {
         Self {
             actor_id,
             service_locator,
@@ -105,7 +105,7 @@ impl MessageSender for VirtualActorWrapper {
         // tell() should fail immediately if actor is not registered (synchronous check)
         // VirtualActorWrapper should always be in registry for virtual actors
         use plexspaces_core::ActorRegistry;
-        let registry: Arc<ActorRegistry> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await
+        let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not registered in ServiceLocator".to_string())?;
         
         // Check if actor is registered (VirtualActorWrapper should be in registry for virtual actors)
@@ -118,7 +118,7 @@ impl MessageSender for VirtualActorWrapper {
         }
         
         // Get VirtualActorManager from ServiceLocator (reuse registry from above)
-        let manager: Arc<VirtualActorManager> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::VIRTUAL_ACTOR_MANAGER).await
+        let manager: Arc<VirtualActorManager> = self.service_locator.virtual_actor_manager().await
             .ok_or_else(|| "VirtualActorManager not registered in ServiceLocator".to_string())?;
         
         // ORLEANS DESIGN: Check if actor is activated (has running message loop)
@@ -181,8 +181,8 @@ impl MessageSender for VirtualActorWrapper {
             
             // Activate the virtual actor using ActorFactory
             // This is synchronous - it awaits actor.start() which registers the actor
-            use crate::actor_factory_impl::ActorFactoryImpl;
-            let factory: Arc<ActorFactoryImpl> = self.service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_FACTORY_IMPL).await
+            use crate::{ActorFactory, get_actor_factory};
+            let factory: Arc<dyn ActorFactory> = get_actor_factory(self.service_locator.as_ref()).await
                 .ok_or_else(|| "ActorFactory not registered in ServiceLocator".to_string())?;
             
             // Activate (synchronous - completes when actor is registered and message loop is running)

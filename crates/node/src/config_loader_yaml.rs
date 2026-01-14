@@ -28,7 +28,8 @@ pub struct ReleaseYaml {
 #[derive(Debug, Deserialize)]
 pub struct NodeConfigYaml {
     pub id: String,
-    pub listen_address: String,
+    #[serde(rename = "listen_address", alias = "listen_addr")]
+    pub listen_addr: String,
     #[serde(default)]
     pub cluster_seed_nodes: Vec<String>,
 }

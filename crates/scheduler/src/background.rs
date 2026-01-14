@@ -136,7 +136,7 @@ impl BackgroundScheduler {
                 refresh_period_ms: 100,
                 metadata: std::collections::HashMap::new(),
             };
-            let ctx = RequestContext::internal();
+            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
             self.lock_manager
                 .acquire_lock(&ctx, options)
                 .await
@@ -185,7 +185,7 @@ impl BackgroundScheduler {
             metadata: std::collections::HashMap::new(),
         };
 
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         self.lock_manager
             .acquire_lock(&ctx, options)
             .await
@@ -208,7 +208,7 @@ impl BackgroundScheduler {
                 metadata: std::collections::HashMap::new(),
             };
 
-            let ctx = RequestContext::internal();
+            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
             match self.lock_manager.renew_lock(&ctx, options).await {
                 Ok(renewed) => {
                     let mut current = self.current_lease.write().await;
@@ -240,7 +240,7 @@ impl BackgroundScheduler {
                 delete_lock: false, // Keep for audit
             };
 
-            let ctx = RequestContext::internal();
+            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
             self.lock_manager
                 .release_lock(&ctx, options)
                 .await
@@ -541,7 +541,7 @@ mod tests {
         assert!(current.is_none());
         
         // Verify lease is no longer held in lock manager
-        let ctx = RequestContext::internal();
+        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let lock = scheduler.lock_manager.get_lock(&ctx, &scheduler.lease_key).await.unwrap();
         assert!(lock.is_none() || !lock.unwrap().locked);
     }

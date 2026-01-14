@@ -92,6 +92,8 @@ all-compression = ["compression-zstd", "compression-snappy"]
 full = ["all-backends", "all-compression"]
 
 [dev-dependencies]
+plexspaces-services = { path = "../services" }
+plexspaces-node = { path = "../node" }
 tokio-test = "0.4"
 plexspaces-actor = { path = "../actor" }
 # Test helpers for checking DynamoDB Local availability

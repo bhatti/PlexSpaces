@@ -225,7 +225,17 @@ mod sqlite_integration_tests {
         };
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.set_replay_handler(Box::new(handler)).await;
+        // Create test ActorContext for replay
+        use plexspaces_services::ServiceLocatorImpl;
+        let service_locator: Arc<dyn ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+        let test_context = Arc::new(ActorContext::new(
+            "local".to_string(),
+            "default".to_string(),
+            "default".to_string(),
+            service_locator,
+            None,
+        ));
+        new_facet.set_replay_handler(Box::new(handler), test_context).await;
 
         // Note: Replay happens in on_attach, but we need ActorContext for replay_journal_with_handler
         // For now, test that replay handler is set correctly

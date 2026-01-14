@@ -408,7 +408,7 @@ pub async fn run_data_plane_benchmark(node: &Node) -> Result<PerformanceMetrics,
     
     // Spawn pipeline processor actor using ActorBuilder with actual behavior
     let pipeline_id: ActorId = "pipeline-processor@v8-isolates-node-1".to_string();
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
     
     // Create durability facet using journal storage from ServiceLocator
     // If not available, create a default in-memory storage for this example

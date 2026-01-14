@@ -8,6 +8,7 @@ use plexspaces_proto::node::v1::{
     ApplicationConfig, GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec,
     RuntimeConfig, SecurityConfig, ShutdownConfig,
 };
+use std::collections::HashMap;
 use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
 use plexspaces_proto::storage::v1::{
     BlobConfig, KafkaBackendConfig, MemoryBackendConfig, NatsBackendConfig,
@@ -22,11 +23,16 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
         description: yaml.description,
         node: Some(NodeConfig {
             id: yaml.node.id,
-            listen_address: yaml.node.listen_address,
+            listen_addr: yaml.node.listen_addr,
             cluster_seed_nodes: yaml.node.cluster_seed_nodes,
             default_tenant_id: "internal".to_string(), // Default for local development
             default_namespace: "system".to_string(), // Default for local development
             cluster_name: String::new(), // Will be set from config if available
+            max_connections: 100,
+            heartbeat_interval_ms: 5000,
+            clustering_enabled: true,
+            grpc_connection_pool_size: 2,
+            metadata: HashMap::new(),
         }),
         runtime: Some({
             let runtime_config = RuntimeConfig {

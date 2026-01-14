@@ -142,11 +142,11 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
     let factory = ActorFactoryImpl::new(service_locator.clone());
     
     // Get ActorRegistry to verify registration
-    let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await.unwrap();
+    let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
     
     // Spawn actor using spawn_actor
     let actor_id: ActorId = "test-actor@test-node".to_string();
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let message_sender = factory.spawn_actor(
         &ctx,
         &actor_id,
@@ -177,11 +177,11 @@ async fn test_spawn_actor_registers_message_sender_only() {
     let factory = ActorFactoryImpl::new(service_locator.clone());
     
     // Get ActorRegistry to verify registration
-    let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await.unwrap();
+    let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
     
     // Spawn actor
     let actor_id: ActorId = "test-actor@test-node".to_string();
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let message_sender = factory.spawn_actor(
         &ctx,
         &actor_id,
@@ -205,10 +205,10 @@ async fn test_spawn_actor_registers_message_sender_only() {
 async fn test_multiple_actors_spawned_via_factory() {
     let service_locator = create_test_service_locator().await;
     let factory = ActorFactoryImpl::new(service_locator.clone());
-    let registry: Arc<ActorRegistry> = service_locator.get_service_by_name(plexspaces_core::service_locator::service_names::ACTOR_REGISTRY).await.unwrap();
+    let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
     
     // Spawn multiple actors using spawn_actor
-    let ctx = plexspaces_core::RequestContext::internal();
+    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     for i in 0..5 {
         let actor_id: ActorId = format!("actor-{}@test-node", i);
         factory.spawn_actor(

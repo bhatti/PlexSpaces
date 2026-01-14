@@ -139,7 +139,7 @@ struct ReleaseMetadata {
 #[derive(Debug, Deserialize)]
 struct NodeConfigToml {
     id: String,
-    listen_address: String,
+    listen_addr: String,
     #[serde(default)]
     cluster_seed_nodes: Vec<String>,
 }
@@ -450,10 +450,15 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
         node: Some(NodeConfig {
             cluster_name: String::new(),
             id: toml.node.id,
-            listen_address: toml.node.listen_address,
+            listen_addr: toml.node.listen_addr,
             cluster_seed_nodes: toml.node.cluster_seed_nodes,
             default_tenant_id: "internal".to_string(), // Default for local development
             default_namespace: "system".to_string(), // Default for local development
+            grpc_connection_pool_size: 2, // Default
+            max_connections: 100, // Default
+            heartbeat_interval_ms: 5000, // Default
+            clustering_enabled: true, // Default
+            metadata: std::collections::HashMap::new(), // Default
         }),
         runtime: Some(RuntimeConfig {
             grpc: Some(GrpcConfig {
@@ -1014,10 +1019,15 @@ mod tests {
             node: Some(NodeConfig {
             cluster_name: String::new(),
                 id: "node1".to_string(),
-                listen_address: "0.0.0.0:9001".to_string(),
+                listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
                 default_tenant_id: "internal".to_string(),
                 default_namespace: "system".to_string(),
+                grpc_connection_pool_size: 2,
+                max_connections: 100,
+                heartbeat_interval_ms: 5000,
+                clustering_enabled: true,
+                metadata: std::collections::HashMap::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1134,10 +1144,15 @@ mod tests {
             node: Some(NodeConfig {
             cluster_name: String::new(),
                 id: "node1".to_string(),
-                listen_address: "0.0.0.0:9001".to_string(),
+                listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
                 default_tenant_id: "internal".to_string(),
                 default_namespace: "system".to_string(),
+                grpc_connection_pool_size: 2,
+                max_connections: 100,
+                heartbeat_interval_ms: 5000,
+                clustering_enabled: true,
+                metadata: std::collections::HashMap::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1213,10 +1228,15 @@ mod tests {
             node: Some(NodeConfig {
             cluster_name: String::new(),
                 id: "node1".to_string(),
-                listen_address: "0.0.0.0:9001".to_string(),
+                listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
                 default_tenant_id: "internal".to_string(),
                 default_namespace: "system".to_string(),
+                grpc_connection_pool_size: 2,
+                max_connections: 100,
+                heartbeat_interval_ms: 5000,
+                clustering_enabled: true,
+                metadata: std::collections::HashMap::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1304,10 +1324,15 @@ mod tests {
             node: Some(NodeConfig {
             cluster_name: String::new(),
                 id: "node1".to_string(),
-                listen_address: "0.0.0.0:9001".to_string(),
+                listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
                 default_tenant_id: "internal".to_string(),
                 default_namespace: "system".to_string(),
+                grpc_connection_pool_size: 2,
+                max_connections: 100,
+                heartbeat_interval_ms: 5000,
+                clustering_enabled: true,
+                metadata: std::collections::HashMap::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1373,10 +1398,15 @@ mod tests {
             node: Some(NodeConfig {
             cluster_name: String::new(),
                 id: "node1".to_string(),
-                listen_address: "0.0.0.0:9001".to_string(),
+                listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
                 default_tenant_id: "internal".to_string(),
                 default_namespace: "system".to_string(),
+                grpc_connection_pool_size: 2,
+                max_connections: 100,
+                heartbeat_interval_ms: 5000,
+                clustering_enabled: true,
+                metadata: std::collections::HashMap::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1435,10 +1465,15 @@ mod tests {
             node: Some(NodeConfig {
             cluster_name: String::new(),
                 id: "node1".to_string(),
-                listen_address: "0.0.0.0:9001".to_string(),
+                listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
                 default_tenant_id: "internal".to_string(),
                 default_namespace: "system".to_string(),
+                grpc_connection_pool_size: 2,
+                max_connections: 100,
+                heartbeat_interval_ms: 5000,
+                clustering_enabled: true,
+                metadata: std::collections::HashMap::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,

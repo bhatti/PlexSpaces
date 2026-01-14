@@ -46,7 +46,7 @@ async fn test_spawn_actor_basic() {
     node.initialize_services().await.unwrap();
 
     // Create gRPC service
-    let service = plexspaces_node::grpc_service::ActorServiceImpl::new(node.clone());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
 
     // Create SpawnActorRequest (target node is implicit from gRPC endpoint)
     let request = Request::new(SpawnActorRequest {
@@ -81,7 +81,7 @@ async fn test_spawn_actor_basic() {
 #[tokio::test]
 async fn test_spawn_remote_actor_missing_target_node() {
     let node = Arc::new(create_test_node("test-node", 9502));
-    let service = plexspaces_node::grpc_service::ActorServiceImpl::new(node.clone());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
 
     // Missing actor_type (should fail)
     let request = Request::new(SpawnActorRequest {
@@ -104,7 +104,7 @@ async fn test_spawn_remote_actor_missing_target_node() {
 #[tokio::test]
 async fn test_spawn_remote_actor_missing_actor_type() {
     let node = Arc::new(create_test_node("test-node", 9503));
-    let service = plexspaces_node::grpc_service::ActorServiceImpl::new(node.clone());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
 
     // Missing actor_type
     let request = Request::new(SpawnActorRequest {
@@ -128,7 +128,7 @@ async fn test_spawn_remote_actor_missing_actor_type() {
 async fn test_spawn_remote_actor_wrong_node() {
     let node = Arc::new(create_test_node("node1", 9504));
     node.initialize_services().await.unwrap();
-    let service = plexspaces_node::grpc_service::ActorServiceImpl::new(node.clone());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
 
     // gRPC spawn_actor always spawns on the node receiving the request
     // The test for "wrong node" doesn't make sense anymore since target is implicit
@@ -151,7 +151,7 @@ async fn test_spawn_remote_actor_wrong_node() {
 async fn test_spawn_multiple_remote_actors() {
     let node = Arc::new(create_test_node("test-node", 9505));
     node.initialize_services().await.unwrap();
-    let service = plexspaces_node::grpc_service::ActorServiceImpl::new(node.clone());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
 
     // Spawn 3 actors
     for i in 0..3 {

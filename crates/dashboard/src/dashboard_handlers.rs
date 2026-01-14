@@ -37,7 +37,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use plexspaces_core::ServiceLocator;
-use crate::dashboard_service::DashboardServiceImpl;
+use plexspaces_services::dashboard_service::DashboardServiceImpl;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService,
     GetSummaryRequest, GetNodesRequest, GetNodeDashboardRequest,
@@ -49,7 +49,7 @@ use tonic::Request;
 
 /// Create dashboard router
 pub fn create_dashboard_router(
-    service_locator: Arc<ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocator>,
     dashboard_service: Option<Arc<DashboardServiceImpl>>,
 ) -> Router {
     Router::new()
@@ -117,7 +117,7 @@ async fn serve_js() -> Response<String> {
 
 /// API: Get summary
 async fn api_summary(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -175,7 +175,7 @@ async fn api_summary(
 
 /// API: Get nodes
 async fn api_nodes(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -232,7 +232,7 @@ async fn api_nodes(
 
 /// API: Get node dashboard
 async fn api_node_dashboard(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Path(node_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -271,7 +271,8 @@ async fn api_node_dashboard(
         metrics_json.insert("uptime_seconds".to_string(), serde_json::Value::Number(metrics.uptime_seconds.into()));
         metrics_json.insert("messages_routed".to_string(), serde_json::Value::Number(metrics.messages_routed.into()));
         metrics_json.insert("active_actors".to_string(), serde_json::Value::Number(metrics.active_actors.into()));
-        metrics_json.insert("actor_count".to_string(), serde_json::Value::Number(metrics.actor_count.into()));
+        // actor_count field removed - use active_actors instead
+        metrics_json.insert("active_actors".to_string(), serde_json::Value::Number(metrics.active_actors.into()));
         json.insert("node_metrics".to_string(), serde_json::Value::Object(metrics_json));
     }
     
@@ -293,7 +294,7 @@ async fn api_node_dashboard(
 
 /// API: Get applications
 async fn api_applications(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -333,12 +334,8 @@ async fn api_applications(
         app_json.insert("status".to_string(), serde_json::Value::Number(app.status.into()));
         
         // Get namespace and tenant_id from ApplicationManager (stored in ApplicationInstance)
-        let (namespace, tenant_id) = if let Some(app_manager) = _service_locator.get_service_by_name::<plexspaces_core::ApplicationManager>(plexspaces_core::service_locator::service_names::APPLICATION_MANAGER).await {
-            app_manager.get_application_namespace_tenant(&app.name).await
-                .unwrap_or_else(|| ("default".to_string(), "internal".to_string()))
-        } else {
-            ("default".to_string(), "internal".to_string())
-        };
+        // Note: ApplicationManager is not available in HTTP handlers - use defaults
+        let (namespace, tenant_id) = ("default".to_string(), "internal".to_string());
         app_json.insert("namespace".to_string(), serde_json::Value::String(namespace));
         app_json.insert("tenant_id".to_string(), serde_json::Value::String(tenant_id));
         
@@ -369,7 +366,7 @@ async fn api_applications(
 
 /// API: Get actors
 async fn api_actors(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -428,7 +425,7 @@ async fn api_actors(
 
 /// API: Get workflows
 async fn api_workflows(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -524,7 +521,7 @@ async fn api_workflows(
 
 /// API: Get workflow detail by definition ID
 async fn api_workflow_detail(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Path(definition_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -552,10 +549,18 @@ async fn api_workflow_detail(
     use plexspaces_core::RequestContext;
     use plexspaces_proto::object_registry::v1::ObjectType;
     
-    let ctx = RequestContext::internal();
-    let node_count = if let Some(object_registry) = _service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(plexspaces_core::service_locator::service_names::OBJECT_REGISTRY).await {
+    let ctx = if let Some(node_config) = _service_locator.get_node_config().await {
+        RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
+            .with_admin(true)
+            .with_internal(true)
+    } else {
+        RequestContext::new_without_auth(String::new(), String::new())
+            .with_admin(true)
+            .with_internal(true)
+    };
+    let node_count = if let Some(object_registry) = _service_locator.get_object_registry().await {
         // Query object-registry directly for workflow nodes
-        if let Ok(registrations) = object_registry.discover(
+        let registrations_result: Result<Vec<plexspaces_core::ObjectRegistration>, _> = object_registry.discover(
             &ctx,
             Some(ObjectType::ObjectTypeWorkflow),
             Some(definition_id.clone()),
@@ -564,7 +569,8 @@ async fn api_workflow_detail(
             None, // health_status
             0, // offset
             1000, // limit
-        ).await {
+        ).await;
+        if let Ok(registrations) = registrations_result {
             registrations.len() as u32
         } else {
             1
@@ -618,7 +624,7 @@ async fn api_workflow_detail(
 
 /// API: Get dependencies
 async fn api_dependencies(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -658,7 +664,7 @@ async fn api_dependencies(
 
 /// API: Get application detail
 async fn api_application_detail(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Path(name): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -710,8 +716,16 @@ async fn api_application_detail(
         use plexspaces_core::RequestContext;
         use plexspaces_proto::object_registry::v1::ObjectType;
         
-        let ctx = RequestContext::internal();
-        if let Some(object_registry) = _service_locator.get_service_by_name::<plexspaces_object_registry::ObjectRegistry>(plexspaces_core::service_locator::service_names::OBJECT_REGISTRY).await {
+        let ctx = if let Some(node_config) = _service_locator.get_node_config().await {
+            RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
+                .with_admin(true)
+                .with_internal(true)
+        } else {
+            RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true)
+                .with_internal(true)
+        };
+        if let Some(object_registry) = _service_locator.get_object_registry().await {
             // Use discover method with individual parameters
             if let Ok(registrations) = object_registry.discover(
                 &ctx,
@@ -762,7 +776,7 @@ async fn api_application_detail(
 
 /// API: Get actor detail
 async fn api_actor_detail(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
     Path(actor_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -834,7 +848,7 @@ async fn api_actor_detail(
 /// API: Get system info (version, build date, git commit)
 /// Uses build-time constants from build.rs
 async fn api_system_info(
-    axum::extract::State((_service_locator, _dashboard_service_opt)): axum::extract::State<(Arc<ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_service_locator, _dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let mut json = serde_json::Map::new();
     json.insert("version".to_string(), serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()));

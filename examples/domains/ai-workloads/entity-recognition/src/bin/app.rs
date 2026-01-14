@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
 
     // Create node using NodeBuilder
     let node = NodeBuilder::new("entity-recognition-app")
-        .with_listen_address("0.0.0.0:9000")
+        .with_listen_addr("0.0.0.0:9000")
         .with_clustering_enabled(true)
         .build().await;
 

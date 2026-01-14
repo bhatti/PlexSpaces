@@ -412,7 +412,7 @@ impl ByzantineAlgorithm {
         // Collect results using ActorRef::ask
         let mut results = Vec::new();
         use plexspaces_core::service_locator::service_names;
-        let actor_registry = ctx.service_locator.get_service_by_name::<plexspaces_core::ActorRegistry>(service_names::ACTOR_REGISTRY).await
+        let actor_registry = ctx.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not available".to_string())?;
         
         for &general_id in &self.general_ids {

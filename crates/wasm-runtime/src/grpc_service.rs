@@ -64,7 +64,7 @@ use tonic::{Request, Response, Status};
 ///
 /// Wraps WasmDeploymentService to provide network-based deployment via gRPC.
 /// Implements the `WasmRuntimeService` trait generated from wasm.proto.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WasmRuntimeServiceImpl {
     /// Deployment service handling actual WASM operations
     deployment_service: Arc<WasmDeploymentService>,
@@ -72,7 +72,7 @@ pub struct WasmRuntimeServiceImpl {
 
 impl WasmRuntimeServiceImpl {
     /// Create new gRPC service
-    pub fn new(runtime: Arc<WasmRuntime>) -> Self {
+    pub fn new(runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>) -> Self {
         let deployment_service = Arc::new(WasmDeploymentService::new(runtime));
         Self {
             deployment_service,
@@ -316,7 +316,8 @@ mod tests {
     #[tokio::test]
     async fn test_deploy_module_via_grpc() {
         let runtime = WasmRuntime::new().await.unwrap();
-        let service = WasmRuntimeServiceImpl::new(Arc::new(runtime));
+        let runtime_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> = Arc::new(runtime);
+        let service = WasmRuntimeServiceImpl::new(runtime_trait);
 
         let module = ProtoWasmModule {
             name: "test".to_string(),

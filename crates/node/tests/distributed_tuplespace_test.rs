@@ -50,7 +50,7 @@ type ProtoTupleField = plexspaces_proto::tuplespace::v1::TupleField;
 async fn create_test_node(node_id: &str, port: u16) -> Arc<Node> {
     Arc::new(
         NodeBuilder::new(node_id)
-            .with_listen_address(&format!("127.0.0.1:{}", port))
+            .with_listen_addr(&format!("127.0.0.1:{}", port))
             .build()
             .await
     )

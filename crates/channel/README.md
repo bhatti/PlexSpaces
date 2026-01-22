@@ -26,8 +26,8 @@ This crate is central to the PlexSpaces microservices framework, enabling:
 │  ┌────────────────────────────────────────────────┐ │
 │  │           Channel Backends                     │ │
 │  ├────────────────────────────────────────────────┤ │
-│  │ InMemory  │  Redis Streams  │  Kafka  │  NATS │ │
-│  │ (MPSC)    │  (Distributed)  │(Streaming)│(Pub/Sub)│ │
+│  │ InMemory  │  Redis Streams  │  Kafka  │  NATS │ ProcessGroup │
+│  │ (MPSC)    │  (Distributed)  │(Streaming)│(Pub/Sub)│ (Erlang pg) │
 │  └────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────┘
 ```
@@ -38,8 +38,8 @@ The core abstraction is the `Channel` trait:
 
 ```rust
 pub trait Channel: Send + Sync {
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String>;
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>>;
+    async fn send(&self, message: Message) -> ChannelResult<String>;
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>>;
     async fn ack(&self, message_id: &str) -> ChannelResult<()>;
     async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()>;
     // ... other methods
@@ -113,6 +113,51 @@ See [Shutdown/Restart Tests](tests/shutdown_restart_test.rs) for examples.
   - Optional JetStream persistence
 - **Performance**: < 1ms latency, > 1M msgs/sec throughput
 - **Observability**: Integrated observability helpers for metrics/logging
+
+### 5. Process Group Backend (`src/process_group_backend.rs`)
+
+**Use Case**: Distributed pub/sub using Erlang pg/pg2-style process groups
+- **Implementation**: ProcessGroupService via ServiceLocator
+- **Features**: 
+  - Distributed pub/sub across cluster nodes
+  - Topic-based message filtering
+  - No external dependencies (Redis, Kafka, etc.)
+  - Multi-tenant support with namespace isolation
+  - Built-in observability with metrics and tracing
+- **Performance**: < 5ms latency (network dependent)
+- **Requirements**: 
+  - Requires `process-group-backend` feature
+  - Must be created directly with ServiceLocator (cannot use `create_channel()` helper)
+  - ProcessGroupService must be registered in ServiceLocator
+
+**Example Usage**:
+```rust
+use plexspaces_channel::{Channel, ProcessGroupChannel};
+use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig};
+
+let config = ChannelConfig {
+    name: "my-channel".to_string(),
+    backend: ChannelBackend::ChannelBackendProcessGroup as i32,
+    capacity: 1000,
+    ..Default::default()
+};
+
+let channel = ProcessGroupChannel::new(
+    service_locator,
+    "my-channel".to_string(),
+    "tenant-1".to_string(),
+    "default".to_string(),
+    config,
+).await?;
+
+// Publish to all subscribers
+let message = Message {
+    id: ulid::Ulid::new().to_string(),
+    payload: b"hello".to_vec(),
+    ..Default::default()
+};
+channel.publish(message).await?;
+```
 
 ## Integration Tests
 
@@ -199,6 +244,35 @@ use plexspaces_channel::{Channel, KafkaChannel};
 let channel = KafkaChannel::new("localhost:9092", "my-topic").await?;
 channel.send(b"hello".to_vec()).await?;
 let message = channel.receive().await?;
+```
+
+### Process Group Channel
+
+```rust
+use plexspaces_channel::{Channel, ProcessGroupChannel};
+use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig};
+
+let config = ChannelConfig {
+    name: "my-channel".to_string(),
+    backend: ChannelBackend::ChannelBackendProcessGroup as i32,
+    capacity: 1000,
+    ..Default::default()
+};
+
+let channel = ProcessGroupChannel::new(
+    service_locator,
+    "my-channel".to_string(),
+    "tenant-1".to_string(),
+    "default".to_string(),
+    config,
+).await?;
+
+let message = Message {
+    id: ulid::Ulid::new().to_string(),
+    payload: b"hello".to_vec(),
+    ..Default::default()
+};
+channel.publish(message).await?;
 ```
 
 ## Test Organization

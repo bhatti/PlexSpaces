@@ -27,7 +27,7 @@ use async_trait::async_trait;
 
 // Import from plexspaces-core crate
 use plexspaces_core::{Actor, BehaviorError, BehaviorType};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
 
 // Re-export ExecutionContext from workflow module
@@ -136,15 +136,15 @@ pub trait GenServer: Actor {
     ///     ctx: &ActorContext,
     ///     msg: Message,
     /// ) -> Result<(), BehaviorError> {
-    ///     if let Some(sender_id) = &msg.sender {
-    ///         let mut reply = Message::new(b"response".to_vec());
-    ///         reply.receiver = sender_id.clone();
-    ///         reply.sender = Some(msg.receiver.clone());
-    ///         if let Some(corr_id) = &msg.correlation_id {
-    ///             reply.correlation_id = Some(corr_id.clone());
+    ///     if !msg.sender_id.is_empty() {
+    ///         let mut reply = Message { payload: b"response".to_vec(), ..Default::default() };
+    ///         reply.receiver_id = msg.sender_id.clone();
+    ///         reply.sender_id = msg.receiver_id.clone();
+    ///         if !msg.correlation_id.is_empty() {
+    ///             reply.correlation_id = msg.correlation_id.clone();
     ///         }
     ///         let actor_service = ctx.service_locator.get_actor_service().await?;
-    ///         actor_service.send(sender_id, reply).await?;
+    ///         actor_service.send(&msg.sender_id, reply).await?;
     ///     }
     ///     Ok(())
     /// }
@@ -195,8 +195,8 @@ pub trait GenServer: Actor {
             let _ = ROUTE_MESSAGE_DEPTH.with(|d| d.set(0)); // Reset on panic
             let backtrace = std::backtrace::Backtrace::capture();
             tracing::error!(
-                "INFINITE RECURSION DETECTED IN route_message! depth={}, max={}, sender={:?}, target={}, correlation_id={:?}, backtrace={:?}",
-                depth, MAX_RECURSION_DEPTH, msg.sender, msg.receiver, msg.correlation_id, backtrace
+                "INFINITE RECURSION DETECTED IN route_message! depth={}, max={}, sender={}, target={}, correlation_id={}, backtrace={:?}",
+                depth, MAX_RECURSION_DEPTH, msg.sender_id, msg.receiver_id, msg.correlation_id, backtrace
             );
             return Err(BehaviorError::ProcessingError(format!(
                 "Infinite recursion detected in route_message (depth: {})",
@@ -206,33 +206,33 @@ pub trait GenServer: Actor {
         
         let msg_type = msg.message_type();
         
-        // Get target actor ID from message.receiver (the actor receiving this message)
-        let target_actor_id = msg.receiver.clone();
+        // Get target actor ID from message.receiver_id (the actor receiving this message)
+        let target_actor_id = msg.receiver_id.clone();
         
         // VALIDATION: Check for self-messaging (source == target)
-        if let Some(sender_id) = &msg.sender {
-            if sender_id == &target_actor_id {
+        if !msg.sender_id.is_empty() {
+            if msg.sender_id == target_actor_id {
                 let _ = ROUTE_MESSAGE_DEPTH.with(|d| d.set(0)); // Reset on error
                 tracing::error!(
                     "🟡 [ROUTE_MESSAGE] SELF-MESSAGING DETECTED! sender_id={}, target_actor_id={}, message_type={:?}, depth={}",
-                    sender_id, target_actor_id, msg_type, depth
+                    msg.sender_id, target_actor_id, msg_type, depth
                 );
                 return Err(BehaviorError::ProcessingError(format!(
                     "Self-messaging detected: actor {} cannot send message to itself",
-                    sender_id
+                    msg.sender_id
                 )));
             }
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
-                    "[ROUTE_MESSAGE] START: depth={}, message_id={}, sender={:?}, target_actor_id={}, message_type={:?}, message_type_str={}, correlation_id={:?}",
-                    depth, msg.id, sender_id, target_actor_id, msg_type, msg.message_type_str(), msg.correlation_id
+                    "[ROUTE_MESSAGE] START: depth={}, message_id={}, sender={}, target_actor_id={}, message_type={:?}, message_type_str={}, correlation_id={}",
+                    depth, msg.id, msg.sender_id, target_actor_id, msg_type, msg.message_type, msg.correlation_id
                 );
             }
         } else {
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     "[ROUTE_MESSAGE] START: depth={}, message_id={}, No sender (fire-and-forget), target_actor_id={}, message_type={:?}, message_type_str={}",
-                    depth, msg.id, target_actor_id, msg_type, msg.message_type_str()
+                    depth, msg.id, target_actor_id, msg_type, msg.message_type
                 );
             }
         }
@@ -240,19 +240,19 @@ pub trait GenServer: Actor {
         match msg_type {
             MessageType::Call => {
                 // DEBUG: Check if sender is temporary sender
-                let sender_is_temp = msg.sender.as_ref()
-                    .map(|s| s.starts_with("ask-") && s.contains('@'))
-                    .unwrap_or(false);
+                let sender_is_temp = !msg.sender_id.is_empty() 
+                    && msg.sender_id.starts_with("ask-") 
+                    && msg.sender_id.contains('@');
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
-                        "[ROUTE_MESSAGE] Routing to handle_request: message_id={}, sender={:?}, is_temporary_sender={}, target_actor_id={}, correlation_id={:?}",
-                        msg.id, msg.sender, sender_is_temp, target_actor_id, msg.correlation_id
+                        "[ROUTE_MESSAGE] Routing to handle_request: message_id={}, sender={}, is_temporary_sender={}, target_actor_id={}, correlation_id={}",
+                        msg.id, msg.sender_id, sender_is_temp, target_actor_id, msg.correlation_id
                     );
                 }
                 
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
-                let sender_id = msg.sender.clone();
+                let sender_id = msg.sender_id.clone();
                 let correlation_id = msg.correlation_id.clone();
                 
                 // Call handle_request with Message (handler will use ActorService::send() to send reply)
@@ -287,14 +287,14 @@ pub trait GenServer: Actor {
                 // Handle Cast (fire-and-forget) - call handle_request but don't require reply
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
-                        "[ROUTE_MESSAGE] CAST: Routing to handle_request (fire-and-forget): message_id={}, sender={:?}, target_actor_id={}",
-                        msg.id, msg.sender, target_actor_id
+                        "[ROUTE_MESSAGE] CAST: Routing to handle_request (fire-and-forget): message_id={}, sender={}, target_actor_id={}",
+                        msg.id, msg.sender_id, target_actor_id
                     );
                 }
                 
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
-                let sender_id = msg.sender.clone();
+                let _sender_id = msg.sender_id.clone();
                 
                 // Call handle_request - actor can choose to send reply or not
                 // For Cast, reply is optional (fire-and-forget)
@@ -687,29 +687,32 @@ pub trait Workflow: Actor {
                 
                 // Store result for queries or send back to caller using ActorRef
                 // Prefer reply_to (for ask pattern) over sender_id (for backward compatibility)
-                let reply_target = msg.reply_to.as_ref()
-                    .or_else(|| msg.sender.as_ref())
-                    .map(|s| s.as_str());
+                let reply_target = if !msg.reply_to.is_empty() {
+                    Some(msg.reply_to.as_str())
+                } else if !msg.sender_id.is_empty() {
+                    Some(msg.sender_id.as_str())
+                } else {
+                    None
+                };
                 
                 if let Some(target_id) = reply_target {
-                    // Use correlation_id from message (set by ask()) or from metadata (backward compatibility)
-                    let mut reply_msg = if let Some(corr_id) = msg.correlation_id.as_ref() {
-                        result.with_correlation_id(corr_id.clone())
-                    } else if let Some(corr_id) = msg.metadata.get("correlation_id") {
-                        result.with_correlation_id(corr_id.clone())
-                    } else {
-                        result
-                    };
+                    // Use correlation_id from message (set by ask()) or from headers (backward compatibility)
+                    let mut reply_msg = result;
+                    if !msg.correlation_id.is_empty() {
+                        reply_msg.correlation_id = msg.correlation_id.clone();
+                    } else if let Some(corr_id) = msg.headers.get("correlation_id") {
+                        reply_msg.correlation_id = corr_id.clone();
+                    }
                     
                     // Use ActorService::send() to send reply (handles local/remote automatically)
                     // ActorService::send() will route via ActorRef::tell() which handles temporary sender IDs and correlation_id routing
                     let actor_service = ctx.service_locator.get_actor_service().await
                         .ok_or_else(|| BehaviorError::ProcessingError("ActorService not available in ServiceLocator".to_string()))?;
                     
-                    // Set receiver to sender_id (the actor that called ask())
-                    reply_msg.receiver = target_id.to_string();
-                    // Set sender to this actor's ID
-                    reply_msg.sender = Some(msg.receiver.clone());
+                    // Set receiver_id to sender_id (the actor that called ask())
+                    reply_msg.receiver_id = target_id.to_string();
+                    // Set sender_id to this actor's ID
+                    reply_msg.sender_id = msg.receiver_id.clone();
                     
                     actor_service.send(&target_id.to_string(), reply_msg).await
                         .map_err(|e| {
@@ -760,29 +763,32 @@ pub trait Workflow: Actor {
                 // Send result back to caller using ActorService
                 // ActorService automatically handles local/remote routing based on node_id
                 // Prefer reply_to (for ask pattern) over sender_id (for backward compatibility)
-                let reply_target = msg.reply_to.as_ref()
-                    .or_else(|| msg.sender.as_ref())
-                    .map(|s| s.as_str());
+                let reply_target = if !msg.reply_to.is_empty() {
+                    Some(msg.reply_to.as_str())
+                } else if !msg.sender_id.is_empty() {
+                    Some(msg.sender_id.as_str())
+                } else {
+                    None
+                };
                 
                 if let Some(target_id) = reply_target {
-                    // Use correlation_id from message (set by ask()) or from metadata (backward compatibility)
-                    let mut reply_msg = if let Some(corr_id) = msg.correlation_id.as_ref() {
-                        result.with_correlation_id(corr_id.clone())
-                    } else if let Some(corr_id) = msg.metadata.get("correlation_id") {
-                        result.with_correlation_id(corr_id.clone())
-                    } else {
-                        result
-                    };
+                    // Use correlation_id from message (set by ask()) or from headers (backward compatibility)
+                    let mut reply_msg = result;
+                    if !msg.correlation_id.is_empty() {
+                        reply_msg.correlation_id = msg.correlation_id.clone();
+                    } else if let Some(corr_id) = msg.headers.get("correlation_id") {
+                        reply_msg.correlation_id = corr_id.clone();
+                    }
                     
                     // Use ActorService::send() to send reply (handles local/remote automatically)
                     // ActorService::send() will route via ActorRef::tell() which handles temporary sender IDs and correlation_id routing
                     let actor_service = ctx.service_locator.get_actor_service().await
                         .ok_or_else(|| BehaviorError::ProcessingError("ActorService not available in ServiceLocator".to_string()))?;
                     
-                    // Set receiver to sender_id (the actor that called ask())
-                    reply_msg.receiver = target_id.to_string();
-                    // Set sender to this actor's ID
-                    reply_msg.sender = Some(msg.receiver.clone());
+                    // Set receiver_id to sender_id (the actor that called ask())
+                    reply_msg.receiver_id = target_id.to_string();
+                    // Set sender_id to this actor's ID
+                    reply_msg.sender_id = msg.receiver_id.clone();
                     
                     actor_service.send(&target_id.to_string(), reply_msg).await
                         .map_err(|e| {
@@ -848,8 +854,14 @@ pub trait MessageTypeExt {
 
 impl MessageTypeExt for Message {
     fn message_type(&self) -> MessageType {
-        // Extract from message_type field or metadata
-        let msg_type = self.message_type_str();
+        // Extract from message_type field or headers
+        let msg_type = if !self.message_type.is_empty() {
+            self.message_type.as_str()
+        } else if let Some(mt) = self.headers.get("message_type") {
+            mt.as_str()
+        } else {
+            "info"
+        };
 
         match msg_type {
             "call" => MessageType::Call,
@@ -941,7 +953,11 @@ mod tests {
             service_locator,
             None,
         ));
-        let msg = Message::new(vec![]);
+        let msg = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: vec![],
+            ..Default::default()
+        };
         behavior.handle_message(&*ctx, msg).await.unwrap();
     }
 }

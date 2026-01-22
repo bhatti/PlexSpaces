@@ -236,7 +236,8 @@ fn parse_exit_reason_from_str(reason_str: &str, metadata: &std::collections::Has
     }
 }
 use plexspaces_facet::{Facet, FacetContainer};
-use plexspaces_mailbox::{Mailbox, Message};
+use plexspaces_mailbox::Mailbox;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_journaling::ReplayHandler;
 use async_trait::async_trait;
 
@@ -848,10 +849,12 @@ impl Actor {
                         }
                         tracing::error!("[ACTOR::SHUTDOWN] ERROR: Should not reach here after break! actor_id={}", actor_id_for_logging);
                     }
-                    Some(message) = mailbox.dequeue() => {
+                    Some(mailbox_message) = mailbox.dequeue() => {
+                        // Convert mailbox Message to proto Message at boundary
+                        let message = mailbox_message.to_proto();
                         if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!("[ACTOR::DEQUEUE] DEQUEUED MESSAGE: actor_id={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={:?}, payload_len={}", 
-                                actor_id_for_logging, message.id, message.sender, message.receiver, message.correlation_id, message.message_type, message.payload().len());
+                            tracing::debug!("[ACTOR::DEQUEUE] DEQUEUED MESSAGE: actor_id={}, message_id={}, sender={}, receiver={}, correlation_id={}, message_type={}, payload_len={}", 
+                                actor_id_for_logging, message.id, message.sender_id, message.receiver_id, message.correlation_id, message.message_type, message.payload.len());
                         }
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             tracing::debug!(
@@ -862,10 +865,11 @@ impl Actor {
                         }
                         
                         // Check if this is an EXIT message (from linked actor death)
-                        if message.is_exit() {
-                            if let Some((from_actor_id, reason_str)) = message.try_parse_exit() {
+                        // Use mailbox_message for EXIT handling (has is_exit() and try_parse_exit() methods)
+                        if mailbox_message.is_exit() {
+                            if let Some((from_actor_id, reason_str)) = mailbox_message.try_parse_exit() {
                                 // Parse exit reason from string
-                                let exit_reason = parse_exit_reason_from_str(&reason_str, &message.metadata);
+                                let exit_reason = parse_exit_reason_from_str(&reason_str, &mailbox_message.metadata);
                                 // Check if actor traps exits
                                 if context.trap_exit {
                                     // Phase 4: Monitoring/Linking Integration - Call facet.on_exit() for ALL facets
@@ -1081,7 +1085,7 @@ impl Actor {
                         // Only for channels that support ack/nack (Redis, Kafka, etc.)
                         if result.is_ok() {
                             // Successful processing - ACK the message
-                            if let Err(e) = mailbox.ack_message(&message).await {
+                            if let Err(e) = mailbox.ack_message(&mailbox_message).await {
                                 let error_str = e.to_string();
                                 // MessageNotFound is expected for in-memory channels (fire-and-forget)
                                 // Only log as warning for unexpected errors
@@ -1105,7 +1109,7 @@ impl Actor {
                         } else {
                             // Failed processing - NACK the message (will retry or DLQ)
                             let error_msg = result.as_ref().err().map(|e| e.to_string());
-                            if let Err(e) = mailbox.nack_message(&message, error_msg.as_deref()).await {
+                            if let Err(e) = mailbox.nack_message(&mailbox_message, error_msg.as_deref()).await {
                                 let error_str = e.to_string();
                                 // MessageNotFound is expected for in-memory channels (fire-and-forget)
                                 // Only log as warning for unexpected errors
@@ -1566,8 +1570,10 @@ impl Actor {
 
     /// Send a message to this actor
     pub async fn send(&self, message: Message) -> Result<(), ActorError> {
+        // Convert proto Message to mailbox Message for mailbox storage
+        let mailbox_msg = plexspaces_mailbox::Message::from_proto(&message);
         self.mailbox
-            .enqueue(message)
+            .enqueue(mailbox_msg)
             .await
             .map_err(|e| ActorError::MailboxError(e.to_string()))
     }
@@ -1924,7 +1930,16 @@ impl Actor {
     /// This is similar to Erlang's gen_server:handle_info with timeout messages
     async fn _on_timer(&mut self, timer_name: &str) -> Result<(), ActorError> {
         // Forward to behavior (Go-style: context first, then message)
-        let timer_message = Message::timer(timer_name);
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("type".to_string(), "timer".to_string());
+        headers.insert("timer_name".to_string(), timer_name.to_string());
+        let timer_message = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: timer_name.as_bytes().to_vec(),
+            message_type: "timer".to_string(),
+            headers,
+            ..Default::default()
+        };
 
         self.behavior
             .write()
@@ -1949,7 +1964,7 @@ impl Actor {
     ) -> Result<(), ActorError> {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!("[ACTOR::PROCESS_MESSAGE] START: actor_id={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
-                actor_id, message.id, message.sender, message.receiver, message.correlation_id, message.message_type_str());
+                actor_id, message.id, message.sender_id, message.receiver_id, message.correlation_id, message.message_type);
         }
         
         // RECURSION DETECTION: Track call depth to detect infinite loops
@@ -1971,7 +1986,7 @@ impl Actor {
             let backtrace = std::backtrace::Backtrace::capture();
             tracing::error!(
                 "INFINITE RECURSION DETECTED IN process_message! depth={}, max={}, actor_id={}, sender={:?}, receiver={}, correlation_id={:?}, backtrace={:?}",
-                depth, MAX_RECURSION_DEPTH, actor_id, message.sender, message.receiver, message.correlation_id, backtrace
+                depth, MAX_RECURSION_DEPTH, actor_id, message.sender_id, message.receiver_id, message.correlation_id, backtrace
             );
             return Err(ActorError::BehaviorError(format!(
                 "Infinite recursion detected in process_message (depth: {})",
@@ -1999,7 +2014,7 @@ impl Actor {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
             "🔴 [PROCESS_MESSAGE] START: depth={}, actor_id={}, message_id={}, message_type={}, sender={:?}, receiver={}, correlation_id={:?}",
-            depth, actor_id_owned, message_id, message_type, message.sender, message.receiver, message.correlation_id
+            depth, actor_id_owned, message_id, message_type, message.sender_id, message.receiver_id, message.correlation_id
         );
         }
         
@@ -2042,7 +2057,7 @@ impl Actor {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 "[PROCESS_MESSAGE] CALLING handle_message: depth={}, actor_id={}, sender={:?}, receiver={}",
-                depth, actor_id_owned, message.sender, message.receiver
+                depth, actor_id_owned, message.sender_id, message.receiver_id
             );
         }
         let result = behavior.handle_message(context, message.clone()).await;
@@ -2127,6 +2142,26 @@ mod tests {
     use super::*;
     use plexspaces_behavior::MockBehavior;
     use plexspaces_mailbox::MailboxConfig;
+    use ulid::Ulid;
+    
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
+    
+    /// Helper to create a test message with TTL
+    fn create_test_message_with_ttl(payload: Vec<u8>, ttl: std::time::Duration) -> Message {
+        let mut msg = create_test_message(payload);
+        msg.ttl = Some(prost_types::Duration {
+            seconds: ttl.as_secs() as i64,
+            nanos: ttl.subsec_nanos() as i32,
+        });
+        msg
+    }
 
     #[tokio::test]
     async fn test_actor_lifecycle() {
@@ -2457,7 +2492,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_message() {
-        use plexspaces_mailbox::{mailbox_config_default, Message};
+        use plexspaces_mailbox::mailbox_config_default;
 
         let behavior = Box::new(MockBehavior::new());
         let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string()).await.expect("Failed to create mailbox");
@@ -2472,7 +2507,7 @@ mod tests {
         );
 
         // Send a message
-        let msg = Message::new(b"test message".to_vec());
+        let msg = create_test_message(b"test message".to_vec());
         let result = actor.send(msg).await;
         assert!(result.is_ok());
 
@@ -2732,7 +2767,7 @@ mod tests {
         assert_eq!(actor.state().await, ActorState::Active);
 
         // Send a message
-        let msg = Message::new(b"test message".to_vec());
+        let msg = create_test_message(b"test message".to_vec());
         actor.send(msg).await.unwrap();
 
         // Give actor time to process message
@@ -2821,8 +2856,8 @@ mod tests {
         let _handle = actor.start().await.unwrap();
 
         // Create message with sender
-        let mut msg = Message::new(b"hello".to_vec());
-        msg.sender = Some("sender-actor".to_string());
+        let mut msg = create_test_message(b"hello".to_vec());
+        msg.sender_id = "sender-actor".to_string();
 
         // Send message
         actor.send(msg).await.unwrap();
@@ -2878,7 +2913,7 @@ mod tests {
         let _handle = actor.start().await.unwrap();
 
         // Send message (will fail in processing)
-        let msg = Message::new(b"test".to_vec());
+        let msg = create_test_message(b"test".to_vec());
         actor.send(msg).await.unwrap();
 
         // Give time to attempt processing

@@ -42,10 +42,12 @@
 syntax = "proto3";
 
 package plexspaces.channel.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/channel/channel;plexspaces_channel_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
 
 // Channel backend type determines the underlying transport
 enum ChannelBackend {
@@ -94,6 +96,21 @@ enum ChannelBackend {
   // - At-least-once delivery with visibility timeout
   // - Auto-scaling, no infrastructure management
   CHANNEL_BACKEND_SQS = 6;
+
+  // Process Group for Erlang pg/pg2-style pub/sub
+  // - Uses ProcessGroupService via ServiceLocator
+  // - Distributed across cluster nodes
+  // - Pub/sub with topic filtering
+  // - No external dependencies
+  CHANNEL_BACKEND_PROCESS_GROUP = 7;
+
+  // PostgreSQL for durable distributed messaging
+  // - Uses FOR UPDATE SKIP LOCKED for queue semantics
+  // - LISTEN/NOTIFY for pub/sub notifications
+  // - Transactional message processing
+  // - Durable, survives crashes
+  // - Good for existing Postgres deployments
+  CHANNEL_BACKEND_POSTGRES = 8;
 
   // Custom backend (user-provided implementation)
   CHANNEL_BACKEND_CUSTOM = 99;
@@ -385,39 +402,6 @@ message SqsConfig {
   uint32 receive_message_wait_time_seconds = 8;
 }
 
-// Channel message envelope
-message ChannelMessage {
-  // Unique message ID (ULID)
-  string id = 1;
-
-  // Channel name/topic
-  string channel = 2;
-
-  // Sender actor ID (optional)
-  string sender_id = 3;
-
-  // Message payload (opaque bytes)
-  bytes payload = 4;
-
-  // Message headers (metadata)
-  map<string, string> headers = 5;
-
-  // Message timestamp
-  google.protobuf.Timestamp timestamp = 6;
-
-  // Partition key (for Kafka/Redis)
-  string partition_key = 7;
-
-  // Correlation ID (for request/reply)
-  string correlation_id = 8;
-
-  // Reply-to channel (for RPC pattern)
-  string reply_to = 9;
-
-  // Delivery count (for retry tracking)
-  uint32 delivery_count = 10;
-}
-
 // Channel statistics
 message ChannelStats {
   // Channel name
@@ -461,7 +445,7 @@ service ChannelService {
   // Send message to channel
   rpc Send(SendRequest) returns (SendResponse) {
     option (google.api.http) = {
-      post: "/api/v1/channels/{channel_id}:send"
+      post: "/api/v1/channels/{channel}:send"
       body: "*"
     };
   }
@@ -469,15 +453,15 @@ service ChannelService {
   // Receive message from channel
   rpc Receive(ReceiveRequest) returns (ReceiveResponse) {
     option (google.api.http) = {
-      post: "/api/v1/channels/{channel_id}:receive"
+      post: "/api/v1/channels/{channel}:receive"
       body: "*"
     };
   }
 
   // Subscribe to channel (streaming)
-  rpc Subscribe(SubscribeRequest) returns (stream ChannelMessage) {
+  rpc Subscribe(SubscribeRequest) returns (stream plexspaces.common.v1.Message) {
     option (google.api.http) = {
-      post: "/api/v1/channels/{channel_id}:subscribe"
+      post: "/api/v1/channels/{channel}:subscribe"
       body: "*"
     };
   }
@@ -485,7 +469,7 @@ service ChannelService {
   // Publish to channel (for pub/sub pattern)
   rpc Publish(PublishRequest) returns (PublishResponse) {
     option (google.api.http) = {
-      post: "/api/v1/channels/{channel_id}:publish"
+      post: "/api/v1/channels/{channel}:publish"
       body: "*"
     };
   }
@@ -493,7 +477,7 @@ service ChannelService {
   // Acknowledge message (for at-least-once delivery)
   rpc Ack(AckRequest) returns (AckResponse) {
     option (google.api.http) = {
-      post: "/api/v1/channels/{channel_id}/messages/{message_id}:ack"
+      post: "/api/v1/channels/{channel}/messages/{message_id}:ack"
       body: "*"
     };
   }
@@ -501,7 +485,7 @@ service ChannelService {
   // Negative acknowledge (requeue message)
   rpc Nack(NackRequest) returns (NackResponse) {
     option (google.api.http) = {
-      post: "/api/v1/channels/{channel_id}/messages/{message_id}:nack"
+      post: "/api/v1/channels/{channel}/messages/{message_id}:nack"
       body: "*"
     };
   }
@@ -509,14 +493,14 @@ service ChannelService {
   // Get channel statistics
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
     option (google.api.http) = {
-      get: "/api/v1/channels/{channel_id}/stats"
+      get: "/api/v1/channels/{channel}/stats"
     };
   }
 
   // Delete channel
   rpc DeleteChannel(DeleteChannelRequest) returns (DeleteChannelResponse) {
     option (google.api.http) = {
-      delete: "/api/v1/channels/{channel_id}"
+      delete: "/api/v1/channels/{channel}"
     };
   }
 }
@@ -534,7 +518,7 @@ message CreateChannelResponse {
 // Send request
 message SendRequest {
   string channel = 1;
-  ChannelMessage message = 2;
+  plexspaces.common.v1.Message message = 2;
   google.protobuf.Duration timeout = 3;
 }
 
@@ -553,7 +537,7 @@ message ReceiveRequest {
 
 // Receive response
 message ReceiveResponse {
-  repeated ChannelMessage messages = 1;
+  repeated plexspaces.common.v1.Message messages = 1;
 }
 
 // Subscribe request (streaming)
@@ -566,7 +550,7 @@ message SubscribeRequest {
 // Publish request (pub/sub)
 message PublishRequest {
   string channel = 1;
-  ChannelMessage message = 2;
+  plexspaces.common.v1.Message message = 2;
 }
 
 // Publish response

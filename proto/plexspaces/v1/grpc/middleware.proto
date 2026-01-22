@@ -51,6 +51,7 @@
 syntax = "proto3";
 
 package plexspaces.grpc.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/grpc/middleware;plexspaces_grpc_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";

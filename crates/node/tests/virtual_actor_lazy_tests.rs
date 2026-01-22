@@ -5,7 +5,7 @@ use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
 use plexspaces_journaling::VirtualActorFacet;
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use plexspaces_node::{Node, NodeBuilder};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -16,6 +16,26 @@ use tokio::time::sleep;
 #[path = "test_helpers.rs"]
 mod test_helpers;
 use test_helpers::{lookup_actor_ref, get_or_activate_actor_helper};
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
+/// Helper to create a test message with message type
+fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        message_type: message_type.to_string(),
+        ..Default::default()
+    }
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum TestMessage {
@@ -60,31 +80,32 @@ impl GenServer for CounterActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        let test_msg: TestMessage = serde_json::from_slice(msg.payload())
+        let test_msg: TestMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
         let reply_msg = match test_msg {
             TestMessage::Ping => {
-                Message::new(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
             }
             TestMessage::Increment => {
                 let mut count = self.count.lock().await;
                 *count += 1;
-                Message::new(serde_json::to_vec(&TestMessage::Pong("incremented".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("incremented".to_string())).unwrap())
             }
             TestMessage::GetCount => {
                 let count = *self.count.lock().await;
-                Message::new(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
             }
             _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         };
         
         // Send reply using ActorContext
-        if let Some(sender_id) = &msg.sender {
+        if !msg.sender_id.is_empty() {
+            let correlation_id = if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) };
             ctx.send_reply(
-                msg.correlation_id.as_deref(),
-                sender_id,
-                msg.receiver.clone(),
+                correlation_id,
+                &msg.sender_id,
+                msg.receiver_id.clone(),
                 reply_msg,
             ).await
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
@@ -144,8 +165,7 @@ async fn test_lazy_activation_tell_then_ask() {
     
     // Send tell() - should activate synchronously (Orleans: first message activates)
     // VirtualActorWrapper.tell() should activate the actor
-    let tell_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
-        .with_message_type("cast".to_string());
+    let tell_msg = create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "cast");
     actor_ref.tell(tell_msg).await.unwrap();
     
     // Activation is synchronous - actor is ready immediately after tell() returns
@@ -161,10 +181,9 @@ async fn test_lazy_activation_tell_then_ask() {
     assert!(is_active_after, "Actor should be active after first message");
     
     // Send ask() - should work (actor already activated, using ActorRef directly)
-    let ask_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
-        .with_message_type("call".to_string());
+    let ask_msg = create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
     let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(1)));
 }
 
@@ -206,10 +225,9 @@ async fn test_lazy_activation_ask_directly() {
         .unwrap();
     
     // Send ask() directly - should activate and respond
-    let ask_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
-        .with_message_type("call".to_string());
+    let ask_msg = create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
     let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Pong(_)));
 }
 
@@ -252,16 +270,14 @@ async fn test_lazy_activation_multiple_messages() {
     
     // Send multiple messages - should activate on first and process all
     for _ in 0..5 {
-        let msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
-            .with_message_type("call".to_string());
+        let msg = create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "call");
         let _ = actor_ref.ask(msg, Duration::from_secs(5)).await.unwrap();
     }
     
     // Verify count
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
-        .with_message_type("call".to_string());
+    let get_msg = create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(5)));
 }
 

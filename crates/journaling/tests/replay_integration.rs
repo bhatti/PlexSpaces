@@ -15,7 +15,7 @@ mod sqlite_integration_tests {
     use plexspaces_journaling::sql::PostgresJournalStorage;
     use plexspaces_facet::Facet;
     use plexspaces_proto::prost_types;
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::Message;
     use plexspaces_core::{ActorContext, ServiceLocator};
     use std::sync::Arc;
     use tokio::sync::RwLock;

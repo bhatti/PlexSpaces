@@ -54,16 +54,16 @@
 //! 1. **Request Phase**: `ask()` always creates temporary sender ActorRef and ReplyWaiter
 //!    - Temporary sender ID format: `"ask-{correlation_id}@{node_id}"`
 //!    - Temporary sender is always local (created on node where `ask()` is called)
-//!    - Receiver can be local or remote (extracted from `message.receiver`)
+//!    - Receiver can be local or remote (extracted from `message.receiver_id`)
 //! 2. **Routing Phase**: `ActorService::send_reply()` routes reply to temporary sender's ActorRef
 //!    - Local: Lookup temporary sender ActorRef → `tell()`
 //!    - Remote: gRPC → remote node → lookup temporary sender ActorRef → `tell()`
 //! 3. **Delivery Phase**: `tell()` checks if receiver is temporary sender → routes to ReplyWaiter
-//!    - Simple rule: if `message.receiver` is temporary sender ID → REPLY → route to ReplyWaiter
+//!    - Simple rule: if `message.receiver_id` is temporary sender ID → REPLY → route to ReplyWaiter
 //!    - Otherwise → REQUEST or normal message → send to mailbox
 //! 4. **Waiting Phase**: ReplyWaiter wakes up waiting `ask()` caller
 //!
-//! **Key Simplification**: We only check `message.receiver` to determine if it's a reply. When
+//! **Key Simplification**: We only check `message.receiver_id` to determine if it's a reply. When
 //! `tell()` is called on a temporary sender ActorRef, the receiver will be that temporary sender ID,
 //! so checking receiver covers all cases. This reduces complexity from 5 checks to 1.
 //!
@@ -140,12 +140,12 @@
 //! let actor_ref: ActorRef = registry.get("my-actor").await?;
 //!
 //! // Send message (fire-and-forget)
-//! let message = Message::new(b"hello".to_vec());
+//! let message = create_test_message(b"hello".to_vec());
 //! actor_ref.tell(message).await?;
 //! // Returns immediately, actor processes asynchronously
 //!
 //! // Request-reply (ask pattern)
-//! let request = Message::new(b"get_state".to_vec());
+//! let request = create_test_message(b"get_state".to_vec());
 //! let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 //! // Returns after actor processes and responds
 //! ```
@@ -153,7 +153,7 @@
 //! ### Non-Blocking Try-Tell
 //! ```rust,ignore
 //! // Try to send without blocking (fails if mailbox full)
-//! let message = Message::new(b"data".to_vec());
+//! let message = create_test_message(b"data".to_vec());
 //! match actor_ref.try_tell(message) {
 //!     Ok(()) => println!("Sent"),
 //!     Err(ActorRefError::MailboxFull) => println!("Mailbox full, try later"),
@@ -183,7 +183,7 @@
 //! for i in 0..10 {
 //!     let ref_clone = actor_ref.clone();  // Cheap clone
 //!     let handle = tokio::spawn(async move {
-//!         let msg = Message::new(format!("increment-{}", i).into_bytes());
+//!         let msg = create_test_message(format!("increment-{}", i).into_bytes());
 //!         ref_clone.tell(msg).await
 //!     });
 //!     handles.push(handle);
@@ -265,7 +265,8 @@
 
 use chrono;
 use plexspaces_core::{ActorId, ReplyWaiter, MessageSender};
-use plexspaces_mailbox::{Mailbox, Message, MailboxConfig};
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -278,8 +279,9 @@ use plexspaces_core::{GrpcConnectionManager, ServiceType};
 
 // Import proto types for gRPC communication
 use plexspaces_proto::actor::v1::{
-    actor_service_client::ActorServiceClient, Message as ProtoMessage, SendMessageRequest,
+    actor_service_client::ActorServiceClient, SendMessageRequest,
 };
+// Message alias removed - using Message directly
 use prost_types::Timestamp;
 
 /// Error types for ActorRef operations
@@ -662,7 +664,7 @@ impl ActorRef {
             let backtrace = std::backtrace::Backtrace::capture();
             tracing::error!(
                 "INFINITE RECURSION DETECTED IN ActorRef::tell! depth={}, max={}, actor_ref_id={}, sender={:?}, receiver={}, correlation_id={:?}, backtrace={:?}",
-                depth, MAX_RECURSION_DEPTH, self.id, message.sender, message.receiver, message.correlation_id, backtrace
+                depth, MAX_RECURSION_DEPTH, self.id, message.sender_id, message.receiver_id, message.correlation_id, backtrace
             );
             return Err(ActorRefError::SendFailed(format!(
                 "Infinite recursion detected in ActorRef::tell (depth: {})",
@@ -703,7 +705,8 @@ impl ActorRef {
 
         // VALIDATION: Check for self-messaging (sender == receiver)
         // Temporary senders prevent this for ask(), but we keep the check for direct tell() calls.
-        if let Some(sender_id) = &message.sender {
+        if !message.sender_id.is_empty() {
+            let sender_id = &message.sender_id;
             if sender_id == &actor_id {
                 let _ = TELL_DEPTH.with(|d| d.set(0)); // Reset on error
                 tracing::error!(
@@ -724,10 +727,10 @@ impl ActorRef {
         
         // VALIDATION: Check if receiver matches this ActorRef
         // We log a warning but don't error - message might be intentionally routed elsewhere.
-        if message.receiver != actor_id {
+        if message.receiver_id != actor_id {
             tracing::warn!(
-                "ActorRef::tell: Receiver mismatch! message.receiver={}, ActorRef.id={}, message_type={}, correlation_id={:?}",
-                message.receiver, actor_id, message_type, message.correlation_id
+                "ActorRef::tell: Receiver mismatch! message.receiver_id={}, ActorRef.id={}, message_type={}, correlation_id={:?}",
+                message.receiver_id, actor_id, message_type, message.correlation_id
             );
         }
 
@@ -737,8 +740,8 @@ impl ActorRef {
             "actor_ref.tell",
             actor_id = %actor_id,
             message_type = %message_type,
-            sender = ?message.sender,
-            receiver = %message.receiver,
+            sender = ?message.sender_id,
+            receiver = %message.receiver_id,
             correlation_id = ?message.correlation_id
         );
         let _guard = span.enter();
@@ -746,7 +749,7 @@ impl ActorRef {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 "[TELL] START: actor_ref_id={}, message_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}",
-                actor_id, message.id, message.sender, message.receiver, message_type, message.correlation_id
+                actor_id, message.id, message.sender_id, message.receiver_id, message_type, message.correlation_id
             );
         }
 
@@ -791,12 +794,15 @@ impl ActorRef {
         // - Otherwise → REQUEST or normal message → send to mailbox
         // Route replies to temporary senders via ReplyWaiter
         // Check if receiver is a temporary sender ID (format: "ask-{correlation_id}@{node_id}")
-        if Self::is_temporary_sender_id(&message.receiver) {
+        if Self::is_temporary_sender_id(&message.receiver_id) {
             // Prefer correlation_id from message, fallback to extracting from temporary sender ID
             // Store extracted correlation_id in a variable to avoid lifetime issues
-            let extracted_corr_id = Self::extract_correlation_id_from_temporary_sender(&message.receiver);
-            let corr_id = message.correlation_id.as_ref()
-                .or_else(|| extracted_corr_id.as_ref());
+            let extracted_corr_id = Self::extract_correlation_id_from_temporary_sender(&message.receiver_id);
+            let corr_id = if !message.correlation_id.is_empty() {
+                Some(&message.correlation_id)
+            } else {
+                extracted_corr_id.as_ref()
+            };
             
             if let Some(corr_id) = corr_id {
                 if let Some(ref waiter_registry) = waiter_registry {
@@ -804,33 +810,33 @@ impl ActorRef {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             "[TELL] Attempting to route reply to temporary sender: correlation_id={}, receiver={}, message_correlation_id={:?}",
-                            corr_id, message.receiver, message.correlation_id
+                            corr_id, message.receiver_id, message.correlation_id
                         );
                     }
                     if waiter_registry.notify(corr_id, message_clone).await {
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             tracing::debug!(
                                 "[TELL] REPLY TO TEMPORARY SENDER ROUTED: correlation_id={}, receiver={}",
-                                corr_id, message.receiver
+                                corr_id, message.receiver_id
                             );
                         }
                         return Ok(());
                     } else {
                         tracing::warn!(
                             "🟢 [TELL] Failed to route reply to temporary sender: correlation_id={}, receiver={}",
-                            corr_id, message.receiver
+                            corr_id, message.receiver_id
                         );
                     }
                 } else {
                     tracing::warn!(
                         "🟢 [TELL] ReplyWaiterRegistry not available: correlation_id={}, receiver={}",
-                        corr_id, message.receiver
+                        corr_id, message.receiver_id
                     );
                 }
             } else {
                 tracing::warn!(
                     "🟢 [TELL] No correlation_id available for temporary sender: receiver={}, message_correlation_id={:?}",
-                    message.receiver, message.correlation_id
+                    message.receiver_id, message.correlation_id
                 );
             }
         }
@@ -843,7 +849,7 @@ impl ActorRef {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "[TELL] LOCAL PATH: actor_ref_id={}, sender={:?}, receiver={}, correlation_id={:?}",
-                        actor_id, message.sender, message.receiver, message.correlation_id
+                        actor_id, message.sender_id, message.receiver_id, message.correlation_id
                     );
                 }
                 
@@ -867,10 +873,12 @@ impl ActorRef {
                 
                 // REQUEST or normal message → send to mailbox
                 // (Reply routing to temporary sender is handled above before this match)
-                let msg_sender = message.sender.clone();
-                let msg_receiver = message.receiver.clone();
+                let msg_sender = message.sender_id.clone();
+                let msg_receiver = message.receiver_id.clone();
                 let msg_correlation_id = message.correlation_id.clone();
-                let send_result = mailbox.send(message).await
+                // Convert proto Message to mailbox Message for mailbox storage
+                let mailbox_msg = plexspaces_mailbox::Message::from_proto(&message);
+                let send_result = mailbox.send(mailbox_msg).await
                     .map_err(|e| {
                         tracing::error!(
                             "🟢 [TELL] MAILBOX SEND FAILED: actor_ref_id={}, sender={:?}, receiver={}, error={}",
@@ -1017,16 +1025,14 @@ impl ActorRef {
         }
     }
 
-    /// Convert internal Message to proto Message
+    /// Prepare message for sending by setting the receiver_id
     fn to_proto_message(
         message: &Message,
         receiver_id: &ActorId,
-    ) -> Result<ProtoMessage, ActorRefError> {
-        // Use message.to_proto() which already handles TTL correctly
-        let mut proto_msg = message.to_proto();
-        // Override receiver_id with the target actor ID
-        proto_msg.receiver_id = receiver_id.clone();
-        Ok(proto_msg)
+    ) -> Result<Message, ActorRefError> {
+        let mut msg = message.clone();
+        msg.receiver_id = receiver_id.clone();
+        Ok(msg)
     }
 
     /// Try to send a message without blocking
@@ -1109,9 +1115,9 @@ impl ActorRef {
     /// ## Examples
     /// ```rust,ignore
     /// // Send request and wait for reply (works for local and remote)
-    /// let request = Message::new(b"get_state".to_vec());
+    /// let request = create_test_message(b"get_state".to_vec());
     /// let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
-    /// println!("Received: {:?}", reply.payload());
+    /// println!("Received: {:?}", reply.payload);
     /// ```
     ///
     /// ## Errors
@@ -1134,8 +1140,8 @@ impl ActorRef {
             actor_id = %actor_id,
             message_type = %message_type,
             timeout_secs = timeout.as_secs(),
-            sender = ?message.sender,
-            receiver = %message.receiver
+            sender = ?message.sender_id,
+            receiver = %message.receiver_id
         );
         let _guard = span.enter();
 
@@ -1154,7 +1160,7 @@ impl ActorRef {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
             "🔵 [ASK] START: caller_actor_ref_id={}, target_actor_id={}, message_id={}, message_type={}, sender={:?}, receiver={}, correlation_id={:?}",
-            actor_id, message.receiver, message.id, message_type, message.sender, message.receiver, message.correlation_id
+            actor_id, message.receiver_id, message.id, message_type, message.sender_id, message.receiver_id, message.correlation_id
         );
         }
 
@@ -1167,7 +1173,7 @@ impl ActorRef {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                     "🔵 [ASK] LOCAL PATH: Generated correlation_id={}, caller_actor_ref_id={}, target_actor_id={}",
-                    correlation_id, actor_id, message.receiver
+                    correlation_id, actor_id, message.receiver_id
                 );
                 }
 
@@ -1186,7 +1192,7 @@ impl ActorRef {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                         "🔵 [ASK] Registered ReplyWaiter in ReplyWaiterRegistry: correlation_id={}, caller_actor_id={:?}, target_actor_id={}",
-                        correlation_id, message.sender, actor_id
+                        correlation_id, message.sender_id, actor_id
                     );
                     }
                 } else {
@@ -1200,8 +1206,8 @@ impl ActorRef {
 
                 // Set receiver to self.id() if not set (Message::new() defaults to "unknown")
                 // Production-grade: ask() on ActorRef targets that actor
-                if message.is_receiver_unset() {
-                    message.receiver = actor_id.clone();
+                if message.receiver_id.is_empty() {
+                    message.receiver_id = actor_id.clone();
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                         "🔵 [ASK] Message receiver was unset, set to ActorRef.id: {}",
@@ -1210,7 +1216,7 @@ impl ActorRef {
                     }
                 } else {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!("🔵 [ASK] Message receiver already set: {}", message.receiver);
+                        tracing::debug!("🔵 [ASK] Message receiver already set: {}", message.receiver_id);
                     }
                 }
                 
@@ -1220,23 +1226,23 @@ impl ActorRef {
                 // SIMPLIFIED DESIGN: Always create temporary sender for ask() calls
                 // This simplifies the code by removing conditional logic.
                 // Temporary sender is always local (created on the node where ask() is called),
-                // but receiver can be local or remote (extracted from message.receiver).
+                // but receiver can be local or remote (extracted from message.receiver_id).
                 // When reply is received by temporary sender, it routes to ReplyWaiter and cleans itself up.
                 let caller_node_id = self.get_caller_node_id().await?;
                 let temp_sender_id = format!("ask-{}@{}", correlation_id, caller_node_id);
                 
                 // Override sender to temporary sender ID (CRITICAL for reply routing)
-                let old_sender = message.sender.clone();
-                message.sender = Some(temp_sender_id.clone());
+                let old_sender = message.sender_id.clone();
+                message.sender_id = temp_sender_id.clone();
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
-                    "🔵 [ASK] Overriding sender to temporary sender ID: old_sender={:?}, new_sender={}, correlation_id={}",
+                    "🔵 [ASK] Overriding sender to temporary sender ID: old_sender={}, new_sender={}, correlation_id={}",
                     old_sender, temp_sender_id, correlation_id
                 );
                 }
                 
                 // Set correlation_id in message for reply routing
-                message.correlation_id = Some(correlation_id.clone());
+                message.correlation_id = correlation_id.clone();
                 
                 // Store temporary sender ID for cleanup
                 let expires_at = Instant::now() + (timeout * 2);
@@ -1302,7 +1308,7 @@ impl ActorRef {
                 ).set(1.0);
                 
                 // Set sender to temporary sender ID
-                message.sender = Some(temp_sender_id.clone());
+                message.sender_id = temp_sender_id.clone();
                 
                 // Clone for cleanup
                 let temp_sender_id_for_cleanup = temp_sender_id.clone();
@@ -1310,22 +1316,22 @@ impl ActorRef {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                     "🔵 [ASK] Message prepared: sender={} (caller ActorRef), receiver={} (target actor), correlation_id={}",
-                    actor_id, message.receiver, correlation_id
+                    actor_id, message.receiver_id, correlation_id
                 );
                 }
                 
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                     "🔵 [ASK] Message prepared: correlation_id={}, sender={:?}, receiver={}, message_type={}",
-                    correlation_id, message.sender, message.receiver, message_type
+                    correlation_id, message.sender_id, message.receiver_id, message_type
                 );
                 }
 
                 // IMPORTANT: When ask() is called on an ActorRef, that ActorRef represents the target actor
                 // The ReplyWaiter is stored on self (the ActorRef ask() was called on)
-                // If message.receiver matches self.id, we can use self.tell() directly
+                // If message.receiver_id matches self.id, we can use self.tell() directly
                 // Otherwise, we need to look up the target ActorRef
-                let target_actor_id = message.receiver.clone();
+                let target_actor_id = message.receiver_id.clone();
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                     "🔵 [ASK] Comparing target_actor_id={} with actor_id={} (self.id())",
@@ -1337,7 +1343,7 @@ impl ActorRef {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                         "🔵 [ASK] Target matches self, using self.tell(): target={}, sender={:?}, receiver={}, correlation_id={}",
-                        target_actor_id, message.sender, message.receiver, correlation_id
+                        target_actor_id, message.sender_id, message.receiver_id, correlation_id
                     );
                     }
                     if let Err(e) = self.tell(message).await {
@@ -1372,11 +1378,11 @@ impl ActorRef {
                     use std::sync::Arc;
                     // Try to get MessageSender from registry (for activated actors and lazy virtual actors)
                     // If found, send message directly and skip the rest of the logic
-                    // IMPORTANT: message.sender and message.correlation_id are already set above (lines 1197, 1127)
+                    // IMPORTANT: message.sender_id and message.correlation_id are already set above (lines 1197, 1127)
                     let message_sent = if let Some(registry) = self.service_locator().actor_registry().await {
                         // Try to get MessageSender first (for activated actors and lazy virtual actors)
                         if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!("[ASK] Looking up actor in registry: target={}, sender={:?}, correlation_id={:?}", target_actor_id, message.sender, message.correlation_id);
+                            tracing::debug!("[ASK] Looking up actor in registry: target={}, sender={:?}, correlation_id={:?}", target_actor_id, message.sender_id, message.correlation_id);
                         }
                         if let Some(sender) = registry.lookup_actor(&target_actor_id).await {
                             if tracing::enabled!(tracing::Level::DEBUG) {
@@ -1478,7 +1484,7 @@ impl ActorRef {
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             tracing::debug!(
                             "🔵 [ASK] Calling tell() on target ActorRef: target={}, sender={:?}, receiver={}, correlation_id={}",
-                            target_actor_id, message.sender, message.receiver, correlation_id
+                            target_actor_id, message.sender_id, message.receiver_id, correlation_id
                         );
                         }
                         if let Err(e) = target_actor_ref.tell(message).await {
@@ -1551,7 +1557,7 @@ impl ActorRef {
                         Ok(msg) => {
                             tracing::debug!(
                                 "[ASK] Reply received: correlation_id={}, caller_actor_ref_id={}, reply_sender={:?}, reply_receiver={}",
-                                correlation_id, actor_id, msg.sender, msg.receiver
+                                correlation_id, actor_id, msg.sender_id, msg.receiver_id
                             );
                         }
                         Err(e) => {
@@ -1572,14 +1578,14 @@ impl ActorRef {
                 // Get local node ID once (for validation and routing)
                 let local_node_id = self.get_local_node_id().await;
                 
-                // Extract target node_id from message.receiver (use self.id() if receiver is unset)
-                let target_actor_id = if message.is_receiver_unset() {
+                // Extract target node_id from message.receiver_id (use self.id() if receiver is unset)
+                let target_actor_id = if message.receiver_id.is_empty() {
                     self.id().as_str().to_string()
                 } else {
-                    message.receiver.clone()
+                    message.receiver_id.clone()
                 };
-                // Ensure message.receiver is set
-                message.receiver = target_actor_id.clone();
+                // Ensure message.receiver_id is set
+                message.receiver_id = target_actor_id.clone();
                 
                 // Extract node_id from target actor ID (fallback to ActorRef's node_id)
                 let (_, target_node_id_opt) = Self::extract_node_id(&target_actor_id);
@@ -1605,7 +1611,7 @@ impl ActorRef {
                                     if let Some(local_actor_sender) = registry.lookup_actor(&target_actor_id).await {
                                         // Generate correlation_id
                                         let correlation_id = Ulid::new().to_string();
-                                        message.correlation_id = Some(correlation_id.clone());
+                                        message.correlation_id = correlation_id.clone();
                                         
                                         // Create ReplyWaiter
                                         let waiter = ReplyWaiter::new();
@@ -1651,8 +1657,8 @@ impl ActorRef {
                                         ).await;
                                         
                                         // Set sender to temporary sender ID
-                                        message.sender = Some(temp_sender_id.clone());
-                                        message.receiver = target_actor_id.clone();
+                                        message.sender_id = temp_sender_id.clone();
+                                        message.receiver_id = target_actor_id.clone();
                                         
                                         // Send message via tell() on local actor's MessageSender
                                         if let Err(e) = local_actor_sender.tell(message).await {
@@ -1702,7 +1708,7 @@ impl ActorRef {
                             
                             // Generate unique correlation_id for this request
                             let correlation_id = Ulid::new().to_string();
-                            message.correlation_id = Some(correlation_id.clone());
+                            message.correlation_id = correlation_id.clone();
                             
                             // Create reply waiter
                             let waiter = ReplyWaiter::new();
@@ -1752,7 +1758,7 @@ impl ActorRef {
                             }
                             
                             // Set sender to temporary sender ID
-                            message.sender = Some(temp_sender_id.clone());
+                            message.sender_id = temp_sender_id.clone();
                             
                             let temp_sender_id_clone = temp_sender_id.clone();
                             
@@ -1823,12 +1829,9 @@ impl ActorRef {
                                 *temp_sender = None;
                             }
                             
-                            // Convert proto message back to internal Message
-                            let reply = Message::from_proto(&reply_proto);
-                            
                             // Verify correlation_id matches
-                            if reply.correlation_id.as_ref() == Some(&correlation_id) {
-                                Ok(reply)
+                            if reply_proto.correlation_id == correlation_id {
+                                Ok(reply_proto)
                             } else {
                                 Err(ActorRefError::SendFailed(
                                     "Reply correlation_id mismatch".to_string(),
@@ -1884,7 +1887,7 @@ impl ActorRef {
     /// ## Arguments
     /// * `correlation_id` - Correlation ID from the original message (optional)
     /// * `sender_id` - ID of the actor that sent the original message (or temporary sender ID)
-    /// * `target_actor_id` - ID of the actor sending the reply (usually `msg.receiver`)
+    /// * `target_actor_id` - ID of the actor sending the reply (usually `msg.receiver_id`)
     /// * `reply_message` - The reply message to send
     /// * `service_locator` - ServiceLocator for accessing ActorService
     ///
@@ -1919,10 +1922,10 @@ impl ActorRef {
             .ok_or_else(|| ActorRefError::SendFailed("ActorService not available in ServiceLocator".to_string()))?;
         
         let mut reply_msg = reply_message;
-        reply_msg.receiver = target_actor_id.clone();
-        reply_msg.sender = Some(sender_id.clone());
+        reply_msg.receiver_id = target_actor_id.clone();
+        reply_msg.sender_id = sender_id.clone();
         if let Some(corr_id) = correlation_id {
-            reply_msg.correlation_id = Some(corr_id.to_string());
+            reply_msg.correlation_id = corr_id.to_string();
         }
         actor_service.send(&target_actor_id, reply_msg).await
             .map(|_| ()) // Ignore message_id return value
@@ -1994,6 +1997,16 @@ mod tests {
     use super::*;
     use plexspaces_core::ActorContext;
     use plexspaces_mailbox::MailboxConfig;
+    use ulid::Ulid;
+    
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
 
     /// Helper to create a test mailbox
     pub(crate) async fn create_test_mailbox() -> Arc<Mailbox> {
@@ -2056,7 +2069,7 @@ mod tests {
             registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None).await;
         }
 
-        let message = Message::new(b"hello".to_vec());
+        let message = create_test_message(b"hello".to_vec());
 
         // Send message
         let message_id = message.id.clone();
@@ -2119,7 +2132,7 @@ impl MockActorService {
         let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor", mailbox, service_locator);
 
-        let msg = Message::new(b"data".to_vec());
+        let msg = create_test_message(b"data".to_vec());
         let result = actor_ref.try_tell(msg);
 
         // Should return error indicating try_tell is not supported with Mailbox
@@ -2133,7 +2146,7 @@ impl MockActorService {
         let service_locator = create_test_service_locator().await;
         let actor_ref = ActorRef::local("test-actor", mailbox, service_locator);
 
-        let message = Message::new(b"hello".to_vec());
+        let message = create_test_message(b"hello".to_vec());
         let result = actor_ref.try_tell(message);
 
         // Should return error indicating try_tell is not supported with Mailbox
@@ -2168,8 +2181,8 @@ impl MockActorService {
         let actor_ref2 = actor_ref1.clone();
 
         // Both can send messages
-        let msg1 = Message::new(b"from ref1".to_vec());
-        let msg2 = Message::new(b"from ref2".to_vec());
+        let msg1 = create_test_message(b"from ref1".to_vec());
+        let msg2 = create_test_message(b"from ref2".to_vec());
 
         let msg1_id = msg1.id.clone();
         let msg2_id = msg2.id.clone();
@@ -2217,8 +2230,8 @@ impl MockActorService {
     fn test_to_proto_message() {
         use plexspaces_mailbox::MessagePriority;
 
-        let mut message = Message::new(b"test payload".to_vec());
-        message.sender = Some("sender-actor".to_string());
+        let mut message = create_test_message(b"test payload".to_vec());
+        message.sender_id = "sender-actor".to_string();
         message.message_type = "call".to_string();
         message.priority = MessagePriority::High;
         message
@@ -2248,7 +2261,7 @@ impl MockActorService {
     /// TEST 10: Proto message conversion with minimal message
     #[test]
     fn test_to_proto_message_minimal() {
-        let message = Message::new(b"minimal".to_vec());
+        let message = create_test_message(b"minimal".to_vec());
         let receiver_id = "receiver".to_string();
 
         let proto_msg = ActorRef::to_proto_message(&message, &receiver_id).unwrap();
@@ -2290,7 +2303,7 @@ impl MockActorService {
             registry.register_actor(&ctx, "target-actor@node1".to_string(), sender, None, None, None).await;
         }
         
-        let message = Message::new(b"hello".to_vec());
+        let message = create_test_message(b"hello".to_vec());
         let message_id = message.id.clone();
 
         actor_ref.tell(message).await.unwrap();
@@ -2330,7 +2343,7 @@ impl MockActorService {
             service_locator,
         );
 
-        let message = Message::new(b"remote hello".to_vec());
+        let message = create_test_message(b"remote hello".to_vec());
         // Remote tell will fail (no server), but that's expected in unit test
         let result = actor_ref.tell(message.clone()).await;
         // Should fail with connection error (no server running)
@@ -2397,9 +2410,9 @@ impl MockActorService {
         }
 
         // Send reply message with correlation_id (simulating reply from another actor)
-        let mut reply_message = Message::new(b"reply".to_vec());
-        reply_message.correlation_id = Some(correlation_id.clone());
-        reply_message.sender = Some("other-actor@node1".to_string()); // Different sender to avoid self-messaging check
+        let mut reply_message = create_test_message(b"reply".to_vec());
+        reply_message.correlation_id = correlation_id.clone();
+        reply_message.sender_id = "other-actor@node1".to_string(); // Different sender to avoid self-messaging check
         
         // Send via ActorRef - ReplyWaiterRegistry routes it if there's a pending ask
         // For this test, we just verify the message can be sent
@@ -2421,7 +2434,7 @@ impl MockActorService {
         let actor_ref = ActorRef::local("test-actor@node1".to_string(), mailbox, service_locator);
 
         // Use unified ask() API - sends to self and waits for reply
-        let request = Message::new(b"request".to_vec());
+        let request = create_test_message(b"request".to_vec());
         let result = actor_ref.ask(request, Duration::from_millis(100)).await;
         
         // Should timeout since no reply will be sent
@@ -2466,7 +2479,7 @@ impl MockActorService {
         );
 
         // Use unified ask() API - no ActorContext needed
-        let request = Message::new(b"remote request".to_vec());
+        let request = create_test_message(b"remote request".to_vec());
         // Remote ask will fail (no server), but that's expected in unit test
         let result = actor_ref
             .ask(request, Duration::from_secs(1))
@@ -2484,7 +2497,7 @@ impl MockActorService {
         // ActorRef manages its own reply_waiters via ReplyWaiterRegistry
 
         let actor_ref = ActorRef::local("target-actor@node1", mailbox, service_locator);
-        let request = Message::new(b"request".to_vec());
+        let request = create_test_message(b"request".to_vec());
         let result = actor_ref
             .ask(request, Duration::from_millis(10))
             .await;
@@ -2516,7 +2529,7 @@ impl MockActorService {
 
         let actor_ref = ActorRef::local("target-actor@node1", mailbox, service_locator);
         // Send request but no one will reply (simulates terminated actor)
-        let request = Message::new(b"request".to_vec());
+        let request = create_test_message(b"request".to_vec());
         let result = actor_ref
             .ask(request, Duration::from_millis(10))
             .await;
@@ -2578,7 +2591,7 @@ impl MockActorService {
             registry.register_actor(&ctx, "actor@node1".to_string(), sender, None, None, None).await;
         }
         
-        actor_ref1.tell(Message::new(b"local".to_vec())).await.unwrap();
+        actor_ref1.tell(create_test_message(b"local".to_vec())).await.unwrap();
         assert!(mailbox1_clone.dequeue().await.is_some());
 
         // Test remote (different node)
@@ -2604,7 +2617,7 @@ impl MockActorService {
         let mailbox2 = create_test_mailbox().await;
         let mailbox2_clone = Arc::clone(&mailbox2);
         let actor_ref2 = ActorRef::local("actor@node1", mailbox2, service_locator);
-        actor_ref2.tell(Message::new(b"remote".to_vec())).await.unwrap();
+        actor_ref2.tell(create_test_message(b"remote".to_vec())).await.unwrap();
         assert!(mailbox2_clone.dequeue().await.is_some());
     }
 
@@ -2654,13 +2667,13 @@ impl MockActorService {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // Notify the waiter
-        let reply = Message::new(b"reply".to_vec());
+        let reply = create_test_message(b"reply".to_vec());
         let notified = actor_ref.try_notify_reply_waiter(&correlation_id, reply.clone()).await;
         assert!(notified, "Waiter should be notified");
 
         // Verify reply was received
         let received_reply = wait_handle.await.unwrap().unwrap();
-        assert_eq!(received_reply.payload(), reply.payload());
+        assert_eq!(received_reply.payload, reply.payload);
 
         // Verify waiter was removed from map
         let waiters = actor_ref.reply_waiters.read().await;
@@ -2676,7 +2689,7 @@ impl MockActorService {
         let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
 
         // Try to notify with unknown correlation_id
-        let reply = Message::new(b"reply".to_vec());
+        let reply = create_test_message(b"reply".to_vec());
         let notified = actor_ref.try_notify_reply_waiter("unknown-corr-id", reply).await;
         assert!(!notified, "Should return false for unknown correlation_id");
     }
@@ -2723,18 +2736,18 @@ impl MockActorService {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // Notify each waiter
-        let reply1 = Message::new(b"reply1".to_vec());
-        let reply2 = Message::new(b"reply2".to_vec());
-        let reply3 = Message::new(b"reply3".to_vec());
+        let reply1 = create_test_message(b"reply1".to_vec());
+        let reply2 = create_test_message(b"reply2".to_vec());
+        let reply3 = create_test_message(b"reply3".to_vec());
 
         assert!(actor_ref.try_notify_reply_waiter(&corr_id1, reply1.clone()).await);
         assert!(actor_ref.try_notify_reply_waiter(&corr_id2, reply2.clone()).await);
         assert!(actor_ref.try_notify_reply_waiter(&corr_id3, reply3.clone()).await);
 
         // Verify all replies were received
-        assert_eq!(wait_handle1.await.unwrap().unwrap().payload(), reply1.payload());
-        assert_eq!(wait_handle2.await.unwrap().unwrap().payload(), reply2.payload());
-        assert_eq!(wait_handle3.await.unwrap().unwrap().payload(), reply3.payload());
+        assert_eq!(wait_handle1.await.unwrap().unwrap().payload, reply1.payload);
+        assert_eq!(wait_handle2.await.unwrap().unwrap().payload, reply2.payload);
+        assert_eq!(wait_handle3.await.unwrap().unwrap().payload, reply3.payload);
 
         // Verify all waiters were removed
         let waiters = actor_ref.reply_waiters.read().await;
@@ -2765,7 +2778,7 @@ impl MockActorService {
             let actor_ref_clone = actor_ref.clone();
             let corr_id_clone = corr_id.clone();
             let handle = tokio::spawn(async move {
-                let reply = Message::new(format!("reply-{}", i).into_bytes());
+                let reply = create_test_message(format!("reply-{}", i).into_bytes());
                 actor_ref_clone.try_notify_reply_waiter(&corr_id_clone, reply).await
             });
 

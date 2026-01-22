@@ -138,7 +138,8 @@ pub async fn invoke(node_addr: &str, actor_id: &str, payload: &str) -> Result<()
 
     println!("📨 Sending message to actor: {}", actor_id);
 
-    use plexspaces_proto::v1::actor::{SendMessageRequest, Message};
+    use plexspaces_proto::v1::actor::SendMessageRequest;
+    use plexspaces_proto::v1::common::Message;
     let mut msg = Message::default();
     msg.receiver_id = actor_id.to_string();
     msg.message_type = "application/json".to_string();

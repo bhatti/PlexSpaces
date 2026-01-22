@@ -1,16 +1,15 @@
-version: v1
+version: v2
 plugins:
-  # Generate markdown documentation
-  - plugin: doc
-    out: docs/proto
-    opt:
-      - markdown,docs.md
-
   # Generate OpenAPI/Swagger specs
-  - plugin: openapiv2
-    out: docs/openapi
+  # Note: Requires grpc-gateway annotations in proto files
+  # Using remote plugin for consistent behavior
+  - remote: buf.build/grpc-ecosystem/openapiv2:v2.19.1
+    out: docs
     opt:
       - generate_unbound_methods=true
       - allow_merge=true
-      - merge_file_name=plexspaces_api
+      - merge_file_name=openapi
       - simple_operation_ids=true
+      - json_names_for_fields=true
+      - openapi_naming_strategy=simple
+      - output_format=json

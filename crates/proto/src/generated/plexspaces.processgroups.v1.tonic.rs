@@ -4,6 +4,24 @@ pub mod process_group_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    /** ============================================================================
+ PROCESS GROUP SERVICE
+ ============================================================================
+ gRPC service for distributed pub/sub and broadcast messaging.
+ Erlang pg/pg2-inspired with PlexSpaces enhancements (multi-tenancy, built-in broadcast).
+
+ ## Usage
+ ```rust
+ // Create a group for config updates
+ client.create_group(CreateGroupRequest { group_name: "config-updates", ... }).await?;
+
+ // Actors join the group
+ client.join_group(JoinGroupRequest { group_name: "config-updates", actor_id: "actor-1", ... }).await?;
+
+ // Publish message to all members
+ client.publish_to_group(PublishToGroupRequest { group_name: "config-updates", message: msg, ... }).await?;
+ ```
+*/
     #[derive(Debug, Clone)]
     pub struct ProcessGroupServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -114,6 +132,22 @@ pub mod process_group_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Delete a process group
+
+ ## Purpose
+ Removes a group and all its membership data. All members are automatically
+ removed from the group.
+
+ ## Semantics
+ - Idempotent (deleting non-existent group succeeds)
+ - All memberships removed atomically
+ - Published messages pending delivery may still be delivered
+
+ ## Example
+ ```
+ DeleteGroupRequest { group_name: "config-updates", tenant_id: "acme" }
+ ```
+*/
         pub async fn delete_group(
             &mut self,
             request: impl tonic::IntoRequest<super::DeleteGroupRequest>,
@@ -144,6 +178,22 @@ pub mod process_group_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Join a process group
+
+ ## Purpose
+ Adds an actor to a group. The actor will receive messages published to the group.
+
+ ## Semantics (Erlang pg2 compatible)
+ - Actor can join same group multiple times (join_count tracked)
+ - Must leave equal number of times to fully remove
+ - Topics filter which messages actor receives (empty = all)
+ - Returns error if group doesn't exist
+
+ ## Example
+ ```
+ JoinGroupRequest { group_name: "events", actor_id: "handler-1", topics: ["user.login"] }
+ ```
+*/
         pub async fn join_group(
             &mut self,
             request: impl tonic::IntoRequest<super::JoinGroupRequest>,
@@ -174,6 +224,22 @@ pub mod process_group_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Leave a process group
+
+ ## Purpose
+ Removes an actor from a group. Decrements join_count; actor fully removed when
+ join_count reaches 0.
+
+ ## Semantics (Erlang pg2 compatible)
+ - Decrements join_count by 1
+ - Actor removed when join_count reaches 0
+ - Returns error if actor not in group
+
+ ## Example
+ ```
+ LeaveGroupRequest { group_name: "events", actor_id: "handler-1" }
+ ```
+*/
         pub async fn leave_group(
             &mut self,
             request: impl tonic::IntoRequest<super::LeaveGroupRequest>,
@@ -204,6 +270,20 @@ pub mod process_group_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Get all members of a group (cluster-wide)
+
+ ## Purpose
+ Returns all actor IDs in the group across all nodes in the cluster.
+
+ ## Performance
+ O(n) where n = total members across cluster. For large groups, use pagination.
+
+ ## Example
+ ```
+ GetMembersRequest { group_name: "config-updates", tenant_id: "acme" }
+ // Returns: ["actor-1", "actor-2", "actor-3"]
+ ```
+*/
         pub async fn get_members(
             &mut self,
             request: impl tonic::IntoRequest<super::GetMembersRequest>,
@@ -234,6 +314,23 @@ pub mod process_group_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Get local members of a group (this node only)
+
+ ## Purpose
+ Returns only actor IDs hosted on the local node. Faster than GetMembers for
+ local-only operations (no network round-trips).
+
+ ## Use Cases
+ - Local metrics collection
+ - Node-local coordination
+ - Optimized local broadcast
+
+ ## Example
+ ```
+ GetLocalMembersRequest { group_name: "metrics-reporters", tenant_id: "acme" }
+ // Returns only actors on this node
+ ```
+*/
         pub async fn get_local_members(
             &mut self,
             request: impl tonic::IntoRequest<super::GetLocalMembersRequest>,
@@ -264,6 +361,23 @@ pub mod process_group_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** List all groups (Erlang pg2 which_groups)
+
+ ## Purpose
+ Returns all groups matching the filter criteria. Supports pagination for
+ large deployments.
+
+ ## Filters
+ - tenant_id: Required (prevents cross-tenant access)
+ - namespace: Optional (filter by namespace)
+ - name_pattern: Optional (glob pattern, e.g., "config-*")
+
+ ## Example
+ ```
+ ListGroupsRequest { tenant_id: "acme", namespace: "prod" }
+ // Returns: ["config-updates", "user-events", "cluster-nodes"]
+ ```
+*/
         pub async fn list_groups(
             &mut self,
             request: impl tonic::IntoRequest<super::ListGroupsRequest>,
@@ -294,6 +408,32 @@ pub mod process_group_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Publish a message to all group members
+
+ ## Purpose
+ Broadcasts a message to all actors in the group. Handles routing to both
+ local and remote actors automatically.
+
+ ## Semantics
+ - Best-effort delivery (async, may retry based on TTL)
+ - Topic filtering: Only members subscribed to topic receive message
+ - Empty topic: All members receive message
+ - Returns count of recipients and failures
+
+ ## Performance
+ - Messages batched per remote node for efficiency
+ - Local delivery bypasses gRPC layer
+
+ ## Example
+ ```
+ PublishToGroupRequest {
+   group_name: "config-updates",
+   topic: "database",
+   message: Message { payload: config_bytes, ... }
+ }
+ // Returns: { recipients_count: 5, failures_count: 0 }
+ ```
+*/
         pub async fn publish_to_group(
             &mut self,
             request: impl tonic::IntoRequest<super::PublishToGroupRequest>,
@@ -340,6 +480,22 @@ pub mod process_group_service_server {
             tonic::Response<super::CreateGroupResponse>,
             tonic::Status,
         >;
+        /** Delete a process group
+
+ ## Purpose
+ Removes a group and all its membership data. All members are automatically
+ removed from the group.
+
+ ## Semantics
+ - Idempotent (deleting non-existent group succeeds)
+ - All memberships removed atomically
+ - Published messages pending delivery may still be delivered
+
+ ## Example
+ ```
+ DeleteGroupRequest { group_name: "config-updates", tenant_id: "acme" }
+ ```
+*/
         async fn delete_group(
             &self,
             request: tonic::Request<super::DeleteGroupRequest>,
@@ -347,6 +503,22 @@ pub mod process_group_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
+        /** Join a process group
+
+ ## Purpose
+ Adds an actor to a group. The actor will receive messages published to the group.
+
+ ## Semantics (Erlang pg2 compatible)
+ - Actor can join same group multiple times (join_count tracked)
+ - Must leave equal number of times to fully remove
+ - Topics filter which messages actor receives (empty = all)
+ - Returns error if group doesn't exist
+
+ ## Example
+ ```
+ JoinGroupRequest { group_name: "events", actor_id: "handler-1", topics: ["user.login"] }
+ ```
+*/
         async fn join_group(
             &self,
             request: tonic::Request<super::JoinGroupRequest>,
@@ -354,6 +526,22 @@ pub mod process_group_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
+        /** Leave a process group
+
+ ## Purpose
+ Removes an actor from a group. Decrements join_count; actor fully removed when
+ join_count reaches 0.
+
+ ## Semantics (Erlang pg2 compatible)
+ - Decrements join_count by 1
+ - Actor removed when join_count reaches 0
+ - Returns error if actor not in group
+
+ ## Example
+ ```
+ LeaveGroupRequest { group_name: "events", actor_id: "handler-1" }
+ ```
+*/
         async fn leave_group(
             &self,
             request: tonic::Request<super::LeaveGroupRequest>,
@@ -361,6 +549,20 @@ pub mod process_group_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
+        /** Get all members of a group (cluster-wide)
+
+ ## Purpose
+ Returns all actor IDs in the group across all nodes in the cluster.
+
+ ## Performance
+ O(n) where n = total members across cluster. For large groups, use pagination.
+
+ ## Example
+ ```
+ GetMembersRequest { group_name: "config-updates", tenant_id: "acme" }
+ // Returns: ["actor-1", "actor-2", "actor-3"]
+ ```
+*/
         async fn get_members(
             &self,
             request: tonic::Request<super::GetMembersRequest>,
@@ -368,6 +570,23 @@ pub mod process_group_service_server {
             tonic::Response<super::GetMembersResponse>,
             tonic::Status,
         >;
+        /** Get local members of a group (this node only)
+
+ ## Purpose
+ Returns only actor IDs hosted on the local node. Faster than GetMembers for
+ local-only operations (no network round-trips).
+
+ ## Use Cases
+ - Local metrics collection
+ - Node-local coordination
+ - Optimized local broadcast
+
+ ## Example
+ ```
+ GetLocalMembersRequest { group_name: "metrics-reporters", tenant_id: "acme" }
+ // Returns only actors on this node
+ ```
+*/
         async fn get_local_members(
             &self,
             request: tonic::Request<super::GetLocalMembersRequest>,
@@ -375,6 +594,23 @@ pub mod process_group_service_server {
             tonic::Response<super::GetLocalMembersResponse>,
             tonic::Status,
         >;
+        /** List all groups (Erlang pg2 which_groups)
+
+ ## Purpose
+ Returns all groups matching the filter criteria. Supports pagination for
+ large deployments.
+
+ ## Filters
+ - tenant_id: Required (prevents cross-tenant access)
+ - namespace: Optional (filter by namespace)
+ - name_pattern: Optional (glob pattern, e.g., "config-*")
+
+ ## Example
+ ```
+ ListGroupsRequest { tenant_id: "acme", namespace: "prod" }
+ // Returns: ["config-updates", "user-events", "cluster-nodes"]
+ ```
+*/
         async fn list_groups(
             &self,
             request: tonic::Request<super::ListGroupsRequest>,
@@ -382,6 +618,32 @@ pub mod process_group_service_server {
             tonic::Response<super::ListGroupsResponse>,
             tonic::Status,
         >;
+        /** Publish a message to all group members
+
+ ## Purpose
+ Broadcasts a message to all actors in the group. Handles routing to both
+ local and remote actors automatically.
+
+ ## Semantics
+ - Best-effort delivery (async, may retry based on TTL)
+ - Topic filtering: Only members subscribed to topic receive message
+ - Empty topic: All members receive message
+ - Returns count of recipients and failures
+
+ ## Performance
+ - Messages batched per remote node for efficiency
+ - Local delivery bypasses gRPC layer
+
+ ## Example
+ ```
+ PublishToGroupRequest {
+   group_name: "config-updates",
+   topic: "database",
+   message: Message { payload: config_bytes, ... }
+ }
+ // Returns: { recipients_count: 5, failures_count: 0 }
+ ```
+*/
         async fn publish_to_group(
             &self,
             request: tonic::Request<super::PublishToGroupRequest>,
@@ -390,6 +652,24 @@ pub mod process_group_service_server {
             tonic::Status,
         >;
     }
+    /** ============================================================================
+ PROCESS GROUP SERVICE
+ ============================================================================
+ gRPC service for distributed pub/sub and broadcast messaging.
+ Erlang pg/pg2-inspired with PlexSpaces enhancements (multi-tenancy, built-in broadcast).
+
+ ## Usage
+ ```rust
+ // Create a group for config updates
+ client.create_group(CreateGroupRequest { group_name: "config-updates", ... }).await?;
+
+ // Actors join the group
+ client.join_group(JoinGroupRequest { group_name: "config-updates", actor_id: "actor-1", ... }).await?;
+
+ // Publish message to all members
+ client.publish_to_group(PublishToGroupRequest { group_name: "config-updates", message: msg, ... }).await?;
+ ```
+*/
     #[derive(Debug)]
     pub struct ProcessGroupServiceServer<T: ProcessGroupService> {
         inner: _Inner<T>,

@@ -50,7 +50,7 @@ package plexspaces.tuplespace.v1;
 
 import "google/protobuf/duration.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/tuplespace/tuplespace_storage;plexspaces_tuplespace_v1";
 option java_package = "com.bhatti.plexspaces.tuplespace.v1";
 option java_multiple_files = true;
 

@@ -459,6 +459,8 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             heartbeat_interval_ms: 5000, // Default
             clustering_enabled: true, // Default
             metadata: std::collections::HashMap::new(), // Default
+            node_registry: None,
+            grpc_address: String::new(),
         }),
         runtime: Some(RuntimeConfig {
             grpc: Some(GrpcConfig {
@@ -1028,6 +1030,8 @@ mod tests {
                 heartbeat_interval_ms: 5000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
+                node_registry: None,
+                grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1153,6 +1157,8 @@ mod tests {
                 heartbeat_interval_ms: 5000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
+                node_registry: None,
+                grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1237,6 +1243,8 @@ mod tests {
                 heartbeat_interval_ms: 5000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
+                node_registry: None,
+                grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1333,6 +1341,8 @@ mod tests {
                 heartbeat_interval_ms: 5000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
+                node_registry: None,
+                grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1407,6 +1417,8 @@ mod tests {
                 heartbeat_interval_ms: 5000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
+                node_registry: None,
+                grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
@@ -1474,6 +1486,8 @@ mod tests {
                 heartbeat_interval_ms: 5000,
                 clustering_enabled: true,
                 metadata: std::collections::HashMap::new(),
+                node_registry: None,
+                grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,

@@ -385,7 +385,7 @@ async fn register_mock_behavior_factory(node: &Node) -> Result<(), String> {
     
     // Register in ServiceLocator (ActorFactory looks for BehaviorRegistry by type)
     let service_locator = node.service_locator();
-    service_locator.register_service(registry_arc.clone()).await;
+    service_locator.register_behavior_registry(registry_arc.clone()).await;
     
     tracing::debug!("Registered behavior factory in ServiceLocator (fallback to SimpleBehavior for unknown types)");
     

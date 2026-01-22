@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use plexspaces_node::{Node, NodeBuilder};
+use plexspaces_core::ApplicationManager;
 use reqwest::multipart;
 
 /// Shared WASM bytes cache (loaded once, reused for all tests)
@@ -176,7 +177,7 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
                 // Verify application is registered
                 use plexspaces_application::ApplicationManager;
                 use plexspaces_core::service_names;
-                let app_manager: Arc<ApplicationManager> = node.service_locator()
+                let app_manager: Arc<dyn ApplicationManager> = node.service_locator()
                     .application_manager()
                     .await
                     .expect("ApplicationManager should be available");
@@ -296,7 +297,7 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
                 // Verify application is registered
                 use plexspaces_application::ApplicationManager;
                 use plexspaces_core::service_names;
-                let app_manager: Arc<ApplicationManager> = node.service_locator()
+                let app_manager: Arc<dyn ApplicationManager> = node.service_locator()
                     .application_manager()
                     .await
                     .expect("ApplicationManager should be available");

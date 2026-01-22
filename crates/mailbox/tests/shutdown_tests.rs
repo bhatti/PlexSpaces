@@ -29,6 +29,17 @@ use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxBuilder, Messag
 use std::time::Duration;
 use tempfile::TempDir;
 
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    let proto_msg = plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    };
+    proto_msg.into()
+}
+
+
 /// Helper to create a SQLite mailbox for testing
 #[cfg(feature = "sqlite-backend")]
 async fn create_sqlite_mailbox(mailbox_id: &str) -> Mailbox {
@@ -56,7 +67,7 @@ async fn test_in_memory_mailbox_shutdown_does_not_reject_enqueue() {
     mailbox.graceful_shutdown(Some(Duration::from_secs(1))).await.unwrap();
 
     // In-memory mailboxes should still accept messages (shutdown flag only affects non-memory)
-    let msg = Message::new(b"test".to_vec());
+    let msg = create_test_message(b"test".to_vec());
     let result = mailbox.enqueue(msg).await;
     assert!(result.is_ok(), "In-memory mailbox should accept messages even after shutdown");
 }
@@ -75,7 +86,7 @@ async fn test_non_memory_mailbox_shutdown_rejects_enqueue() {
     mailbox.graceful_shutdown(Some(Duration::from_secs(1))).await.unwrap();
 
     // Non-memory mailboxes should reject new messages
-    let msg = Message::new(b"test".to_vec());
+    let msg = create_test_message(b"test".to_vec());
     let result = mailbox.enqueue(msg).await;
     assert!(result.is_err(), "Non-memory mailbox should reject messages during shutdown");
     
@@ -92,7 +103,7 @@ async fn test_shutdown_stops_dequeue() {
     let mailbox = create_sqlite_mailbox("test-dequeue-shutdown").await;
 
     // Send a message
-    mailbox.enqueue(Message::new(b"test".to_vec())).await.unwrap();
+    mailbox.enqueue(create_test_message(b"test".to_vec())).await.unwrap();
     
     // Wait for message to be processed
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -117,7 +128,7 @@ async fn test_shutdown_waits_for_in_progress() {
     let mailbox = create_sqlite_mailbox("test-in-progress").await;
 
     // Send a message
-    mailbox.enqueue(Message::new(b"test".to_vec())).await.unwrap();
+    mailbox.enqueue(create_test_message(b"test".to_vec())).await.unwrap();
 
     // Start shutdown with longer timeout
     let start = std::time::Instant::now();
@@ -154,7 +165,7 @@ async fn test_shutdown_closes_channel() {
 
     // Channel should be closed (we can't directly access channel, but shutdown should close it)
     // Verify by trying to enqueue (should fail for non-memory after shutdown)
-    let msg = Message::new(b"test".to_vec());
+    let msg = create_test_message(b"test".to_vec());
     let result = mailbox.enqueue(msg).await;
     assert!(result.is_err(), "Channel should be closed after shutdown");
 }
@@ -167,7 +178,7 @@ async fn test_shutdown_flushes_durable_messages() {
 
     // Send multiple messages
     for i in 0..5 {
-        mailbox.enqueue(Message::new(format!("msg{}", i).into_bytes())).await.unwrap();
+        mailbox.enqueue(create_test_message(format!("msg{}", i).into_bytes())).await.unwrap();
     }
 
     // Wait a bit for processing
@@ -208,7 +219,7 @@ async fn test_shutdown_idempotent() {
     mailbox.graceful_shutdown(Some(Duration::from_secs(1))).await.unwrap();
 
     // Should still reject new messages
-    let msg = Message::new(b"test".to_vec());
+    let msg = create_test_message(b"test".to_vec());
     let result = mailbox.enqueue(msg).await;
     assert!(result.is_err());
 }
@@ -223,7 +234,7 @@ async fn test_shutdown_with_no_timeout() {
     mailbox.graceful_shutdown(None).await.unwrap();
 
     // Should reject new messages
-    let msg = Message::new(b"test".to_vec());
+    let msg = create_test_message(b"test".to_vec());
     let result = mailbox.enqueue(msg).await;
     assert!(result.is_err());
 }

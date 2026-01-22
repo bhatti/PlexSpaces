@@ -719,6 +719,7 @@ impl SystemService for SystemServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_core::PlexSpacesHealthReporter;
     use plexspaces_proto::system::v1::{HealthProbeConfig, DependencyRegistrationConfig};
 
     #[tokio::test]

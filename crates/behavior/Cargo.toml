@@ -12,6 +12,7 @@ description = "OTP-style behaviors for PlexSpaces actor system"
 [dependencies]
 # Core types
 plexspaces-core = { workspace = true }
+plexspaces-proto = { workspace = true }
 plexspaces-mailbox = { workspace = true }
 plexspaces-persistence = { workspace = true }
 
@@ -31,6 +32,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 plexspaces-node = { path = "../node" }
+ulid = { workspace = true }
 
 [features]
 tracing = ["plexspaces-core/tracing"]

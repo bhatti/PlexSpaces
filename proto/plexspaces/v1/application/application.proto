@@ -48,6 +48,7 @@
 syntax = "proto3";
 
 package plexspaces.application.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/application/application;plexspaces_application_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";

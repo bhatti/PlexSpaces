@@ -106,11 +106,19 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
     // Wait for nodes to start
     sleep(Duration::from_millis(500)).await;
 
-    // Register node2 as remote in node1's registry
-    node1
-        .register_remote_node(NodeId::new("node2"), "http://127.0.0.1:8001".to_string())
-        .await
-        .expect("Failed to register node2");
+    // Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
+    use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+    let ctx = node1.service_locator().request_context_for_system_operations().await;
+    let registration = ObjectRegistration {
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_id: "node2".to_string(),
+        grpc_address: "http://127.0.0.1:8001".to_string(),
+        object_category: "Node".to_string(),
+        ..Default::default()
+    };
+    if let Some(object_registry) = node1.service_locator().get_object_registry().await {
+        object_registry.register(&ctx, registration).await.expect("Failed to register node2");
+    }
 
     // Test 1: Write tuple on node1, read from node2 via gRPC
     {

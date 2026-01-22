@@ -10,7 +10,7 @@ use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
 
 /// Create a message with payload and receiver
-pub fn create_message(payload: &str, receiver: &str) -> plexspaces_proto::v1::actor::Message {
+pub fn create_message(payload: &str, receiver: &str) -> plexspaces_proto::common::v1::Message {
     let mut message = Message::new(payload.as_bytes().to_vec());
     message.receiver = receiver.to_string();
     message.to_proto()

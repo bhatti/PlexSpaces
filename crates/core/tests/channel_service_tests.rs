@@ -5,29 +5,54 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::Message;
     use std::sync::Arc;
     use futures::StreamExt;
     use async_trait::async_trait;
-    use plexspaces_core::{ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider};
+    use plexspaces_core::{ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider, RequestContext};
+    use ulid::Ulid;
+
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
 
     // Test ChannelService implementation
-    struct TestChannelService;
+    struct TestChannelService {
+        messages: Arc<tokio::sync::RwLock<Vec<Message>>>,
+    }
+
+    impl TestChannelService {
+        fn new() -> Self {
+            Self {
+                messages: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            }
+        }
+    }
     
     #[async_trait::async_trait]
-    impl plexspaces_core::ChannelService for TestChannelService {
-        async fn send_to_queue(&self, _queue_name: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            Ok("msg-id".to_string())
+    impl ChannelService for TestChannelService {
+        async fn send_to_queue(&self, _queue_name: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            let id = message.id.clone();
+            self.messages.write().await.push(message);
+            Ok(id)
         }
-        async fn publish_to_topic(&self, _topic_name: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            Ok("msg-id".to_string())
+        async fn publish_to_topic(&self, _topic_name: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            let id = message.id.clone();
+            self.messages.write().await.push(message);
+            Ok(id)
         }
         async fn subscribe_to_topic(&self, _topic_name: &str) -> Result<futures::stream::BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
             use futures::stream;
             Ok(Box::pin(stream::empty()))
         }
         async fn receive_from_queue(&self, _queue_name: &str, _timeout: Option<std::time::Duration>) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(None)
+            let messages = self.messages.read().await;
+            Ok(messages.first().cloned())
         }
     }
 
@@ -46,43 +71,22 @@ mod tests {
     struct MockObjectRegistry;
     #[async_trait::async_trait]
     impl ObjectRegistry for MockObjectRegistry {
-        async fn lookup(&self, _ctx: &plexspaces_core::RequestContext, _object_id: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn lookup(&self, _ctx: &RequestContext, _object_id: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(None)
         }
-        async fn lookup_full(&self, _ctx: &plexspaces_core::RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn lookup_full(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(None)
         }
-        async fn register(&self, _ctx: &plexspaces_core::RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn register(&self, _ctx: &RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
-        
-    async fn unregister(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        _object_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
-    async fn heartbeat(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        _object_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
-}
-        async fn discover(
-            &self,
-            _ctx: &plexspaces_core::RequestContext,
-            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-            _object_category: Option<String>,
-            _capabilities: Option<Vec<String>>,
-            _labels: Option<Vec<String>>,
-            _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            _offset: usize,
-            _limit: usize,
-        ) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        }
+        async fn unregister(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+        async fn heartbeat(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+        async fn discover(&self, _ctx: &RequestContext, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>, _object_category: Option<String>, _capabilities: Option<Vec<String>>, _labels: Option<Vec<String>>, _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>, _offset: usize, _limit: usize) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }
     }
@@ -103,5 +107,61 @@ mod tests {
             Ok(0)
         }
     }
-}
 
+    #[tokio::test]
+    async fn test_channel_service_send_to_queue() {
+        let service = TestChannelService::new();
+        let message = create_test_message(b"test payload".to_vec());
+        let msg_id = message.id.clone();
+        
+        let result = service.send_to_queue("test-queue", message).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), msg_id);
+        
+        let messages = service.messages.read().await;
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_channel_service_publish_to_topic() {
+        let service = TestChannelService::new();
+        let message = create_test_message(b"test payload".to_vec());
+        let msg_id = message.id.clone();
+        
+        let result = service.publish_to_topic("test-topic", message).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), msg_id);
+        
+        let messages = service.messages.read().await;
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_channel_service_receive_from_queue() {
+        let service = TestChannelService::new();
+        let message = create_test_message(b"test payload".to_vec());
+        let msg_id = message.id.clone();
+        
+        // First send a message
+        service.send_to_queue("test-queue", message).await.unwrap();
+        
+        // Then receive it
+        let result = service.receive_from_queue("test-queue", None).await;
+        assert!(result.is_ok());
+        let received = result.unwrap();
+        assert!(received.is_some());
+        assert_eq!(received.unwrap().id, msg_id);
+    }
+
+    #[tokio::test]
+    async fn test_channel_service_subscribe_to_topic() {
+        let service = TestChannelService::new();
+        
+        let result = service.subscribe_to_topic("test-topic").await;
+        assert!(result.is_ok());
+        // Empty stream should return no messages
+        let mut stream = result.unwrap();
+        let next = stream.next().await;
+        assert!(next.is_none());
+    }
+}

@@ -28,8 +28,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-// Re-export types from dependencies
-pub use plexspaces_mailbox::{Mailbox, Message};
+// Re-export Message from proto (unified message type)
+pub use plexspaces_proto::common::v1::Message;
 
 // Public modules
 pub mod behavior_factory;
@@ -42,7 +42,7 @@ pub mod service_wrappers;
 pub mod service_trait;
 pub use service_trait::{Service, service_names};
 pub mod service_locator_trait;
-pub use service_locator_trait::{ServiceLocator, ApplicationManager, ServiceLocatorInitialization, WasmRuntimeTrait};
+pub use service_locator_trait::{ServiceLocator, ApplicationManager, ServiceLocatorInitialization, WasmRuntimeTrait, BlobServiceTrait, NodeRegistryTrait};
 pub mod service_locator;
 pub mod keyvalue_store;
 pub use keyvalue_store::KeyValueStore;
@@ -76,6 +76,8 @@ pub mod health_checker;
 pub use health_checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, run_health_check};
 pub mod health_service;
 pub use health_service::PlexSpacesHealthReporter;
+pub mod secret_masker;
+pub use secret_masker::{SecretMasker, mask_release_spec, mask_map_secrets, DEFAULT_MASK};
 
 // Re-export enhanced ActorContext
 pub use actor_context::{
@@ -298,10 +300,10 @@ pub trait Actor: Send + Sync {
     /// ## Sending Replies
     /// To send a reply, use ActorRef::send_reply() via ctx.service_locator:
     /// ```rust,ignore
-    /// if let Some(sender_id) = &msg.sender {
-    ///     let actor_ref = ActorRef::remote(sender_id.clone(), node_id, ctx.service_locator().clone());
-    ///     let reply = Message::new(b"response".to_vec());
-    ///     ActorRef::send_reply(sender_id, msg.correlation_id.as_deref(), reply, ctx.service_locator().clone(), ctx.actor_id().clone()).await?;
+    /// if !msg.sender_id.is_empty() {
+    ///     let actor_ref = ActorRef::remote(msg.sender_id.clone(), node_id, ctx.service_locator().clone());
+    ///     let reply = Message { payload: b"response".to_vec(), ..Default::default() };
+    ///     ActorRef::send_reply(&msg.sender_id, Some(&msg.correlation_id), reply, ctx.service_locator().clone(), ctx.actor_id().clone()).await?;
     /// }
     /// ```
     async fn handle_message(
@@ -505,9 +507,9 @@ pub enum ActorError {
     FacetError(String),
 }
 
-// Conversion from JournalError to ActorError
-impl From<plexspaces_persistence::JournalError> for ActorError {
-    fn from(e: plexspaces_persistence::JournalError) -> Self {
+// Conversion from core's JournalError to ActorError
+impl From<crate::JournalError> for ActorError {
+    fn from(e: crate::JournalError) -> Self {
         ActorError::JournalError(e.to_string())
     }
 }
@@ -516,11 +518,9 @@ impl From<plexspaces_persistence::JournalError> for ActorError {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_actor_id_parsing() {
+    #[test]
+    fn test_actor_id_parsing() {
         // Test valid actor IDs
-        let mailbox = Arc::new(Mailbox::new(Default::default(), "counter@node1".to_string()).await.expect("Failed to create mailbox"));
-
         let actor_ref = ActorRef::new("counter@node1".to_string()).unwrap();
         assert_eq!(actor_ref.id(), "counter@node1");
         assert_eq!(actor_ref.actor_name(), "counter");
@@ -551,28 +551,6 @@ mod tests {
         assert!(ActorRef::parse_actor_id("invalid").is_err());
     }
 
-    #[tokio::test]
-    async fn test_local_tell() {
-        use plexspaces_mailbox::mailbox_config_default;
-        let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test@localhost".to_string()).await.expect("Failed to create mailbox"));
-        let actor_ref = ActorRef::new("test@localhost".to_string()).unwrap();
-
-        // Send a message directly to mailbox (ActorRef no longer has tell method)
-        let message = Message::new(vec![1, 2, 3]);
-        let result = mailbox.send(message).await;
-        assert!(result.is_ok());
-
-        // Verify message was delivered to mailbox
-        let received = mailbox.dequeue().await;
-        assert!(received.is_some());
-        assert_eq!(received.unwrap().payload(), &vec![1, 2, 3]);
-    }
-
-    #[tokio::test]
-    async fn test_tell_and_ask_metrics() {
-        // NOTE: This test is disabled because ActorRef is now pure data (no tell() method).
-        // Metrics testing should be done at the ActorService level instead.
-        // This test mainly ensured the metrics code doesn't panic, which is now handled
-        // by ActorService metrics.
-    }
+    // test_local_tell moved to plexspaces-mailbox crate tests
+    // It tests mailbox send/receive which is mailbox functionality
 }

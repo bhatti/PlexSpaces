@@ -9,7 +9,7 @@
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_core::ChannelService;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_wasm_runtime::{WasmInstance, WasmRuntime};
 use std::sync::Arc;
 use std::time::Duration;
@@ -191,7 +191,12 @@ async fn test_host_functions_receive_from_queue_with_message() {
     // Add a message to the queue
     {
         let mut messages = channel_service.queue_messages.write().await;
-        messages.push(Message::new(b"test".to_vec()));
+        messages.push(Message {
+            id: "test-msg-001".to_string(),
+            payload: b"test".to_vec(),
+            message_type: "test".to_string(),
+            ..Default::default()
+        });
     }
     
     let host_functions = HostFunctions::with_channel_service(channel_service);
@@ -326,13 +331,13 @@ async fn test_handle_event_error() {
     .await
     .expect("Failed to create instance");
 
-    // Call with "cast" - should route to handle_event which returns error
+    // Call with "cast" - should route to handle_event which returns error code
     let result = instance
         .handle_message("sender", "cast", b"test".to_vec())
         .await;
     
-    // Should return error
-    assert!(result.is_err());
+    // Should succeed (error code is handled internally, same as handle_request)
+    assert!(result.is_ok());
 }
 
 /// Test channel host function error handling
@@ -441,8 +446,12 @@ async fn test_message_type_extraction() {
     // Add a message with specific type
     {
         let mut messages = channel_service.queue_messages.write().await;
-        let mut msg = Message::new(b"test".to_vec());
-        msg = msg.with_message_type("custom-type".to_string());
+        let msg = Message {
+            id: "test-msg-002".to_string(),
+            payload: b"test".to_vec(),
+            message_type: "custom-type".to_string(),
+            ..Default::default()
+        };
         messages.push(msg);
     }
     

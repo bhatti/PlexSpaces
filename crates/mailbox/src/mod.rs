@@ -59,7 +59,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Notify, RwLock};
 use ulid::Ulid;
 use plexspaces_channel::{Channel, ChannelError, create_channel};
-use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, ChannelMessage};
+use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig};
+use plexspaces_proto::common::v1::Message as ProtoMessage;
 use prost_types::Timestamp;
 
 #[path = "lru_cache.rs"]
@@ -446,7 +447,7 @@ impl Message {
     }
 
     /// Convert from proto Message to internal Message
-    pub fn from_proto(proto_msg: &plexspaces_proto::v1::actor::Message) -> Self {
+    pub fn from_proto(proto_msg: &plexspaces_proto::common::v1::Message) -> Self {
         // Convert priority from i32 to MessagePriority
         // Proto uses: System(10), Highest(5), High(4), Normal(3), Low(2), Lowest(1)
         // Legacy values: Signal(100), System(75), High(50), Normal(25), Low(0)
@@ -498,7 +499,7 @@ impl Message {
     }
 
     /// Convert internal Message to proto Message
-    pub fn to_proto(&self) -> plexspaces_proto::v1::actor::Message {
+    pub fn to_proto(&self) -> plexspaces_proto::common::v1::Message {
         use chrono::Utc;
 
         // Convert priority to i32 (proto uses: System=10, Highest=5, High=4, Normal=3, Low=2, Lowest=1)
@@ -522,23 +523,28 @@ impl Message {
             headers.insert("reply_to".to_string(), reply_to.clone());
         }
 
-        plexspaces_proto::v1::actor::Message {
+        plexspaces_proto::common::v1::Message {
             id: self.id.clone(),
             sender_id: self.sender.clone().unwrap_or_default(),
             receiver_id: self.receiver.clone(),
+            channel: String::new(), // Not used for actor messages
             message_type: self.message_type.clone(),
             payload: self.payload.clone(),
             timestamp: Some(prost_types::Timestamp {
                 seconds: Utc::now().timestamp(),
                 nanos: 0,
             }),
+            headers,
             priority,
             ttl: self.ttl.map(|d| prost_types::Duration {
                 seconds: d.as_secs() as i64,
                 nanos: d.subsec_nanos() as i32,
             }),
-            headers,
+            delivery_count: 0, // Initial delivery
             idempotency_key: self.idempotency_key.clone().unwrap_or_default(),
+            correlation_id: self.correlation_id.clone().unwrap_or_default(),
+            reply_to: self.reply_to.clone().unwrap_or_default(),
+            partition_key: String::new(), // Not used for actor messages
             uri_path: self.uri_path.clone().unwrap_or_default(),
             uri_method: self.uri_method.clone().unwrap_or_default(),
         }
@@ -682,12 +688,12 @@ impl Message {
         }
     }
 
-    /// Convert Mailbox Message to ChannelMessage
+    /// Convert Mailbox Message to ProtoMessage
     ///
     /// ## Purpose
-    /// Converts mailbox-specific Message to channel-agnostic ChannelMessage
+    /// Converts mailbox-specific Message to channel-agnostic ProtoMessage
     /// for use with Channel trait backends.
-    pub fn to_channel_message(&self, channel_name: &str) -> ChannelMessage {
+    pub fn to_channel_message(&self, channel_name: &str) -> ProtoMessage {
         use chrono::Utc;
         
         let mut headers = self.metadata.clone();
@@ -706,31 +712,43 @@ impl Message {
         headers.insert("receiver".to_string(), self.receiver.clone());
         
         let now = Utc::now();
-        ChannelMessage {
+        let priority = message_priority_value(&self.priority);
+        
+        ProtoMessage {
             id: self.id.clone(),
-            channel: channel_name.to_string(),
             sender_id: self.sender.clone().unwrap_or_default(),
+            receiver_id: self.receiver.clone(),
+            channel: channel_name.to_string(),
+            message_type: self.message_type.clone(),
             payload: self.payload.clone(),
-            headers,
             timestamp: Some(Timestamp {
                 seconds: now.timestamp(),
                 nanos: now.timestamp_subsec_nanos() as i32,
             }),
-            partition_key: self.receiver.clone(), // Use receiver as partition key
+            headers,
+            priority,
+            ttl: self.ttl.map(|d| prost_types::Duration {
+                seconds: d.as_secs() as i64,
+                nanos: d.subsec_nanos() as i32,
+            }),
+            delivery_count: 0,
+            idempotency_key: self.idempotency_key.clone().unwrap_or_default(),
             correlation_id: self.correlation_id.clone().unwrap_or_default(),
             reply_to: self.reply_to.clone().unwrap_or_default(),
-            delivery_count: 0,
+            partition_key: self.receiver.clone(), // Use receiver as partition key
+            uri_path: self.uri_path.clone().unwrap_or_default(),
+            uri_method: self.uri_method.clone().unwrap_or_default(),
         }
     }
 }
 
-/// Convert ChannelMessage to Mailbox Message
+/// Convert ProtoMessage to Mailbox Message
 ///
 /// ## Purpose
-/// Converts channel-agnostic ChannelMessage back to mailbox-specific Message
+/// Converts channel-agnostic ProtoMessage back to mailbox-specific Message
 /// for actor consumption.
-impl From<ChannelMessage> for Message {
-    fn from(channel_msg: ChannelMessage) -> Self {
+impl From<ProtoMessage> for Message {
+    fn from(channel_msg: ProtoMessage) -> Self {
         // Extract priority from headers or default to Normal
         // Priority is stored as the numeric value (e.g., "4" for High)
         let priority = channel_msg.headers
@@ -790,11 +808,11 @@ impl From<ChannelMessage> for Message {
             sender,
             receiver,
             message_type,
-            ttl: None, // TTL not in ChannelMessage, would need to be added if needed
+            ttl: None, // TTL not in ProtoMessage, would need to be added if needed
             created_at: std::time::Instant::now(), // Reset creation time when deserializing
-            idempotency_key: None, // Idempotency key not in ChannelMessage
-            uri_path: None, // URI path not in ChannelMessage
-            uri_method: None, // URI method not in ChannelMessage
+            idempotency_key: None, // Idempotency key not in ProtoMessage
+            uri_path: None, // URI path not in ProtoMessage
+            uri_method: None, // URI method not in ProtoMessage
             // Store channel message ID for ack/nack operations
             // For Redis: this is the stream ID (e.g., "1234567890-0")
             // For Kafka: this would be the offset
@@ -1872,6 +1890,8 @@ impl Mailbox {
             Ok(ChannelBackend::ChannelBackendNats) => "nats",
             Ok(ChannelBackend::ChannelBackendUdp) => "udp",
             Ok(ChannelBackend::ChannelBackendSqs) => "sqs",
+            Ok(ChannelBackend::ChannelBackendProcessGroup) => "process_group",
+            Ok(ChannelBackend::ChannelBackendPostgres) => "postgres",
             Ok(ChannelBackend::ChannelBackendCustom) => "custom",
             Err(_) => "unknown",
         }
@@ -2062,10 +2082,10 @@ mod tests {
 
         // Dequeue in FIFO order
         let msg1 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg1.payload(), b"first");
+        assert_eq!(msg1.payload, b"first");
 
         let msg2 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg2.payload(), b"second");
+        assert_eq!(msg2.payload, b"second");
     }
 
     #[tokio::test]
@@ -2085,10 +2105,10 @@ mod tests {
 
         // Dequeue in LIFO order
         let msg1 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg1.payload(), b"second");
+        assert_eq!(msg1.payload, b"second");
 
         let msg2 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg2.payload(), b"first");
+        assert_eq!(msg2.payload, b"first");
     }
 
     // ==========================================================================
@@ -2157,7 +2177,7 @@ mod tests {
         // Message should be available for dequeue
         let msg = mailbox.dequeue().await;
         assert!(msg.is_some(), "Message should be available in channel");
-        assert_eq!(msg.unwrap().payload(), b"test");
+        assert_eq!(msg.unwrap().payload, b"test");
     }
 
     /// Test 4: Verify priority ordering with two messages
@@ -2186,10 +2206,10 @@ mod tests {
 
         // High priority should come first
         let msg1 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg1.payload(), b"high", "High priority should come first");
+        assert_eq!(msg1.payload, b"high", "High priority should come first");
 
         let msg2 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg2.payload(), b"low", "Low priority should come second");
+        assert_eq!(msg2.payload, b"low", "Low priority should come second");
     }
 
     /// Test 5: Verify priority ordering with signal (Highest priority)
@@ -2218,10 +2238,10 @@ mod tests {
 
         // Signal (Highest) should come first
         let msg1 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg1.payload(), b"signal", "Signal (Highest priority) should come first");
+        assert_eq!(msg1.payload, b"signal", "Signal (Highest priority) should come first");
 
         let msg2 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg2.payload(), b"low", "Low priority should come second");
+        assert_eq!(msg2.payload, b"low", "Low priority should come second");
     }
 
     /// Test 6: Full priority mailbox test (all priorities)
@@ -2258,16 +2278,16 @@ mod tests {
 
         // Dequeue in priority order: signal (Highest=5) > high (4) > normal (3) > low (2)
         let msg1 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg1.payload(), b"signal", "Signal (Highest=5) should come first");
+        assert_eq!(msg1.payload, b"signal", "Signal (Highest=5) should come first");
 
         let msg2 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg2.payload(), b"high", "High (4) should come second");
+        assert_eq!(msg2.payload, b"high", "High (4) should come second");
 
         let msg3 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg3.payload(), b"normal", "Normal (3) should come third");
+        assert_eq!(msg3.payload, b"normal", "Normal (3) should come third");
 
         let msg4 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg4.payload(), b"low", "Low (2) should come last");
+        assert_eq!(msg4.payload, b"low", "Low (2) should come last");
     }
 
     #[tokio::test]
@@ -2288,9 +2308,9 @@ mod tests {
             .unwrap();
 
         // Selectively receive the "target" message
-        let msg = mailbox.dequeue_matching(|m| m.payload() == b"target").await;
+        let msg = mailbox.dequeue_matching(|m| m.payload == b"target").await;
         assert!(msg.is_some());
-        assert_eq!(msg.unwrap().payload(), b"target");
+        assert_eq!(msg.unwrap().payload, b"target");
 
         // First and second should still be in queue
         assert_eq!(mailbox.size().await, 2);
@@ -2319,7 +2339,7 @@ mod tests {
         assert_eq!(mailbox.size().await, 2);
 
         let msg1 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg1.payload(), b"second"); // "first" was dropped
+        assert_eq!(msg1.payload, b"second"); // "first" was dropped
     }
 
     #[tokio::test]
@@ -2356,7 +2376,7 @@ mod tests {
         let message = Message::system(b"shutdown".to_vec());
 
         assert_eq!(message.priority, MessagePriority::System);
-        assert_eq!(message.payload(), b"shutdown");
+        assert_eq!(message.payload, b"shutdown");
     }
 
     /// Test Message::timer() creates timer message with metadata
@@ -2372,7 +2392,7 @@ mod tests {
         );
 
         // Payload should contain timer name
-        assert_eq!(message.payload(), b"heartbeat");
+        assert_eq!(message.payload, b"heartbeat");
     }
 
     /// Test Message::id() and payload() methods
@@ -2384,7 +2404,7 @@ mod tests {
         assert!(!message.id().is_empty());
 
         // Payload should match
-        assert_eq!(message.payload(), b"test-payload");
+        assert_eq!(message.payload, b"test-payload");
     }
 
     /// Test message_type_str() returns correct type
@@ -2470,7 +2490,7 @@ mod tests {
     /// Test from_proto() with various priority values
     #[tokio::test]
     async fn test_message_from_proto() {
-        use plexspaces_proto::v1::actor::Message as ProtoMessage;
+        use plexspaces_proto::common::v1::Message as ProtoMessage;
         use std::collections::HashMap;
 
         // Test high priority (50-74 range)
@@ -2482,6 +2502,7 @@ mod tests {
             id: "test-id".to_string(),
             sender_id: "sender-123".to_string(),
             receiver_id: "receiver-456".to_string(),
+            channel: String::new(),
             message_type: "call".to_string(),
             payload: b"test-payload".to_vec(),
             timestamp: None,
@@ -2489,6 +2510,10 @@ mod tests {
             ttl: None,
             headers: headers.clone(),
             idempotency_key: String::new(),
+            correlation_id: "corr-1".to_string(),
+            reply_to: "reply-1".to_string(),
+            partition_key: String::new(),
+            delivery_count: 0,
             uri_path: String::new(),
             uri_method: String::new(),
         };
@@ -2611,10 +2636,10 @@ mod tests {
 
         // First two messages should still be there
         let msg1 = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(100))).await.unwrap();
-        assert_eq!(msg1.payload(), b"first");
+        assert_eq!(msg1.payload, b"first");
 
         let msg2 = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(100))).await.unwrap();
-        assert_eq!(msg2.payload(), b"second");
+        assert_eq!(msg2.payload, b"second");
 
         // No third message
         assert_eq!(mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(10))).await, None);
@@ -2732,7 +2757,7 @@ mod tests {
         assert_eq!(mailbox.size().await, 1);
 
         let msg = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg.payload(), b"test");
+        assert_eq!(msg.payload, b"test");
     }
 
     /// Test dequeue() on empty mailbox waits indefinitely (returns None only when channel is closed)
@@ -2771,7 +2796,7 @@ mod tests {
         let elapsed = start.elapsed();
         
         assert!(result.is_some(), "Should receive message before timeout");
-        assert_eq!(result.unwrap().payload(), b"test");
+        assert_eq!(result.unwrap().payload, b"test");
         assert!(elapsed < std::time::Duration::from_millis(50), "Should receive message quickly");
     }
 
@@ -2791,7 +2816,7 @@ mod tests {
 
         // Try to match something that doesn't exist
         let msg = mailbox
-            .dequeue_matching(|m| m.payload() == b"nonexistent")
+            .dequeue_matching(|m| m.payload == b"nonexistent")
             .await;
         assert_eq!(msg, None);
 
@@ -2820,8 +2845,8 @@ mod tests {
         // Peek at first 2 messages
         let peeked = mailbox.peek(2).await;
         assert_eq!(peeked.len(), 2);
-        assert_eq!(peeked[0].payload(), b"first");
-        assert_eq!(peeked[1].payload(), b"second");
+        assert_eq!(peeked[0].payload, b"first");
+        assert_eq!(peeked[1].payload, b"second");
 
         // Messages should still be in mailbox
         assert_eq!(mailbox.size().await, 3);
@@ -2872,7 +2897,7 @@ mod tests {
     // CHANNEL-BASED MAILBOX TESTS
     // ==========================================================================
 
-    /// Test Message to ChannelMessage conversion
+    /// Test Message to ProtoMessage conversion
     #[test]
     fn test_message_to_channel_message() {
         let msg = Message::new(b"test payload".to_vec())
@@ -2896,27 +2921,24 @@ mod tests {
         assert_eq!(channel_msg.headers.get("key1"), Some(&"value1".to_string()));
     }
 
-    /// Test ChannelMessage to Message conversion
+    /// Test ProtoMessage to Message conversion
     #[test]
     fn test_channel_message_to_message() {
-        use plexspaces_proto::channel::v1::ChannelMessage;
+        use plexspaces_proto::common::v1::Message as ProtoMessage;
         use prost_types::Timestamp;
         use chrono::Utc;
         
         let now = Utc::now();
-        let channel_msg = ChannelMessage {
+        let channel_msg = ProtoMessage {
             id: "msg-123".to_string(),
             channel: "test-channel".to_string(),
             sender_id: "sender-actor".to_string(),
+            receiver_id: "receiver-actor".to_string(),
+            message_type: "test_type".to_string(),
             payload: b"test payload".to_vec(),
             headers: {
                 let mut h = std::collections::HashMap::new();
-                h.insert("message_type".to_string(), "test_type".to_string());
                 h.insert("priority".to_string(), "4".to_string()); // High
-                h.insert("correlation_id".to_string(), "corr-123".to_string());
-                h.insert("reply_to".to_string(), "reply-addr".to_string());
-                h.insert("sender".to_string(), "sender-actor".to_string());
-                h.insert("receiver".to_string(), "receiver-actor".to_string());
                 h.insert("key1".to_string(), "value1".to_string());
                 h
             },
@@ -2924,13 +2946,18 @@ mod tests {
                 seconds: now.timestamp(),
                 nanos: now.timestamp_subsec_nanos() as i32,
             }),
+            priority: 60, // High priority
+            ttl: None,
             partition_key: "receiver-actor".to_string(),
             correlation_id: "corr-123".to_string(),
             reply_to: "reply-addr".to_string(),
             delivery_count: 0,
+            idempotency_key: String::new(),
+            uri_path: String::new(),
+            uri_method: String::new(),
         };
         
-        let msg: Message = channel_msg.into();
+        let msg: Message = Message::from_proto(&channel_msg);
         
         assert_eq!(msg.id, "msg-123");
         assert_eq!(msg.payload, b"test payload");
@@ -2960,7 +2987,7 @@ mod tests {
         
         let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
         assert!(received.is_some());
-        assert_eq!(received.unwrap().payload(), b"test");
+        assert_eq!(received.unwrap().payload, b"test");
     }
 
     /// Test mailbox creation with SQLite backend
@@ -3004,7 +3031,7 @@ mod tests {
         
         let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
         assert!(received.is_some());
-        assert_eq!(received.unwrap().payload(), b"test-sqlite");
+        assert_eq!(received.unwrap().payload, b"test-sqlite");
     }
 
     /// Test mailbox creation with invalid backend

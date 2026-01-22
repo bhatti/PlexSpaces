@@ -44,6 +44,7 @@
 use futures::StreamExt;
 use plexspaces_channel::*;
 use plexspaces_proto::channel::v1::*;
+use plexspaces_proto::common::v1::Message;
 use std::time::Duration;
 
 // Helper to check if NATS is available
@@ -111,7 +112,7 @@ async fn test_nats_send_and_receive_single_message() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Send message
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: "send_receive".to_string(),
         payload: b"test message".to_vec(),
@@ -156,7 +157,7 @@ async fn test_nats_send_and_receive_multiple_messages() {
     // Send multiple messages
     let mut sent_ids = Vec::new();
     for i in 0..5 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "send_receive_multi".to_string(),
             payload: format!("message {}", i).into_bytes(),
@@ -206,7 +207,7 @@ async fn test_nats_try_receive_non_blocking() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Send a message
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: "try_receive".to_string(),
         payload: b"test".to_vec(),
@@ -242,7 +243,7 @@ async fn test_nats_publish_subscribe() {
     let mut stream = channel.subscribe(None).await.expect("Failed to subscribe");
 
     // Publish message
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: "pubsub".to_string(),
         payload: b"broadcast message".to_vec(),
@@ -281,7 +282,7 @@ async fn test_nats_queue_group_load_balancing() {
 
     // Send 4 messages
     for i in 0..4 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "queue_group".to_string(),
             payload: format!("message {}", i).into_bytes(),
@@ -347,7 +348,7 @@ async fn test_nats_ack_nack() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Send a message
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: "ack_nack".to_string(),
         payload: b"test".to_vec(),
@@ -400,7 +401,7 @@ async fn test_nats_get_stats() {
 
     // Send and receive some messages
     for i in 0..3 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "stats".to_string(),
             payload: format!("msg {}", i).into_bytes(),
@@ -446,7 +447,7 @@ async fn test_nats_channel_close() {
     assert!(channel.is_closed());
 
     // Sending after close should fail
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: "close".to_string(),
         payload: b"test".to_vec(),

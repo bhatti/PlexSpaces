@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{ActorId, ActorRef, RequestContext, ServiceLocator};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use futures::stream::BoxStream;
 
@@ -48,7 +48,7 @@ pub type ObjectRegistration = plexspaces_proto::object_registry::v1::ObjectRegis
 /// This is a Rust trait (not in proto), following proto-first principle.
 ///
 /// ## Proto-First Principle
-/// - Proto defines: ChannelConfig, ChannelMessage, ChannelBackend (structs/enums)
+/// - Proto defines: ChannelConfig, Message (unified), ChannelBackend (structs/enums)
 /// - Rust defines: ChannelService trait (implementation detail, flexible)
 ///
 /// ## Design
@@ -110,6 +110,165 @@ pub trait ChannelService: Send + Sync {
         queue_name: &str,
         timeout: Option<std::time::Duration>,
     ) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Trait for process group operations (Erlang pg/pg2-style pub/sub)
+///
+/// ## Purpose
+/// Provides unified interface for distributed pub/sub and broadcast messaging.
+/// This is a Rust trait (not in proto), following proto-first principle.
+///
+/// ## Proto-First Principle
+/// - Proto defines: ProcessGroup, GroupMembership, PublishToGroupRequest (structs)
+/// - Rust defines: ProcessGroupService trait (implementation detail, flexible)
+///
+/// ## Design (Industry Standard - Erlang pg/pg2)
+/// Process groups provide distributed pub/sub with:
+/// - **Named Groups**: Actors join named groups for coordination
+/// - **Topic Filtering**: Actors subscribe to specific topics within groups
+/// - **Multiple Joins**: Actors can join same group multiple times (join_count tracked)
+/// - **Local vs Global**: Fast local member queries, distributed global queries
+///
+/// ## State Management
+/// Uses ObjectRegistry (OBJECT_TYPE_PROCESS_GROUP) for distributed state:
+/// - Each node maintains local membership view
+/// - ObjectRegistry provides distributed coordination (shared DB, etc.)
+/// - Local operations (get_local_members) are fast (no network)
+/// - Global operations may require coordination
+#[async_trait]
+pub trait ProcessGroupService: Send + Sync {
+    /// Create a new process group
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `group_name` - Unique group name within tenant
+    ///
+    /// ## Returns
+    /// Success or error if group already exists
+    async fn create_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Delete a process group
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `group_name` - Group to delete
+    ///
+    /// ## Semantics
+    /// - Idempotent (deleting non-existent group succeeds)
+    /// - All memberships automatically removed
+    async fn delete_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Join a process group
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `group_name` - Group to join
+    /// * `actor_id` - Actor to add to group
+    /// * `topics` - Optional topics to subscribe to (empty = all topics)
+    ///
+    /// ## Semantics (Erlang pg2-compatible)
+    /// - Actor can join same group multiple times (join_count tracked)
+    /// - Must leave equal number of times to fully remove
+    async fn join_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+        actor_id: &str,
+        topics: Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Leave a process group
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `group_name` - Group to leave
+    /// * `actor_id` - Actor to remove from group
+    ///
+    /// ## Semantics (Erlang pg2-compatible)
+    /// - Decrements join_count by 1
+    /// - Actor fully removed when join_count reaches 0
+    async fn leave_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+        actor_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Get all members of a group (cluster-wide)
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `group_name` - Group to query
+    ///
+    /// ## Returns
+    /// List of actor IDs across all nodes
+    ///
+    /// ## Performance
+    /// May involve distributed coordination - use get_local_members for fast local queries
+    async fn get_members(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Get local members of a group (this node only)
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `group_name` - Group to query
+    ///
+    /// ## Returns
+    /// List of actor IDs on local node only
+    ///
+    /// ## Performance
+    /// Fast - no network coordination needed
+    async fn get_local_members(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// List all groups for tenant
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    ///
+    /// ## Returns
+    /// List of group names
+    async fn list_groups(
+        &self,
+        ctx: &RequestContext,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Publish message to group members
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `group_name` - Group to publish to
+    /// * `topic` - Optional topic (None = all members)
+    /// * `message` - Message to broadcast
+    ///
+    /// ## Returns
+    /// Number of recipients
+    ///
+    /// ## Semantics
+    /// - Best-effort delivery (async)
+    /// - Topic filtering: only members subscribed to topic receive message
+    async fn publish_to_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+        topic: Option<&str>,
+        message: Message,
+    ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// Trait for actor service operations (spawning, messaging)
@@ -393,94 +552,6 @@ pub trait TupleSpaceProvider: Send + Sync {
 }
 
 
-/// Trait for process group operations (pub/sub for actors)
-///
-/// ## Purpose
-/// Provides unified interface for process group operations (Erlang pg/pg2-inspired).
-/// This is a Rust trait (not in proto), following proto-first principle.
-///
-/// ## Proto-First Principle
-/// - Proto defines: ProcessGroup, GroupMembership (structs/enums)
-/// - Rust defines: ProcessGroupService trait (implementation detail, flexible)
-///
-/// ## Design
-/// Process groups provide actor-level pub/sub for coordination:
-/// - **Join/Leave**: Actors subscribe to groups
-/// - **Publish**: Broadcast messages to all group members
-/// - **Get Members**: Query group membership
-#[async_trait]
-pub trait ProcessGroupService: Send + Sync {
-    /// Join a process group
-    ///
-    /// ## Arguments
-    /// * `group_name` - Name of the group
-    /// * `tenant_id` - Tenant for multi-tenancy
-    /// * `namespace` - Namespace within tenant
-    /// * `actor_id` - Actor ID to add to group
-    ///
-    /// ## Returns
-    /// Ok(()) on success
-    async fn join_group(
-        &self,
-        group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
-        actor_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Leave a process group
-    ///
-    /// ## Arguments
-    /// * `group_name` - Name of the group
-    /// * `tenant_id` - Tenant for multi-tenancy
-    /// * `namespace` - Namespace within tenant
-    /// * `actor_id` - Actor ID to remove from group
-    ///
-    /// ## Returns
-    /// Ok(()) on success
-    async fn leave_group(
-        &self,
-        group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
-        actor_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Publish message to all group members
-    ///
-    /// ## Arguments
-    /// * `group_name` - Name of the group
-    /// * `tenant_id` - Tenant for multi-tenancy
-    /// * `namespace` - Namespace within tenant
-    /// * `message` - Message to broadcast
-    ///
-    /// ## Returns
-    /// List of actor IDs that received the message
-    async fn publish_to_group(
-        &self,
-        group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
-        message: Message,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Get all group members
-    ///
-    /// ## Arguments
-    /// * `group_name` - Name of the group
-    /// * `tenant_id` - Tenant for multi-tenancy
-    /// * `namespace` - Namespace within tenant
-    ///
-    /// ## Returns
-    /// List of actor IDs in the group
-    async fn get_members(
-        &self,
-        group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
-}
-
 /// Enhanced ActorContext with service locator access
 ///
 /// ## Purpose
@@ -655,12 +726,12 @@ impl ActorContext {
     /// ## Example
     /// ```rust,ignore
     /// // In actor's handle_message or handle_request:
-    /// if let Some(sender_id) = &msg.sender {
-    ///     let reply = Message::new(b"response".to_vec());
+    /// if !msg.sender_id.is_empty() {
+    ///     let reply = Message { payload: b"response".to_vec(), ..Default::default() };
     ///     ctx.send_reply(
-    ///         msg.correlation_id.as_deref(),
-    ///         sender_id,
-    ///         msg.receiver.clone(),
+    ///         Some(&msg.correlation_id),
+    ///         &msg.sender_id,
+    ///         msg.receiver_id.clone(),
     ///         reply,
     ///     ).await?;
     /// }
@@ -679,11 +750,11 @@ impl ActorContext {
         }
         
         // SIMPLIFIED: Use send() method - temporary sender behaves like normal actor
-        // Set message fields: receiver=sender_id (where reply goes TO), sender=target_actor_id (where reply comes FROM), correlation_id
-        reply_message.receiver = sender_id.clone(); // Reply goes TO the sender (temporary sender for ask pattern)
-        reply_message.sender = Some(target_actor_id.clone()); // Reply comes FROM the current actor
+        // Set message fields: receiver_id=sender_id (where reply goes TO), sender_id=target_actor_id (where reply comes FROM), correlation_id
+        reply_message.receiver_id = sender_id.clone(); // Reply goes TO the sender (temporary sender for ask pattern)
+        reply_message.sender_id = target_actor_id.clone(); // Reply comes FROM the current actor
         if let Some(corr_id) = correlation_id {
-            reply_message.correlation_id = Some(corr_id.to_string());
+            reply_message.correlation_id = corr_id.to_string();
         }
         
         // Use send() method - it will route to temporary sender just like any other actor
@@ -920,43 +991,72 @@ struct StubProcessGroupService;
 
 #[async_trait]
 impl ProcessGroupService for StubProcessGroupService {
+    async fn create_group(
+        &self,
+        _ctx: &RequestContext,
+        _group_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubProcessGroupService: create_group not implemented".into())
+    }
+
+    async fn delete_group(
+        &self,
+        _ctx: &RequestContext,
+        _group_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubProcessGroupService: delete_group not implemented".into())
+    }
+
     async fn join_group(
         &self,
+        _ctx: &RequestContext,
         _group_name: &str,
-        _tenant_id: &str,
-        _namespace: &str,
         _actor_id: &str,
+        _topics: Vec<String>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err("StubProcessGroupService: join_group not implemented".into())
     }
 
     async fn leave_group(
         &self,
+        _ctx: &RequestContext,
         _group_name: &str,
-        _tenant_id: &str,
-        _namespace: &str,
         _actor_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err("StubProcessGroupService: leave_group not implemented".into())
     }
 
-    async fn publish_to_group(
-        &self,
-        _group_name: &str,
-        _tenant_id: &str,
-        _namespace: &str,
-        _message: Message,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        Err("StubProcessGroupService: publish_to_group not implemented".into())
-    }
-
     async fn get_members(
         &self,
+        _ctx: &RequestContext,
         _group_name: &str,
-        _tenant_id: &str,
-        _namespace: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         Err("StubProcessGroupService: get_members not implemented".into())
+    }
+
+    async fn get_local_members(
+        &self,
+        _ctx: &RequestContext,
+        _group_name: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubProcessGroupService: get_local_members not implemented".into())
+    }
+
+    async fn list_groups(
+        &self,
+        _ctx: &RequestContext,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubProcessGroupService: list_groups not implemented".into())
+    }
+
+    async fn publish_to_group(
+        &self,
+        _ctx: &RequestContext,
+        _group_name: &str,
+        _topic: Option<&str>,
+        _message: Message,
+    ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubProcessGroupService: publish_to_group not implemented".into())
     }
 }
 

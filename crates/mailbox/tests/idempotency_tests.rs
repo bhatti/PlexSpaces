@@ -4,9 +4,30 @@
 // Tests for idempotency key deduplication and LRU cache
 
 use plexspaces_mailbox::{mailbox_config_default, Mailbox, Message};
-use plexspaces_proto::v1::mailbox::MailboxConfig;
 use prost_types::Duration as ProtoDuration;
 use std::time::Duration;
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    let proto_msg = plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    };
+    proto_msg.into()
+}
+
+/// Helper to create a test message with idempotency key
+fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: String) -> Message {
+    let proto_msg = plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        idempotency_key,
+        ..Default::default()
+    };
+    proto_msg.into()
+}
+
 
 #[tokio::test]
 async fn test_idempotency_key_deduplication() {
@@ -21,8 +42,7 @@ async fn test_idempotency_key_deduplication() {
     let idempotency_key = "test-key-123".to_string();
 
     // Send first message with idempotency key
-    let msg1 = Message::new(b"first".to_vec())
-        .with_idempotency_key(idempotency_key.clone());
+    let msg1 = create_test_message_with_idempotency(b"first".to_vec(), idempotency_key.clone());
     mailbox.enqueue(msg1).await.unwrap();
 
     // Process first message to add idempotency key to cache
@@ -30,8 +50,7 @@ async fn test_idempotency_key_deduplication() {
     assert_eq!(msg1_dequeued.payload, b"first");
 
     // Send second message with same idempotency key (should be deduplicated)
-    let msg2 = Message::new(b"second".to_vec())
-        .with_idempotency_key(idempotency_key.clone());
+    let msg2 = create_test_message_with_idempotency(b"second".to_vec(), idempotency_key.clone());
     mailbox.enqueue(msg2).await.unwrap();
 
     // Second message should be deduplicated (mailbox should be empty)
@@ -51,12 +70,10 @@ async fn test_idempotency_key_different_keys() {
     .unwrap();
 
     // Send messages with different idempotency keys
-    let msg1 = Message::new(b"first".to_vec())
-        .with_idempotency_key("key-1".to_string());
+    let msg1 = create_test_message_with_idempotency(b"first".to_vec(), "key-1".to_string());
     mailbox.enqueue(msg1).await.unwrap();
 
-    let msg2 = Message::new(b"second".to_vec())
-        .with_idempotency_key("key-2".to_string());
+    let msg2 = create_test_message_with_idempotency(b"second".to_vec(), "key-2".to_string());
     mailbox.enqueue(msg2).await.unwrap();
 
     // Both messages should be in mailbox
@@ -78,10 +95,10 @@ async fn test_idempotency_key_without_key() {
     .unwrap();
 
     // Send messages without idempotency key
-    let msg1 = Message::new(b"first".to_vec());
+    let msg1 = create_test_message(b"first".to_vec());
     mailbox.enqueue(msg1).await.unwrap();
 
-    let msg2 = Message::new(b"second".to_vec());
+    let msg2 = create_test_message(b"second".to_vec());
     mailbox.enqueue(msg2).await.unwrap();
 
     // Both messages should be in mailbox
@@ -103,25 +120,21 @@ async fn test_idempotency_key_lru_eviction() {
         .unwrap();
 
     // Fill cache with 2 entries
-    let msg1 = Message::new(b"first".to_vec())
-        .with_idempotency_key("key-1".to_string());
+    let msg1 = create_test_message_with_idempotency(b"first".to_vec(), "key-1".to_string());
     mailbox.enqueue(msg1).await.unwrap();
     let _ = mailbox.dequeue().await; // Process to add to cache
 
-    let msg2 = Message::new(b"second".to_vec())
-        .with_idempotency_key("key-2".to_string());
+    let msg2 = create_test_message_with_idempotency(b"second".to_vec(), "key-2".to_string());
     mailbox.enqueue(msg2).await.unwrap();
     let _ = mailbox.dequeue().await; // Process to add to cache
 
     // Add third entry (should evict first)
-    let msg3 = Message::new(b"third".to_vec())
-        .with_idempotency_key("key-3".to_string());
+    let msg3 = create_test_message_with_idempotency(b"third".to_vec(), "key-3".to_string());
     mailbox.enqueue(msg3).await.unwrap();
     let _ = mailbox.dequeue().await; // Process to add to cache
 
     // Now key-1 should be evicted, so we can send it again
-    let msg1_again = Message::new(b"first-again".to_vec())
-        .with_idempotency_key("key-1".to_string());
+    let msg1_again = create_test_message_with_idempotency(b"first-again".to_vec(), "key-1".to_string());
     mailbox.enqueue(msg1_again).await.unwrap();
 
     // Should be able to dequeue (not deduplicated because evicted)
@@ -145,8 +158,7 @@ async fn test_idempotency_key_expiration() {
     let idempotency_key = "expiring-key".to_string();
 
     // Send first message
-    let msg1 = Message::new(b"first".to_vec())
-        .with_idempotency_key(idempotency_key.clone());
+    let msg1 = create_test_message_with_idempotency(b"first".to_vec(), idempotency_key.clone());
     mailbox.enqueue(msg1).await.unwrap();
     let _ = mailbox.dequeue().await; // Process
 
@@ -154,8 +166,7 @@ async fn test_idempotency_key_expiration() {
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     // Send second message with same key (should NOT be deduplicated after expiration)
-    let msg2 = Message::new(b"second".to_vec())
-        .with_idempotency_key(idempotency_key.clone());
+    let msg2 = create_test_message_with_idempotency(b"second".to_vec(), idempotency_key.clone());
     mailbox.enqueue(msg2).await.unwrap();
 
     // Should be able to dequeue (not deduplicated because expired)

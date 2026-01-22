@@ -29,8 +29,8 @@
 
 use plexspaces_supervisor::{Supervisor, SupervisionStrategy, ActorSpec, RestartPolicy, ChildType, ChildSpec, StartedChild, ShutdownSpec};
 use plexspaces_actor::{Actor, ActorRef as ActorActorRef};
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorError, BehaviorError, Message, ServiceLocator};
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorError, BehaviorError, Message};
+use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::time::{sleep, Duration};
@@ -66,7 +66,7 @@ impl plexspaces_core::Actor for TestActor {
 }
 
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<plexspaces_supervisor::SupervisorEvent>) {
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(ServiceLocatorImpl::new());
     let (mut supervisor, event_rx) = Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -104,7 +104,7 @@ async fn test_start_child() {
                 let actor_ref = ActorActorRef::local(
                     actor_id.clone(),
                     actor.mailbox().clone(),
-                    Arc::new(ServiceLocator::new()),
+                    Arc::new(ServiceLocatorImpl::new()),
                 );
                 Ok(StartedChild::Worker { actor, actor_ref })
             })
@@ -148,7 +148,7 @@ async fn test_delete_child() {
                 let actor_ref = ActorActorRef::local(
                     actor_id.clone(),
                     actor.mailbox().clone(),
-                    Arc::new(ServiceLocator::new()),
+                    Arc::new(ServiceLocatorImpl::new()),
                 );
                 Ok(StartedChild::Worker { actor, actor_ref })
             })
@@ -194,7 +194,7 @@ async fn test_which_children() {
                     let actor_ref = ActorActorRef::local(
                         actor_id.clone(),
                         actor.mailbox().clone(),
-                        Arc::new(ServiceLocator::new()),
+                        Arc::new(ServiceLocatorImpl::new()),
                     );
                     Ok(StartedChild::Worker { actor, actor_ref })
                 })
@@ -248,7 +248,7 @@ async fn test_count_children() {
                     let actor_ref = ActorActorRef::local(
                         actor_id.clone(),
                         actor.mailbox().clone(),
-                        Arc::new(ServiceLocator::new()),
+                        Arc::new(ServiceLocatorImpl::new()),
                     );
                     Ok(StartedChild::Worker { actor, actor_ref })
                 })
@@ -290,7 +290,7 @@ async fn test_get_childspec() {
                 let actor_ref = ActorActorRef::local(
                     actor_id.clone(),
                     actor.mailbox().clone(),
-                    Arc::new(ServiceLocator::new()),
+                    Arc::new(ServiceLocatorImpl::new()),
                 );
                 Ok(StartedChild::Worker { actor, actor_ref })
             })

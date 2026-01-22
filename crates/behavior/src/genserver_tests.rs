@@ -26,8 +26,25 @@ mod tests {
     use plexspaces_core::{
         Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType,
     };
-    use plexspaces_mailbox::Message;
+    use plexspaces_proto::common::v1::Message;
     use std::sync::Arc;
+    use ulid::Ulid;
+    
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
+    
+    /// Helper to create a test message with message type
+    fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> Message {
+        let mut msg = create_test_message(payload);
+        msg.message_type = message_type.to_string();
+        msg
+    }
 
     // Counter state for testing
     #[derive(Clone)]
@@ -73,18 +90,18 @@ mod tests {
             self.call_count += 1;
 
             // Parse the message payload to determine action
-            if let Ok(s) = String::from_utf8(msg.payload().to_vec()) {
+            if let Ok(s) = String::from_utf8(msg.payload.clone()) {
                 if s.contains("increment") || s.contains("inc") {
                     self.value += 10;
                     // Send reply if sender_id is present
-                    if let Some(sender_id) = &msg.sender {
+                    if !msg.sender_id.is_empty() {
                         let reply_data = format!("value={}", self.value);
-                        let reply = Message::new(reply_data.into_bytes());
+                        let reply = create_test_message(reply_data.into_bytes());
                         // Use ctx.send_reply() to send reply
                         let _ = ctx.send_reply(
-                            msg.correlation_id.as_deref(),
-                            sender_id,
-                            msg.receiver.clone(),
+                            if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
+                            &msg.sender_id,
+                            msg.receiver_id.clone(),
                             reply,
                         ).await; // Ignore errors in tests
                     }
@@ -95,13 +112,13 @@ mod tests {
             }
 
             // Send reply if sender_id is present
-            if let Some(sender_id) = &msg.sender {
-                let reply_data = format!("Reply to: {:?}", msg.payload());
-                let reply = Message::new(reply_data.into_bytes());
+            if !msg.sender_id.is_empty() {
+                let reply_data = format!("Reply to: {:?}", msg.payload);
+                let reply = create_test_message(reply_data.into_bytes());
                 let _ = ctx.send_reply(
-                    msg.correlation_id.as_deref(),
-                    sender_id,
-                    msg.receiver.clone(), // This actor's ID (the receiver of the original message)
+                    if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
+                    &msg.sender_id,
+                    msg.receiver_id.clone(), // This actor's ID (the receiver of the original message)
                     reply,
                 ).await; // Ignore errors in tests
             }
@@ -160,7 +177,7 @@ mod tests {
         assert_eq!(behavior.behavior_type(), BehaviorType::GenServer);
 
         // Create request message
-        let request_msg = Message::new(b"test call".to_vec()).with_message_type("call".to_string());
+        let request_msg = create_test_message_with_type(b"test call".to_vec(), "call");
         let (ctx, msg, _mailbox) =
             create_test_context_and_message(request_msg, Some("corr-123".to_string())).await;
 
@@ -180,7 +197,7 @@ mod tests {
         let mut behavior = Counter::new();
 
         // First request
-        let msg1 = Message::new(b"increment".to_vec()).with_message_type("call".to_string());
+        let msg1 = create_test_message_with_type(b"increment".to_vec(), "call");
         let (ctx1, msg1_actual, _mailbox1) = create_test_context_and_message(msg1, None).await;
         behavior.handle_message(&*ctx1, msg1_actual).await.unwrap();
 
@@ -189,7 +206,7 @@ mod tests {
         assert_eq!(behavior.call_count, 1);
 
         // Second request - state should persist
-        let msg2 = Message::new(b"increment".to_vec()).with_message_type("call".to_string());
+        let msg2 = create_test_message_with_type(b"increment".to_vec(), "call");
         let (ctx2, msg2_actual, _mailbox2) = create_test_context_and_message(msg2, None).await;
         behavior.handle_message(&*ctx2, msg2_actual).await.unwrap();
 
@@ -203,7 +220,7 @@ mod tests {
     async fn test_genserver_request_with_error() {
         let mut behavior = Counter::new();
 
-        let msg = Message::new(b"fail".to_vec()).with_message_type("call".to_string());
+        let msg = create_test_message_with_type(b"fail".to_vec(), "call");
         let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
 
         // Handle should return error
@@ -218,7 +235,7 @@ mod tests {
         let mut behavior = Counter::new();
 
         // GenServer should accept cast messages (for HTTP POST/PUT support)
-        let msg = Message::new(b"inc".to_vec()).with_message_type("cast".to_string());
+        let msg = create_test_message_with_type(b"inc".to_vec(), "cast");
         let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
 
         let result = behavior.handle_message(&*ctx, msg_actual).await;
@@ -235,7 +252,7 @@ mod tests {
 
         // Send 5 cast messages - all should be accepted (for HTTP POST/PUT support)
         for _ in 0..5 {
-            let msg = Message::new(b"inc".to_vec()).with_message_type("cast".to_string());
+            let msg = create_test_message_with_type(b"inc".to_vec(), "cast");
             let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
             let result = behavior.handle_message(&*ctx, msg_actual).await;
             assert!(result.is_ok()); // Cast messages are now accepted
@@ -250,7 +267,7 @@ mod tests {
     async fn test_genserver_correlation_id() {
         let mut behavior = Counter::new();
 
-        let msg = Message::new(b"test".to_vec()).with_message_type("call".to_string());
+        let msg = create_test_message_with_type(b"test".to_vec(), "call");
         let correlation_id = "trace-abc-123".to_string();
         let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, Some(correlation_id.clone())).await;
 
@@ -268,7 +285,7 @@ mod tests {
 
         // Simulate 10 sequential requests
         for i in 1..=10 {
-            let msg = Message::new(b"inc".to_vec()).with_message_type("call".to_string());
+            let msg = create_test_message_with_type(b"inc".to_vec(), "call");
             let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
             behavior.handle_message(&*ctx, msg_actual).await.unwrap();
 
@@ -286,18 +303,18 @@ mod tests {
         let mut behavior = Counter::new();
 
         // Request (adds 10)
-        let msg1 = Message::new(b"inc".to_vec()).with_message_type("call".to_string());
+        let msg1 = create_test_message_with_type(b"inc".to_vec(), "call");
         let (ctx1, msg1_actual, _mailbox1) = create_test_context_and_message(msg1, None).await;
         behavior.handle_message(&*ctx1, msg1_actual).await.unwrap();
 
         // Cast message should be accepted (GenServer now supports Cast for HTTP POST/PUT)
-        let msg2 = Message::new(b"inc".to_vec()).with_message_type("cast".to_string());
+        let msg2 = create_test_message_with_type(b"inc".to_vec(), "cast");
         let (ctx2, msg2_actual, _) = create_test_context_and_message(msg2, None).await;
         let result = behavior.handle_message(&*ctx2, msg2_actual).await;
         assert!(result.is_ok()); // Cast messages are now accepted
 
         // Request again (adds 10)
-        let msg3 = Message::new(b"inc".to_vec()).with_message_type("call".to_string());
+        let msg3 = create_test_message_with_type(b"inc".to_vec(), "call");
         let (ctx3, msg3_actual, _mailbox3) = create_test_context_and_message(msg3, None).await;
         behavior.handle_message(&*ctx3, msg3_actual).await.unwrap();
 
@@ -311,7 +328,7 @@ mod tests {
         let mut behavior = Counter::new();
 
         // GenServer should accept cast messages (for HTTP POST/PUT support)
-        let msg = Message::new(b"inc".to_vec()).with_message_type("cast".to_string());
+        let msg = create_test_message_with_type(b"inc".to_vec(), "cast");
         let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
 
         let result = behavior.handle_message(&*ctx, msg_actual).await;
@@ -327,7 +344,7 @@ mod tests {
         let mut behavior = Counter::new();
 
         // Use a different message type (e.g., WorkflowRun)
-        let msg = Message::new(b"unknown".to_vec()).with_message_type("workflow_run".to_string());
+        let msg = create_test_message_with_type(b"unknown".to_vec(), "workflow_run");
         let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
 
         // Should succeed but do nothing

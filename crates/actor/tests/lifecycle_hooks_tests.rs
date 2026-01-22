@@ -218,8 +218,8 @@ async fn test_handle_exit_called_when_linked_actor_dies() {
     let handle_exit_action = actor_impl.handle_exit_action.clone();
     
     // Create actor context with trap_exit=true
-    use plexspaces_core::ServiceLocator;
-    let service_locator = Arc::new(ServiceLocator::new());
+    use plexspaces_actor::TestServiceLocatorStub;
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),

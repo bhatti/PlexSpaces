@@ -461,9 +461,10 @@ mod tests {
             host_functions: host_functions.clone(),
         };
 
-        // ACT: Register multiple objects
+        // ACT: Register multiple objects (use non-empty tenant/namespace for proper key generation)
+        let ctx = test_context("default", "default");
         registry.register(
-            test_context("", ""),
+            ctx.clone(),
             "actor1".to_string(),
             ObjectType::Actor,
             "http://test:8000".to_string(),
@@ -473,7 +474,7 @@ mod tests {
         ).await.unwrap();
 
         registry.register(
-            test_context("", ""),
+            ctx.clone(),
             "actor2".to_string(),
             ObjectType::Actor,
             "http://test:8001".to_string(),
@@ -482,9 +483,9 @@ mod tests {
             vec![],
         ).await.unwrap();
 
-        // ACT: Discover all actors
+        // ACT: Discover all actors (use same context as registration)
         let result = registry.discover(
-            test_context("", ""),
+            ctx,
             Some(ObjectType::Actor),
             None,
             vec![],
@@ -495,7 +496,7 @@ mod tests {
         ).await;
         assert!(result.is_ok(), "discover should succeed");
         let objects = result.unwrap();
-        assert!(objects.len() >= 2, "should find at least 2 actors");
+        assert!(objects.len() >= 2, "should find at least 2 actors, found {}", objects.len());
     }
 
     #[tokio::test]

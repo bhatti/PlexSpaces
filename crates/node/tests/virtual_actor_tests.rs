@@ -26,10 +26,21 @@ use test_helpers::{spawn_actor_helper, lookup_actor_ref, activate_virtual_actor}
 
 use plexspaces_core::Actor as ActorTrait;
 use plexspaces_journaling::VirtualActorFacet;
-use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
+use plexspaces_core::Message;
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
 
 // Simple test behavior
 struct TestBehavior {
@@ -106,7 +117,7 @@ async fn test_virtual_actor_implicit_activation() {
     // Actor may or may not be active depending on implementation details
     
     // Send first message - should trigger activation
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     actor_ref.tell(message).await.unwrap();
     
@@ -169,7 +180,7 @@ async fn test_virtual_actor_idle_deactivation() {
 
     // Send message to activate
     let actor_id2 = plexspaces_core::ActorId::from("virtual-actor-2");
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     let actor_ref = lookup_actor_ref(&node, &actor_id2).await.unwrap().unwrap();
     actor_ref.tell(message).await.unwrap();
     
@@ -241,7 +252,7 @@ async fn test_virtual_actor_pending_messages() {
     let actor_id3 = plexspaces_core::ActorId::from("virtual-actor-3");
     let actor_ref = lookup_actor_ref(&node, &actor_id3).await.unwrap().unwrap();
     for i in 0..5 {
-        let message = Message::new(format!("msg-{}", i).into_bytes());
+        let message = create_test_message(format!("msg-{}", i).into_bytes());
         actor_ref.tell(message).await.unwrap();
     }
     

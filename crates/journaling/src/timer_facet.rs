@@ -42,7 +42,7 @@
 use async_trait::async_trait;
 use plexspaces_core::{ActorRef, ActorService};
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -277,9 +277,16 @@ impl TimerFacet {
                 let payload = prost::Message::encode_to_vec(&timer_fired);
                 
                 // Create message with timer type
-                let message = Message::new(payload)
-                    .with_metadata("type".to_string(), "TimerFired".to_string())
-                    .with_metadata("timer_name".to_string(), timer_name_for_task.clone());
+                let mut headers = std::collections::HashMap::new();
+                headers.insert("type".to_string(), "TimerFired".to_string());
+                headers.insert("timer_name".to_string(), timer_name_for_task.clone());
+                let message = Message {
+                    id: ulid::Ulid::new().to_string(),
+                    payload,
+                    message_type: "TimerFired".to_string(),
+                    headers,
+                    ..Default::default()
+                };
                 
                 // Use ActorService to send message (handles local/remote routing)
                 if let Err(e) = actor_service.send(actor_ref_clone.id.as_str(), message).await {

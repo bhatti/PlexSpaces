@@ -102,6 +102,193 @@ pub struct NodeConfig {
     /// Node metadata (key-value pairs for extensibility)
     #[prost(map="string, string", tag="11")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    // ==================== NODE REGISTRY CONFIGURATION ====================
+
+    /// Node registry configuration (SWIM protocol, caching, DB fallback)
+    ///
+    /// Configures how nodes discover and track each other. Uses SWIM protocol
+    /// for efficient failure detection without requiring a shared database.
+    #[prost(message, optional, tag="20")]
+    pub node_registry: ::core::option::Option<NodeRegistryConfig>,
+    /// gRPC address this node advertises to other nodes
+    ///
+    /// If not set, derived from listen_addr. Should be externally reachable.
+    /// Example: "<http://node1.example.com:8000">
+    #[prost(string, tag="21")]
+    pub grpc_address: ::prost::alloc::string::String,
+}
+/// Node registry configuration
+///
+/// ## Purpose
+/// Configures node discovery, failure detection, and membership tracking.
+/// Uses SWIM protocol for scalable, decentralized failure detection.
+///
+/// ## Design
+/// Based on SWIM (Scalable Weakly-consistent Infection-style Process Group
+/// Membership Protocol) with enhancements from Lifeguard (HashiCorp).
+///
+/// ## References
+/// - SWIM: Das, Gupta, Motivala (2002)
+/// - Lifeguard: HashiCorp (2017)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NodeRegistryConfig {
+    // ==================== CACHE CONFIGURATION ====================
+
+    /// Cache TTL in seconds for node entries
+    ///
+    /// How long to cache node registrations before considering them stale.
+    /// Lower values mean more DB/network traffic but fresher data.
+    /// Default: 60 seconds
+    #[prost(uint32, tag="1")]
+    pub cache_ttl_seconds: u32,
+    // ==================== SWIM PROTOCOL CONFIGURATION ====================
+
+    /// Enable SWIM gossip protocol
+    ///
+    /// When enabled, nodes use SWIM for failure detection and membership
+    /// propagation. Recommended when not using a shared database.
+    /// Default: true
+    #[prost(bool, tag="10")]
+    pub gossip_enabled: bool,
+    /// SWIM protocol configuration
+    #[prost(message, optional, tag="11")]
+    pub swim: ::core::option::Option<SwimConfig>,
+    // ==================== DATABASE FALLBACK CONFIGURATION ====================
+
+    /// Use shared database as source of truth
+    ///
+    /// When true, ObjectRegistry database is the authoritative source.
+    /// SWIM protocol supplements DB with faster failure detection.
+    /// When false, SWIM is the only source (suitable for dev/testing).
+    /// Default: false
+    #[prost(bool, tag="20")]
+    pub use_shared_db: bool,
+    /// DB operation backoff configuration
+    #[prost(message, optional, tag="21")]
+    pub db_backoff: ::core::option::Option<DbBackoffConfig>,
+    /// Anti-entropy sync interval in seconds
+    ///
+    /// How often to sync local state with database (if use_shared_db=true).
+    /// Default: 30 seconds
+    #[prost(uint32, tag="22")]
+    pub db_sync_interval_seconds: u32,
+}
+/// SWIM protocol configuration
+///
+/// ## Purpose
+/// Configures the SWIM (Scalable Weakly-consistent Infection-style Membership)
+/// protocol for robust failure detection without a shared database.
+///
+/// ## Key Concepts
+/// - **Protocol Period**: How often to probe a random node
+/// - **Probe Timeout**: How long to wait for ping response
+/// - **Indirect Probes**: Number of intermediary nodes for fallback probing
+/// - **Suspicion**: Grace period before declaring a node dead
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SwimConfig {
+    /// Protocol period in milliseconds
+    ///
+    /// How often to probe a random cluster member. Lower values mean faster
+    /// failure detection but more network traffic.
+    /// Default: 1000ms (1 second)
+    #[prost(uint32, tag="1")]
+    pub protocol_period_ms: u32,
+    /// Probe timeout in milliseconds
+    ///
+    /// How long to wait for a ping response before trying indirect probing.
+    /// Should be less than protocol_period_ms.
+    /// Default: 500ms
+    #[prost(uint32, tag="2")]
+    pub probe_timeout_ms: u32,
+    /// Number of nodes to use for indirect probing
+    ///
+    /// When direct probe fails, ask this many random nodes to probe the target.
+    /// Higher values reduce false positives but increase network traffic.
+    /// Default: 3
+    #[prost(uint32, tag="3")]
+    pub indirect_ping_nodes: u32,
+    /// Suspicion timeout multiplier
+    ///
+    /// Multiplied by log(cluster_size) * protocol_period to calculate
+    /// how long a node stays in suspect state before being declared dead.
+    /// Higher values reduce false positives in unstable networks.
+    /// Default: 4
+    #[prost(uint32, tag="4")]
+    pub suspicion_multiplier: u32,
+    /// Minimum suspicion timeout in milliseconds
+    ///
+    /// Lower bound for suspicion timeout regardless of cluster size.
+    /// Default: 3000ms (3 seconds)
+    #[prost(uint32, tag="5")]
+    pub suspicion_min_ms: u32,
+    /// Maximum suspicion timeout in milliseconds
+    ///
+    /// Upper bound for suspicion timeout regardless of cluster size.
+    /// Default: 30000ms (30 seconds)
+    #[prost(uint32, tag="6")]
+    pub suspicion_max_ms: u32,
+    /// Dead node reap timeout in seconds
+    ///
+    /// How long to keep dead nodes in membership before removing them.
+    /// Allows late-arriving messages about the dead node to be processed.
+    /// Default: 300 seconds (5 minutes)
+    #[prost(uint32, tag="7")]
+    pub dead_node_reap_seconds: u32,
+    /// Maximum membership updates to piggyback on messages
+    ///
+    /// SWIM piggybacks membership updates on protocol messages for
+    /// efficient dissemination. This limits how many updates per message.
+    /// Default: 10
+    #[prost(uint32, tag="8")]
+    pub max_piggyback_updates: u32,
+    /// Broadcast limit for membership updates
+    ///
+    /// How many times to broadcast an update before dropping it.
+    /// Calculated as broadcast_limit * log(cluster_size) in practice.
+    /// Default: 5
+    #[prost(uint32, tag="9")]
+    pub broadcast_limit: u32,
+    /// Anti-entropy sync interval in seconds
+    ///
+    /// How often to perform full state sync with a random peer.
+    /// Ensures consistency even if some updates are lost.
+    /// Default: 30 seconds
+    #[prost(uint32, tag="10")]
+    pub anti_entropy_interval_seconds: u32,
+}
+/// Database backoff configuration
+///
+/// ## Purpose
+/// Configures exponential backoff with jitter for database operations.
+/// Prevents thundering herd and reduces DB load during failures.
+///
+/// ## Algorithm
+/// Uses decorrelated jitter: sleep = min(cap, random(base, sleep * 3))
+/// Based on AWS Architecture Blog recommendations.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DbBackoffConfig {
+    /// Base delay in milliseconds
+    ///
+    /// Initial backoff delay for the first retry.
+    /// Default: 100ms
+    #[prost(uint32, tag="1")]
+    pub base_delay_ms: u32,
+    /// Maximum delay cap in milliseconds
+    ///
+    /// Upper bound for backoff delay regardless of retry count.
+    /// Default: 30000ms (30 seconds)
+    #[prost(uint32, tag="2")]
+    pub max_delay_ms: u32,
+    /// Maximum retry attempts
+    ///
+    /// How many times to retry a failed DB operation before giving up.
+    /// Set to 0 for unlimited retries (not recommended).
+    /// Default: 10
+    #[prost(uint32, tag="3")]
+    pub max_attempts: u32,
 }
 /// Runtime configuration
 ///
@@ -858,6 +1045,306 @@ pub struct DiscoverNodesResponse {
     #[prost(message, repeated, tag="1")]
     pub nodes: ::prost::alloc::vec::Vec<NodeDiscovery>,
 }
+/// GetReleaseSpec request
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetReleaseSpecRequest {
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+}
+/// GetReleaseSpec response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetReleaseSpecResponse {
+    #[prost(message, optional, tag="1")]
+    pub release_spec: ::core::option::Option<ReleaseSpec>,
+}
+/// RegisterNodes request - supports multiple nodes
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RegisterNodesRequest {
+    /// Nodes to register
+    #[prost(message, repeated, tag="1")]
+    pub nodes: ::prost::alloc::vec::Vec<NodeRegistration>,
+    /// Cluster name for grouping
+    #[prost(string, tag="2")]
+    pub cluster: ::prost::alloc::string::String,
+    /// Labels for categorization
+    #[prost(map="string, string", tag="3")]
+    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+/// RegisterNodes response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RegisterNodesResponse {
+    /// IDs of successfully registered nodes
+    #[prost(string, repeated, tag="1")]
+    pub registered_node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Errors for nodes that failed to register
+    #[prost(map="string, string", tag="2")]
+    pub errors: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+/// UnregisterNode response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UnregisterNodeResponse {
+    #[prost(bool, tag="1")]
+    pub success: bool,
+}
+/// ListConnectedNodes request (paginated)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListConnectedNodesRequest {
+    /// Filter by cluster name
+    #[prost(string, tag="1")]
+    pub cluster: ::prost::alloc::string::String,
+    /// Page size (default: 100, max: 1000)
+    #[prost(int32, tag="2")]
+    pub page_size: i32,
+    /// Page token for pagination
+    #[prost(string, tag="3")]
+    pub page_token: ::prost::alloc::string::String,
+    /// Include health status in response
+    #[prost(bool, tag="4")]
+    pub include_health: bool,
+}
+/// ListConnectedNodes response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListConnectedNodesResponse {
+    /// List of node registrations
+    #[prost(message, repeated, tag="1")]
+    pub nodes: ::prost::alloc::vec::Vec<NodeRegistration>,
+    /// Token for next page
+    #[prost(string, tag="2")]
+    pub next_page_token: ::prost::alloc::string::String,
+    /// Total count (if available)
+    #[prost(int32, tag="3")]
+    pub total_count: i32,
+}
+/// StreamConnectedNodes request
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StreamConnectedNodesRequest {
+    /// Filter by cluster name
+    #[prost(string, tag="1")]
+    pub cluster: ::prost::alloc::string::String,
+    /// Include health status
+    #[prost(bool, tag="2")]
+    pub include_health: bool,
+}
+/// GetMetrics request
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetMetricsRequest {
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Include extended metrics (actor details, etc.)
+    #[prost(bool, tag="2")]
+    pub include_extended: bool,
+}
+/// CalculateCapacity request
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CalculateCapacityRequest {
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+}
+/// ListNodeApplications request
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListNodeApplicationsRequest {
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Page size
+    #[prost(int32, tag="2")]
+    pub page_size: i32,
+    /// Page token
+    #[prost(string, tag="3")]
+    pub page_token: ::prost::alloc::string::String,
+    /// Filter by status
+    #[prost(string, tag="4")]
+    pub status_filter: ::prost::alloc::string::String,
+}
+/// ListNodeApplications response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListNodeApplicationsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub applications: ::prost::alloc::vec::Vec<NodeApplicationInfo>,
+    #[prost(string, tag="2")]
+    pub next_page_token: ::prost::alloc::string::String,
+    #[prost(int32, tag="3")]
+    pub total_count: i32,
+}
+/// NodeApplicationInfo - Information about an application on a node
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NodeApplicationInfo {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="4")]
+    pub started_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(int32, tag="5")]
+    pub actor_count: i32,
+    #[prost(map="string, string", tag="6")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+/// GetHealth request
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetHealthRequest {
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+}
+/// GetHealth response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetHealthResponse {
+    #[prost(enumeration="NodeHealthStatus", tag="1")]
+    pub status: i32,
+    #[prost(string, tag="2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub last_checked: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(map="string, string", tag="4")]
+    pub details: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+/// SendHeartbeat request
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SendHeartbeatRequest {
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub capacity: ::core::option::Option<NodeCapacity>,
+    #[prost(map="string, double", tag="3")]
+    pub metrics: ::std::collections::HashMap<::prost::alloc::string::String, f64>,
+}
+/// SendHeartbeat response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SendHeartbeatResponse {
+    #[prost(bool, tag="1")]
+    pub acknowledged: bool,
+    #[prost(message, optional, tag="2")]
+    pub server_time: ::core::option::Option<::prost_types::Timestamp>,
+}
+// ============================================================================
+// SWIM Protocol Messages
+// ============================================================================
+
+/// Ping request - Direct failure detection
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PingRequest {
+    /// Source node sending the ping
+    #[prost(string, tag="1")]
+    pub source_node_id: ::prost::alloc::string::String,
+    /// Sequence number for correlation
+    #[prost(uint64, tag="2")]
+    pub sequence_number: u64,
+    /// Piggybacked membership updates (for efficient dissemination)
+    #[prost(message, repeated, tag="3")]
+    pub updates: ::prost::alloc::vec::Vec<MembershipUpdate>,
+}
+/// Ping response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PingResponse {
+    /// Responding node's ID
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Echo back sequence number
+    #[prost(uint64, tag="2")]
+    pub sequence_number: u64,
+    /// Current incarnation number (for conflict resolution)
+    #[prost(uint64, tag="3")]
+    pub incarnation: u64,
+    /// Piggybacked membership updates
+    #[prost(message, repeated, tag="4")]
+    pub updates: ::prost::alloc::vec::Vec<MembershipUpdate>,
+}
+/// Indirect ping request - Ask intermediary to ping target
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PingReqRequest {
+    /// Node requesting the indirect ping
+    #[prost(string, tag="1")]
+    pub source_node_id: ::prost::alloc::string::String,
+    /// Target node to ping
+    #[prost(string, tag="2")]
+    pub target_node_id: ::prost::alloc::string::String,
+    /// Target's address (in case intermediary doesn't know it)
+    #[prost(string, tag="3")]
+    pub target_address: ::prost::alloc::string::String,
+    /// Sequence number for correlation
+    #[prost(uint64, tag="4")]
+    pub sequence_number: u64,
+}
+/// Indirect ping response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PingReqResponse {
+    /// Whether the target responded to indirect ping
+    #[prost(bool, tag="1")]
+    pub target_alive: bool,
+    /// Target's incarnation (if alive)
+    #[prost(uint64, tag="2")]
+    pub target_incarnation: u64,
+    /// Piggybacked membership updates
+    #[prost(message, repeated, tag="3")]
+    pub updates: ::prost::alloc::vec::Vec<MembershipUpdate>,
+}
+/// Membership update - Piggybacked on protocol messages
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MembershipUpdate {
+    /// Node ID this update is about
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Node address
+    #[prost(string, tag="2")]
+    pub address: ::prost::alloc::string::String,
+    /// Membership state
+    #[prost(enumeration="MemberState", tag="3")]
+    pub state: i32,
+    /// Incarnation number (higher wins)
+    #[prost(uint64, tag="4")]
+    pub incarnation: u64,
+    /// Metadata/capabilities
+    #[prost(map="string, string", tag="5")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+/// Sync membership request - Full state exchange
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SyncMembershipRequest {
+    /// Requesting node's ID
+    #[prost(string, tag="1")]
+    pub source_node_id: ::prost::alloc::string::String,
+    /// Requesting node's full membership state
+    #[prost(message, repeated, tag="2")]
+    pub members: ::prost::alloc::vec::Vec<MembershipUpdate>,
+    /// Whether this is a push (true) or pull (false) sync
+    #[prost(bool, tag="3")]
+    pub is_push: bool,
+}
+/// Sync membership response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SyncMembershipResponse {
+    /// Responding node's full membership state
+    #[prost(message, repeated, tag="1")]
+    pub members: ::prost::alloc::vec::Vec<MembershipUpdate>,
+    /// Number of updates received that were new/updated
+    #[prost(int32, tag="2")]
+    pub updates_applied: i32,
+}
 /// Node type enumeration
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -969,4 +1456,41 @@ impl NodeHealthStatus {
         }
     }
 }
+/// Membership state enum
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum MemberState {
+    MemberStateUnspecified = 0,
+    MemberStateAlive = 1,
+    MemberStateSuspect = 2,
+    MemberStateDead = 3,
+    MemberStateLeft = 4,
+}
+impl MemberState {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            MemberState::MemberStateUnspecified => "MEMBER_STATE_UNSPECIFIED",
+            MemberState::MemberStateAlive => "MEMBER_STATE_ALIVE",
+            MemberState::MemberStateSuspect => "MEMBER_STATE_SUSPECT",
+            MemberState::MemberStateDead => "MEMBER_STATE_DEAD",
+            MemberState::MemberStateLeft => "MEMBER_STATE_LEFT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "MEMBER_STATE_UNSPECIFIED" => Some(Self::MemberStateUnspecified),
+            "MEMBER_STATE_ALIVE" => Some(Self::MemberStateAlive),
+            "MEMBER_STATE_SUSPECT" => Some(Self::MemberStateSuspect),
+            "MEMBER_STATE_DEAD" => Some(Self::MemberStateDead),
+            "MEMBER_STATE_LEFT" => Some(Self::MemberStateLeft),
+            _ => None,
+        }
+    }
+}
+include!("plexspaces.node.v1.tonic.rs");
 // @@protoc_insertion_point(module)

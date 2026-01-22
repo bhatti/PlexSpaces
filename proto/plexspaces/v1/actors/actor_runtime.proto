@@ -389,7 +389,7 @@ import "google/protobuf/any.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/actor_runtime;plexspaces_actor_v1";
 option java_package = "com.bhatti.plexspaces.actor.v1";
 option java_multiple_files = true;
 
@@ -403,87 +403,6 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   consumes: "application/json";
   produces: "application/json";
 };
-
-// Actor message for inter-actor communication.
-//
-// ## Purpose
-// Represents a single message sent from one actor to another with metadata
-// for routing, priority, correlation, and time-to-live.
-//
-// ## Why This Exists
-// - Enables asynchronous actor communication (fundamental to actor model)
-// - Supports message priority for control vs data plane separation (Quickwit-inspired)
-// - Provides correlation IDs for request-reply patterns (Erlang gen_server:call)
-// - TTL prevents message accumulation in failure scenarios
-// - Headers enable extensibility (tracing, auth, custom routing)
-//
-// ## Design Notes
-// - sender_id is optional to support anonymous sends
-// - priority maps to 5-level system: Signal(100), System(75), High(50), Normal(25), Low(0)
-// - payload is opaque bytes, decoded by receiving actor's behavior
-// - headers provide extensibility without proto changes
-message Message {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Actor Message"
-      description: "Message sent between actors"
-      required: ["id", "receiver_id", "message_type", "payload"]
-    }
-  };
-
-  string id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}  // ULID format
-  ];
-  string sender_id = 2 [(buf.validate.field).string.max_len = 255];  // Optional, but bounded
-  string receiver_id = 3 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
-  string message_type = 4 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 128}  // call, cast, info, etc.
-  ];
-  bytes payload = 5 [(google.api.field_behavior) = REQUIRED];
-  google.protobuf.Timestamp timestamp = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  int32 priority = 7 [(buf.validate.field).int32 = {gte: 0, lte: 100}];  // 5-level system: 0=Low, 25=Normal, 50=High, 75=System, 100=Signal
-  google.protobuf.Duration ttl = 8 [(buf.validate.field).duration.lte.seconds = 86400];  // Max 24 hours
-  map<string, string> headers = 9;
-
-  // Optional idempotency key for message deduplication
-  //
-  // ## Purpose
-  // Prevents accidental double-processing of messages within a time window (e.g., 24 hours).
-  // If a message with the same idempotency_key is processed within the window, it's skipped.
-  //
-  // ## Usage
-  // - Client generates unique idempotency key (e.g., UUID, request ID)
-  // - System tracks processed keys in journal
-  // - Duplicate messages within time window return cached response (if available)
-  // - Fits durable execution model (Restate-inspired)
-  //
-  // ## Example
-  // ```protobuf
-  // Message {
-  //   id: "msg-123"
-  //   idempotency_key: "payment-request-abc-xyz"
-  //   receiver_id: "payment-processor"
-  //   payload: [payment data]
-  // }
-  // // If same idempotency_key processed within 24h, returns cached response
-  // ```
-  string idempotency_key = 10 [(buf.validate.field).string.max_len = 255];
-
-  // URI path for HTTP-based invocations (optional)
-  // Example: "/api/v1/actors/default/counter/metrics"
-  // Populated when message originates from HTTP InvokeActor RPC
-  string uri_path = 11;
-
-  // HTTP method for HTTP-based invocations (optional)
-  // Example: "GET", "POST", "PUT", "DELETE"
-  // Populated when message originates from HTTP InvokeActor RPC
-  string uri_method = 12;
-}
 
 // Actor instance representation.
 //
@@ -1284,14 +1203,14 @@ message SendMessageRequest {
     }
   };
 
-  Message message = 1 [(google.api.field_behavior) = REQUIRED];
+  plexspaces.common.v1.Message message = 1 [(google.api.field_behavior) = REQUIRED];
   bool wait_for_response = 2;
   google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour timeout
 }
 
 message SendMessageResponse {
   string message_id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
-  Message response = 2; // Only if wait_for_response = true
+  plexspaces.common.v1.Message response = 2; // Only if wait_for_response = true
 }
 
 // Request for streaming messages (high-throughput)
@@ -1304,7 +1223,7 @@ message StreamMessageRequest {
     }
   };
 
-  Message message = 1 [(google.api.field_behavior) = REQUIRED];
+  plexspaces.common.v1.Message message = 1 [(google.api.field_behavior) = REQUIRED];
   // Sequence number for ordering (client-generated)
   uint64 sequence = 2;
 }
@@ -1952,7 +1871,7 @@ service ActorService {
   // Get an actor by ID
   rpc GetActor(GetActorRequest) returns (GetActorResponse) {
     option (google.api.http) = {
-      get: "/api/v1/actors/{actor_id.id}"
+      get: "/api/v1/actors/{actor_id}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Actor"
@@ -1999,7 +1918,7 @@ service ActorService {
   // Change actor state
   rpc SetActorState(SetActorStateRequest) returns (SetActorStateResponse) {
     option (google.api.http) = {
-      patch: "/api/v1/actors/{actor_id.id}/state"
+      patch: "/api/v1/actors/{actor_id}/state"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -2012,7 +1931,7 @@ service ActorService {
   // Migrate actor to different node
   rpc MigrateActor(MigrateActorRequest) returns (MigrateActorResponse) {
     option (google.api.http) = {
-      post: "/api/v1/actors/{actor_id.id}/migrate"
+      post: "/api/v1/actors/{actor_id}/migrate"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -2025,7 +1944,7 @@ service ActorService {
   // Delete an actor
   rpc DeleteActor(DeleteActorRequest) returns (plexspaces.common.v1.Empty) {
     option (google.api.http) = {
-      delete: "/api/v1/actors/{actor_id.id}"
+      delete: "/api/v1/actors/{actor_id}"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Delete Actor"

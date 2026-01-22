@@ -297,7 +297,7 @@ mod tests {
         
         let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
         assert!(received.is_some());
-        assert_eq!(received.unwrap().payload(), b"test");
+        assert_eq!(received.unwrap().payload, b"test");
     }
 
     #[tokio::test]
@@ -361,7 +361,7 @@ mod tests {
         
         let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
         assert!(received.is_some());
-        assert_eq!(received.unwrap().payload(), b"test-sqlite");
+        assert_eq!(received.unwrap().payload, b"test-sqlite");
     }
 
     #[tokio::test]

@@ -121,10 +121,19 @@ async fn test_monitor_remote_actor() {
     
     // Actor already registered - no need to update config
 
-    // Register node2 in node1's registry
-    let _: Result<(), _> = node1
-        .register_remote_node(NodeId::new("node2"), node2_address.clone())
-        .await;
+    // Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
+    use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+    let ctx = node1.service_locator().request_context_for_system_operations().await;
+    let registration = ObjectRegistration {
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_id: "node2".to_string(),
+        grpc_address: node2_address.clone(),
+        object_category: "Node".to_string(),
+        ..Default::default()
+    };
+    if let Some(object_registry) = node1.service_locator().get_object_registry().await {
+        let _ = object_registry.register(&ctx, registration).await;
+    }
 
     // Create notification channel on supervisor node (node1)
     let (tx, mut rx) = mpsc::channel(1);
@@ -234,15 +243,33 @@ async fn test_remote_actor_termination_notification() {
     
     // Actor already registered - no need to update config
 
-    // Connect nodes
-    node1
-        .register_remote_node(NodeId::new("node2"), node2_address.clone())
-        .await
-        .unwrap();
-    node2
-        .register_remote_node(NodeId::new("node1"), node1_address.clone())
-        .await
-        .unwrap();
+    // Connect nodes - register in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
+    {
+        let ctx = node1.service_locator().request_context_for_system_operations().await;
+        let registration = plexspaces_proto::object_registry::v1::ObjectRegistration {
+            object_type: plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode as i32,
+            object_id: "node2".to_string(),
+            grpc_address: node2_address.clone(),
+            object_category: "Node".to_string(),
+            ..Default::default()
+        };
+        if let Some(object_registry) = node1.service_locator().get_object_registry().await {
+            object_registry.register(&ctx, registration).await.unwrap();
+        }
+    }
+    {
+        let ctx = node2.service_locator().request_context_for_system_operations().await;
+        let registration = plexspaces_proto::object_registry::v1::ObjectRegistration {
+            object_type: plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode as i32,
+            object_id: "node1".to_string(),
+            grpc_address: node1_address.clone(),
+            object_category: "Node".to_string(),
+            ..Default::default()
+        };
+        if let Some(object_registry) = node2.service_locator().get_object_registry().await {
+            object_registry.register(&ctx, registration).await.unwrap();
+        }
+    }
 
     // Create notification channel on supervisor node (node1)
     let (tx, mut rx) = mpsc::channel(1);

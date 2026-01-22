@@ -82,8 +82,7 @@ fn test_value(size: usize) -> Vec<u8> {
 
 /// Create test RequestContext
 fn test_ctx() -> RequestContext {
-    RequestContext::new("bench-tenant".to_string())
-        .with_namespace("bench-namespace".to_string())
+    RequestContext::new_without_auth("bench-tenant".to_string(), "bench-namespace".to_string())
 }
 
 /// Benchmark configuration

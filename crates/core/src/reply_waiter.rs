@@ -70,7 +70,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify, RwLock};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use crate::Service;
 
 /// Reply waiter using async condition variables for high-performance ask pattern
@@ -133,8 +133,8 @@ impl ReplyWaiter {
                 if let Some(msg) = reply.take() {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
-                            "[REPLY_WAITER] WAIT SUCCESS: Received reply, sender={:?}, receiver={}, correlation_id={:?}",
-                            msg.sender, msg.receiver, msg.correlation_id
+                            "[REPLY_WAITER] WAIT SUCCESS: Received reply, sender={}, receiver={}, correlation_id={}",
+                            msg.sender_id, msg.receiver_id, msg.correlation_id
                         );
                     }
                     return Ok(msg);
@@ -158,8 +158,8 @@ impl ReplyWaiter {
                     match &result {
                         Ok(msg) => {
                             tracing::debug!(
-                                "[REPLY_WAITER] WAIT COMPLETED: Reply received, sender={:?}, receiver={}, correlation_id={:?}",
-                                msg.sender, msg.receiver, msg.correlation_id
+                                "[REPLY_WAITER] WAIT COMPLETED: Reply received, sender={}, receiver={}, correlation_id={}",
+                                msg.sender_id, msg.receiver_id, msg.correlation_id
                             );
                         }
                         Err(e) => {
@@ -192,8 +192,8 @@ impl ReplyWaiter {
     pub async fn notify(&self, reply: Message) -> Result<(), ReplyWaiterError> {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-                "[REPLY_WAITER] NOTIFY START: reply_sender={:?}, reply_receiver={}, correlation_id={:?}",
-                reply.sender, reply.receiver, reply.correlation_id
+                "[REPLY_WAITER] NOTIFY START: reply_sender={}, reply_receiver={}, correlation_id={}",
+                reply.sender_id, reply.receiver_id, reply.correlation_id
             );
         }
         
@@ -212,8 +212,8 @@ impl ReplyWaiter {
         
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-                "[REPLY_WAITER] NOTIFYING: correlation_id={:?}, reply_sender={:?}, reply_receiver={}",
-                reply.correlation_id, reply.sender, reply.receiver
+                "[REPLY_WAITER] NOTIFYING: correlation_id={}, reply_sender={}, reply_receiver={}",
+                reply.correlation_id, reply.sender_id, reply.receiver_id
             );
         }
         self.notify.notify_one();

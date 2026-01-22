@@ -5,12 +5,22 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_core::{ActorContext, ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider};
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::{ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider, RequestContext};
+    use plexspaces_core::Message;
     use std::sync::Arc;
     use std::time::Duration;
     use futures::StreamExt;
     use async_trait::async_trait;
+    use ulid::Ulid;
+
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
 
     // Mock ChannelService for testing
     struct MockChannelService {
@@ -21,44 +31,22 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ChannelService for MockChannelService {
-        async fn send_to_queue(
-            &self,
-            queue_name: &str,
-            message: Message,
-        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            self.sent_to_queue
-                .lock()
-                .unwrap()
-                .push((queue_name.to_string(), message));
+        async fn send_to_queue(&self, queue_name: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            self.sent_to_queue.lock().unwrap().push((queue_name.to_string(), message));
             Ok("msg-id".to_string())
         }
 
-        async fn publish_to_topic(
-            &self,
-            topic_name: &str,
-            message: Message,
-        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            self.published_to_topic
-                .lock()
-                .unwrap()
-                .push((topic_name.to_string(), message));
+        async fn publish_to_topic(&self, topic_name: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            self.published_to_topic.lock().unwrap().push((topic_name.to_string(), message));
             Ok("msg-id".to_string())
         }
 
-        async fn subscribe_to_topic(
-            &self,
-            _topic_name: &str,
-        ) -> Result<futures::stream::BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
-            // Return empty stream for now
+        async fn subscribe_to_topic(&self, _topic_name: &str) -> Result<futures::stream::BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
             use futures::stream;
             Ok(Box::pin(stream::empty()))
         }
 
-        async fn receive_from_queue(
-            &self,
-            _queue_name: &str,
-            _timeout: Option<Duration>,
-        ) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn receive_from_queue(&self, _queue_name: &str, _timeout: Option<Duration>) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
             let mut queue = self.queue_messages.lock().unwrap();
             Ok(queue.pop_front())
         }
@@ -67,21 +55,12 @@ mod tests {
     struct MockActorService;
 
     #[async_trait::async_trait]
-    impl plexspaces_core::ActorService for MockActorService {
-        async fn spawn_actor(
-            &self,
-            _actor_id: &str,
-            _actor_type: &str,
-            _initial_state: Vec<u8>,
-        ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+    impl ActorService for MockActorService {
+        async fn spawn_actor(&self, _actor_id: &str, _actor_type: &str, _initial_state: Vec<u8>) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
 
-        async fn send(
-            &self,
-            _actor_id: &str,
-            _message: Message,
-        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        async fn send(&self, _actor_id: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
     }
@@ -89,50 +68,28 @@ mod tests {
     struct MockObjectRegistry;
 
     #[async_trait::async_trait]
-    impl plexspaces_core::ObjectRegistry for MockObjectRegistry {
-        async fn lookup(
-            &self,
-            _ctx: &plexspaces_core::RequestContext,
-            _object_id: &str,
-            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        ) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    impl ObjectRegistry for MockObjectRegistry {
+        async fn lookup(&self, _ctx: &RequestContext, _object_id: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(None)
         }
 
-        async fn lookup_full(
-            &self,
-            _ctx: &plexspaces_core::RequestContext,
-            _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-            _object_id: &str,
-        ) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn lookup_full(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(None)
         }
 
-        async fn register(
-            &self,
-            _ctx: &plexspaces_core::RequestContext,
-            _registration: plexspaces_core::ObjectRegistration,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn register(&self, _ctx: &RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
-        
-    async fn unregister(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        _object_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
-    async fn heartbeat(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        _object_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
-}
-        async fn discover(&self, _ctx: &plexspaces_core::RequestContext, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>, _name_pattern: Option<String>, _tags: Option<Vec<String>>, _metadata: Option<Vec<String>>, _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>, _offset: usize, _limit: usize) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        }
+
+        async fn unregister(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn heartbeat(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn discover(&self, _ctx: &RequestContext, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>, _name_pattern: Option<String>, _tags: Option<Vec<String>>, _metadata: Option<Vec<String>>, _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>, _offset: usize, _limit: usize) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }
     }
@@ -140,38 +97,75 @@ mod tests {
     struct MockTupleSpaceProvider;
 
     #[async_trait::async_trait]
-    impl plexspaces_core::TupleSpaceProvider for MockTupleSpaceProvider {
-        async fn write(
-            &self,
-            _tuple: plexspaces_tuplespace::Tuple,
-        ) -> Result<(), plexspaces_tuplespace::TupleSpaceError> {
+    impl TupleSpaceProvider for MockTupleSpaceProvider {
+        async fn write(&self, _tuple: plexspaces_tuplespace::Tuple) -> Result<(), plexspaces_tuplespace::TupleSpaceError> {
             Ok(())
         }
 
-        async fn read(
-            &self,
-            _pattern: &plexspaces_tuplespace::Pattern,
-        ) -> Result<Vec<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError>
-        {
+        async fn read(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<Vec<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError> {
             Ok(vec![])
         }
 
-        async fn take(
-            &self,
-            _pattern: &plexspaces_tuplespace::Pattern,
-        ) -> Result<
-            Option<plexspaces_tuplespace::Tuple>,
-            plexspaces_tuplespace::TupleSpaceError,
-        > {
+        async fn take(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<Option<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError> {
             Ok(None)
         }
 
-        async fn count(
-            &self,
-            _pattern: &plexspaces_tuplespace::Pattern,
-        ) -> Result<usize, plexspaces_tuplespace::TupleSpaceError> {
+        async fn count(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<usize, plexspaces_tuplespace::TupleSpaceError> {
             Ok(0)
         }
     }
-}
 
+    #[tokio::test]
+    async fn test_channel_service_send_to_queue() {
+        let service = MockChannelService {
+            sent_to_queue: Arc::new(std::sync::Mutex::new(Vec::new())),
+            published_to_topic: Arc::new(std::sync::Mutex::new(Vec::new())),
+            queue_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+        };
+
+        let msg = create_test_message(b"test".to_vec());
+        let result = service.send_to_queue("test-queue", msg).await;
+        assert!(result.is_ok());
+        
+        let sent = service.sent_to_queue.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "test-queue");
+    }
+
+    #[tokio::test]
+    async fn test_channel_service_publish_to_topic() {
+        let service = MockChannelService {
+            sent_to_queue: Arc::new(std::sync::Mutex::new(Vec::new())),
+            published_to_topic: Arc::new(std::sync::Mutex::new(Vec::new())),
+            queue_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+        };
+
+        let msg = create_test_message(b"test".to_vec());
+        let result = service.publish_to_topic("test-topic", msg).await;
+        assert!(result.is_ok());
+        
+        let published = service.published_to_topic.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0, "test-topic");
+    }
+
+    #[tokio::test]
+    async fn test_channel_service_receive_from_queue() {
+        let msg = create_test_message(b"test".to_vec());
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(msg.clone());
+        
+        let service = MockChannelService {
+            sent_to_queue: Arc::new(std::sync::Mutex::new(Vec::new())),
+            published_to_topic: Arc::new(std::sync::Mutex::new(Vec::new())),
+            queue_messages: Arc::new(std::sync::Mutex::new(queue)),
+        };
+
+        let result = service.receive_from_queue("test-queue", None).await;
+        assert!(result.is_ok());
+        
+        let received = result.unwrap();
+        assert!(received.is_some());
+        assert_eq!(received.unwrap().id, msg.id);
+    }
+}

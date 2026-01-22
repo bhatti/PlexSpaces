@@ -80,7 +80,7 @@ async fn test_tuplespace_provider_wrapper() {
 #[tokio::test]
 async fn test_stub_actor_service() {
     // StubActorService is private, test via minimal context
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::Message;
 
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;

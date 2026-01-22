@@ -42,7 +42,7 @@ import "google/protobuf/duration.proto";
 import "buf/validate/validate.proto";
 import "plexspaces/v1/common.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/keyvalue/keyvalue;plexspaces_keyvalue_v1";
 option java_package = "com.bhatti.plexspaces.keyvalue.v1";
 option java_multiple_files = true;
 

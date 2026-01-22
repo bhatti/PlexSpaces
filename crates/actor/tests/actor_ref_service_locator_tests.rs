@@ -4,11 +4,21 @@
 // Tests for ActorRef integration with ServiceLocator (TDD)
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{ActorRegistry, ServiceLocator, actor_context::ObjectRegistry as ObjectRegistryTrait};
-use plexspaces_mailbox::{Message, Mailbox, MailboxConfig};
+use plexspaces_core::{ActorRegistry, ServiceLocator, actor_context::ObjectRegistry as ObjectRegistryTrait, Message};
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::sync::Arc;
 use tokio::time;
+use ulid::Ulid;
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
 
 // Helper to wrap ObjectRegistry for ActorRegistry
 struct ObjectRegistryAdapter {
@@ -69,6 +79,30 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
+
+    async fn unregister(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .unregister(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn heartbeat(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .heartbeat(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
 #[tokio::test]
@@ -87,7 +121,7 @@ async fn test_actor_ref_remote_uses_service_locator() {
     ));
     
     // Register ActorRegistry in ServiceLocator
-    service_locator.register_service(actor_registry.clone()).await;
+    service_locator.register_actor_registry(actor_registry.clone()).await;
     
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
@@ -129,7 +163,7 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
     ));
     
     // Register ActorRegistry in ServiceLocator
-    service_locator.register_service(actor_registry.clone()).await;
+    service_locator.register_actor_registry(actor_registry.clone()).await;
     
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
@@ -140,7 +174,7 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
     
     // Send message (will fail to connect, but should use ServiceLocator)
     // Use timeout to prevent hanging
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         actor_ref.tell(message)
@@ -190,7 +224,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     ));
     
     // Register ActorRegistry in ServiceLocator
-    service_locator.register_service(actor_registry.clone()).await;
+    service_locator.register_actor_registry(actor_registry.clone()).await;
     
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
@@ -201,7 +235,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     
     // Send ask request (will fail to connect, but should use ServiceLocator)
     // Use timeout to prevent hanging (ask already has timeout, but wrap in additional timeout for safety)
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         actor_ref.ask(message, std::time::Duration::from_secs(1))
@@ -244,11 +278,11 @@ async fn test_actor_ref_local_unchanged() {
     }
     
     // Send message should work
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     actor_ref.tell(message).await.unwrap();
     
     // Verify message was delivered
     let received = mailbox.dequeue().await;
     assert!(received.is_some());
-    assert_eq!(received.unwrap().payload(), b"test");
+    assert_eq!(received.unwrap().payload, b"test");
 }

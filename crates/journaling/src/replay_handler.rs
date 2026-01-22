@@ -60,7 +60,7 @@
 
 use async_trait::async_trait;
 use plexspaces_core::ActorContext;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 
 /// Trait for replaying messages during deterministic replay
 ///

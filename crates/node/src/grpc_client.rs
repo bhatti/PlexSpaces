@@ -22,7 +22,8 @@
 //! This is the foundation for the future high-level SDK.
 
 use plexspaces_proto::{
-    v1::actor::{Message as ProtoMessage, SendMessageRequest, SpawnActorRequest, SpawnActorResponse},
+    v1::actor::{SendMessageRequest, SpawnActorRequest, SpawnActorResponse},
+    common::v1::Message as ProtoMessage,
     ActorServiceClient,
 };
 use tonic::{transport::Channel, Request};
@@ -36,7 +37,7 @@ use tonic::{transport::Channel, Request};
 /// ## Examples
 /// ```no_run
 /// # use plexspaces_node::grpc_client::RemoteActorClient;
-/// # use plexspaces_proto::v1::actor::Message as ProtoMessage;
+/// # use plexspaces_proto::common::v1::Message as ProtoMessage;
 /// # use plexspaces_proto::v1::common::ActorId as ProtoActorId;
 /// # async fn example() -> Result<(), String> {
 /// let mut client = RemoteActorClient::connect("http://localhost:8000").await?;

@@ -42,7 +42,7 @@ import "plexspaces/v1/common.proto";
 import "plexspaces/v1/metrics/metrics.proto";
 import "plexspaces/prv/circuitbreaker/circuitbreaker.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/system/system;plexspaces_system_v1";
 option java_package = "com.bhatti.plexspaces.system.v1";
 option java_multiple_files = true;
 

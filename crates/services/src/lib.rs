@@ -62,4 +62,16 @@ pub mod system_service;
 pub mod firecracker_service;
 pub mod metrics_service;
 pub mod dashboard_service;
+pub mod process_group_service;
+pub mod node_registry;
+pub mod node_service;
+
+// Re-export ProcessGroupServiceImpl for convenience
+pub use process_group_service::ProcessGroupServiceImpl;
+
+// Re-export NodeRegistry for convenience
+pub use node_registry::NodeRegistry;
+
+// Re-export NodeServiceImpl for convenience
+pub use node_service::NodeServiceImpl;
 

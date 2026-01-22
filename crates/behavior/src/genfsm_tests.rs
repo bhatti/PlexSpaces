@@ -27,8 +27,17 @@ mod tests {
     use plexspaces_core::{
         Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType,
     };
-    use plexspaces_mailbox::Message;
+    use plexspaces_proto::common::v1::Message;
     use std::sync::{Arc, Mutex};
+    
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: ulid::Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
 
     // Traffic light states (classic FSM example)
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,7 +99,7 @@ mod tests {
             TrafficLightEvent::Timer => b"Timer".to_vec(),
             TrafficLightEvent::Emergency => b"Emergency".to_vec(),
         };
-        Message::new(payload)
+        create_test_message(payload)
     }
 
     // Test 1: Basic FSM creation and initial state
@@ -463,31 +472,31 @@ mod tests {
         let mut fsm = GenStateMachineBehavior::new(DoorState::Locked, transition_fn);
 
         // Locked -> Unlocked
-        let (ctx, _) = create_test_context_and_message(Message::new(b"unlock".to_vec()));
+        let (ctx, _) = create_test_context_and_message(create_test_message(b"unlock".to_vec()));
         fsm.transition(&*ctx, DoorEvent::Unlock).await
         .unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Unlocked);
 
         // Unlocked -> Opened
-        let (ctx, _) = create_test_context_and_message(Message::new(b"open".to_vec()));
+        let (ctx, _) = create_test_context_and_message(create_test_message(b"open".to_vec()));
         fsm.transition(&*ctx, DoorEvent::Open).await
         .unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Opened);
 
         // Opened -> Unlocked
-        let (ctx, _) = create_test_context_and_message(Message::new(b"close".to_vec()));
+        let (ctx, _) = create_test_context_and_message(create_test_message(b"close".to_vec()));
         fsm.transition(&*ctx, DoorEvent::Close).await
         .unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Unlocked);
 
         // Unlocked -> Locked
-        let (ctx, _) = create_test_context_and_message(Message::new(b"lock".to_vec()));
+        let (ctx, _) = create_test_context_and_message(create_test_message(b"lock".to_vec()));
         fsm.transition(&*ctx, DoorEvent::Lock).await
         .unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Locked);
 
         // Locked -> Alarm (invalid code)
-        let (ctx, _) = create_test_context_and_message(Message::new(b"invalid".to_vec()));
+        let (ctx, _) = create_test_context_and_message(create_test_message(b"invalid".to_vec()));
         fsm.transition(&*ctx, DoorEvent::InvalidCode).await
         .unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Alarm);

@@ -4,8 +4,6 @@ pub mod node_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    /** Node management service (internal use only)
-*/
     #[derive(Debug, Clone)]
     pub struct NodeServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -86,13 +84,11 @@ pub mod node_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /** Register a new node
-*/
-        pub async fn register_node(
+        pub async fn get_release_spec(
             &mut self,
-            request: impl tonic::IntoRequest<super::RegisterNodeRequest>,
+            request: impl tonic::IntoRequest<super::GetReleaseSpecRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::RegisterNodeResponse>,
+            tonic::Response<super::GetReleaseSpecResponse>,
             tonic::Status,
         > {
             self.inner
@@ -106,22 +102,47 @@ pub mod node_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/RegisterNode",
+                "/plexspaces.node.v1.NodeService/GetReleaseSpec",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "RegisterNode"),
+                    GrpcMethod::new("plexspaces.node.v1.NodeService", "GetReleaseSpec"),
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Unregister a node
-*/
+        pub async fn register_nodes(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RegisterNodesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RegisterNodesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.node.v1.NodeService/RegisterNodes",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("plexspaces.node.v1.NodeService", "RegisterNodes"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn unregister_node(
             &mut self,
             request: impl tonic::IntoRequest<super::UnregisterNodeRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Response<super::UnregisterNodeResponse>,
             tonic::Status,
         > {
             self.inner
@@ -144,37 +165,11 @@ pub mod node_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Get node information
-*/
-        pub async fn get_node(
+        pub async fn list_connected_nodes(
             &mut self,
-            request: impl tonic::IntoRequest<super::GetNodeRequest>,
-        ) -> std::result::Result<tonic::Response<super::Node>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/GetNode",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("plexspaces.node.v1.NodeService", "GetNode"));
-            self.inner.unary(req, path, codec).await
-        }
-        /** List all nodes
-*/
-        pub async fn list_nodes(
-            &mut self,
-            request: impl tonic::IntoRequest<super::ListNodesRequest>,
+            request: impl tonic::IntoRequest<super::ListConnectedNodesRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ListNodesResponse>,
+            tonic::Response<super::ListConnectedNodesResponse>,
             tonic::Status,
         > {
             self.inner
@@ -188,49 +183,23 @@ pub mod node_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/ListNodes",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("plexspaces.node.v1.NodeService", "ListNodes"));
-            self.inner.unary(req, path, codec).await
-        }
-        /** Assign an actor to a node
-*/
-        pub async fn assign_actor(
-            &mut self,
-            request: impl tonic::IntoRequest<super::AssignActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::AssignActorResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/AssignActor",
+                "/plexspaces.node.v1.NodeService/ListConnectedNodes",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "AssignActor"),
+                    GrpcMethod::new(
+                        "plexspaces.node.v1.NodeService",
+                        "ListConnectedNodes",
+                    ),
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Remove an actor from a node
-*/
-        pub async fn remove_actor(
+        pub async fn stream_connected_nodes(
             &mut self,
-            request: impl tonic::IntoRequest<super::RemoveActorRequest>,
+            request: impl tonic::IntoRequest<super::StreamConnectedNodesRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Response<tonic::codec::Streaming<super::NodeRegistration>>,
             tonic::Status,
         > {
             self.inner
@@ -244,22 +213,72 @@ pub mod node_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/RemoveActor",
+                "/plexspaces.node.v1.NodeService/StreamConnectedNodes",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "RemoveActor"),
+                    GrpcMethod::new(
+                        "plexspaces.node.v1.NodeService",
+                        "StreamConnectedNodes",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
+        }
+        pub async fn get_metrics(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetMetricsRequest>,
+        ) -> std::result::Result<tonic::Response<super::NodeMetrics>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.node.v1.NodeService/GetMetrics",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("plexspaces.node.v1.NodeService", "GetMetrics"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn calculate_capacity(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CalculateCapacityRequest>,
+        ) -> std::result::Result<tonic::Response<super::NodeCapacity>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.node.v1.NodeService/CalculateCapacity",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.node.v1.NodeService",
+                        "CalculateCapacity",
+                    ),
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** ORBIT-INSPIRED: Actor lock operations
-*/
-        pub async fn acquire_actor_lock(
+        pub async fn list_node_applications(
             &mut self,
-            request: impl tonic::IntoRequest<super::AcquireActorLockRequest>,
+            request: impl tonic::IntoRequest<super::ListNodeApplicationsRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::AcquireActorLockResponse>,
+            tonic::Response<super::ListNodeApplicationsResponse>,
             tonic::Status,
         > {
             self.inner
@@ -273,21 +292,23 @@ pub mod node_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/AcquireActorLock",
+                "/plexspaces.node.v1.NodeService/ListNodeApplications",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "AcquireActorLock"),
+                    GrpcMethod::new(
+                        "plexspaces.node.v1.NodeService",
+                        "ListNodeApplications",
+                    ),
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
-        pub async fn release_actor_lock(
+        pub async fn get_health(
             &mut self,
-            request: impl tonic::IntoRequest<super::ReleaseActorLockRequest>,
+            request: impl tonic::IntoRequest<super::GetHealthRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Response<super::GetHealthResponse>,
             tonic::Status,
         > {
             self.inner
@@ -301,78 +322,18 @@ pub mod node_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/ReleaseActorLock",
+                "/plexspaces.node.v1.NodeService/GetHealth",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "ReleaseActorLock"),
-                );
+                .insert(GrpcMethod::new("plexspaces.node.v1.NodeService", "GetHealth"));
             self.inner.unary(req, path, codec).await
         }
-        /** WASMCLOUD-INSPIRED: Lattice mesh operations
-*/
-        pub async fn join_lattice(
-            &mut self,
-            request: impl tonic::IntoRequest<super::JoinLatticeRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::JoinLatticeResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/JoinLattice",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "JoinLattice"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        ///
-        pub async fn leave_lattice(
-            &mut self,
-            request: impl tonic::IntoRequest<super::LeaveLatticeRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/LeaveLattice",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "LeaveLattice"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        ///
         pub async fn send_heartbeat(
             &mut self,
-            request: impl tonic::IntoRequest<super::Heartbeat>,
+            request: impl tonic::IntoRequest<super::SendHeartbeatRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Response<super::SendHeartbeatResponse>,
             tonic::Status,
         > {
             self.inner
@@ -395,12 +356,33 @@ pub mod node_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
-        pub async fn discover_nodes(
+        pub async fn ping(
             &mut self,
-            request: impl tonic::IntoRequest<super::DiscoverNodesRequest>,
+            request: impl tonic::IntoRequest<super::PingRequest>,
+        ) -> std::result::Result<tonic::Response<super::PingResponse>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.node.v1.NodeService/Ping",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("plexspaces.node.v1.NodeService", "Ping"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn ping_req(
+            &mut self,
+            request: impl tonic::IntoRequest<super::PingReqRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::DiscoverNodesResponse>,
+            tonic::Response<super::PingReqResponse>,
             tonic::Status,
         > {
             self.inner
@@ -414,21 +396,20 @@ pub mod node_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/DiscoverNodes",
+                "/plexspaces.node.v1.NodeService/PingReq",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "DiscoverNodes"),
-                );
+                .insert(GrpcMethod::new("plexspaces.node.v1.NodeService", "PingReq"));
             self.inner.unary(req, path, codec).await
         }
-        /** Get node metrics
-*/
-        pub async fn get_node_metrics(
+        pub async fn sync_membership(
             &mut self,
-            request: impl tonic::IntoRequest<super::GetNodeRequest>,
-        ) -> std::result::Result<tonic::Response<super::NodeMetrics>, tonic::Status> {
+            request: impl tonic::IntoRequest<super::SyncMembershipRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SyncMembershipResponse>,
+            tonic::Status,
+        > {
             self.inner
                 .ready()
                 .await
@@ -440,12 +421,12 @@ pub mod node_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.node.v1.NodeService/GetNodeMetrics",
+                "/plexspaces.node.v1.NodeService/SyncMembership",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("plexspaces.node.v1.NodeService", "GetNodeMetrics"),
+                    GrpcMethod::new("plexspaces.node.v1.NodeService", "SyncMembership"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -458,116 +439,92 @@ pub mod node_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with NodeServiceServer.
     #[async_trait]
     pub trait NodeService: Send + Sync + 'static {
-        /** Register a new node
-*/
-        async fn register_node(
+        async fn get_release_spec(
             &self,
-            request: tonic::Request<super::RegisterNodeRequest>,
+            request: tonic::Request<super::GetReleaseSpecRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::RegisterNodeResponse>,
+            tonic::Response<super::GetReleaseSpecResponse>,
             tonic::Status,
         >;
-        /** Unregister a node
-*/
+        async fn register_nodes(
+            &self,
+            request: tonic::Request<super::RegisterNodesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RegisterNodesResponse>,
+            tonic::Status,
+        >;
         async fn unregister_node(
             &self,
             request: tonic::Request<super::UnregisterNodeRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Response<super::UnregisterNodeResponse>,
             tonic::Status,
         >;
-        /** Get node information
-*/
-        async fn get_node(
+        async fn list_connected_nodes(
             &self,
-            request: tonic::Request<super::GetNodeRequest>,
-        ) -> std::result::Result<tonic::Response<super::Node>, tonic::Status>;
-        /** List all nodes
-*/
-        async fn list_nodes(
-            &self,
-            request: tonic::Request<super::ListNodesRequest>,
+            request: tonic::Request<super::ListConnectedNodesRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ListNodesResponse>,
+            tonic::Response<super::ListConnectedNodesResponse>,
             tonic::Status,
         >;
-        /** Assign an actor to a node
-*/
-        async fn assign_actor(
+        /// Server streaming response type for the StreamConnectedNodes method.
+        type StreamConnectedNodesStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::NodeRegistration, tonic::Status>,
+            >
+            + Send
+            + 'static;
+        async fn stream_connected_nodes(
             &self,
-            request: tonic::Request<super::AssignActorRequest>,
+            request: tonic::Request<super::StreamConnectedNodesRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::AssignActorResponse>,
+            tonic::Response<Self::StreamConnectedNodesStream>,
             tonic::Status,
         >;
-        /** Remove an actor from a node
-*/
-        async fn remove_actor(
+        async fn get_metrics(
             &self,
-            request: tonic::Request<super::RemoveActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
-            tonic::Status,
-        >;
-        /** ORBIT-INSPIRED: Actor lock operations
-*/
-        async fn acquire_actor_lock(
+            request: tonic::Request<super::GetMetricsRequest>,
+        ) -> std::result::Result<tonic::Response<super::NodeMetrics>, tonic::Status>;
+        async fn calculate_capacity(
             &self,
-            request: tonic::Request<super::AcquireActorLockRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::AcquireActorLockResponse>,
-            tonic::Status,
-        >;
-        ///
-        async fn release_actor_lock(
+            request: tonic::Request<super::CalculateCapacityRequest>,
+        ) -> std::result::Result<tonic::Response<super::NodeCapacity>, tonic::Status>;
+        async fn list_node_applications(
             &self,
-            request: tonic::Request<super::ReleaseActorLockRequest>,
+            request: tonic::Request<super::ListNodeApplicationsRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Response<super::ListNodeApplicationsResponse>,
             tonic::Status,
         >;
-        /** WASMCLOUD-INSPIRED: Lattice mesh operations
-*/
-        async fn join_lattice(
+        async fn get_health(
             &self,
-            request: tonic::Request<super::JoinLatticeRequest>,
+            request: tonic::Request<super::GetHealthRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::JoinLatticeResponse>,
+            tonic::Response<super::GetHealthResponse>,
             tonic::Status,
         >;
-        ///
-        async fn leave_lattice(
-            &self,
-            request: tonic::Request<super::LeaveLatticeRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
-            tonic::Status,
-        >;
-        ///
         async fn send_heartbeat(
             &self,
-            request: tonic::Request<super::Heartbeat>,
+            request: tonic::Request<super::SendHeartbeatRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Response<super::SendHeartbeatResponse>,
             tonic::Status,
         >;
-        ///
-        async fn discover_nodes(
+        async fn ping(
             &self,
-            request: tonic::Request<super::DiscoverNodesRequest>,
+            request: tonic::Request<super::PingRequest>,
+        ) -> std::result::Result<tonic::Response<super::PingResponse>, tonic::Status>;
+        async fn ping_req(
+            &self,
+            request: tonic::Request<super::PingReqRequest>,
+        ) -> std::result::Result<tonic::Response<super::PingReqResponse>, tonic::Status>;
+        async fn sync_membership(
+            &self,
+            request: tonic::Request<super::SyncMembershipRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::DiscoverNodesResponse>,
+            tonic::Response<super::SyncMembershipResponse>,
             tonic::Status,
         >;
-        /** Get node metrics
-*/
-        async fn get_node_metrics(
-            &self,
-            request: tonic::Request<super::GetNodeRequest>,
-        ) -> std::result::Result<tonic::Response<super::NodeMetrics>, tonic::Status>;
     }
-    /** Node management service (internal use only)
-*/
     #[derive(Debug)]
     pub struct NodeServiceServer<T: NodeService> {
         inner: _Inner<T>,
@@ -647,25 +604,25 @@ pub mod node_service_server {
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
-                "/plexspaces.node.v1.NodeService/RegisterNode" => {
+                "/plexspaces.node.v1.NodeService/GetReleaseSpec" => {
                     #[allow(non_camel_case_types)]
-                    struct RegisterNodeSvc<T: NodeService>(pub Arc<T>);
+                    struct GetReleaseSpecSvc<T: NodeService>(pub Arc<T>);
                     impl<
                         T: NodeService,
-                    > tonic::server::UnaryService<super::RegisterNodeRequest>
-                    for RegisterNodeSvc<T> {
-                        type Response = super::RegisterNodeResponse;
+                    > tonic::server::UnaryService<super::GetReleaseSpecRequest>
+                    for GetReleaseSpecSvc<T> {
+                        type Response = super::GetReleaseSpecResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::RegisterNodeRequest>,
+                            request: tonic::Request<super::GetReleaseSpecRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as NodeService>::register_node(&inner, request).await
+                                <T as NodeService>::get_release_spec(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -677,7 +634,53 @@ pub mod node_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = RegisterNodeSvc(inner);
+                        let method = GetReleaseSpecSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.node.v1.NodeService/RegisterNodes" => {
+                    #[allow(non_camel_case_types)]
+                    struct RegisterNodesSvc<T: NodeService>(pub Arc<T>);
+                    impl<
+                        T: NodeService,
+                    > tonic::server::UnaryService<super::RegisterNodesRequest>
+                    for RegisterNodesSvc<T> {
+                        type Response = super::RegisterNodesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RegisterNodesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NodeService>::register_nodes(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = RegisterNodesSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -700,7 +703,7 @@ pub mod node_service_server {
                         T: NodeService,
                     > tonic::server::UnaryService<super::UnregisterNodeRequest>
                     for UnregisterNodeSvc<T> {
-                        type Response = super::super::super::common::v1::Empty;
+                        type Response = super::UnregisterNodeResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -739,209 +742,25 @@ pub mod node_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.node.v1.NodeService/GetNode" => {
+                "/plexspaces.node.v1.NodeService/ListConnectedNodes" => {
                     #[allow(non_camel_case_types)]
-                    struct GetNodeSvc<T: NodeService>(pub Arc<T>);
+                    struct ListConnectedNodesSvc<T: NodeService>(pub Arc<T>);
                     impl<
                         T: NodeService,
-                    > tonic::server::UnaryService<super::GetNodeRequest>
-                    for GetNodeSvc<T> {
-                        type Response = super::Node;
+                    > tonic::server::UnaryService<super::ListConnectedNodesRequest>
+                    for ListConnectedNodesSvc<T> {
+                        type Response = super::ListConnectedNodesResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::GetNodeRequest>,
+                            request: tonic::Request<super::ListConnectedNodesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as NodeService>::get_node(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = GetNodeSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.node.v1.NodeService/ListNodes" => {
-                    #[allow(non_camel_case_types)]
-                    struct ListNodesSvc<T: NodeService>(pub Arc<T>);
-                    impl<
-                        T: NodeService,
-                    > tonic::server::UnaryService<super::ListNodesRequest>
-                    for ListNodesSvc<T> {
-                        type Response = super::ListNodesResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::ListNodesRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as NodeService>::list_nodes(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = ListNodesSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.node.v1.NodeService/AssignActor" => {
-                    #[allow(non_camel_case_types)]
-                    struct AssignActorSvc<T: NodeService>(pub Arc<T>);
-                    impl<
-                        T: NodeService,
-                    > tonic::server::UnaryService<super::AssignActorRequest>
-                    for AssignActorSvc<T> {
-                        type Response = super::AssignActorResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::AssignActorRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as NodeService>::assign_actor(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = AssignActorSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.node.v1.NodeService/RemoveActor" => {
-                    #[allow(non_camel_case_types)]
-                    struct RemoveActorSvc<T: NodeService>(pub Arc<T>);
-                    impl<
-                        T: NodeService,
-                    > tonic::server::UnaryService<super::RemoveActorRequest>
-                    for RemoveActorSvc<T> {
-                        type Response = super::super::super::common::v1::Empty;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::RemoveActorRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as NodeService>::remove_actor(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = RemoveActorSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.node.v1.NodeService/AcquireActorLock" => {
-                    #[allow(non_camel_case_types)]
-                    struct AcquireActorLockSvc<T: NodeService>(pub Arc<T>);
-                    impl<
-                        T: NodeService,
-                    > tonic::server::UnaryService<super::AcquireActorLockRequest>
-                    for AcquireActorLockSvc<T> {
-                        type Response = super::AcquireActorLockResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::AcquireActorLockRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as NodeService>::acquire_actor_lock(&inner, request)
+                                <T as NodeService>::list_connected_nodes(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -954,7 +773,7 @@ pub mod node_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = AcquireActorLockSvc(inner);
+                        let method = ListConnectedNodesSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -970,25 +789,27 @@ pub mod node_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.node.v1.NodeService/ReleaseActorLock" => {
+                "/plexspaces.node.v1.NodeService/StreamConnectedNodes" => {
                     #[allow(non_camel_case_types)]
-                    struct ReleaseActorLockSvc<T: NodeService>(pub Arc<T>);
+                    struct StreamConnectedNodesSvc<T: NodeService>(pub Arc<T>);
                     impl<
                         T: NodeService,
-                    > tonic::server::UnaryService<super::ReleaseActorLockRequest>
-                    for ReleaseActorLockSvc<T> {
-                        type Response = super::super::super::common::v1::Empty;
+                    > tonic::server::ServerStreamingService<
+                        super::StreamConnectedNodesRequest,
+                    > for StreamConnectedNodesSvc<T> {
+                        type Response = super::NodeRegistration;
+                        type ResponseStream = T::StreamConnectedNodesStream;
                         type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
+                            tonic::Response<Self::ResponseStream>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::ReleaseActorLockRequest>,
+                            request: tonic::Request<super::StreamConnectedNodesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as NodeService>::release_actor_lock(&inner, request)
+                                <T as NodeService>::stream_connected_nodes(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -1001,7 +822,53 @@ pub mod node_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = ReleaseActorLockSvc(inner);
+                        let method = StreamConnectedNodesSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.node.v1.NodeService/GetMetrics" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetMetricsSvc<T: NodeService>(pub Arc<T>);
+                    impl<
+                        T: NodeService,
+                    > tonic::server::UnaryService<super::GetMetricsRequest>
+                    for GetMetricsSvc<T> {
+                        type Response = super::NodeMetrics;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetMetricsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NodeService>::get_metrics(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetMetricsSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -1017,25 +884,26 @@ pub mod node_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.node.v1.NodeService/JoinLattice" => {
+                "/plexspaces.node.v1.NodeService/CalculateCapacity" => {
                     #[allow(non_camel_case_types)]
-                    struct JoinLatticeSvc<T: NodeService>(pub Arc<T>);
+                    struct CalculateCapacitySvc<T: NodeService>(pub Arc<T>);
                     impl<
                         T: NodeService,
-                    > tonic::server::UnaryService<super::JoinLatticeRequest>
-                    for JoinLatticeSvc<T> {
-                        type Response = super::JoinLatticeResponse;
+                    > tonic::server::UnaryService<super::CalculateCapacityRequest>
+                    for CalculateCapacitySvc<T> {
+                        type Response = super::NodeCapacity;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::JoinLatticeRequest>,
+                            request: tonic::Request<super::CalculateCapacityRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as NodeService>::join_lattice(&inner, request).await
+                                <T as NodeService>::calculate_capacity(&inner, request)
+                                    .await
                             };
                             Box::pin(fut)
                         }
@@ -1047,7 +915,7 @@ pub mod node_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = JoinLatticeSvc(inner);
+                        let method = CalculateCapacitySvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -1063,25 +931,26 @@ pub mod node_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.node.v1.NodeService/LeaveLattice" => {
+                "/plexspaces.node.v1.NodeService/ListNodeApplications" => {
                     #[allow(non_camel_case_types)]
-                    struct LeaveLatticeSvc<T: NodeService>(pub Arc<T>);
+                    struct ListNodeApplicationsSvc<T: NodeService>(pub Arc<T>);
                     impl<
                         T: NodeService,
-                    > tonic::server::UnaryService<super::LeaveLatticeRequest>
-                    for LeaveLatticeSvc<T> {
-                        type Response = super::super::super::common::v1::Empty;
+                    > tonic::server::UnaryService<super::ListNodeApplicationsRequest>
+                    for ListNodeApplicationsSvc<T> {
+                        type Response = super::ListNodeApplicationsResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::LeaveLatticeRequest>,
+                            request: tonic::Request<super::ListNodeApplicationsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as NodeService>::leave_lattice(&inner, request).await
+                                <T as NodeService>::list_node_applications(&inner, request)
+                                    .await
                             };
                             Box::pin(fut)
                         }
@@ -1093,7 +962,53 @@ pub mod node_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = LeaveLatticeSvc(inner);
+                        let method = ListNodeApplicationsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.node.v1.NodeService/GetHealth" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetHealthSvc<T: NodeService>(pub Arc<T>);
+                    impl<
+                        T: NodeService,
+                    > tonic::server::UnaryService<super::GetHealthRequest>
+                    for GetHealthSvc<T> {
+                        type Response = super::GetHealthResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetHealthRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NodeService>::get_health(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetHealthSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -1112,16 +1027,18 @@ pub mod node_service_server {
                 "/plexspaces.node.v1.NodeService/SendHeartbeat" => {
                     #[allow(non_camel_case_types)]
                     struct SendHeartbeatSvc<T: NodeService>(pub Arc<T>);
-                    impl<T: NodeService> tonic::server::UnaryService<super::Heartbeat>
+                    impl<
+                        T: NodeService,
+                    > tonic::server::UnaryService<super::SendHeartbeatRequest>
                     for SendHeartbeatSvc<T> {
-                        type Response = super::super::super::common::v1::Empty;
+                        type Response = super::SendHeartbeatResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::Heartbeat>,
+                            request: tonic::Request<super::SendHeartbeatRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
@@ -1153,25 +1070,23 @@ pub mod node_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.node.v1.NodeService/DiscoverNodes" => {
+                "/plexspaces.node.v1.NodeService/Ping" => {
                     #[allow(non_camel_case_types)]
-                    struct DiscoverNodesSvc<T: NodeService>(pub Arc<T>);
-                    impl<
-                        T: NodeService,
-                    > tonic::server::UnaryService<super::DiscoverNodesRequest>
-                    for DiscoverNodesSvc<T> {
-                        type Response = super::DiscoverNodesResponse;
+                    struct PingSvc<T: NodeService>(pub Arc<T>);
+                    impl<T: NodeService> tonic::server::UnaryService<super::PingRequest>
+                    for PingSvc<T> {
+                        type Response = super::PingResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::DiscoverNodesRequest>,
+                            request: tonic::Request<super::PingRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as NodeService>::discover_nodes(&inner, request).await
+                                <T as NodeService>::ping(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1183,7 +1098,7 @@ pub mod node_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = DiscoverNodesSvc(inner);
+                        let method = PingSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -1199,25 +1114,25 @@ pub mod node_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.node.v1.NodeService/GetNodeMetrics" => {
+                "/plexspaces.node.v1.NodeService/PingReq" => {
                     #[allow(non_camel_case_types)]
-                    struct GetNodeMetricsSvc<T: NodeService>(pub Arc<T>);
+                    struct PingReqSvc<T: NodeService>(pub Arc<T>);
                     impl<
                         T: NodeService,
-                    > tonic::server::UnaryService<super::GetNodeRequest>
-                    for GetNodeMetricsSvc<T> {
-                        type Response = super::NodeMetrics;
+                    > tonic::server::UnaryService<super::PingReqRequest>
+                    for PingReqSvc<T> {
+                        type Response = super::PingReqResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::GetNodeRequest>,
+                            request: tonic::Request<super::PingReqRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as NodeService>::get_node_metrics(&inner, request).await
+                                <T as NodeService>::ping_req(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1229,7 +1144,53 @@ pub mod node_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = GetNodeMetricsSvc(inner);
+                        let method = PingReqSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.node.v1.NodeService/SyncMembership" => {
+                    #[allow(non_camel_case_types)]
+                    struct SyncMembershipSvc<T: NodeService>(pub Arc<T>);
+                    impl<
+                        T: NodeService,
+                    > tonic::server::UnaryService<super::SyncMembershipRequest>
+                    for SyncMembershipSvc<T> {
+                        type Response = super::SyncMembershipResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::SyncMembershipRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NodeService>::sync_membership(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = SyncMembershipSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

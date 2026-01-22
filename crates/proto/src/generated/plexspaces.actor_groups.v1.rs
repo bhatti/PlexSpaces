@@ -67,7 +67,7 @@ pub struct ScatterGatherQuery {
     pub group_id: ::prost::alloc::string::String,
     /// Query message to send to all shards
     #[prost(message, optional, tag="2")]
-    pub query: ::core::option::Option<super::super::actor::v1::Message>,
+    pub query: ::core::option::Option<super::super::common::v1::Message>,
     /// Timeout for gathering results
     #[prost(message, optional, tag="3")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
@@ -84,7 +84,7 @@ pub struct ScatterGatherQuery {
 pub struct ScatterGatherResponse {
     /// Aggregated result
     #[prost(message, optional, tag="1")]
-    pub result: ::core::option::Option<super::super::actor::v1::Message>,
+    pub result: ::core::option::Option<super::super::common::v1::Message>,
     /// Individual shard responses
     #[prost(message, repeated, tag="2")]
     pub shard_responses: ::prost::alloc::vec::Vec<ShardResponse>,
@@ -101,7 +101,7 @@ pub struct ShardResponse {
     pub shard_id: u32,
     /// Response message
     #[prost(message, optional, tag="2")]
-    pub response: ::core::option::Option<super::super::actor::v1::Message>,
+    pub response: ::core::option::Option<super::super::common::v1::Message>,
     /// Response latency
     #[prost(message, optional, tag="3")]
     pub latency: ::core::option::Option<::prost_types::Duration>,
@@ -251,7 +251,7 @@ pub struct SendToShardRequest {
     pub partition_key: ::prost::alloc::vec::Vec<u8>,
     /// Message to send
     #[prost(message, optional, tag="3")]
-    pub message: ::core::option::Option<super::super::actor::v1::Message>,
+    pub message: ::core::option::Option<super::super::common::v1::Message>,
     /// Wait for response
     #[prost(bool, tag="4")]
     pub wait_for_response: bool,
@@ -267,7 +267,7 @@ pub struct SendToShardResponse {
     pub shard_id: u32,
     /// Response from shard (if wait_for_response = true)
     #[prost(message, optional, tag="2")]
-    pub response: ::core::option::Option<super::super::actor::v1::Message>,
+    pub response: ::core::option::Option<super::super::common::v1::Message>,
 }
 /// Actor group state
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

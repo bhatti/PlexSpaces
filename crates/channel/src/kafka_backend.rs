@@ -45,8 +45,9 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats, KafkaConfig,
+    channel_config, ChannelBackend, ChannelConfig, ChannelStats, KafkaConfig,
 };
+use plexspaces_proto::common::v1::Message;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::{Header, Headers, OwnedHeaders};
@@ -65,7 +66,7 @@ use std::time::Duration;
 ///
 /// ## Invariants
 /// - Topic format: channel name (e.g., "orders", "events")
-/// - Message key: partition_key from ChannelMessage
+/// - Message key: partition_key from Message
 /// - Consumer group: Configurable for load balancing
 /// - Offset commit: Auto-commit on ACK
 #[derive(Clone)]
@@ -158,7 +159,7 @@ impl KafkaChannel {
     }
 
     /// Serialize message to Kafka headers
-    fn serialize_to_headers(msg: &ChannelMessage) -> OwnedHeaders {
+    fn serialize_to_headers(msg: &Message) -> OwnedHeaders {
         OwnedHeaders::new()
             .insert(Header {
                 key: "id",
@@ -187,7 +188,7 @@ impl KafkaChannel {
     }
 
     /// Deserialize message from Kafka message
-    fn deserialize_from_kafka(kafka_msg: &impl KafkaMessage) -> ChannelResult<ChannelMessage> {
+    fn deserialize_from_kafka(kafka_msg: &impl KafkaMessage) -> ChannelResult<Message> {
         let mut headers_map = HashMap::new();
         if let Some(headers) = kafka_msg.headers() {
             for header in headers.iter() {
@@ -210,10 +211,11 @@ impl KafkaChannel {
             .map(|k| String::from_utf8_lossy(k).to_string())
             .unwrap_or_default();
 
-        Ok(ChannelMessage {
+        Ok(Message {
             id: headers_map.get("id").cloned().unwrap_or_default(),
             channel: headers_map.get("channel").cloned().unwrap_or_default(),
             sender_id: headers_map.get("sender_id").cloned().unwrap_or_default(),
+            receiver_id: headers_map.get("receiver_id").cloned().unwrap_or_default(),
             payload,
             correlation_id: headers_map
                 .get("correlation_id")
@@ -226,14 +228,20 @@ impl KafkaChannel {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
             timestamp: None,
-            headers: headers_map,
+            headers: headers_map.clone(),
+            message_type: headers_map.get("message_type").cloned().unwrap_or_default(),
+            priority: headers_map.get("priority").and_then(|s| s.parse().ok()).unwrap_or(0),
+            ttl: None,
+            idempotency_key: headers_map.get("idempotency_key").cloned().unwrap_or_default(),
+            uri_path: headers_map.get("uri_path").cloned().unwrap_or_default(),
+            uri_method: headers_map.get("uri_method").cloned().unwrap_or_default(),
         })
     }
 }
 
 #[async_trait]
 impl Channel for KafkaChannel {
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String> {
+    async fn send(&self, message: Message) -> ChannelResult<String> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -263,7 +271,7 @@ impl Channel for KafkaChannel {
         Ok(format!("{}:{}", partition, offset))
     }
 
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -296,7 +304,7 @@ impl Channel for KafkaChannel {
         Ok(messages)
     }
 
-    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -328,7 +336,7 @@ impl Channel for KafkaChannel {
     async fn subscribe(
         &self,
         _consumer_group: Option<String>,
-    ) -> ChannelResult<BoxStream<'static, ChannelMessage>> {
+    ) -> ChannelResult<BoxStream<'static, Message>> {
         let consumer = Arc::new(self.create_consumer()?);
         consumer
             .subscribe(&[&self.topic])
@@ -345,7 +353,7 @@ impl Channel for KafkaChannel {
         Ok(Box::pin(stream))
     }
 
-    async fn publish(&self, message: ChannelMessage) -> ChannelResult<u32> {
+    async fn publish(&self, message: Message) -> ChannelResult<u32> {
         // For Kafka, publish is same as send (all consumers in group will share load)
         self.send(message).await?;
         Ok(1)

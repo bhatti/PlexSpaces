@@ -128,7 +128,8 @@ use plexspaces_core::{ActorId, ActorRegistry, ServiceLocator as ServiceLocatorTr
 use std::collections::HashMap;
 use plexspaces_actor::ActorFactory;
 use plexspaces_actor::ActorRef as ActorRefImpl;
-use plexspaces_mailbox::{Message, Mailbox};
+use plexspaces_mailbox::Mailbox;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 
@@ -359,14 +360,14 @@ impl ActorServiceImpl {
         if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             "🟪 [ACTOR_SERVICE::send_message] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}",
-            message.id, actor_id, message.sender, message.receiver, message.message_type_str(), message.correlation_id
+            message.id, actor_id, message.sender_id, message.receiver_id, message.message_type, message.correlation_id
         );
         }
         
         // Check if this is a reply (has correlation_id) and route to per-ActorRef reply map if local
-        // Extract correlation_id first to avoid borrow issues
-        let correlation_id_opt = message.correlation_id.clone();
-        if let Some(correlation_id) = &correlation_id_opt {
+        // correlation_id is now String - check if not empty
+        if !message.correlation_id.is_empty() {
+            let correlation_id = message.correlation_id.clone();
             // Parse actor@node ID
             let (actor_name, node_id) = if let Some((name, node)) = actor_id.split_once('@') {
                 (name.to_string(), node.to_string())
@@ -385,7 +386,7 @@ impl ActorServiceImpl {
                 if let Some(sender) = self.get_actor_registry().await.lookup_actor(&actor_id_full).await {
                     // MessageSender exists - use it directly
                     // ActorRef::tell() will check for correlation_id and route to ReplyWaiter if present
-                    let message_id = message.id().to_string();
+                    let message_id = message.id.to_string();
                     if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "🟪 [ACTOR_SERVICE::send_message] REPLY ROUTING: message_id={}, correlation_id={}, routing via MessageSender.tell()",
@@ -447,7 +448,7 @@ impl ActorServiceImpl {
         if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             "🟪 [ACTOR_SERVICE::send_message_and_wait] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}, timeout={:?}",
-            message.id, actor_id, message.sender, message.receiver, message.message_type_str(), message.correlation_id, timeout
+            message.id, actor_id, message.sender_id, message.receiver_id, message.message_type, message.correlation_id, timeout
         );
         }
         
@@ -545,9 +546,9 @@ impl ActorServiceImpl {
     ) -> Result<(String, Option<Message>), Status> {
         // Extract message_id and other fields for logging before moving message
         let message_id = message.id.clone();
-        let message_sender = message.sender.clone();
-        let message_receiver = message.receiver.clone();
-        let message_type = message.message_type_str().to_string();
+        let message_sender = message.sender_id.clone();
+        let message_receiver = message.receiver_id.clone();
+        let message_type = message.message_type.to_string();
         let message_correlation_id = message.correlation_id.clone();
         
         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -635,11 +636,11 @@ impl ActorServiceImpl {
 
         // Construct full actor ID
         let actor_id = format!("{}@{}", actor_name, node_id);
-        let message_id = message.id().to_string();
+        let message_id = message.id.to_string();
 
         // route_local is only for local actors
         // Look up MessageSender from ActorRegistry - try constructed actor_id first,
-        // then try with original message.receiver if it's different (for actors registered with "remote-looking" IDs)
+        // then try with original message.receiver_id if it's different (for actors registered with "remote-looking" IDs)
         let actor_registry = self.get_actor_registry().await;
         let sender = actor_registry.lookup_actor(&actor_id.to_string()).await
             .or_else(|| {
@@ -652,11 +653,11 @@ impl ActorServiceImpl {
         // If still not found, try original receiver ID (async lookup)
         let sender = if let Some(s) = sender {
             s
-        } else if message.receiver != actor_id {
+        } else if message.receiver_id != actor_id {
             // Try lookup with original receiver ID (may have different node_id)
-            actor_registry.lookup_actor(&message.receiver).await
+            actor_registry.lookup_actor(&message.receiver_id).await
                 .ok_or_else(|| {
-                    Status::not_found(format!("Actor not found: {} (also tried: {})", actor_id, message.receiver))
+                    Status::not_found(format!("Actor not found: {} (also tried: {})", actor_id, message.receiver_id))
                 })?
         } else {
             return Err(Status::not_found(format!("Actor not found: {}", actor_id)));
@@ -675,7 +676,7 @@ impl ActorServiceImpl {
             // Generate unique correlation_id for this request
             use ulid::Ulid;
             let correlation_id = Ulid::new().to_string();
-            message.correlation_id = Some(correlation_id.clone());
+            message.correlation_id = correlation_id.clone();
             
             // Create ReplyWaiter for async waiting
             let waiter = ReplyWaiter::new();
@@ -720,7 +721,7 @@ impl ActorServiceImpl {
             }
             
             // Set sender to temporary sender ID
-            message.sender = Some(temp_sender_id.clone());
+            message.sender_id = temp_sender_id.clone();
             
             // Send request via MessageSender::tell()
             let send_result = sender.tell(message).await;
@@ -845,7 +846,7 @@ impl ActorServiceImpl {
         let mut client = ActorServiceClient::new(channel);
 
         // Convert message to proto
-        let proto_message = message.to_proto();
+        let proto_message = message.clone();
 
         // Convert timeout to proto Duration
         let proto_timeout = timeout.map(|d| prost_types::Duration {
@@ -899,7 +900,7 @@ impl ActorServiceImpl {
         // Convert response back to internal Message if present
         let reply_message = response_inner
             .response
-            .map(|proto_msg| Message::from_proto(&proto_msg));
+            .map(|proto_msg| proto_msg.clone());
 
         Ok((response_inner.message_id, reply_message))
     }
@@ -1020,7 +1021,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             .ok_or_else(|| Status::invalid_argument("Message is required"))?;
 
         // Convert proto Message to mailbox Message
-        let message = Message::from_proto(&proto_message);
+        let message = proto_message.clone();
 
         // Extract target actor ID from message
         let actor_id = if proto_message.receiver_id.is_empty() {
@@ -1032,7 +1033,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             "🟪 [ACTOR_SERVICE::send_message (gRPC)] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}, wait_for_response={}",
-            message.id, actor_id, message.sender, message.receiver, message.message_type_str(), message.correlation_id, req.wait_for_response
+            message.id, actor_id, message.sender_id, message.receiver_id, message.message_type, message.correlation_id, req.wait_for_response
         );
         }
 
@@ -1054,8 +1055,8 @@ impl ActorServiceTrait for ActorServiceImpl {
             );
         }
 
-        // Convert response back to proto
-        let response_message = response.map(|m| m.to_proto());
+        // Response is already proto Message
+        let response_message = response;
 
         Ok(Response::new(SendMessageResponse {
             message_id,
@@ -1510,8 +1511,12 @@ impl ActorServiceTrait for ActorServiceImpl {
         }
 
         // Create message
-        let mut message = Message::new(payload);
-        message.receiver = selected_actor_id.clone();
+        let mut message = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload,
+            receiver_id: selected_actor_id.clone(),
+            ..Default::default()
+        };
         // Set message type based on HTTP method:
         // GET/DELETE = "call" (ask pattern, expects reply)
         // POST/PUT = "cast" (tell pattern, fire-and-forget)
@@ -1520,7 +1525,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         } else {
             "cast".to_string()
         };
-        message.metadata = metadata;
+        message.headers = metadata;
         
         // Set URI path and method for HTTP-based invocations
         // Use full path from request, or construct from tenant_id and actor_type
@@ -1529,8 +1534,8 @@ impl ActorServiceTrait for ActorServiceImpl {
         } else {
             format!("/api/v1/actors/{}/{}", &namespace, req.actor_type)
         };
-        message.uri_path = Some(full_path);
-        message.uri_method = Some(http_method.clone());
+        message.uri_path = full_path;
+        message.uri_method = http_method.clone();
 
         // Use route_message to invoke the actor (handles local/remote routing automatically)
         // This avoids creating invalid Remote ActorRefs with local node_ids
@@ -1577,7 +1582,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                     Ok(Response::new(InvokeActorResponse {
                         success: true,
                         payload: reply.payload,
-                        headers: reply.metadata,
+                        headers: reply.headers,
                         actor_id: selected_actor_id.clone(),
                         error_message: String::new(),
                     }))
@@ -1886,6 +1891,16 @@ mod tests {
     use plexspaces_keyvalue::InMemoryKVStore;
     use plexspaces_proto::object_registry::v1::ObjectRegistration as ProtoObjectRegistration;
     use std::time::Duration as StdDuration;
+    use ulid::Ulid;
+    
+    /// Helper to create a test message with proto Message type
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
 
     /// Simple wrapper to adapt ObjectRegistry to ObjectRegistryTrait
     struct ObjectRegistryAdapter {
@@ -1943,6 +1958,30 @@ mod tests {
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             self.inner
                 .discover(ctx, object_type, object_category, capabilities, labels, health_status, offset, limit)
+                .await
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        }
+
+        async fn unregister(
+            &self,
+            ctx: &plexspaces_core::RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner
+                .unregister(ctx, object_type, object_id)
+                .await
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        }
+
+        async fn heartbeat(
+            &self,
+            ctx: &plexspaces_core::RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner
+                .heartbeat(ctx, object_type, object_id)
                 .await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
         }
@@ -2020,7 +2059,7 @@ mod tests {
         let actor_registry = create_test_registry("node1");
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
-        let message = Message::new(b"test".to_vec());
+        let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to non-existent actor
         let result = service
@@ -2044,8 +2083,8 @@ mod tests {
         let _actor_ref = plexspaces_core::ActorRef::new("test@node1".to_string()).unwrap();
         register_test_actor(actor_registry.clone(), "test@node1".to_string(), Arc::clone(&mailbox), service.service_locator.clone()).await;
 
-        let message = Message::new(b"hello".to_vec());
-        let message_id = message.id().to_string();
+        let message = create_test_message(b"hello".to_vec());
+        let message_id = message.id.to_string();
 
         // ACT: Route message (fire-and-forget)
         let result = service
@@ -2074,7 +2113,7 @@ mod tests {
         // Poll for message delivery (no sleep - use proper async waiting)
         let delivered_msg = mailbox.dequeue().await;
         assert!(delivered_msg.is_some(), "Message should be delivered immediately");
-        assert_eq!(delivered_msg.unwrap().payload(), b"hello");
+        assert_eq!(delivered_msg.unwrap().payload, b"hello");
     }
 
     #[tokio::test]
@@ -2087,7 +2126,7 @@ mod tests {
         let _actor_ref = plexspaces_core::ActorRef::new("test@node1".to_string()).unwrap();
         register_test_actor(actor_registry.clone(), "test@node1".to_string(), Arc::clone(&mailbox), service.service_locator.clone()).await;
 
-        let message = Message::new(b"hello".to_vec());
+        let message = create_test_message(b"hello".to_vec());
 
         // ACT: Try request-reply (ask pattern)
         let result = service
@@ -2119,7 +2158,7 @@ mod tests {
         
         // Service registration is synchronous - no wait needed
 
-        let message = Message::new(b"test".to_vec());
+        let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to unknown node
         let result = service
@@ -2195,7 +2234,7 @@ mod tests {
         let actor_registry = create_test_registry("node1");
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
-        let message = Message::new(b"test".to_vec());
+        let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route with actor ID that doesn't exist (no @node defaults to local)
         // Since actor IDs without @node are now valid (default to local node),
@@ -2221,8 +2260,8 @@ mod tests {
         let _actor_ref = plexspaces_core::ActorRef::new("test@node1".to_string()).unwrap();
         register_test_actor(actor_registry.clone(), "test@node1".to_string(), Arc::clone(&mailbox), service.service_locator.clone()).await;
 
-        let message = Message::new(b"hello".to_vec());
-        let message_id = message.id().to_string();
+        let message = create_test_message(b"hello".to_vec());
+        let message_id = message.id.to_string();
 
         // ACT: Route message via route_message() entry point
         let result = service
@@ -2238,7 +2277,7 @@ mod tests {
         // Verify message delivered (poll immediately - no sleep needed)
         let delivered = mailbox.dequeue().await;
         assert!(delivered.is_some(), "Message should be delivered immediately");
-        assert_eq!(delivered.unwrap().payload(), b"hello");
+        assert_eq!(delivered.unwrap().payload, b"hello");
     }
 
     // ========================================================================
@@ -2274,7 +2313,7 @@ mod tests {
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         // Create message without receiver_id
-        let mut proto_message = Message::new(b"test".to_vec()).to_proto();
+        let mut proto_message = create_test_message(b"test".to_vec());
         proto_message.receiver_id = String::new(); // Empty receiver_id!
 
         let request = tonic::Request::new(SendMessageRequest {
@@ -2304,9 +2343,9 @@ mod tests {
         register_test_actor(actor_registry.clone(), "test@node1".to_string(), Arc::clone(&mailbox), service.service_locator.clone()).await;
 
         // Create proto message
-        let mut message = Message::new(b"hello".to_vec());
-        message.receiver = "test@node1".to_string();
-        let proto_message = message.to_proto();
+        let mut message = create_test_message(b"hello".to_vec());
+        message.receiver_id = "test@node1".to_string();
+        let proto_message = message.clone();
         let expected_message_id = proto_message.id.clone();
 
         let request = tonic::Request::new(SendMessageRequest {
@@ -2327,7 +2366,7 @@ mod tests {
         // Verify delivery (poll immediately - no sleep needed)
         let delivered = mailbox.dequeue().await;
         assert!(delivered.is_some(), "Message should be delivered immediately");
-        assert_eq!(delivered.unwrap().payload(), b"hello");
+        assert_eq!(delivered.unwrap().payload, b"hello");
     }
 
     #[tokio::test]
@@ -2341,9 +2380,9 @@ mod tests {
         register_test_actor(actor_registry.clone(), "test@node1".to_string(), Arc::clone(&mailbox), service.service_locator.clone()).await;
 
         // Create message with timeout
-        let mut message = Message::new(b"test".to_vec());
-        message.receiver = "test@node1".to_string();
-        let proto_message = message.to_proto();
+        let mut message = create_test_message(b"test".to_vec());
+        message.receiver_id = "test@node1".to_string();
+        let proto_message = message.clone();
 
         let request = tonic::Request::new(SendMessageRequest {
             message: Some(proto_message),
@@ -2387,7 +2426,7 @@ mod tests {
         
         // Service registration is synchronous - no wait needed
 
-        let message = Message::new(b"test".to_vec());
+        let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to unknown node (not in registry)
         let result = service
@@ -2417,7 +2456,7 @@ mod tests {
         
         // Service registration is synchronous - no wait needed
 
-        let message = Message::new(b"test".to_vec());
+        let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to node (registry lookup will fail with NotFound)
         let result = service
@@ -2444,7 +2483,7 @@ mod tests {
         
         // Service registration is synchronous - no wait needed
 
-        let message = Message::new(b"test".to_vec());
+        let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to unreachable node
         let result = service
@@ -2481,9 +2520,9 @@ mod tests {
         register_test_actor(actor_registry.clone(), "test@node1".to_string(), Arc::clone(&mailbox), service.service_locator.clone()).await;
 
         // Create message with fractional seconds timeout
-        let mut message = Message::new(b"test".to_vec());
-        message.receiver = "test@node1".to_string();
-        let proto_message = message.to_proto();
+        let mut message = create_test_message(b"test".to_vec());
+        message.receiver_id = "test@node1".to_string();
+        let proto_message = message.clone();
 
         let request = tonic::Request::new(SendMessageRequest {
             message: Some(proto_message),
@@ -2535,7 +2574,7 @@ mod tests {
         );
 
         // ACT: Try to route to unreachable node
-        let message = Message::new(b"test".to_vec());
+        let message = create_test_message(b"test".to_vec());
         let result = service.route_message("actor@node2", message, false, None).await;
 
         // ASSERT: Should fail with appropriate error

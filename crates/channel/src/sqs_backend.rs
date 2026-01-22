@@ -60,8 +60,9 @@ use aws_sdk_sqs::{
 use futures::stream::BoxStream;
 use plexspaces_common::AWSConfig;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats,
+    channel_config, ChannelBackend, ChannelConfig, ChannelStats,
 };
+use plexspaces_proto::common::v1::Message as ChannelMessage;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;

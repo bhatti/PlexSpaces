@@ -11,8 +11,9 @@
 
 use plexspaces_channel::{Channel, InMemoryChannel};
 use plexspaces_proto::channel::v1::{
-    ChannelBackend, ChannelConfig, ChannelMessage, DeliveryGuarantee, OrderingGuarantee,
+    ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
 };
+use plexspaces_proto::common::v1::Message;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -35,7 +36,7 @@ async fn test_bounded_channel_backpressure_blocks_sender() {
 
     // Fill channel to capacity
     for i in 0..10 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: format!("msg-{}", i),
             channel: "backpressure-test".to_string(),
             payload: format!("data-{}", i).into_bytes(),
@@ -54,7 +55,7 @@ async fn test_bounded_channel_backpressure_blocks_sender() {
     let channel_clone = channel.clone();
     let send_complete_clone = send_complete.clone();
     let send_task = tokio::spawn(async move {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: "msg-blocked".to_string(),
             channel: "backpressure-test".to_string(),
             payload: b"blocked-data".to_vec(),
@@ -117,7 +118,7 @@ async fn test_backpressure_with_multiple_senders() {
         let channel_clone = channel.clone();
         let messages_sent_clone = messages_sent.clone();
         let task = tokio::spawn(async move {
-            let msg = ChannelMessage {
+            let msg = Message {
                 id: format!("msg-{}", i),
                 channel: "multi-sender-backpressure".to_string(),
                 payload: format!("data-{}", i).into_bytes(),
@@ -169,7 +170,7 @@ async fn test_unbounded_channel_no_backpressure() {
     // Send many messages - should not block
     let send_start = Instant::now();
     for i in 0..1000 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: format!("msg-{}", i),
             channel: "unbounded-test".to_string(),
             payload: format!("data-{}", i).into_bytes(),
@@ -227,7 +228,7 @@ async fn test_backpressure_propagation() {
 
     // Fill input channel
     for i in 0..5 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: format!("input-{}", i),
             channel: "input-channel".to_string(),
             payload: format!("data-{}", i).into_bytes(),
@@ -246,7 +247,7 @@ async fn test_backpressure_propagation() {
                 break;
             }
             for msg in messages {
-                let output_msg = ChannelMessage {
+                let output_msg = Message {
                     id: format!("output-{}", msg.id),
                     channel: "output-channel".to_string(),
                     payload: msg.payload,
@@ -259,7 +260,7 @@ async fn test_backpressure_propagation() {
 
     // Fill output channel to capacity
     for i in 0..5 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: format!("output-fill-{}", i),
             channel: "output-channel".to_string(),
             payload: format!("fill-{}", i).into_bytes(),
@@ -274,7 +275,7 @@ async fn test_backpressure_propagation() {
     let send_blocked_clone = send_blocked.clone();
     let input_clone = Arc::clone(&input_channel);
     let send_task = tokio::spawn(async move {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: "blocked-input".to_string(),
             channel: "input-channel".to_string(),
             payload: b"blocked".to_vec(),
@@ -316,7 +317,7 @@ async fn test_capacity_configuration() {
 
         // Fill to capacity
         for i in 0..capacity {
-            let msg = ChannelMessage {
+            let msg = Message {
                 id: format!("msg-{}", i),
                 channel: format!("capacity-{}", capacity),
                 payload: format!("data-{}", i).into_bytes(),
@@ -364,7 +365,7 @@ async fn test_backpressure_with_timeout() {
 
     // Fill to capacity
     for i in 0..5 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: format!("msg-{}", i),
             channel: "timeout-backpressure".to_string(),
             payload: format!("data-{}", i).into_bytes(),
@@ -374,7 +375,7 @@ async fn test_backpressure_with_timeout() {
     }
 
     // Try to send with timeout - should timeout because channel is full
-    let msg = ChannelMessage {
+    let msg = Message {
         id: "timeout-msg".to_string(),
         channel: "timeout-backpressure".to_string(),
         payload: b"timeout-data".to_vec(),

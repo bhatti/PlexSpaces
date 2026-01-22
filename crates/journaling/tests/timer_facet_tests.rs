@@ -21,9 +21,8 @@
 //! Comprehensive test suite for TimerFacet following TDD principles.
 //! Tests cover registration, unregistration, firing, and lifecycle.
 
-use plexspaces_core::{ActorId, ActorRef, ActorService};
+use plexspaces_core::{ActorId, ActorRef, ActorService, Message};
 use plexspaces_journaling::{TimerFacet, TimerError, TimerRegistration};
-use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
 use plexspaces_facet::Facet;
 use plexspaces_proto::prost_types;
 use std::sync::Arc;
@@ -31,9 +30,17 @@ use std::time::Duration;
 use tokio::time::sleep;
 use async_trait::async_trait;
 
-/// Mock ActorService that sends messages to a mailbox
+/// Mock ActorService that tracks sent messages
 struct MockActorService {
-    mailbox: Arc<Mailbox>,
+    sent_messages: Arc<tokio::sync::RwLock<Vec<Message>>>,
+}
+
+impl MockActorService {
+    fn new() -> Self {
+        Self {
+            sent_messages: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        }
+    }
 }
 
 #[async_trait]
@@ -52,8 +59,7 @@ impl ActorService for MockActorService {
         _actor_id: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.mailbox.send(message).await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
+        self.sent_messages.write().await.push(message);
         Ok("message-id".to_string())
     }
 }
@@ -62,17 +68,17 @@ impl ActorService for MockActorService {
 async fn setup_facet_with_services(
     mut facet: TimerFacet,
     actor_id: &str,
-) -> (TimerFacet, Arc<Mailbox>) {
+) -> (TimerFacet, Arc<MockActorService>) {
     facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
     
-    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), format!("{}@test-node", actor_id)).await.expect("Failed to create mailbox"));
     let actor_ref = ActorRef::new(format!("{}@test-node", actor_id)).unwrap();
-    let actor_service: Arc<dyn ActorService> = Arc::new(MockActorService { mailbox: mailbox.clone() });
+    let mock_service = Arc::new(MockActorService::new());
+    let actor_service: Arc<dyn ActorService> = mock_service.clone();
     
     facet.set_actor_ref(actor_ref).await;
     facet.set_actor_service(actor_service).await;
     
-    (facet, mailbox)
+    (facet, mock_service)
 }
 
 #[tokio::test]

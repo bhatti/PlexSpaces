@@ -19,8 +19,18 @@
 //! Comprehensive tests for ReplyWaiter and ReplyWaiterRegistry
 
 use plexspaces_core::{ReplyWaiter, ReplyWaiterRegistry, ReplyWaiterError};
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use std::time::Duration;
+use ulid::Ulid;
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
 
 #[tokio::test]
 async fn test_reply_waiter_new() {
@@ -32,7 +42,7 @@ async fn test_reply_waiter_new() {
 #[tokio::test]
 async fn test_reply_waiter_wait_and_notify() {
     let waiter = ReplyWaiter::new();
-    let reply_msg = Message::new(b"reply".to_vec());
+    let reply_msg = create_test_message(b"reply".to_vec());
     
     // Spawn task to notify after a short delay
     let waiter_clone = waiter.clone();
@@ -64,8 +74,8 @@ async fn test_reply_waiter_timeout() {
 #[tokio::test]
 async fn test_reply_waiter_double_notify() {
     let waiter = ReplyWaiter::new();
-    let reply_msg1 = Message::new(b"reply1".to_vec());
-    let reply_msg2 = Message::new(b"reply2".to_vec());
+    let reply_msg1 = create_test_message(b"reply1".to_vec());
+    let reply_msg2 = create_test_message(b"reply2".to_vec());
     
     // First notify should succeed
     assert!(waiter.notify(reply_msg1.clone()).await.is_ok());
@@ -84,7 +94,7 @@ async fn test_reply_waiter_concurrent_waiters() {
     // Each waiter is a separate instance, so they each get their own reply
     // This test verifies that multiple waiters can wait concurrently
     let waiter = ReplyWaiter::new();
-    let reply_msg = Message::new(b"reply".to_vec());
+    let reply_msg = create_test_message(b"reply".to_vec());
     
     // Spawn a single waiter (cloning creates shared state, so all clones share the same reply)
     let waiter_clone = waiter.clone();
@@ -104,8 +114,8 @@ async fn test_reply_waiter_concurrent_waiters() {
     // Test that multiple independent waiters work correctly
     let waiter1 = ReplyWaiter::new();
     let waiter2 = ReplyWaiter::new();
-    let reply_msg1 = Message::new(b"reply1".to_vec());
-    let reply_msg2 = Message::new(b"reply2".to_vec());
+    let reply_msg1 = create_test_message(b"reply1".to_vec());
+    let reply_msg2 = create_test_message(b"reply2".to_vec());
     
     let waiter1_clone = waiter1.clone();
     let waiter2_clone = waiter2.clone();
@@ -136,7 +146,7 @@ async fn test_reply_waiter_registry_register_and_notify() {
     let registry = ReplyWaiterRegistry::new();
     let correlation_id = "corr-123".to_string();
     let waiter = ReplyWaiter::new();
-    let reply_msg = Message::new(b"reply".to_vec());
+    let reply_msg = create_test_message(b"reply".to_vec());
     
     // Register waiter
     registry.register(correlation_id.clone(), waiter.clone()).await;
@@ -163,7 +173,7 @@ async fn test_reply_waiter_registry_register_and_notify() {
 async fn test_reply_waiter_registry_notify_unknown() {
     let registry = ReplyWaiterRegistry::new();
     let correlation_id = "corr-unknown".to_string();
-    let reply_msg = Message::new(b"reply".to_vec());
+    let reply_msg = create_test_message(b"reply".to_vec());
     
     // Try to notify unknown correlation_id
     let notified = registry.notify(&correlation_id, reply_msg).await;
@@ -183,7 +193,7 @@ async fn test_reply_waiter_registry_remove() {
     registry.remove(&correlation_id).await;
     
     // Try to notify - should fail
-    let reply_msg = Message::new(b"reply".to_vec());
+    let reply_msg = create_test_message(b"reply".to_vec());
     let notified = registry.notify(&correlation_id, reply_msg).await;
     assert!(!notified);
 }
@@ -195,8 +205,8 @@ async fn test_reply_waiter_registry_multiple_correlation_ids() {
     let corr2 = "corr-2".to_string();
     let waiter1 = ReplyWaiter::new();
     let waiter2 = ReplyWaiter::new();
-    let reply_msg1 = Message::new(b"reply1".to_vec());
-    let reply_msg2 = Message::new(b"reply2".to_vec());
+    let reply_msg1 = create_test_message(b"reply1".to_vec());
+    let reply_msg2 = create_test_message(b"reply2".to_vec());
     
     // Register both waiters
     registry.register(corr1.clone(), waiter1.clone()).await;
@@ -229,7 +239,7 @@ async fn test_reply_waiter_registry_auto_remove_on_notify() {
     let registry = ReplyWaiterRegistry::new();
     let correlation_id = "corr-123".to_string();
     let waiter = ReplyWaiter::new();
-    let reply_msg = Message::new(b"reply".to_vec());
+    let reply_msg = create_test_message(b"reply".to_vec());
     
     // Register waiter
     registry.register(correlation_id.clone(), waiter).await;
@@ -238,7 +248,7 @@ async fn test_reply_waiter_registry_auto_remove_on_notify() {
     assert!(registry.notify(&correlation_id, reply_msg.clone()).await);
     
     // Try to notify again - should fail (waiter was removed)
-    let reply_msg2 = Message::new(b"reply2".to_vec());
+    let reply_msg2 = create_test_message(b"reply2".to_vec());
     assert!(!registry.notify(&correlation_id, reply_msg2).await);
 }
 

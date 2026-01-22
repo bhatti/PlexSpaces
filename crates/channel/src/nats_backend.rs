@@ -46,8 +46,9 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats, NatsConfig,
+    channel_config, ChannelBackend, ChannelConfig, ChannelStats, NatsConfig,
 };
+use plexspaces_proto::common::v1::Message;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -166,7 +167,7 @@ impl NatsChannel {
     }
 
     /// Serialize message to protobuf bytes for NATS payload
-    fn serialize_message(msg: &ChannelMessage) -> ChannelResult<Vec<u8>> {
+    fn serialize_message(msg: &Message) -> ChannelResult<Vec<u8>> {
         use prost::Message;
         let mut buf = Vec::new();
         msg.encode(&mut buf).map_err(|e| {
@@ -176,9 +177,9 @@ impl NatsChannel {
     }
 
     /// Deserialize message from NATS payload (protobuf bytes)
-    fn deserialize_message(data: &[u8]) -> ChannelResult<ChannelMessage> {
+    fn deserialize_message(data: &[u8]) -> ChannelResult<Message> {
         use prost::Message;
-        ChannelMessage::decode(data).map_err(|e| {
+        Message::decode(data).map_err(|e| {
             ChannelError::SerializationError(format!("Failed to decode message: {}", e))
         })
     }
@@ -186,7 +187,7 @@ impl NatsChannel {
 
 #[async_trait]
 impl Channel for NatsChannel {
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String> {
+    async fn send(&self, message: Message) -> ChannelResult<String> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -204,7 +205,7 @@ impl Channel for NatsChannel {
         Ok(message.id.clone())
     }
 
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -246,7 +247,7 @@ impl Channel for NatsChannel {
         Ok(messages)
     }
 
-    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         // NATS doesn't have a non-blocking receive, so we use a short timeout
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
@@ -290,7 +291,7 @@ impl Channel for NatsChannel {
     async fn subscribe(
         &self,
         consumer_group: Option<String>,
-    ) -> ChannelResult<BoxStream<'static, ChannelMessage>> {
+    ) -> ChannelResult<BoxStream<'static, Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -327,7 +328,7 @@ impl Channel for NatsChannel {
         Ok(Box::pin(stream))
     }
 
-    async fn publish(&self, message: ChannelMessage) -> ChannelResult<u32> {
+    async fn publish(&self, message: Message) -> ChannelResult<u32> {
         // NATS publish is broadcast to all subscribers
         // We can't know the exact count without JetStream, so return 1 as a placeholder
         self.send(message).await?;
@@ -462,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_serialize_message() {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: "test-id".to_string(),
             channel: "test-channel".to_string(),
             payload: b"test payload".to_vec(),
@@ -477,7 +478,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_message() {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: "test-id".to_string(),
             channel: "test-channel".to_string(),
             payload: b"test payload".to_vec(),

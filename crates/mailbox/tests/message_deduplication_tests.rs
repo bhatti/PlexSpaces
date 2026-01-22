@@ -6,20 +6,42 @@
 use plexspaces_mailbox::{Mailbox, MailboxConfig, Message, mailbox_config_default};
 use std::time::Duration;
 
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    let proto_msg = plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    };
+    proto_msg.into()
+}
+
+/// Helper to create a test message with idempotency key
+fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: String) -> Message {
+    let proto_msg = plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        idempotency_key,
+        ..Default::default()
+    };
+    proto_msg.into()
+}
+
+
 #[tokio::test]
 async fn test_message_id_deduplication() {
     // Test: Duplicate message IDs should be skipped
     let config = mailbox_config_default();
     let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap();
     
-    let message1 = Message::new(b"test".to_vec());
+    let message1 = create_test_message(b"test".to_vec());
     let message_id = message1.id.clone();
     
     // Enqueue first message
     mailbox.enqueue(message1).await.unwrap();
     
     // Enqueue duplicate message ID
-    let message2 = Message::new(b"test2".to_vec());
+    let message2 = create_test_message(b"test2".to_vec());
     // Manually set same ID to test deduplication
     // Note: Message::new() generates unique IDs, so we need to test differently
     // For now, we'll test that the same message can't be enqueued twice
@@ -33,7 +55,7 @@ async fn test_message_id_deduplication() {
     // The cache should have the message ID
     // We can't directly access the cache, but we can verify behavior
     // by trying to enqueue the same message (which has the same ID)
-    let message1_clone = Message::new(b"test".to_vec());
+    let message1_clone = create_test_message(b"test".to_vec());
     // This will have a different ID, so it won't be deduplicated
     // For a proper test, we'd need a way to create messages with specific IDs
     // or expose cache inspection methods
@@ -50,11 +72,9 @@ async fn test_idempotency_key_deduplication() {
     
     let idempotency_key = "test-key-123".to_string();
     
-    let message1 = Message::new(b"test1".to_vec())
-        .with_idempotency_key(idempotency_key.clone());
+    let message1 = create_test_message_with_idempotency(b"test1".to_vec(), idempotency_key.clone());
     
-    let message2 = Message::new(b"test2".to_vec())
-        .with_idempotency_key(idempotency_key.clone());
+    let message2 = create_test_message_with_idempotency(b"test2".to_vec(), idempotency_key.clone());
     
     // Enqueue first message
     mailbox.enqueue(message1).await.unwrap();
@@ -83,11 +103,9 @@ async fn test_idempotency_key_different_keys() {
     let config = mailbox_config_default();
     let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap();
     
-    let message1 = Message::new(b"test1".to_vec())
-        .with_idempotency_key("key1".to_string());
+    let message1 = create_test_message_with_idempotency(b"test1".to_vec(), "key1".to_string());
     
-    let message2 = Message::new(b"test2".to_vec())
-        .with_idempotency_key("key2".to_string());
+    let message2 = create_test_message_with_idempotency(b"test2".to_vec(), "key2".to_string());
     
     // Both should be enqueued (different keys)
     mailbox.enqueue(message1).await.unwrap();
@@ -111,9 +129,9 @@ async fn test_lru_cache_eviction() {
     let mailbox = Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap();
     
     // Create 3 messages with different IDs
-    let message1 = Message::new(b"test1".to_vec());
-    let message2 = Message::new(b"test2".to_vec());
-    let message3 = Message::new(b"test3".to_vec());
+    let message1 = create_test_message(b"test1".to_vec());
+    let message2 = create_test_message(b"test2".to_vec());
+    let message3 = create_test_message(b"test3".to_vec());
     
     // Enqueue first two (cache should have 2 entries)
     mailbox.enqueue(message1.clone()).await.unwrap();

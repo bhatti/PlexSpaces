@@ -28,8 +28,9 @@
 mod tests {
     use plexspaces_channel::create_channel;
     use plexspaces_proto::channel::v1::{
-        ChannelBackend, ChannelConfig, ChannelMessage, SqliteConfig,
+        ChannelBackend, ChannelConfig, SqliteConfig,
     };
+    use plexspaces_proto::common::v1::Message;
     use std::time::Duration;
     use tempfile::TempDir;
     use tokio::time::timeout;
@@ -66,13 +67,13 @@ mod tests {
         let channel = create_channel(channel_config.clone()).await.unwrap();
 
         // Send messages
-        channel.send(ChannelMessage {
+        channel.send(Message {
             id: "msg1".to_string(),
             channel: "shutdown-test-1".to_string(),
             payload: b"message 1".to_vec(),
             ..Default::default()
         }).await.unwrap();
-        channel.send(ChannelMessage {
+        channel.send(Message {
             id: "msg2".to_string(),
             channel: "shutdown-test-1".to_string(),
             payload: b"message 2".to_vec(),
@@ -110,7 +111,7 @@ mod tests {
 
         // Send 3 messages
         for i in 1..=3 {
-            channel1.send(ChannelMessage {
+            channel1.send(Message {
                 id: format!("msg{}", i),
                 channel: "resume-test-1".to_string(),
                 payload: format!("message {}", i).into_bytes(),
@@ -156,7 +157,7 @@ mod tests {
         let channel1 = create_channel(channel_config.clone()).await.unwrap();
 
         // Send message
-        channel1.send(ChannelMessage {
+        channel1.send(Message {
             id: "nack-msg".to_string(),
             channel: "nack-resume-test-1".to_string(),
             payload: b"nacked message".to_vec(),
@@ -200,7 +201,7 @@ mod tests {
         let channel = create_channel(channel_config).await.unwrap();
 
         // Send message
-        channel.send(ChannelMessage {
+        channel.send(Message {
             id: "graceful-msg".to_string(),
             channel: "graceful-test-1".to_string(),
             payload: b"graceful message".to_vec(),
@@ -230,7 +231,7 @@ mod tests {
         let channel = create_channel(channel_config).await.unwrap();
         
         // First cycle: send, receive, ack
-        channel.send(ChannelMessage {
+        channel.send(Message {
             id: "cycle1-msg".to_string(),
             channel: "multi-restart-test-1".to_string(),
             payload: b"cycle 1".to_vec(),
@@ -247,7 +248,7 @@ mod tests {
         }
 
         // Second cycle: send more, receive
-        channel.send(ChannelMessage {
+        channel.send(Message {
             id: "cycle2-msg".to_string(),
             channel: "multi-restart-test-1".to_string(),
             payload: b"cycle 2".to_vec(),

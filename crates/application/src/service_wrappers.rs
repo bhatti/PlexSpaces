@@ -37,7 +37,7 @@ use plexspaces_core::actor_context::{
 use plexspaces_core::{RequestContext, Service};
 use plexspaces_facet::Facet;
 use plexspaces_core::ActorRef;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use futures::stream::BoxStream;
 use std::time::Duration;
@@ -167,23 +167,15 @@ impl ChannelService for ChannelServiceWrapper {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(queue_name).await?;
         
-        // Convert Message to ChannelMessage
-        use plexspaces_proto::channel::v1::ChannelMessage;
-        let channel_msg = ChannelMessage {
-            id: message.id.clone(),
-            channel: queue_name.to_string(),
-            sender_id: message.sender.clone().unwrap_or_default(),
-            payload: message.payload.clone(),
-            headers: message.metadata.clone(),
-            timestamp: Some(prost_types::Timestamp {
+        // Message is already proto Message (unified type) - set channel name
+        let mut channel_msg = message.clone();
+        channel_msg.channel = queue_name.to_string();
+        if channel_msg.timestamp.is_none() {
+            channel_msg.timestamp = Some(prost_types::Timestamp {
                 seconds: chrono::Utc::now().timestamp(),
                 nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
-            }),
-            partition_key: String::new(),
-            correlation_id: message.correlation_id.clone().unwrap_or_default(),
-            reply_to: message.reply_to.clone().unwrap_or_default(),
-            delivery_count: 0,
-        };
+            });
+        }
         
         channel.send(channel_msg).await
             .map_err(|e| format!("Failed to send to queue {}: {}", queue_name, e).into())
@@ -196,23 +188,15 @@ impl ChannelService for ChannelServiceWrapper {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(topic_name).await?;
         
-        // Convert Message to ChannelMessage
-        use plexspaces_proto::channel::v1::ChannelMessage;
-        let channel_msg = ChannelMessage {
-            id: message.id.clone(),
-            channel: topic_name.to_string(),
-            sender_id: message.sender.clone().unwrap_or_default(),
-            payload: message.payload.clone(),
-            headers: message.metadata.clone(),
-            timestamp: Some(prost_types::Timestamp {
+        // Message is already proto Message (unified type) - set channel name
+        let mut channel_msg = message.clone();
+        channel_msg.channel = topic_name.to_string();
+        if channel_msg.timestamp.is_none() {
+            channel_msg.timestamp = Some(prost_types::Timestamp {
                 seconds: chrono::Utc::now().timestamp(),
                 nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
-            }),
-            partition_key: String::new(),
-            correlation_id: message.correlation_id.clone().unwrap_or_default(),
-            reply_to: message.reply_to.clone().unwrap_or_default(),
-            delivery_count: 0,
-        };
+            });
+        }
         
         channel.publish(channel_msg).await
             .map(|_| message.id.clone())
@@ -225,30 +209,11 @@ impl ChannelService for ChannelServiceWrapper {
     ) -> Result<BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(topic_name).await?;
         
-        // Subscribe to channel and convert ChannelMessage stream to Message stream
-        use futures::StreamExt;
+        // Channel already returns proto Message stream - return directly
         let stream = channel.subscribe(None).await
             .map_err(|e| format!("Failed to subscribe to topic {}: {}", topic_name, e))?;
         
-        let message_stream = stream.map(|channel_msg| {
-            let mut msg = Message::new(channel_msg.payload);
-            // Message ID is auto-generated, but we can set metadata
-            for (k, v) in channel_msg.headers {
-                msg = msg.with_metadata(k, v);
-            }
-            if !channel_msg.correlation_id.is_empty() {
-                msg = msg.with_correlation_id(channel_msg.correlation_id);
-            }
-            if !channel_msg.reply_to.is_empty() {
-                msg = msg.with_reply_to(channel_msg.reply_to);
-            }
-            if !channel_msg.sender_id.is_empty() {
-                msg = msg.with_sender(channel_msg.sender_id);
-            }
-            msg
-        });
-        
-        Ok(Box::pin(message_stream))
+        Ok(stream)
     }
 
     async fn receive_from_queue(
@@ -270,27 +235,8 @@ impl ChannelService for ChannelServiceWrapper {
                 .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?
         };
         
-        if messages.is_empty() {
-            return Ok(None);
-        }
-        
-        // Convert first ChannelMessage to Message
-        let channel_msg = &messages[0];
-        let mut msg = Message::new(channel_msg.payload.clone());
-        // Message ID is auto-generated, but we can set metadata
-        for (k, v) in &channel_msg.headers {
-            msg = msg.with_metadata(k.clone(), v.clone());
-        }
-        if !channel_msg.correlation_id.is_empty() {
-            msg = msg.with_correlation_id(channel_msg.correlation_id.clone());
-        }
-        if !channel_msg.reply_to.is_empty() {
-            msg = msg.with_reply_to(channel_msg.reply_to.clone());
-        }
-        if !channel_msg.sender_id.is_empty() {
-            msg = msg.with_sender(channel_msg.sender_id.clone());
-        }
-        Ok(Some(msg))
+        // Channel already returns proto Message - return first message directly
+        Ok(messages.into_iter().next())
     }
 }
 
@@ -361,82 +307,119 @@ impl Service for ProcessGroupServiceWrapper {
 
 #[async_trait]
 impl ProcessGroupService for ProcessGroupServiceWrapper {
+    async fn create_group(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        group_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.registry
+            .create_group(group_name, ctx.tenant_id(), ctx.namespace())
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("Failed to create group {}: {}", group_name, e).into())
+    }
+
+    async fn delete_group(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        group_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.registry
+            .delete_group(ctx, group_name)
+            .await
+            .map_err(|e| format!("Failed to delete group {}: {}", group_name, e).into())
+    }
+
     async fn join_group(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
         actor_id: &str,
+        topics: Vec<String>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // ProcessGroupRegistry requires group to exist first, so we create it if needed
         // This is a convenience - in production, groups should be created explicitly
-        let _ = self.registry.create_group(group_name, tenant_id, namespace).await;
+        let _ = self.registry.create_group(group_name, ctx.tenant_id(), ctx.namespace()).await;
         
         // Convert actor_id string to ActorId
         use plexspaces_core::ActorId;
         let actor_id = ActorId::from(actor_id.to_string());
         
         self.registry
-            .join_group(group_name, tenant_id, namespace, &actor_id, vec![])
+            .join_group(group_name, ctx.tenant_id(), ctx.namespace(), &actor_id, topics)
             .await
             .map_err(|e| format!("Failed to join group {}: {}", group_name, e).into())
     }
 
     async fn leave_group(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
         actor_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
         use plexspaces_core::ActorId;
         let actor_id = ActorId::from(actor_id.to_string());
         
         self.registry
-            .leave_group(&ctx, group_name, &actor_id)
+            .leave_group(ctx, group_name, &actor_id)
             .await
             .map_err(|e| format!("Failed to leave group {}: {}", group_name, e).into())
     }
 
-    async fn publish_to_group(
-        &self,
-        group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
-        message: Message,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
-        // Convert Message to Vec<u8> for ProcessGroupRegistry
-        let payload = message.payload().to_vec();
-        
-        let actor_ids = self.registry
-            .publish_to_group(&ctx, group_name, None, payload)
-            .await
-            .map_err(|e| format!("Failed to publish to group {}: {}", group_name, e))?;
-        
-        // Convert ActorId to String
-        Ok(actor_ids.iter().map(|id| id.to_string()).collect())
-    }
-
     async fn get_members(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
-        
         let actor_ids = self.registry
-            .get_members(&ctx, group_name)
+            .get_members(ctx, group_name)
             .await
             .map_err(|e| format!("Failed to get members of group {}: {}", group_name, e))?;
         
         // Convert ActorId to String
         Ok(actor_ids.iter().map(|id| id.to_string()).collect())
+    }
+
+    async fn get_local_members(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        group_name: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let actor_ids = self.registry
+            .get_local_members(ctx, group_name)
+            .await
+            .map_err(|e| format!("Failed to get local members of group {}: {}", group_name, e))?;
+        
+        // Convert ActorId to String
+        Ok(actor_ids.iter().map(|id| id.to_string()).collect())
+    }
+
+    async fn list_groups(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        self.registry
+            .list_groups(ctx)
+            .await
+            .map_err(|e| format!("Failed to list groups: {}", e).into())
+    }
+
+    async fn publish_to_group(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        group_name: &str,
+        topic: Option<&str>,
+        message: Message,
+    ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+        // Convert Message to Vec<u8> for ProcessGroupRegistry
+        let payload = message.payload.clone();
+        
+        let actor_ids = self.registry
+            .publish_to_group(ctx, group_name, topic, payload)
+            .await
+            .map_err(|e| format!("Failed to publish to group {}: {}", group_name, e))?;
+        
+        Ok(actor_ids.len() as u32)
     }
 }
 

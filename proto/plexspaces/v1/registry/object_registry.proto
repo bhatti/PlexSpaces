@@ -171,7 +171,7 @@ import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/object_registry/v1;object_registryv1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/registry/object_registry;plexspaces_object_registry_v1";
 option java_multiple_files = true;
 option java_package = "com.bhatti.plexspaces.object_registry.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
@@ -231,6 +231,14 @@ enum ObjectType {
   // object_category: "Node"
   // grpc_address: Node's gRPC endpoint
   OBJECT_TYPE_NODE = 7;
+
+  // ProcessGroup: Erlang pg/pg2-style process group for pub/sub coordination
+  // Examples: config-updates, user-events, cluster-nodes
+  // object_category: Group type (e.g., "pubsub", "broadcast", "topic")
+  // grpc_address: Node's ProcessGroupService endpoint
+  // node_id: Node hosting the group members
+  // capabilities: ["topic-filtering", "multiple-joins", "distributed"]
+  OBJECT_TYPE_PROCESS_GROUP = 8;
 }
 
 // Health status (common across all object types)

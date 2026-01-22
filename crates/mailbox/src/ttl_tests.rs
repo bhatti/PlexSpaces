@@ -80,12 +80,13 @@ mod tests {
     #[test]
     fn test_message_ttl_from_proto() {
         use prost_types::Duration as ProtoDuration;
-        use plexspaces_proto::v1::actor::Message as ProtoMessage;
+        use plexspaces_proto::common::v1::Message as ProtoMessage;
         
         let proto_msg = ProtoMessage {
             id: "test-id".to_string(),
             sender_id: "sender".to_string(),
             receiver_id: "receiver".to_string(),
+            channel: String::new(),
             message_type: "test".to_string(),
             payload: b"test".to_vec(),
             timestamp: None,
@@ -96,6 +97,10 @@ mod tests {
             }),
             headers: Default::default(),
             idempotency_key: String::new(),
+            correlation_id: String::new(),
+            reply_to: String::new(),
+            partition_key: String::new(),
+            delivery_count: 0,
             uri_path: String::new(),
             uri_method: String::new(),
         };
@@ -107,12 +112,13 @@ mod tests {
     /// Test message without TTL in proto
     #[test]
     fn test_message_no_ttl_from_proto() {
-        use plexspaces_proto::v1::actor::Message as ProtoMessage;
+        use plexspaces_proto::common::v1::Message as ProtoMessage;
         
         let proto_msg = ProtoMessage {
             id: "test-id".to_string(),
             sender_id: "sender".to_string(),
             receiver_id: "receiver".to_string(),
+            channel: String::new(),
             message_type: "test".to_string(),
             payload: b"test".to_vec(),
             timestamp: None,
@@ -120,6 +126,10 @@ mod tests {
             ttl: None,
             headers: Default::default(),
             idempotency_key: String::new(),
+            correlation_id: String::new(),
+            reply_to: String::new(),
+            partition_key: String::new(),
+            delivery_count: 0,
             uri_path: String::new(),
             uri_method: String::new(),
         };

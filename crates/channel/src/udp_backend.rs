@@ -46,8 +46,9 @@ use tracing::{debug, info};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats, UdpConfig,
+    channel_config, ChannelBackend, ChannelConfig, ChannelStats, UdpConfig,
 };
+use plexspaces_proto::common::v1::Message;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -75,7 +76,7 @@ pub struct UdpChannel {
     multicast_addr: SocketAddr,
     stats: Arc<ChannelStatsData>,
     closed: Arc<AtomicBool>,
-    broadcast_tx: Arc<broadcast::Sender<ChannelMessage>>,
+    broadcast_tx: Arc<broadcast::Sender<Message>>,
 }
 
 struct ChannelStatsData {
@@ -266,7 +267,7 @@ impl UdpChannel {
     }
 
     /// Serialize message to protobuf bytes for UDP payload
-    fn serialize_message(msg: &ChannelMessage) -> ChannelResult<Vec<u8>> {
+    fn serialize_message(msg: &Message) -> ChannelResult<Vec<u8>> {
         use prost::Message;
         let mut buf = Vec::new();
         msg.encode(&mut buf).map_err(|e| {
@@ -276,9 +277,9 @@ impl UdpChannel {
     }
 
     /// Deserialize message from UDP payload (protobuf bytes)
-    fn deserialize_message(data: &[u8]) -> ChannelResult<ChannelMessage> {
+    fn deserialize_message(data: &[u8]) -> ChannelResult<Message> {
         use prost::Message;
-        ChannelMessage::decode(data).map_err(|e| {
+        Message::decode(data).map_err(|e| {
             ChannelError::SerializationError(format!("Failed to decode message: {}", e))
         })
     }
@@ -286,7 +287,7 @@ impl UdpChannel {
     /// Start receiving loop (spawned as background task)
     async fn receive_loop(
         socket: Arc<TokioUdpSocket>,
-        broadcast_tx: Arc<broadcast::Sender<ChannelMessage>>,
+        broadcast_tx: Arc<broadcast::Sender<Message>>,
         stats: Arc<ChannelStatsData>,
         closed: Arc<AtomicBool>,
         max_message_size: usize,
@@ -347,7 +348,7 @@ fn is_multicast_ip(ip: Ipv4Addr) -> bool {
 
 #[async_trait]
 impl Channel for UdpChannel {
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String> {
+    async fn send(&self, message: Message) -> ChannelResult<String> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -385,7 +386,7 @@ impl Channel for UdpChannel {
         Ok(message.id.clone())
     }
 
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -416,7 +417,7 @@ impl Channel for UdpChannel {
         Ok(messages)
     }
 
-    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -453,7 +454,7 @@ impl Channel for UdpChannel {
     async fn subscribe(
         &self,
         _consumer_group: Option<String>,
-    ) -> ChannelResult<BoxStream<'static, ChannelMessage>> {
+    ) -> ChannelResult<BoxStream<'static, Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -479,7 +480,7 @@ impl Channel for UdpChannel {
         Ok(Box::pin(stream))
     }
 
-    async fn publish(&self, message: ChannelMessage) -> ChannelResult<u32> {
+    async fn publish(&self, message: Message) -> ChannelResult<u32> {
         // UDP multicast is inherently pub/sub - all subscribers receive
         // We can't know the exact count, so we return 1 (best-effort)
         self.send(message).await?;

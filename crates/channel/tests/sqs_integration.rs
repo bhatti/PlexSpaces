@@ -35,9 +35,10 @@
 mod tests {
     use plexspaces_channel::{Channel, SQSChannel};
     use plexspaces_proto::channel::v1::{
-        ChannelBackend, ChannelConfig, ChannelMessage, DeliveryGuarantee,
+        ChannelBackend, ChannelConfig, DeliveryGuarantee,
         OrderingGuarantee,
     };
+    use plexspaces_proto::common::v1::Message;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::sleep;
@@ -113,7 +114,7 @@ mod tests {
         let channel = create_channel("test-send-receive").await;
 
         // Send message
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-send-receive".to_string(),
             payload: b"test payload".to_vec(),
@@ -143,7 +144,7 @@ mod tests {
 
         // Send multiple messages
         for i in 0..5 {
-            let msg = ChannelMessage {
+            let msg = Message {
                 id: ulid::Ulid::new().to_string(),
                 channel: "test-multiple".to_string(),
                 payload: format!("message-{}", i).into_bytes(),
@@ -172,7 +173,7 @@ mod tests {
         let channel = create_channel("test-ack").await;
 
         // Send and receive
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-ack".to_string(),
             payload: b"test".to_vec(),
@@ -202,7 +203,7 @@ mod tests {
         let channel = create_channel("test-nack-requeue").await;
 
         // Send message
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-nack-requeue".to_string(),
             payload: b"test".to_vec(),
@@ -237,7 +238,7 @@ mod tests {
         let channel = create_channel("test-nack-dlq").await;
 
         // Send message
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-nack-dlq".to_string(),
             payload: b"test".to_vec(),
@@ -271,7 +272,7 @@ mod tests {
         let channel = create_channel("test-visibility").await;
 
         // Send message
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-visibility".to_string(),
             payload: b"test".to_vec(),
@@ -311,7 +312,7 @@ mod tests {
         assert_eq!(received.len(), 0);
 
         // Send message
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-try-receive".to_string(),
             payload: b"test".to_vec(),
@@ -342,7 +343,7 @@ mod tests {
             let channel_clone = channel.clone();
             let handle = tokio::spawn(async move {
                 for j in 0..5 {
-                    let msg = ChannelMessage {
+                    let msg = Message {
                         id: ulid::Ulid::new().to_string(),
                         channel: "test-concurrent".to_string(),
                         payload: format!("sender-{}-msg-{}", i, j).into_bytes(),
@@ -383,7 +384,7 @@ mod tests {
 
         // Send some messages
         for i in 0..5 {
-            let msg = ChannelMessage {
+            let msg = Message {
                 id: ulid::Ulid::new().to_string(),
                 channel: "test-stats".to_string(),
                 payload: format!("msg-{}", i).into_bytes(),
@@ -407,7 +408,7 @@ mod tests {
         let channel = create_channel("test-close").await;
 
         // Send message before closing
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-close".to_string(),
             payload: b"test".to_vec(),
@@ -420,7 +421,7 @@ mod tests {
         assert!(channel.is_closed());
 
         // Send should fail
-        let msg2 = ChannelMessage {
+        let msg2 = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-close".to_string(),
             payload: b"test2".to_vec(),

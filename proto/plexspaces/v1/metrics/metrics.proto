@@ -91,7 +91,7 @@ import "plexspaces/v1/common.proto";
 import "plexspaces/v1/node/node.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/metrics/v1;metricsv1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/metrics/metrics;plexspaces_metrics_v1";
 option java_package = "com.bhatti.plexspaces.metrics.v1";
 option java_multiple_files = true;
 

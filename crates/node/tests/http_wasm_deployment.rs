@@ -22,6 +22,7 @@
 //! Uses both the calculator_actor.wasm (large Python-based) and hello.wasm (small C-based) examples.
 
 use plexspaces_node::NodeBuilder;
+use plexspaces_core::ApplicationManager;
 use std::path::PathBuf;
 use std::fs;
 use std::sync::Arc;

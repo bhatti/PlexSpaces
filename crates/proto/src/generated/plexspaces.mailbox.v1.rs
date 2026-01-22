@@ -93,45 +93,6 @@ pub struct MailboxStats {
     #[prost(message, optional, tag="10")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
 }
-/// Message envelope for mailbox
-///
-/// ## Note
-/// This is the proto representation of the internal `Message` struct.
-/// The Rust `Message` type should use this proto-generated type.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct MessageEnvelope {
-    /// Unique message ID
-    #[prost(string, tag="1")]
-    pub message_id: ::prost::alloc::string::String,
-    /// Message type
-    #[prost(string, tag="2")]
-    pub message_type: ::prost::alloc::string::String,
-    /// Message payload
-    #[prost(bytes="vec", tag="3")]
-    pub payload: ::prost::alloc::vec::Vec<u8>,
-    /// Sender actor ID
-    #[prost(string, tag="4")]
-    pub sender_id: ::prost::alloc::string::String,
-    /// Recipient actor ID
-    #[prost(string, tag="5")]
-    pub recipient_id: ::prost::alloc::string::String,
-    /// Message priority
-    #[prost(enumeration="MessagePriority", tag="6")]
-    pub priority: i32,
-    /// When message was enqueued
-    #[prost(message, optional, tag="7")]
-    pub enqueued_at: ::core::option::Option<::prost_types::Timestamp>,
-    /// Message expiration time
-    #[prost(message, optional, tag="8")]
-    pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
-    /// Correlation ID for request-reply
-    #[prost(string, tag="9")]
-    pub correlation_id: ::prost::alloc::string::String,
-    /// Message metadata
-    #[prost(map="string, string", tag="10")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateMailboxRequest {

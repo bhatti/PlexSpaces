@@ -376,17 +376,15 @@ mod tests {
         // ARRANGE
         let mut tuplespace = TuplespaceImpl::new(None, "test-actor".to_string());
 
-        // ACT & ASSERT: Placeholder implementations should not panic
+        // ACT & ASSERT: Without a tuplespace provider, operations return errors
         let write_result = tuplespace.write(test_context("", ""), vec![]).await;
-        assert!(write_result.is_ok(), "write placeholder should succeed");
+        assert!(write_result.is_err(), "write should fail without tuplespace provider");
 
         let read_result = tuplespace.read(test_context("", ""), vec![]).await;
-        assert!(read_result.is_ok(), "read placeholder should succeed");
-        assert!(read_result.unwrap().is_none(), "read should return None (placeholder)");
+        assert!(read_result.is_err(), "read should fail without tuplespace provider");
 
         let count_result = tuplespace.count(test_context("", ""), vec![]).await;
-        assert!(count_result.is_ok(), "count placeholder should succeed");
-        assert_eq!(count_result.unwrap(), 0, "count should return 0 (placeholder)");
+        assert!(count_result.is_err(), "count should fail without tuplespace provider");
     }
 
     #[tokio::test]
@@ -403,8 +401,8 @@ mod tests {
             vec![1, 2, 3],
         ).await;
 
-        // ASSERT: Should succeed (even if channel service not configured)
-        assert!(result.is_ok(), "send_to_queue should succeed");
+        // ASSERT: Should fail without channel service configured
+        assert!(result.is_err(), "send_to_queue should fail without channel service");
     }
 
     #[tokio::test]
@@ -416,9 +414,8 @@ mod tests {
         // ACT: Test receive_from_queue (with timeout 0 = poll immediately)
         let result = channels.receive_from_queue(test_context("", ""), "test-queue".to_string(), 0).await;
 
-        // ASSERT: Should return None if no message available
-        assert!(result.is_ok(), "receive_from_queue should succeed");
-        // Result may be Some or None depending on implementation
+        // ASSERT: Should fail without channel service configured
+        assert!(result.is_err(), "receive_from_queue should fail without channel service");
     }
 
     #[tokio::test]
@@ -435,8 +432,8 @@ mod tests {
             vec![1, 2, 3],
         ).await;
 
-        // ASSERT: Should succeed
-        assert!(result.is_ok(), "publish_to_topic should succeed");
+        // ASSERT: Should fail without channel service configured
+        assert!(result.is_err(), "publish_to_topic should fail without channel service");
     }
 
     #[tokio::test]
@@ -445,17 +442,18 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::new());
         let mut durability = DurabilityImpl::new("test-actor".to_string(), host_functions);
 
-        // ACT & ASSERT: Placeholder implementations should not panic
+        // ACT & ASSERT: Without journal storage, persist returns error
         let persist_result = durability.persist(test_context("", ""), "test-event".to_string(), vec![]).await;
-        assert!(persist_result.is_ok(), "persist placeholder should succeed");
-        assert_eq!(persist_result.unwrap(), 0, "persist should return 0 (placeholder)");
+        assert!(persist_result.is_err(), "persist should fail without journal storage");
 
+        // checkpoint returns error without storage
         let checkpoint_result = durability.checkpoint(test_context("", "")).await;
-        assert!(checkpoint_result.is_ok(), "checkpoint placeholder should succeed");
+        assert!(checkpoint_result.is_err(), "checkpoint should fail without journal storage");
 
+        // is_replaying returns false (default) even without storage
         let is_replaying_result = durability.is_replaying(test_context("", "")).await;
         assert!(is_replaying_result.is_ok(), "is_replaying should succeed");
-        assert_eq!(is_replaying_result.unwrap(), false, "is_replaying should return false");
+        assert!(!is_replaying_result.unwrap(), "is_replaying should return false");
     }
 
     #[tokio::test]

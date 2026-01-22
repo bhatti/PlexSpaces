@@ -32,14 +32,14 @@
 //! - Verify metrics are recorded
 //! - Verify graceful shutdown with all facets
 
-use plexspaces_application::{Application, ApplicationNode, ApplicationError};
+use plexspaces_application::{Application, ApplicationNode, ApplicationError, ApplicationManagerImpl};
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec, ChildSpec, ChildType, SupervisionStrategy, RestartPolicy};
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use std::sync::Arc;
 use std::collections::HashMap;
 use async_trait::async_trait;
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_core::{ApplicationManager, ActorId};
+use plexspaces_core::{ActorId, ApplicationManager};
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use serde_json::Value;
 use tokio::time::{sleep, Duration};
@@ -189,10 +189,7 @@ async fn test_application_deploy_with_multiple_facet_types() {
     let app_spec = create_application_spec_with_multiple_facets("test-app-multi", "1.0.0");
     
     // ACT: Deploy application
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     // Create SpecApplication from spec
     use plexspaces_application::SpecApplication;
@@ -260,10 +257,7 @@ async fn test_application_undeploy_with_multiple_facets_cleanup() {
     let app_spec = create_application_spec_with_multiple_facets("test-app-undeploy-multi", "1.0.0");
     
     // ACT: Deploy application
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     // Create SpecApplication from spec
     use plexspaces_application::SpecApplication;
@@ -346,10 +340,7 @@ async fn test_application_with_timer_facet_only() {
     let app_spec = create_application_spec_with_single_facet("test-app-timer", "1.0.0", "timer");
     
     // ACT: Deploy and undeploy
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
@@ -422,10 +413,7 @@ async fn test_application_with_reminder_facet_only() {
     let app_spec = create_application_spec_with_single_facet("test-app-reminder", "1.0.0", "reminder");
     
     // ACT & ASSERT
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
@@ -493,10 +481,7 @@ async fn test_application_with_durability_facet_only() {
     
     let app_spec = create_application_spec_with_single_facet("test-app-durability", "1.0.0", "durability");
     
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
@@ -564,10 +549,7 @@ async fn test_application_with_virtual_actor_facet_only() {
     
     let app_spec = create_application_spec_with_single_facet("test-app-virtual", "1.0.0", "virtual_actor");
     
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
@@ -774,10 +756,7 @@ async fn test_observability_metrics_for_facet_lifecycle() {
     let app_spec = create_application_spec_with_multiple_facets("test-app-observability", "1.0.0");
     
     // ACT: Deploy application
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
@@ -854,10 +833,7 @@ async fn test_application_metrics_for_deploy_undeploy() {
     let app_spec = create_application_spec_with_multiple_facets("test-app-metrics", "1.0.0");
     
     // ACT: Deploy application
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);

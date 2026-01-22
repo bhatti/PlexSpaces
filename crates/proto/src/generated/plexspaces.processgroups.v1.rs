@@ -310,7 +310,7 @@ pub struct PublishToGroupRequest {
     /// - priority: Message priority (system=75, high=50, normal=25, low=0)
     /// - ttl: How long to retry failed deliveries
     #[prost(message, optional, tag="3")]
-    pub message: ::core::option::Option<super::super::actor::v1::Message>,
+    pub message: ::core::option::Option<super::super::common::v1::Message>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -329,4 +329,5 @@ pub struct PublishToGroupResponse {
     #[prost(map="string, uint32", tag="3")]
     pub recipients_per_node: ::std::collections::HashMap<::prost::alloc::string::String, u32>,
 }
+include!("plexspaces.processgroups.v1.tonic.rs");
 // @@protoc_insertion_point(module)

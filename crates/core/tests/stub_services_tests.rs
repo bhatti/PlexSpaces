@@ -4,7 +4,7 @@
 // Tests for stub service implementations to improve coverage
 
 use plexspaces_core::ActorContext;
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleField, TupleSpaceError};
 use std::sync::Arc;
 

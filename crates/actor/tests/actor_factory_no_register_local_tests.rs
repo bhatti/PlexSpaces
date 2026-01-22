@@ -25,71 +25,18 @@
 
 use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder, ActorFactory, actor_factory_impl::ActorFactoryImpl, ActorRef};
-use plexspaces_core::{ActorId, ActorRegistry, ServiceLocator, VirtualActorManager, FacetManagerServiceWrapper, Actor as ActorTrait, BehaviorType, BehaviorError, ActorContext, actor_context::ObjectRegistry, RequestContext};
-use plexspaces_facet::FacetManager;
-use plexspaces_keyvalue::InMemoryKVStore;
-use plexspaces_mailbox::Message;
-use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
-use plexspaces_proto::object_registry::v1::{ObjectType, ObjectRegistration, HealthStatus};
+use plexspaces_core::{ActorId, ServiceLocator, Actor as ActorTrait, BehaviorType, BehaviorError, ActorContext, RequestContext, ActorRegistry};
+use plexspaces_core::Message;
 use std::sync::Arc;
+use ulid::Ulid;
 
-// Adapter to convert ObjectRegistryImpl to ObjectRegistry trait
-struct ObjectRegistryAdapter {
-    inner: Arc<ObjectRegistryImpl>,
-}
-
-#[async_trait::async_trait]
-impl ObjectRegistry for ObjectRegistryAdapter {
-    async fn lookup(
-        &self,
-        ctx: &plexspaces_core::RequestContext,
-        object_id: &str,
-        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-    ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-        self.inner
-            .lookup(ctx, obj_type, object_id)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: Ulid::new().to_string(),
+        payload,
+        ..Default::default()
     }
-    
-    async fn discover(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: Option<ObjectType>,
-        _object_category: Option<String>,
-        _capabilities: Option<Vec<String>>,
-        _labels: Option<Vec<String>>,
-        _health_status: Option<HealthStatus>,
-        _limit: usize,
-        _offset: usize,
-    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(Vec::new())
-    }
-
-    async fn lookup_full(
-        &self,
-        ctx: &plexspaces_core::RequestContext,
-        object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        object_id: &str,
-    ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .lookup_full(ctx, object_type, object_id)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
-    }
-
-    async fn register(
-        &self,
-        ctx: &plexspaces_core::RequestContext,
-        registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .register(ctx, registration)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
-    }
-
 }
 
 struct TestBehavior;
@@ -99,7 +46,7 @@ impl ActorTrait for TestBehavior {
     async fn handle_message(
         &mut self,
         _ctx: &ActorContext,
-        _msg: plexspaces_mailbox::Message,
+        _msg: Message,
     ) -> Result<(), BehaviorError> {
         Ok(())
     }
@@ -109,31 +56,16 @@ impl ActorTrait for TestBehavior {
     }
 }
 
-async fn create_test_service_locator() -> Arc<ServiceLocator> {
+async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    
-    // Create ObjectRegistry for ActorRegistry
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
-    let object_registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryAdapter { 
-        inner: object_registry_impl 
-    });
-    
-    // Register ActorRegistry
-    let registry = Arc::new(ActorRegistry::new(object_registry, "test-node".to_string()));
-    service_locator.register_service(registry.clone()).await;
-    
-    // Register VirtualActorManager
-    let manager = Arc::new(VirtualActorManager::new(registry.clone()));
-    service_locator.register_service(manager.clone()).await;
-    
-    // Register FacetManager (wrapped in FacetManagerServiceWrapper to implement Service trait)
-    let facet_manager = Arc::new(FacetManager::new());
-    let facet_manager_wrapper = Arc::new(FacetManagerServiceWrapper::new(facet_manager.clone()));
-    service_locator.register_service(facet_manager_wrapper).await;
-    
-    service_locator
+    // create_default_service_locator already initializes all services including:
+    // - ActorRegistry
+    // - VirtualActorManager
+    // - ReplyWaiterRegistry
+    // - FacetManager
+    // - FacetRegistry
+    // - ProcessGroupRegistry
+    create_default_service_locator(Some("test-node".to_string()), None, None).await
 }
 
 #[tokio::test]
@@ -166,7 +98,7 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
     assert!(found_sender.is_some(), "MessageSender should be registered");
     
     // Verify we can send messages
-    let message = Message::new(vec![1, 2, 3]);
+    let message = create_test_message(vec![1, 2, 3]);
     let result = message_sender.tell(message).await;
     assert!(result.is_ok(), "Should be able to send message");
 }
@@ -196,7 +128,7 @@ async fn test_spawn_actor_registers_message_sender_only() {
     assert!(registry.is_actor_activated(&actor_id).await);
     
     // Verify MessageSender works
-    let message = Message::new(vec![1, 2, 3]);
+    let message = create_test_message(vec![1, 2, 3]);
     let result = message_sender.tell(message).await;
     assert!(result.is_ok(), "Should be able to send message");
 }

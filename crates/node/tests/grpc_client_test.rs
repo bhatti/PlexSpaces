@@ -21,9 +21,10 @@
 use plexspaces_actor::ActorRef;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{
-    grpc_client::RemoteActorClient, grpc_service::ActorServiceImpl, Node, NodeId, NodeBuilder, default_node_config,
+    grpc_client::RemoteActorClient, Node, NodeId, NodeBuilder, default_node_config,
 };
-use plexspaces_proto::{v1::actor::Message as ProtoMessage, ActorServiceServer};
+use plexspaces_services::actor_service::ActorServiceImpl;
+use plexspaces_proto::{common::v1::Message as ProtoMessage, ActorServiceServer};
 use std::sync::Arc;
 use tonic::transport::Server;
 
@@ -87,7 +88,7 @@ async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
         async fn handle_message(
             &mut self,
             _ctx: &plexspaces_core::ActorContext,
-            _msg: plexspaces_mailbox::Message,
+            _msg: plexspaces_core::Message,
         ) -> Result<(), plexspaces_core::BehaviorError> {
             // Just consume the message - no processing needed for gRPC client tests
             Ok(())

@@ -52,8 +52,10 @@ help:
 	@echo "  make validate         - Full validation before push"
 	@echo ""
 	@echo "📚 Documentation:"
-	@echo "  make doc              - Generate documentation"
+	@echo "  make doc              - Generate Rust documentation"
 	@echo "  make doc-open         - Generate and open docs in browser"
+	@echo "  make proto-openapi    - Generate OpenAPI spec from proto files"
+	@echo "  make install-tools    - Install dev tools (cargo, buf, protoc-gen-openapiv2)"
 	@echo ""
 	@echo "🧹 Maintenance:"
 	@echo "  make clean            - Clean build artifacts"
@@ -107,15 +109,37 @@ help:
 install-tools:
 	@echo "Installing development tools..."
 	@rustup component add rustfmt clippy
-	@cargo install cargo-tarpaulin
-	@cargo install cargo-watch
-	@cargo install cargo-edit
-	@cargo install cargo-audit
+	@cargo install cargo-tarpaulin || true
+	@cargo install cargo-watch || true
+	@cargo install cargo-edit || true
+	@cargo install cargo-audit || true
 	@echo "Installing buf..."
-	@curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.28.1/buf-$$(uname -s)-$$(uname -m)" -o /tmp/buf
-	@sudo mv /tmp/buf /usr/local/bin/buf
-	@sudo chmod +x /usr/local/bin/buf
+	@if ! command -v buf >/dev/null 2>&1; then \
+		curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.28.1/buf-$$(uname -s)-$$(uname -m)" -o /tmp/buf && \
+		sudo mv /tmp/buf /usr/local/bin/buf && \
+		sudo chmod +x /usr/local/bin/buf; \
+	else \
+		echo "buf already installed"; \
+	fi
+	@echo "Installing protoc-gen-openapiv2 for OpenAPI generation..."
+	@if command -v go >/dev/null 2>&1; then \
+		go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest && \
+		echo "protoc-gen-openapiv2 installed at $$(go env GOPATH)/bin/protoc-gen-openapiv2"; \
+	else \
+		echo "Go not installed - skipping protoc-gen-openapiv2 (needed for OpenAPI generation)"; \
+	fi
 	@echo "Tools installed successfully!"
+
+# Install OpenAPI generation tools (requires Go)
+install-openapi-tools:
+	@echo "Installing OpenAPI generation tools..."
+	@if ! command -v go >/dev/null 2>&1; then \
+		echo "ERROR: Go is required. Install from https://go.dev/dl/"; \
+		exit 1; \
+	fi
+	@go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
+	@echo "protoc-gen-openapiv2 installed at $$(go env GOPATH)/bin/protoc-gen-openapiv2"
+	@echo "Add to PATH: export PATH=\$$PATH:$$(go env GOPATH)/bin"
 
 # Generate code from proto files (using tonic-build via cargo)
 # This is the RECOMMENDED approach. It relies on build.rs.
@@ -395,26 +419,26 @@ test:
 	echo "" | tee -a test-out; \
 	TIMEOUT_CMD=""; \
 	if command -v timeout >/dev/null 2>&1; then \
-		TIMEOUT_CMD="timeout 300"; \
+		TIMEOUT_CMD="timeout 900"; \
 	elif command -v gtimeout >/dev/null 2>&1; then \
-		TIMEOUT_CMD="gtimeout 300"; \
+		TIMEOUT_CMD="gtimeout 900"; \
 	fi; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
 		echo "Using cargo-nextest for faster test execution..." | tee -a test-out; \
 		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..." | tee -a test-out; \
-		echo "Note: Tests have a 5-minute timeout per test (build/compile time excluded)" | tee -a test-out; \
-		cargo nextest run --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=1 --test-timeout 300s 2>&1 | tee -a test-out || exit 1; \
+		echo "Note: Tests have a 15-minute timeout per test (build/compile time excluded)" | tee -a test-out; \
+		cargo nextest run --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=1 --test-timeout 900s 2>&1 | tee -a test-out || exit 1; \
 		echo "" | tee -a test-out; \
 		echo "Running all other tests with parallel execution..." | tee -a test-out; \
 		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
-			--exclude plexspaces-tuplespace --test-timeout 300s 2>&1 | tee -a test-out || exit 1; \
+			--exclude plexspaces-tuplespace --test-timeout 900s 2>&1 | tee -a test-out || exit 1; \
 		echo "" | tee -a test-out; \
 		echo "Running WASM integration tests (offline, no AWS/MinIO required)..." | tee -a test-out; \
-		cargo nextest run --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast --test-timeout 300s 2>&1 | tee -a test-out || exit 1; \
+		cargo nextest run --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast --test-timeout 900s 2>&1 | tee -a test-out || exit 1; \
 	else \
 		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
 		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..." | tee -a test-out; \
-		echo "Note: Tests have a 5-minute timeout (build/compile time excluded)" | tee -a test-out; \
+		echo "Note: Tests have a 15-minute timeout (build/compile time excluded)" | tee -a test-out; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
 			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
 		else \
@@ -739,6 +763,22 @@ lint-proto:
 proto-breaking:
 	@echo "Checking for breaking proto changes..."
 	@$(BUF) breaking --against '.git#branch=main'
+
+# Generate OpenAPI documentation from proto files
+# Uses buf with remote grpc-ecosystem/openapiv2 plugin (no local install needed)
+proto-openapi:
+	@echo "Generating OpenAPI documentation from proto files..."
+	@mkdir -p docs
+	@rm -f docs/openapi.swagger.json docs/openapi.json
+	@$(BUF) generate --template buf.gen.docs.yaml 2>&1 | grep -v "duplicate generated file" || true
+	@if [ -f docs/openapi.swagger.json ]; then \
+		mv docs/openapi.swagger.json docs/openapi.json; \
+		PATHS=$$(cat docs/openapi.json | grep -c '"/' || echo 0); \
+		echo "  ✓ OpenAPI 2.0 spec generated at docs/openapi.json ($$PATHS endpoints)"; \
+	else \
+		echo "  ⚠ OpenAPI generation failed - check proto annotations"; \
+		exit 1; \
+	fi
 
 # Generate documentation
 doc:

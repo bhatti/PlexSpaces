@@ -33,7 +33,7 @@ use plexspaces_services::ServiceLocatorImpl;
 use plexspaces_core::actor_context::ObjectRegistry;
 use plexspaces_actor::ActorRef;
 use plexspaces_journaling::{ActivationProvider, VirtualActorFacet};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
 use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics};
 use plexspaces_core::LinkProvider;
@@ -80,6 +80,12 @@ impl From<String> for NodeId {
     }
 }
 
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 // MonitorLink is now defined in ActorRegistry (core crate)
 // Use plexspaces_core::MonitorLink instead
 
@@ -95,10 +101,6 @@ pub use plexspaces_core::{VirtualActorMetadata, MonitorLink};
 pub struct Node {
     /// Node identifier
     id: NodeId,
-    /// Connection metadata (node addresses, health status)
-    connections: Arc<RwLock<HashMap<NodeId, NodeConnection>>>,
-    /// Connection health tracking: node_id -> (last_used, last_error, consecutive_failures)
-    connection_health: Arc<RwLock<HashMap<NodeId, (tokio::time::Instant, Option<String>, u32)>>>,
     /// Node configuration
     config: plexspaces_proto::node::v1::NodeConfig,
     /// Node metrics (combined resource and operational metrics)
@@ -146,36 +148,14 @@ pub fn default_node_config() -> plexspaces_proto::node::v1::NodeConfig {
         heartbeat_interval_ms: 5000,
         clustering_enabled: true,
         metadata: HashMap::new(),
+        node_registry: None, // Use defaults from NodeRegistryConfig
+        grpc_address: String::new(), // Derived from listen_addr if empty
     }
 }
 
 // Note: NodeMetrics is from proto crate, so we can't add methods to it
 // Use direct field access: metrics.active_actors (u32) instead of usize
 
-/// Connection to another node
-#[allow(dead_code)]
-struct NodeConnection {
-    /// Remote node ID
-    remote_id: NodeId,
-    /// Remote node gRPC address (e.g., "http://localhost:8000")
-    node_address: String,
-    /// Connection state
-    state: ConnectionState,
-    /// Last heartbeat
-    last_heartbeat: tokio::time::Instant,
-    /// Remote node capabilities (using proto-generated type)
-    capabilities: ProtoNodeCapabilities,
-}
-
-/// Connection state
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-enum ConnectionState {
-    Connecting,
-    Connected,
-    Disconnected,
-    Failed(String),
-}
 
 // Use proto-generated NodeCapabilities instead of custom struct
 type NodeCapabilities = ProtoNodeCapabilities;
@@ -213,7 +193,6 @@ impl Node {
         Node {
             id,
             service_locator,
-            connections: Arc::new(RwLock::new(HashMap::new())),
             config,
             metrics: Arc::new(RwLock::new(default_node_metrics(&node_id_str, ""))),
             start_time: Arc::new(RwLock::new(None)), // Set in start()
@@ -222,7 +201,6 @@ impl Node {
             task_router: Arc::new(RwLock::new(None)), // Phase 5: Task router (created in start())
             wasm_runtime: Arc::new(RwLock::new(None)), // WASM runtime (created in start())
             blob_service: Arc::new(RwLock::new(None)), // Blob service (created in start())
-            connection_health: Arc::new(RwLock::new(HashMap::new())), // Connection health tracking
             health_reporter: Arc::new(RwLock::new(None)), // Health reporter (created in start())
             release_spec: Arc::new(RwLock::new(None)), // ReleaseSpec (optional, loaded from config)
             application_manager: Arc::new(ApplicationManager::new()), // ApplicationManager (NOT in ServiceLocator)
@@ -265,6 +243,8 @@ impl Node {
                         clustering_enabled: self.config.clustering_enabled,
                         grpc_connection_pool_size: self.config.grpc_connection_pool_size,
                         metadata: self.config.metadata.clone(),
+                        node_registry: None,
+                        grpc_address: String::new(),
                     }
                 }
             } else {
@@ -281,6 +261,8 @@ impl Node {
                     clustering_enabled: self.config.clustering_enabled,
                     grpc_connection_pool_size: self.config.grpc_connection_pool_size,
                     metadata: self.config.metadata.clone(),
+                    node_registry: None,
+                    grpc_address: String::new(),
                 }
             }
         };
@@ -453,47 +435,8 @@ impl Node {
     }
     
     // === Helper methods to access actor data via ActorRegistry ===
-    // These provide convenient access to actor-related data stored in ActorRegistry
-    // All methods now get ActorRegistry from ServiceLocator
-    
-    /// Get facet storage (use facet_manager() instead)
-    pub async fn facet_storage(&self) -> Result<Arc<RwLock<HashMap<ActorId, Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>>>>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.facet_manager().facet_storage().clone())
-    }
-    
-    /// Get FacetManager
-    pub async fn facet_manager(&self) -> Result<Arc<FacetManager>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.facet_manager().clone())
-    }
-    
-    /// Get monitors
-    pub async fn monitors(&self) -> Result<Arc<RwLock<HashMap<ActorId, Vec<MonitorLink>>>>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.monitors().clone())
-    }
-    
-    /// Get links
-    pub async fn links(&self) -> Result<Arc<RwLock<HashMap<ActorId, Vec<ActorId>>>>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.links().clone())
-    }
-    
-    /// Get lifecycle subscribers
-    pub async fn lifecycle_subscribers(&self) -> Result<Arc<RwLock<Vec<mpsc::UnboundedSender<plexspaces_proto::ActorLifecycleEvent>>>>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.lifecycle_subscribers().clone())
-    }
-    
-    /// Get virtual actor manager from ServiceLocator
-    ///
-    /// ## Note
-    /// VirtualActorManager is now registered in ServiceLocator instead of stored directly in Node.
-    /// This removes Node as a middleman for actor management, simplifying the design.
-    pub async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
-        self.service_locator.virtual_actor_manager().await
-    }
+    // Use ServiceLocator methods directly: service_locator.actor_registry().await,
+    // service_locator.get_facet_manager().await, service_locator.virtual_actor_manager().await
     
     /// Get virtual actor manager from ServiceLocator or return error
     ///
@@ -564,15 +507,7 @@ impl Node {
         guard.clone()
     }
 
-    /// Get WASM runtime (if initialized)
-    ///
-    /// Returns None if node hasn't been started yet.
-    pub async fn wasm_runtime(&self) -> Option<Arc<plexspaces_wasm_runtime::WasmRuntime>> {
-        let runtime_guard = self.wasm_runtime.read().await;
-        runtime_guard.clone()
-    }
-
-    /// Get facets container for facet access (Option 1: Facet Storage)
+    /// Get facets container for facet access
     ///
     /// ## Purpose
     /// Returns the facets container for accessing facets.
@@ -587,7 +522,8 @@ impl Node {
         &self,
         actor_id: &ActorId,
     ) -> Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> {
-        if let Ok(facet_manager) = self.facet_manager().await {
+        if let Some(facet_manager_wrapper) = self.service_locator.get_facet_manager().await {
+            let facet_manager = facet_manager_wrapper.inner_clone();
             facet_manager.get_facets(actor_id).await
         } else {
             None
@@ -657,96 +593,27 @@ impl Node {
         }
     }
 
-    /// Connect to another node (register remote node address)
-    pub async fn connect_to(&self, remote_id: NodeId, address: String) -> Result<(), NodeError> {
-        let mut connections = self.connections.write().await;
-
-        if connections.contains_key(&remote_id) {
-            return Err(NodeError::AlreadyConnected(remote_id));
-        }
-
-        // Register connection metadata (address stored for connection pooling)
-        let address_clone = address.clone();
-        let connection = NodeConnection {
-            remote_id: remote_id.clone(),
-            node_address: address, // Store address for gRPC client
-            state: ConnectionState::Connected,
-            last_heartbeat: tokio::time::Instant::now(),
-            capabilities: NodeCapabilities::default(),
-        };
-
-        connections.insert(remote_id.clone(), connection);
-        let connected_count = connections.len();
-        drop(connections);
-
-        let mut metrics = self.metrics.write().await;
-        metrics.connected_nodes = connected_count as u32;
-        drop(metrics);
-        
-        // Record metrics
-        metrics::gauge!("plexspaces_node_connected_nodes",
-            "node_id" => self.id().as_str().to_string()
-        ).set(connected_count as f64);
-        tracing::info!(remote_node_id = %remote_id.as_str(), address = %address_clone, node_id = %self.id().as_str(), "Connected to remote node");
-
-        // TupleSpace removed - not needed
-
-        // Note: gRPC client created lazily on first message (connection pooling)
-        Ok(())
-    }
-
-    /// Register a remote node (alias for connect_to)
-    /// This is the preferred API for Phase 2 testing
-    pub async fn register_remote_node(
-        &self,
-        remote_id: NodeId,
-        address: String,
-    ) -> Result<(), NodeError> {
-        self.connect_to(remote_id, address).await
-    }
-
-    /// Disconnect from another node
-    pub async fn disconnect_from(&self, remote_id: &NodeId) -> Result<(), NodeError> {
-        let was_connected = {
-            let connections = self.connections.read().await;
-            connections.contains_key(remote_id)
-        };
-        
-        if was_connected {
-            let mut connections = self.connections.write().await;
-            connections.remove(remote_id);
-            drop(connections);
-
-            // Remove from connection pool (handled by ServiceLocator)
-            // ServiceLocator manages gRPC clients, no manual cleanup needed
-
-            metrics::gauge!("plexspaces_node_active_connections",
-                "node_id" => self.id().as_str().to_string()
-            ).decrement(1.0);
-            let connected_count = self.connections.read().await.len();
-            metrics::gauge!("plexspaces_node_connected_nodes",
-                "node_id" => self.id().as_str().to_string()
-            ).set(connected_count as f64);
-            tracing::info!(remote_node_id = %remote_id.as_str(), node_id = %self.id().as_str(), "Disconnected from remote node");
-            
-            let mut metrics = self.metrics.write().await;
-            metrics.connected_nodes = connected_count as u32;
-            drop(metrics);
-        }
-
-        Ok(())
-    }
-
-    /// Get list of connected nodes
-    pub async fn connected_nodes(&self) -> Vec<NodeId> {
-        let connections = self.connections.read().await;
-        connections.keys().cloned().collect()
-    }
-
     /// Get node statistics
+    ///
+    /// ## Note
+    /// For gRPC-based metrics, use `NodeService::get_metrics`.
     pub async fn metrics(&self) -> NodeMetrics {
         let guard = self.metrics.read().await;
         guard.clone()
+    }
+
+    /// Look up a remote node's address from NodeRegistry
+    async fn lookup_node_address(&self, node_id: &NodeId) -> Result<String, NodeError> {
+        if let Some(node_registry) = self.service_locator.get_node_registry().await {
+            let ctx = self.service_locator.request_context_for_system_operations().await;
+            match node_registry.lookup_node(&ctx, node_id.as_str()).await {
+                Ok(Some(registration)) => Ok(registration.node_address),
+                Ok(None) => Err(NodeError::NodeNotConnected(node_id.clone())),
+                Err(e) => Err(NodeError::NetworkError(format!("Failed to lookup node: {}", e))),
+            }
+        } else {
+            Err(NodeError::NetworkError("NodeRegistry not available".to_string()))
+        }
     }
     
     /// Update metrics with current system info (CPU, memory, uptime, actors, connected nodes)
@@ -781,32 +648,22 @@ impl Node {
             0
         };
         
-        // Get connected nodes count (explicitly connected + discovered from ObjectRegistry)
-        let connected_nodes = {
-            let explicit_connections = self.connections.read().await.len();
-            // Also count nodes discovered via ObjectRegistry
-            // System metrics collection - discovering nodes for metrics reporting
-            // This is a system-level operation for observability, not user-initiated, so node.service_locator().request_context_for_system_operations().await is appropriate
-            let discovered_count = if let Some(object_registry) = self.service_locator.get_object_registry().await {
-                use plexspaces_core::RequestContext;
-                let ctx = self.service_locator.request_context_for_system_operations().await;
-                use plexspaces_proto::object_registry::v1::ObjectType;
-                // Discover all nodes (excluding self)
-                // Note: discover returns Vec<ObjectRegistration>
-                match object_registry.discover(&ctx, Some(ObjectType::ObjectTypeNode), None, None, None, None, 0, 1000).await {
-                    Ok(registrations) => {
-                        let local_node_id = self.id().as_str().to_string();
-                        registrations.iter()
-                            .filter(|r| r.object_id != local_node_id)
-                            .count()
-                    }
-                    Err(_) => 0
+        // Get connected nodes count from NodeRegistry
+        let connected_nodes = if let Some(node_registry) = self.service_locator.get_node_registry().await {
+            use plexspaces_core::RequestContext;
+            let ctx = self.service_locator.request_context_for_system_operations().await;
+            let local_node_id = self.id().as_str().to_string();
+            // List nodes from registry (excluding self)
+            match node_registry.list_nodes(&ctx, None, 1000, "").await {
+                Ok((nodes, _)) => {
+                    nodes.iter()
+                        .filter(|n| n.node_id != local_node_id)
+                        .count() as u32
                 }
-            } else {
-                0
-            };
-            // Use max of explicit connections and discovered nodes (they may overlap)
-            std::cmp::max(explicit_connections, discovered_count) as u32
+                Err(_) => 0
+            }
+        } else {
+            0
         };
         
         // Update metrics
@@ -820,6 +677,9 @@ impl Node {
     }
     
     /// Get node statistics (alias for metrics)
+    ///
+    /// ## Note
+    /// For gRPC-based metrics, use `NodeService::get_metrics`.
     pub async fn stats(&self) -> NodeMetrics {
         self.metrics().await
     }
@@ -1071,8 +931,11 @@ impl Node {
             Ok(service) => {
                 let service_arc = Arc::new(service);
                 
-                // Register in service_locator
+                // Register in service_locator (both as Service and as BlobServiceTrait)
                 self.service_locator.register_service(service_arc.clone()).await;
+                // Also register via BlobServiceTrait for type-safe access
+                let blob_service_trait: std::sync::Arc<dyn plexspaces_core::BlobServiceTrait> = service_arc.clone();
+                self.service_locator.register_blob_service(blob_service_trait).await;
                 
                 // Store in Node
                 {
@@ -1557,6 +1420,23 @@ impl Node {
             self.id.as_str().to_string(),
         ));
         
+        // Create ProcessGroupService for distributed pub/sub
+        use plexspaces_services::process_group_service::{ProcessGroupServiceImpl, ProcessGroupServiceGrpc};
+        use plexspaces_proto::ProcessGroupServiceServer;
+        let process_group_impl = Arc::new(ProcessGroupServiceImpl::new(
+            self.service_locator.clone(),
+            self.id.as_str().to_string(),
+        ));
+        
+        // Register ProcessGroupService in ServiceLocator so it can be accessed by other components
+        let process_group_service_trait: Arc<dyn plexspaces_core::ProcessGroupService> = process_group_impl.clone();
+        self.service_locator.register_process_group_service(process_group_service_trait).await;
+        
+        let process_group_service = ProcessGroupServiceGrpc::new(
+            process_group_impl,
+            self.service_locator.clone(),
+        );
+        
         // Create standard gRPC health service (for Kubernetes probes)
         // Use our custom implementation that integrates with PlexSpacesHealthReporter
         use crate::standard_health_service::StandardHealthServiceImpl;
@@ -1720,6 +1600,11 @@ impl Node {
             )
             .add_service(
                 MetricsServiceServer::new(metrics_service)
+                    .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
+                    .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
+            )
+            .add_service(
+                ProcessGroupServiceServer::new(process_group_service)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
             );
@@ -2420,15 +2305,9 @@ impl Node {
             Ok(monitor_ref)
         } else {
             // REMOTE MONITORING: Actor on different node
-            // Get remote node's address
+            // Get remote node's address from NodeRegistry
             let remote_node_id = crate::NodeId::new(node_part);
-            let connections = self.connections.read().await;
-            let node_address = connections
-                .get(&remote_node_id)
-                .ok_or_else(|| NodeError::NodeNotConnected(remote_node_id.clone()))?
-                .node_address
-                .clone();
-            drop(connections);
+            let node_address = self.lookup_node_address(&remote_node_id).await?;
 
             // Generate unique monitor reference
             let monitor_ref = ulid::Ulid::new().to_string();
@@ -2564,7 +2443,7 @@ impl Node {
             // The remote side will be linked via RPC call below
             // We can't use ActorRegistry.link() here because it requires both actors to exist locally
             // So we manually add to links for the local actor only
-            let links_arc = self.links().await?;
+            let links_arc = actor_registry.links();
             let mut links = links_arc.write().await;
             links
                 .entry(actor_id.clone())
@@ -2573,13 +2452,7 @@ impl Node {
 
             // Call LinkActor RPC on remote node
             let remote_node_id = crate::NodeId::new(node_part2);
-            let connections = self.connections.read().await;
-            let node_address = connections
-                .get(&remote_node_id)
-                .ok_or_else(|| NodeError::NodeNotConnected(remote_node_id.clone()))?
-                .node_address
-                .clone();
-            drop(connections);
+            let node_address = self.lookup_node_address(&remote_node_id).await?;
 
             let channel = tonic::transport::Channel::from_shared(node_address.clone())
                 .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
@@ -2600,7 +2473,8 @@ impl Node {
         } else if is_local2 {
             // linked_actor_id is local, actor_id is remote
             // Link local actor to remote actor
-            let links_arc = self.links().await?;
+            let actor_registry = self.actor_registry().await?;
+            let links_arc = actor_registry.links();
             let mut links = links_arc.write().await;
             links
                 .entry(linked_actor_id.clone())
@@ -2609,13 +2483,7 @@ impl Node {
 
             // Call LinkActor RPC on remote node
             let remote_node_id = crate::NodeId::new(node_part1);
-            let connections = self.connections.read().await;
-            let node_address = connections
-                .get(&remote_node_id)
-                .ok_or_else(|| NodeError::NodeNotConnected(remote_node_id.clone()))?
-                .node_address
-                .clone();
-            drop(connections);
+            let node_address = self.lookup_node_address(&remote_node_id).await?;
 
             let channel = tonic::transport::Channel::from_shared(node_address.clone())
                 .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
@@ -2681,7 +2549,8 @@ impl Node {
             Ok(())
         } else if is_local1 {
             // actor_id is local, linked_actor_id is remote
-            let links_arc = self.links().await?;
+            let actor_registry = self.actor_registry().await?;
+            let links_arc = actor_registry.links();
             let mut links = links_arc.write().await;
             if let Some(linked_actors) = links.get_mut(actor_id) {
                 linked_actors.retain(|id| id != linked_actor_id);
@@ -2692,13 +2561,7 @@ impl Node {
 
             // Call UnlinkActor RPC on remote node
             let remote_node_id = crate::NodeId::new(node_part2);
-            let connections = self.connections.read().await;
-            let node_address = connections
-                .get(&remote_node_id)
-                .ok_or_else(|| NodeError::NodeNotConnected(remote_node_id.clone()))?
-                .node_address
-                .clone();
-            drop(connections);
+            let node_address = self.lookup_node_address(&remote_node_id).await?;
 
             let channel = tonic::transport::Channel::from_shared(node_address.clone())
                 .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
@@ -2718,7 +2581,8 @@ impl Node {
             Ok(())
         } else if is_local2 {
             // linked_actor_id is local, actor_id is remote
-            let links_arc = self.links().await?;
+            let actor_registry = self.actor_registry().await?;
+            let links_arc = actor_registry.links();
             let mut links = links_arc.write().await;
             if let Some(linked_actors) = links.get_mut(linked_actor_id) {
                 linked_actors.retain(|id| id != actor_id);
@@ -2729,13 +2593,7 @@ impl Node {
 
             // Call UnlinkActor RPC on remote node
             let remote_node_id = crate::NodeId::new(node_part1);
-            let connections = self.connections.read().await;
-            let node_address = connections
-                .get(&remote_node_id)
-                .ok_or_else(|| NodeError::NodeNotConnected(remote_node_id.clone()))?
-                .node_address
-                .clone();
-            drop(connections);
+            let node_address = self.lookup_node_address(&remote_node_id).await?;
 
             let channel = tonic::transport::Channel::from_shared(node_address.clone())
                 .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
@@ -2770,10 +2628,11 @@ impl Node {
     /// ## Arguments
     /// * `event` - The lifecycle event to publish
     async fn publish_lifecycle_event(&self, event: plexspaces_proto::ActorLifecycleEvent) {
-        let subscribers_arc = match self.lifecycle_subscribers().await {
-            Ok(arc) => arc,
-            Err(_) => return, // If subscribers not available, skip
+        let actor_registry = match self.actor_registry().await {
+            Ok(ar) => ar,
+            Err(_) => return, // If registry not available, skip
         };
+        let subscribers_arc = actor_registry.lifecycle_subscribers();
         let subscribers = subscribers_arc.read().await;
         for subscriber in subscribers.iter() {
             let _ = subscriber.send(event.clone());
@@ -3104,12 +2963,24 @@ impl Node {
         tracing::warn!("   • Remaining actors: {} (down from {})", after_actor_count, actor_count);
         tracing::warn!("   • Remaining mailbox queue size: {} (down from {})", after_queue_size, queue_size);
         
-        // Close network connections
+        // Close network connections via NodeRegistry
         tracing::warn!("🛑 Phase 4: Network Connections");
-        let connected_nodes = self.connected_nodes().await;
-        tracing::warn!("   • Closing {} connections...", connected_nodes.len());
-        for node_id in connected_nodes {
-            let _ = self.disconnect_from(&node_id).await;
+        if let Some(node_registry) = self.service_locator.get_node_registry().await {
+            let ctx = self.service_locator.request_context_for_system_operations().await;
+            match node_registry.list_nodes(&ctx, None, 1000, "").await {
+                Ok((nodes, _)) => {
+                    let node_count = nodes.len();
+                    tracing::warn!("   • Closing {} connections...", node_count);
+                    for node in nodes {
+                        let _ = node_registry.unregister_node(&ctx, &node.node_id).await;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("   • Could not list nodes: {}", e);
+                }
+            }
+        } else {
+            tracing::warn!("   • NodeRegistry not available");
         }
         tracing::warn!("   ✓ All network connections closed");
         
@@ -3165,8 +3036,16 @@ impl Node {
         let node_metrics = self.metrics().await;
         let active_requests = node_metrics.messages_routed as usize;
         
-        // Get connected nodes
-        let connected_nodes = self.connected_nodes().await.len();
+        // Get connected nodes from NodeRegistry
+        let connected_nodes = if let Some(node_registry) = self.service_locator.get_node_registry().await {
+            let ctx = self.service_locator.request_context_for_system_operations().await;
+            match node_registry.list_nodes(&ctx, None, 1000, "").await {
+                Ok((nodes, _)) => nodes.len(),
+                Err(_) => 0,
+            }
+        } else {
+            0
+        };
         
         (application_count, actor_count, total_mailbox_queue_size, active_requests, connected_nodes)
     }
@@ -3529,106 +3408,6 @@ impl Node {
         });
     }
 
-    /// Start connection health monitoring and stale connection cleanup
-    ///
-    /// ## Purpose
-    /// Spawns a background task that periodically:
-    /// - Checks connection health (tracks last used time and failures)
-    /// - Removes stale connections (idle for > 1 hour)
-    /// - Attempts to reconnect failed connections
-    ///
-    /// ## Behavior
-    /// - Runs every 60 seconds
-    /// - Checks all gRPC client connections
-    /// - Removes connections idle for > 1 hour
-    /// - Attempts to reconnect connections with failures
-    ///
-    /// ## Note
-    /// This should be called once when the node starts.
-    pub fn start_connection_health_monitor(&self) {
-        let node = Arc::new(self.clone());
-        
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
-            let stale_timeout = Duration::from_secs(3600); // 1 hour
-            
-            loop {
-                interval.tick().await;
-                
-                // Get list of connections to check
-                let connections_to_check: Vec<(NodeId, String)> = {
-                    let connections = node.connections.read().await;
-                    connections.iter()
-                        .map(|(node_id, conn)| (node_id.clone(), conn.node_address.clone()))
-                        .collect()
-                };
-                
-                // Check each connection
-                for (node_id, node_address) in connections_to_check {
-                    let health_status = {
-                        let health = node.connection_health.read().await;
-                        health.get(&node_id).cloned()
-                    };
-                    
-                    if let Some((last_used, last_error, consecutive_failures)) = health_status {
-                        let idle_duration = last_used.elapsed();
-                        
-                        // Remove stale connections (idle > 1 hour)
-                        if idle_duration > stale_timeout {
-                            tracing::info!(remote_node_id = %node_id.as_str(), idle_seconds = idle_duration.as_secs(), "Removing stale connection");
-                            
-                            // grpc_clients removed - use ServiceLocator.get_node_client() instead
-                            // ServiceLocator manages gRPC clients, no manual cleanup needed
-                            
-                            let mut health = node.connection_health.write().await;
-                            health.remove(&node_id);
-                            drop(health);
-                            
-                            metrics::counter!("plexspaces_node_connections_removed_stale_total",
-                                "node_id" => node.id().as_str().to_string(),
-                                "remote_node_id" => node_id.as_str().to_string()
-                            ).increment(1);
-                            metrics::gauge!("plexspaces_node_active_connections",
-                                "node_id" => node.id().as_str().to_string()
-                            ).decrement(1.0);
-                            continue;
-                        }
-                        
-                        // Attempt to reconnect if we have failures but connection still exists
-                        if consecutive_failures > 0 && last_error.is_some() {
-                            // Check if connection still exists in pool
-                            // grpc_clients removed - use ServiceLocator.get_node_client() instead
-                            // ServiceLocator manages clients, assume connection exists if health check passed
-                            let connection_exists = true;
-                            
-                            if connection_exists {
-                                // Try to reconnect
-                                if let Ok(new_client) = RemoteActorClient::connect(&node_address).await {
-                                    tracing::info!(remote_node_id = %node_id.as_str(), "Reconnected to remote node via health check");
-                                    
-                                    // grpc_clients removed - ServiceLocator manages clients automatically
-                                    // Client will be created on-demand via get_node_client()
-                                    
-                                    let mut health = node.connection_health.write().await;
-                                    health.insert(node_id.clone(), (tokio::time::Instant::now(), None, 0));
-                                    drop(health);
-                                    
-                                    metrics::counter!("plexspaces_node_connections_reconnected_total",
-                                        "node_id" => node.id().as_str().to_string(),
-                                        "remote_node_id" => node_id.as_str().to_string()
-                                    ).increment(1);
-                                } else {
-                                    if tracing::enabled!(tracing::Level::DEBUG) {
-                                    tracing::debug!(remote_node_id = %node_id.as_str(), consecutive_failures = consecutive_failures, "Failed to reconnect during health check");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
 }
 
 /// Implement ApplicationNode trait to provide infrastructure access to applications
@@ -3785,16 +3564,24 @@ impl ClusterManager {
 
     /// Join the cluster
     pub async fn join(&self) -> Result<(), NodeError> {
-        // Connect to seed nodes
-        for (node_id, address) in &self.config.seed_nodes {
-            if node_id != self.local_node.id() {
-                self.local_node
-                    .connect_to(node_id.clone(), address.clone())
-                    .await?;
+        // Connect to seed nodes via NodeRegistry
+        let service_locator = self.local_node.service_locator();
+        if let Some(node_registry) = service_locator.get_node_registry().await {
+            let ctx = service_locator.request_context_for_system_operations().await;
+            for (node_id, address) in &self.config.seed_nodes {
+                if node_id != self.local_node.id() {
+                    // Register the seed node in NodeRegistry
+                    let registration = plexspaces_proto::node::v1::NodeRegistration {
+                        node_id: node_id.as_str().to_string(),
+                        node_address: address.clone(),
+                        ..Default::default()
+                    };
+                    if let Err(e) = node_registry.register_node(&ctx, registration).await {
+                        tracing::warn!(node_id = %node_id.as_str(), address = %address, error = %e, "Failed to register seed node");
+                    }
+                }
             }
         }
-
-        // TupleSpace removed - not needed
         Ok(())
     }
 
@@ -3901,9 +3688,7 @@ mod tests {
     #[tokio::test]
     async fn test_node_creation() {
         let node = NodeBuilder::new("test-node").build().await;
-
         assert_eq!(node.id().as_str(), "test-node");
-        assert_eq!(node.connected_nodes().await.len(), 0);
     }
 
     #[tokio::test]
@@ -4035,8 +3820,7 @@ mod tests {
         let node_arc = Arc::new(NodeBuilder::new("test-node").build().await);
         
         // Register NodeMetricsAccessor early for tests (normally done in create_actor_context_arc)
-        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(node.clone()));
-        node_arc.service_locator().register_service(metrics_accessor.clone()).await;
+        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(node_arc.clone()));
         let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> = metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
         node_arc.service_locator().register_node_metrics_accessor(metrics_accessor_trait).await;
         let node = node_arc.as_ref();
@@ -4054,7 +3838,11 @@ mod tests {
         actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
         // Create message
-        let message = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
+        let message = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: vec![1, 2, 3],
+            ..Default::default()
+        };
 
         // Reset metrics before sending message
         {
@@ -4079,7 +3867,11 @@ mod tests {
         // Initialize services
         node.initialize_services().await.unwrap();
 
-        let message = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
+        let message = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: vec![1, 2, 3],
+            ..Default::default()
+        };
 
         // Try to send to non-existent actor
         // lookup_actor_ref returns Ok(None) for local actors that don't exist
@@ -4101,62 +3893,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_node_connection() {
-        let node = NodeBuilder::new("node1").build().await;
-
-        // Connect to another node
-        node.connect_to(NodeId::new("node2"), "localhost:8001".to_string())
-            .await
-            .unwrap();
-
-        // Verify connection
-        let connected = node.connected_nodes().await;
-        assert_eq!(connected.len(), 1);
-        assert_eq!(connected[0].as_str(), "node2");
-
-        // Check stats
-        let node_metrics = node.metrics().await;
-        assert_eq!(node_metrics.connected_nodes, 1);
-    }
-
-    #[tokio::test]
-    async fn test_node_disconnection() {
-        let node = NodeBuilder::new("node1").build().await;
-
-        // Connect
-        node.connect_to(NodeId::new("node2"), "localhost:8001".to_string())
-            .await
-            .unwrap();
-        assert_eq!(node.connected_nodes().await.len(), 1);
-
-        // Disconnect
-        node.disconnect_from(&NodeId::new("node2")).await.unwrap();
-        assert_eq!(node.connected_nodes().await.len(), 0);
-
-        let node_metrics = node.metrics().await;
-        assert_eq!(node_metrics.connected_nodes, 0);
-    }
-
-    #[tokio::test]
-    async fn test_duplicate_connection() {
-        let node = NodeBuilder::new("node1").build().await;
-
-        // First connection should succeed
-        node.connect_to(NodeId::new("node2"), "localhost:8001".to_string())
-            .await
-            .unwrap();
-
-        // Second connection should fail
-        let result = node
-            .connect_to(NodeId::new("node2"), "localhost:8001".to_string())
-            .await;
-        assert!(result.is_err());
-        match result {
-            Err(NodeError::AlreadyConnected(_)) => {} // Expected
-            _ => panic!("Expected AlreadyConnected error"),
-        }
-    }
 
     #[tokio::test]
     async fn test_node_announcement() {
@@ -4457,12 +4193,8 @@ mod tests {
 
         let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
-        // Register node2 as remote node in node1's registry
-        // Using a fake address since we're testing routing logic, not actual gRPC
-        node1
-            .register_remote_node(NodeId::new("node2"), "http://localhost:9999".to_string())
-            .await
-            .unwrap();
+        // Note: We no longer use register_remote_node - node discovery goes through ObjectRegistry/NodeRegistry
+        // The registration happens below via ObjectRegistry.register()
 
         // Register actor on node2
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
@@ -4490,7 +4222,11 @@ mod tests {
         object_registry.register(&ctx, registration).await.unwrap();
 
         // Try to route message from node1 to actor on node2
-        let message = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
+        let message = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: vec![1, 2, 3],
+            ..Default::default()
+        };
 
         // This will fail because we don't have a real gRPC server running
         // But it exercises the remote routing code path via ActorRef::tell()
@@ -4518,12 +4254,8 @@ mod tests {
     async fn test_find_actor_remote_via_node_id() {
         let node = NodeBuilder::new("node1").build().await;
 
-        // Register remote node in connections
-        node.register_remote_node(NodeId::new("node2"), "http://localhost:9999".to_string())
-            .await
-            .unwrap();
-
         // Register remote node in ObjectRegistry (ActorRegistry looks up nodes here)
+        // Note: We no longer use register_remote_node - discovery goes through ObjectRegistry/NodeRegistry
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
         let ctx = node.service_locator().request_context_for_system_operations().await;
         let registration = ObjectRegistration {
@@ -4624,7 +4356,11 @@ mod tests {
     async fn test_send_to_remote_node_not_found() {
         let node = NodeBuilder::new("node1").build().await;
 
-        let message = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
+        let message = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: vec![1, 2, 3],
+            ..Default::default()
+        };
 
         // Try to send to node that's not in connections registry
         // This will fail when trying to lookup the actor (node not found)
@@ -5063,8 +4799,7 @@ mod tests {
         let node_arc = Arc::new(NodeBuilder::new("test-node").build().await);
         
         // Register NodeMetricsAccessor early for tests (normally done in create_actor_context_arc)
-        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(node.clone()));
-        node_arc.service_locator().register_service(metrics_accessor.clone()).await;
+        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(node_arc.clone()));
         let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> = metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
         node_arc.service_locator().register_node_metrics_accessor(metrics_accessor_trait).await;
         let node = node_arc.as_ref();
@@ -5102,7 +4837,11 @@ mod tests {
         }
 
         // Send local message via ActorRef (use the actor_ref we already have)
-        let message = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
+        let message = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: vec![1, 2, 3],
+            ..Default::default()
+        };
         actor_ref.tell(message).await.unwrap();
 
         // Check stats updated (metrics are now updated synchronously in ActorRef::tell)
@@ -5692,8 +5431,6 @@ mod tests {
         // State should be Failed
         let state = node
             .application_manager()
-            .await
-            .unwrap()
             .get_state("test-app")
             .await;
         assert_eq!(state, Some(ApplicationState::ApplicationStateFailed));
@@ -5717,8 +5454,6 @@ mod tests {
         // Verify application stopped
         let state = node
             .application_manager()
-            .await
-            .unwrap()
             .get_state("test-app")
             .await;
         assert_eq!(state, Some(ApplicationState::ApplicationStateStopped));
@@ -5738,7 +5473,8 @@ mod tests {
         node.application_manager().start("test-app").await.unwrap();
 
         let result = node
-            .stop_application("test-app", tokio::time::Duration::from_secs(5))
+            .application_manager()
+            .stop("test-app", tokio::time::Duration::from_secs(5))
             .await;
 
         // Should fail
@@ -5747,8 +5483,6 @@ mod tests {
         // State should be Failed
         let state = node
             .application_manager()
-            .await
-            .unwrap()
             .get_state("test-app")
             .await;
         assert_eq!(state, Some(ApplicationState::ApplicationStateFailed));
@@ -5837,7 +5571,8 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let result = node
-            .stop_application("nonexistent", tokio::time::Duration::from_secs(5))
+            .application_manager()
+            .stop("nonexistent", tokio::time::Duration::from_secs(5))
             .await;
 
         // Should fail with not found error
@@ -5970,7 +5705,7 @@ mod tests {
         let manager = node.application_manager();
 
         // Verify it's the same manager (returns empty list initially)
-        let apps = manager.await.unwrap().list_applications().await;
+        let apps = manager.list_applications().await;
         assert_eq!(apps.len(), 0);
     }
 
@@ -6023,7 +5758,8 @@ mod tests {
 
         // Second stop should succeed (already stopped)
         let result = node
-            .stop_application("test-app", tokio::time::Duration::from_secs(5))
+            .application_manager()
+            .stop("test-app", tokio::time::Duration::from_secs(5))
             .await;
         assert!(result.is_ok());
     }

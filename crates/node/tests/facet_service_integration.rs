@@ -30,11 +30,21 @@ use test_helpers::spawn_actor_helper;
 use plexspaces_actor::ActorBuilder;
 use plexspaces_core::{Actor, ActorContext, ActorId};
 use plexspaces_journaling::TimerFacet;
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
 
 /// Simple behavior for testing
 struct TestBehavior;
@@ -139,8 +149,8 @@ async fn test_facet_service_get_facet_virtual_actor() {
     
     // Virtual actors with lazy activation need to be activated before facets are stored
     // Send a message to trigger activation
-    use plexspaces_mailbox::Message;
-    let message = Message::new(b"activate".to_vec());
+    use plexspaces_core::Message;
+    let message = create_test_message(b"activate".to_vec());
     actor_ref.tell(message).await.unwrap();
     
     // Wait for actor to be fully initialized and activated

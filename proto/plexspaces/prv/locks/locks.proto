@@ -42,7 +42,7 @@ package plexspaces.locks.prv;
 import "google/protobuf/timestamp.proto";
 import "buf/validate/validate.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/prv;plexspacesprv";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/prv/locks/locks;plexspaces_locks_prv";
 option java_package = "com.bhatti.plexspaces.locks.prv";
 option java_multiple_files = true;
 

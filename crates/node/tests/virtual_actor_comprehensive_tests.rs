@@ -5,7 +5,7 @@ use plexspaces_actor::{Actor as ActorStruct, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait, ActorRegistry};
 use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, MemoryJournalStorage, StateLoader, JournalStorage};
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_node::default_node_config;
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,27 @@ use tokio::time::sleep;
 #[path = "test_helpers.rs"]
 mod test_helpers;
 use test_helpers::{spawn_actor_helper, find_actor_helper, unregister_actor_helper, lookup_actor_ref, get_or_activate_actor_helper, activate_virtual_actor, wait_for_virtual_actor_activation};
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
+/// Helper to create a test message with message type
+fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        message_type: message_type.to_string(),
+        ..Default::default()
+    }
+}
+
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum TestMessage {
@@ -63,25 +84,25 @@ impl GenServer for CounterActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        let test_msg: TestMessage = serde_json::from_slice(msg.payload())
+        let test_msg: TestMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
         let reply_msg = match test_msg {
             TestMessage::Ping => {
-                Message::new(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
             }
             TestMessage::Increment => {
                 let mut count = self.count.lock().await;
                 *count += 1;
-                Message::new(serde_json::to_vec(&TestMessage::Pong("incremented".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("incremented".to_string())).unwrap())
             }
             TestMessage::GetCount => {
                 let count = *self.count.lock().await;
-                Message::new(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
             }
             TestMessage::SlowOperation(duration) => {
                 sleep(duration).await;
-                Message::new(serde_json::to_vec(&TestMessage::Pong("slow_done".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("slow_done".to_string())).unwrap())
             }
             TestMessage::Error => {
                 return Err(BehaviorError::ProcessingError("Test error".to_string()));
@@ -90,13 +111,14 @@ impl GenServer for CounterActor {
         };
         
         // Send reply using ActorContext
-        if let Some(sender_id) = &msg.sender {
+        if !msg.sender_id.is_empty() {
+            let correlation_id = if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) };
             eprintln!("🔵 [COUNTER_ACTOR] Sending reply: correlation_id={:?}, sender_id={}, target_actor_id={}", 
-                msg.correlation_id, sender_id, msg.receiver);
+                msg.correlation_id, &msg.sender_id, msg.receiver_id);
             let result = ctx.send_reply(
-                msg.correlation_id.as_deref(),
-                sender_id,
-                msg.receiver.clone(),
+                correlation_id,
+                &msg.sender_id,
+                msg.receiver_id.clone(),
                 reply_msg,
             ).await;
             match &result {
@@ -152,7 +174,7 @@ async fn test_lazy_activation_concurrent_requests() {
     sleep(Duration::from_millis(200)).await;
     
     // Trigger activation first by sending a message via ActorRef
-    let activate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let activate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let _ = actor_ref.tell(activate_msg).await;
@@ -182,7 +204,7 @@ async fn test_lazy_activation_concurrent_requests() {
     for _ in 0..10 {
         let actor_ref_clone = actor_ref.clone();
         let handle = tokio::spawn(async move {
-            let msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+            let msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
                 .with_message_type("call".to_string());
             actor_ref_clone.ask(msg, Duration::from_secs(5)).await
         });
@@ -196,10 +218,10 @@ async fn test_lazy_activation_concurrent_requests() {
     }
     
     // Verify count is 10 (all increments processed)
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(10)));
 }
 
@@ -238,7 +260,7 @@ async fn test_lazy_activation_pending_messages_processed() {
     // Activation is synchronous (VirtualActorWrapper.tell() awaits activate_virtual_actor())
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     for _ in 0..5 {
-        let msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+        let msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
             .with_message_type("call".to_string());
         let _ = actor_ref.tell(msg).await;
     }
@@ -251,10 +273,10 @@ async fn test_lazy_activation_pending_messages_processed() {
         .await
         .unwrap()
         .unwrap();
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(5)));
 }
 
@@ -292,7 +314,7 @@ async fn test_lazy_activation_activation_failure_handling() {
     sleep(Duration::from_millis(200)).await;
     
     // Trigger activation first
-    let activate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let activate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let result = actor_ref.tell(activate_msg).await;
@@ -305,7 +327,7 @@ async fn test_lazy_activation_activation_failure_handling() {
         .unwrap()
         .unwrap();
 
-    let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(msg, Duration::from_secs(5)).await;
     assert!(result.is_ok(), "Message should succeed after activation");
@@ -338,15 +360,15 @@ async fn test_regular_actor_tell_then_ask() {
         .unwrap();
     
     // Send tell()
-    let tell_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+    let tell_msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
         .with_message_type("cast".to_string());
     actor_ref.tell(tell_msg).await.unwrap();
     
     // Send ask() - should work
-    let ask_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let ask_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(1)));
 }
 
@@ -390,9 +412,9 @@ async fn test_lazy_activation_tell_then_ask() {
     // Send tell() - should activate synchronously
     // VirtualActorWrapper.tell() awaits activate_virtual_actor() which is synchronous
     // After activation, VirtualActorWrapper is replaced by ActorRef in registry
-    let tell_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+    let tell_msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
         .with_message_type("cast".to_string());
-    eprintln!("🔵 [TEST] Sending tell() message: actor_id={}, message_type={}", actor_id, tell_msg.message_type_str());
+    eprintln!("🔵 [TEST] Sending tell() message: actor_id={}, message_type={}", actor_id, tell_msg.message_type);
     actor_ref.tell(tell_msg).await.unwrap();
     eprintln!("🟢 [TEST] tell() completed: actor_id={}", actor_id);
     
@@ -413,14 +435,14 @@ async fn test_lazy_activation_tell_then_ask() {
     
     // Send ask() - should work (actor already activated, using ActorRef directly)
     // Behavior should be identical to regular actor
-    let ask_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let ask_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     eprintln!("🔵 [TEST] Sending ask() message: actor_id={}, message_type={}, correlation_id={:?}", 
-        actor_id, ask_msg.message_type_str(), ask_msg.correlation_id);
+        actor_id, ask_msg.message_type, ask_msg.correlation_id);
     let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await;
     eprintln!("🟢 [TEST] ask() completed: actor_id={}, result={:?}", actor_id, result.as_ref().map(|_| "Ok").unwrap_or("Err"));
     let result = result.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(1)));
 }
 
@@ -460,7 +482,7 @@ async fn test_eager_activation_immediate_availability() {
     
     // Registration is synchronous - actor should be immediately available
     // ask() will automatically set message.receiver to actor_ref.id() if unset (empty or "unknown")
-    let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(msg, Duration::from_secs(1)).await;
     assert!(result.is_ok(), "Eager actor should be immediately available");
@@ -507,7 +529,7 @@ async fn test_eager_activation_multiple_actors() {
                 .unwrap()
                 .unwrap();
             
-            let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+            let msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
                 .with_message_type("call".to_string());
             // ask() will automatically set message.receiver to actor_ref.id() if empty
             actor_ref.ask(msg, Duration::from_secs(1)).await
@@ -563,7 +585,7 @@ async fn test_passivation_idle_timeout_expiration() {
     sleep(Duration::from_millis(200)).await;
     
     // Activate actor - route through node
-    let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let _ = actor_ref.tell(msg).await;
@@ -619,7 +641,7 @@ async fn test_passivation_reactivation_after_timeout() {
     sleep(Duration::from_millis(200)).await;
     
     // Trigger activation first
-    let activate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let activate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let _ = actor_ref.tell(activate_msg).await;
@@ -633,7 +655,7 @@ async fn test_passivation_reactivation_after_timeout() {
         .unwrap();
     
     // Use actor
-    let msg1 = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+    let msg1 = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
         .with_message_type("call".to_string());
     let _ = actor_ref.ask(msg1, Duration::from_secs(5)).await;
     
@@ -642,7 +664,7 @@ async fn test_passivation_reactivation_after_timeout() {
     
     // Send another message - should reactivate
     // First trigger reactivation
-    let reactivate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let reactivate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let result = actor_ref.tell(reactivate_msg).await;
@@ -657,15 +679,15 @@ async fn test_passivation_reactivation_after_timeout() {
         .unwrap();
     
     // Send increment
-    let msg2 = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+    let msg2 = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
         .with_message_type("call".to_string());
     let _ = actor_ref2.ask(msg2, Duration::from_secs(5)).await;
     
     // Verify count is 2 (both increments processed)
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref2.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(2)));
 }
 
@@ -705,7 +727,7 @@ async fn test_passivation_message_resets_idle_timer() {
     
     // Activate actor - send via ActorRef
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
-    let msg1 = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let msg1 = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let _ = actor_ref.tell(msg1).await;
     
@@ -714,7 +736,7 @@ async fn test_passivation_message_resets_idle_timer() {
     // Send messages every 2 seconds (before timeout) - should prevent passivation
     for _ in 0..3 {
         sleep(Duration::from_secs(2)).await;
-        let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+        let msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
             .with_message_type("call".to_string());
         let _ = actor_ref.tell(msg).await;
     }
@@ -788,7 +810,7 @@ async fn test_mixed_lazy_eager_actors() {
     sleep(Duration::from_millis(500)).await;
     
     // Lazy actor should activate on first message - route through node
-    let lazy_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let lazy_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let lazy_actor_ref = lookup_actor_ref(&node, &lazy_id).await.unwrap().unwrap();
     let lazy_result = lazy_actor_ref.tell(lazy_msg).await;
@@ -799,7 +821,7 @@ async fn test_mixed_lazy_eager_actors() {
         .await
         .unwrap()
         .unwrap();
-    let eager_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let eager_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let eager_result = eager_ref.ask(eager_msg, Duration::from_secs(1)).await;
     assert!(eager_result.is_ok(), "Eager actor should be immediately available");
@@ -840,7 +862,7 @@ async fn test_virtual_actor_state_preservation() {
     sleep(Duration::from_millis(200)).await;
     
     // Trigger activation first
-    let activate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let activate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let _ = actor_ref.tell(activate_msg).await;
@@ -855,16 +877,16 @@ async fn test_virtual_actor_state_preservation() {
     
     // Increment to 5
     for _ in 0..5 {
-        let msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+        let msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
             .with_message_type("call".to_string());
         let _ = actor_ref.ask(msg, Duration::from_secs(5)).await;
     }
     
     // Verify count is 5
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(5)));
     
     // Wait for passivation
@@ -873,7 +895,7 @@ async fn test_virtual_actor_state_preservation() {
     // Reactivate and verify state is preserved
     // Note: In current implementation, state is in-memory, so it may not persist
     // This test verifies the reactivation works, but state persistence would require DurabilityFacet
-    let reactivate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let reactivate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let result = actor_ref.tell(reactivate_msg).await;
@@ -936,7 +958,7 @@ async fn test_virtual_actor_manual_deactivation() {
     sleep(Duration::from_millis(200)).await;
     
     // Activate actor - send via ActorRef
-    let activate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let activate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let _ = actor_ref.tell(activate_msg).await;
@@ -1001,7 +1023,7 @@ async fn test_virtual_actor_full_lifecycle() {
     assert!(is_virtual, "Actor should be registered as virtual");
     
     // 3. Send message - should activate - send via ActorRef
-    let activate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let activate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let result1 = actor_ref.tell(activate_msg).await;
@@ -1021,23 +1043,23 @@ async fn test_virtual_actor_full_lifecycle() {
     
     // Use actor
     for _ in 0..3 {
-        let msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+        let msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
             .with_message_type("call".to_string());
         let _ = actor_ref.ask(msg, Duration::from_secs(5)).await;
     }
     
     // 6. Verify count
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(3)));
     
     // 7. Wait for passivation
     sleep(Duration::from_secs(15)).await;
     
     // 8. Reactivate with new message - route through node
-    let reactivate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let reactivate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let result2 = actor_ref.tell(reactivate_msg).await;
@@ -1077,7 +1099,7 @@ async fn test_virtual_actor_high_throughput() {
     sleep(Duration::from_millis(200)).await;
     
     // Trigger activation first
-    let activate_msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let activate_msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     let _ = actor_ref.tell(activate_msg).await;
@@ -1095,7 +1117,7 @@ async fn test_virtual_actor_high_throughput() {
     for _ in 0..100 {
         let actor_ref_clone = actor_ref.clone();
         let handle = tokio::spawn(async move {
-            let msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+            let msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
                 .with_message_type("call".to_string());
             actor_ref_clone.ask(msg, Duration::from_secs(10)).await
         });
@@ -1109,10 +1131,10 @@ async fn test_virtual_actor_high_throughput() {
     }
     
     // Verify count
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(100)));
 }
 
@@ -1187,32 +1209,32 @@ impl GenServer for DurableCounterActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        let test_msg: TestMessage = serde_json::from_slice(msg.payload())
+        let test_msg: TestMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
         let reply_msg = match test_msg {
             TestMessage::Ping => {
-                Message::new(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
             }
             TestMessage::Increment => {
                 let mut count = self.count.lock().await;
                 *count += 1;
                 eprintln!("🟢 [DURABLE_COUNTER] Incremented count to {}", *count);
-                Message::new(serde_json::to_vec(&TestMessage::Pong("incremented".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("incremented".to_string())).unwrap())
             }
             TestMessage::GetCount => {
                 let count = *self.count.lock().await;
                 eprintln!("🟢 [DURABLE_COUNTER] GetCount: count={}", count);
-                Message::new(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
             }
             _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         };
         
-        if let Some(sender_id) = &msg.sender {
+        if !msg.sender_id.is_empty() {
             ctx.send_reply(
-                msg.correlation_id.as_deref(),
+                if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
                 sender_id,  // Where reply goes TO (temporary sender for ask pattern)
-                msg.receiver.clone(),  // Where reply comes FROM (current actor)
+                msg.receiver_id.clone(),  // Where reply comes FROM (current actor)
                 reply_msg,
             ).await
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
@@ -1283,7 +1305,7 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     let mut registry = BehaviorRegistry::new();
     registry.register_simple("GenServer", || DurableCounterActor::new()).await;
-    node.service_locator().register_service(Arc::new(registry)).await;
+    node.service_locator().register_behavior_registry(Arc::new(registry)).await;
     
     let actor_id: ActorId = "durable-counter-eager@test-node".to_string();
     
@@ -1353,16 +1375,16 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
         .unwrap();
     
     for _ in 0..3 {
-        let increment_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+        let increment_msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
             .with_message_type("call".to_string());
         let _ = actor_ref.ask(increment_msg, Duration::from_secs(5)).await.unwrap();
     }
     
     // Verify count is 3
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(3)), "Count should be 3 after 3 increments");
     
     // Create checkpoint manually (since auto-checkpoint may not have triggered)
@@ -1401,10 +1423,10 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
         .unwrap()
         .unwrap();
     
-    let ask_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let ask_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     
     // Verify state was restored
     // StateLoader.restore_state() stores the restored state in shared_state
@@ -1446,7 +1468,7 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     let mut registry = BehaviorRegistry::new();
     registry.register_simple("GenServer", || DurableCounterActor::new()).await;
-    node.service_locator().register_service(Arc::new(registry)).await;
+    node.service_locator().register_behavior_registry(Arc::new(registry)).await;
     
     let actor_id: ActorId = "durable-counter-lazy@test-node".to_string();
     
@@ -1516,16 +1538,16 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     
     // Increment count to 5
     for _ in 0..5 {
-        let increment_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+        let increment_msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
             .with_message_type("call".to_string());
         let _ = actor_ref.ask(increment_msg, Duration::from_secs(5)).await.unwrap();
     }
     
     // Verify count is 5
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(5)), "Count should be 5 after 5 increments");
     
     // Create checkpoint manually
@@ -1563,10 +1585,10 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
         .unwrap()
         .unwrap();
     
-    let ask_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let ask_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     
     // Verify state was restored
     // StateLoader.restore_state() stores the restored state in shared_state

@@ -24,27 +24,45 @@
 //! 3. register_local() has been removed
 //! 4. is_actor_activated() checks MessageSender, not mailbox
 
-use plexspaces_core::{ActorRegistry, ActorId, actor_context::ObjectRegistry, MessageSender};
+use plexspaces_core::{ActorRegistry, ActorId, actor_context::ObjectRegistry, MessageSender, Message, RequestContext};
 use plexspaces_keyvalue::InMemoryKVStore;
-use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
 use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use ulid::Ulid;
 
 // Atomic counter for generating unique test IDs
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
 // Simple MessageSender implementation for testing
 struct TestMessageSender {
     actor_id: ActorId,
-    mailbox: Arc<Mailbox>,
+    messages: Arc<tokio::sync::RwLock<Vec<Message>>>,
+}
+
+impl TestMessageSender {
+    fn new(actor_id: ActorId) -> Self {
+        Self {
+            actor_id,
+            messages: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl MessageSender for TestMessageSender {
     async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.mailbox.enqueue(message).await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        self.messages.write().await.push(message);
+        Ok(())
     }
 }
 
@@ -57,7 +75,7 @@ struct ObjectRegistryAdapter {
 impl ObjectRegistry for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &RequestContext,
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -70,7 +88,7 @@ impl ObjectRegistry for ObjectRegistryAdapter {
 
     async fn lookup_full(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -82,7 +100,7 @@ impl ObjectRegistry for ObjectRegistryAdapter {
 
     async fn discover(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &RequestContext,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         name_pattern: Option<String>,
         tags: Option<Vec<String>>,
@@ -99,7 +117,7 @@ impl ObjectRegistry for ObjectRegistryAdapter {
 
     async fn register(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &RequestContext,
         registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner
@@ -108,6 +126,29 @@ impl ObjectRegistry for ObjectRegistryAdapter {
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
 
+    async fn unregister(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .unregister(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn heartbeat(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .heartbeat(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
 fn create_test_registry() -> Arc<ActorRegistry> {
@@ -121,9 +162,9 @@ fn create_test_registry() -> Arc<ActorRegistry> {
 
 /// Helper to create test RequestContext with proper tenant/namespace isolation
 /// Generates unique tenant/namespace per test to allow concurrent test execution
-fn create_test_context() -> plexspaces_core::RequestContext {
+fn create_test_context() -> RequestContext {
     let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    plexspaces_core::RequestContext::new_without_auth(
+    RequestContext::new_without_auth(
         format!("test-tenant-{}", test_id),
         format!("test-namespace-{}", test_id),
     )
@@ -134,14 +175,8 @@ async fn test_register_actor_with_message_sender() {
     let registry = create_test_registry();
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
-    // Create mailbox with larger capacity and MessageSender
-    let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.capacity = 1000;
-    let mailbox = Arc::new(Mailbox::new(mailbox_config, actor_id.clone()).await.unwrap());
-    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender {
-        actor_id: actor_id.clone(),
-        mailbox: mailbox.clone(),
-    });
+    // Create MessageSender
+    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     
     // Register actor with MessageSender
     let ctx = create_test_context();
@@ -160,14 +195,10 @@ async fn test_register_actor_mailbox_not_exposed() {
     let registry = create_test_registry();
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
-    // Create mailbox with larger capacity and MessageSender
-    let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.capacity = 1000;
-    let mailbox = Arc::new(Mailbox::new(mailbox_config, actor_id.clone()).await.unwrap());
-    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender {
-        actor_id: actor_id.clone(),
-        mailbox: mailbox.clone(),
-    });
+    // Create MessageSender with internal message storage
+    let test_sender = Arc::new(TestMessageSender::new(actor_id.clone()));
+    let messages = test_sender.messages.clone();
+    let sender: Arc<dyn MessageSender> = test_sender;
     
     // Register actor
     let ctx = create_test_context();
@@ -175,18 +206,16 @@ async fn test_register_actor_mailbox_not_exposed() {
     
     // Verify we can send messages via MessageSender
     let sender = registry.lookup_actor(&actor_id).await.unwrap();
-    let message = Message::new(vec![1, 2, 3]);
+    let message = create_test_message(vec![1, 2, 3]);
     let result = sender.tell(message).await;
     if let Err(e) = &result {
         eprintln!("Error sending message: {}", e);
     }
     assert!(result.is_ok(), "Should be able to send message via MessageSender, got error: {:?}", result.err());
     
-    // Verify message was delivered to mailbox
-    // Give it a moment for async processing
-    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    let received = mailbox.dequeue().await;
-    assert!(received.is_some(), "Message should be in mailbox");
+    // Verify message was delivered
+    let received = messages.read().await;
+    assert_eq!(received.len(), 1, "Message should be stored");
 }
 
 #[tokio::test]
@@ -195,11 +224,7 @@ async fn test_unregister_actor_removes_message_sender() {
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
     // Register actor
-    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), actor_id.clone()).await.unwrap());
-    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender {
-        actor_id: actor_id.clone(),
-        mailbox: mailbox.clone(),
-    });
+    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     let ctx = create_test_context();
     registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
     
@@ -223,11 +248,7 @@ async fn test_is_actor_activated_checks_message_sender() {
     assert!(!registry.is_actor_activated(&actor_id).await);
     
     // Register actor
-    let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), actor_id.clone()).await.unwrap());
-    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender {
-        actor_id: actor_id.clone(),
-        mailbox: mailbox.clone(),
-    });
+    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     let ctx = create_test_context();
     registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
     
@@ -242,13 +263,9 @@ async fn test_multiple_actors_registration() {
     // Register multiple actors
     for i in 0..10 {
         let actor_id: ActorId = format!("actor-{}@test-node", i);
-        let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), actor_id.clone()).await.unwrap());
-        let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender {
-            actor_id: actor_id.clone(),
-            mailbox: mailbox.clone(),
-        });
+        let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
         let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
+        registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
     }
     
     // Verify all are registered

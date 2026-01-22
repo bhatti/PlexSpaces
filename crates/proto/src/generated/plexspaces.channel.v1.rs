@@ -368,41 +368,6 @@ pub struct SqsConfig {
     #[prost(uint32, tag="8")]
     pub receive_message_wait_time_seconds: u32,
 }
-/// Channel message envelope
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ChannelMessage {
-    /// Unique message ID (ULID)
-    #[prost(string, tag="1")]
-    pub id: ::prost::alloc::string::String,
-    /// Channel name/topic
-    #[prost(string, tag="2")]
-    pub channel: ::prost::alloc::string::String,
-    /// Sender actor ID (optional)
-    #[prost(string, tag="3")]
-    pub sender_id: ::prost::alloc::string::String,
-    /// Message payload (opaque bytes)
-    #[prost(bytes="vec", tag="4")]
-    pub payload: ::prost::alloc::vec::Vec<u8>,
-    /// Message headers (metadata)
-    #[prost(map="string, string", tag="5")]
-    pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Message timestamp
-    #[prost(message, optional, tag="6")]
-    pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
-    /// Partition key (for Kafka/Redis)
-    #[prost(string, tag="7")]
-    pub partition_key: ::prost::alloc::string::String,
-    /// Correlation ID (for request/reply)
-    #[prost(string, tag="8")]
-    pub correlation_id: ::prost::alloc::string::String,
-    /// Reply-to channel (for RPC pattern)
-    #[prost(string, tag="9")]
-    pub reply_to: ::prost::alloc::string::String,
-    /// Delivery count (for retry tracking)
-    #[prost(uint32, tag="10")]
-    pub delivery_count: u32,
-}
 /// Channel statistics
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -456,7 +421,7 @@ pub struct SendRequest {
     #[prost(string, tag="1")]
     pub channel: ::prost::alloc::string::String,
     #[prost(message, optional, tag="2")]
-    pub message: ::core::option::Option<ChannelMessage>,
+    pub message: ::core::option::Option<super::super::common::v1::Message>,
     #[prost(message, optional, tag="3")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
@@ -486,7 +451,7 @@ pub struct ReceiveRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReceiveResponse {
     #[prost(message, repeated, tag="1")]
-    pub messages: ::prost::alloc::vec::Vec<ChannelMessage>,
+    pub messages: ::prost::alloc::vec::Vec<super::super::common::v1::Message>,
 }
 /// Subscribe request (streaming)
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -508,7 +473,7 @@ pub struct PublishRequest {
     #[prost(string, tag="1")]
     pub channel: ::prost::alloc::string::String,
     #[prost(message, optional, tag="2")]
-    pub message: ::core::option::Option<ChannelMessage>,
+    pub message: ::core::option::Option<super::super::common::v1::Message>,
 }
 /// Publish response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -624,6 +589,19 @@ pub enum ChannelBackend {
     /// - At-least-once delivery with visibility timeout
     /// - Auto-scaling, no infrastructure management
     ChannelBackendSqs = 6,
+    /// Process Group for Erlang pg/pg2-style pub/sub
+    /// - Uses ProcessGroupService via ServiceLocator
+    /// - Distributed across cluster nodes
+    /// - Pub/sub with topic filtering
+    /// - No external dependencies
+    ChannelBackendProcessGroup = 7,
+    /// PostgreSQL for durable distributed messaging
+    /// - Uses FOR UPDATE SKIP LOCKED for queue semantics
+    /// - LISTEN/NOTIFY for pub/sub notifications
+    /// - Transactional message processing
+    /// - Durable, survives crashes
+    /// - Good for existing Postgres deployments
+    ChannelBackendPostgres = 8,
     /// Custom backend (user-provided implementation)
     ChannelBackendCustom = 99,
 }
@@ -641,6 +619,8 @@ impl ChannelBackend {
             ChannelBackend::ChannelBackendNats => "CHANNEL_BACKEND_NATS",
             ChannelBackend::ChannelBackendUdp => "CHANNEL_BACKEND_UDP",
             ChannelBackend::ChannelBackendSqs => "CHANNEL_BACKEND_SQS",
+            ChannelBackend::ChannelBackendProcessGroup => "CHANNEL_BACKEND_PROCESS_GROUP",
+            ChannelBackend::ChannelBackendPostgres => "CHANNEL_BACKEND_POSTGRES",
             ChannelBackend::ChannelBackendCustom => "CHANNEL_BACKEND_CUSTOM",
         }
     }
@@ -654,6 +634,8 @@ impl ChannelBackend {
             "CHANNEL_BACKEND_NATS" => Some(Self::ChannelBackendNats),
             "CHANNEL_BACKEND_UDP" => Some(Self::ChannelBackendUdp),
             "CHANNEL_BACKEND_SQS" => Some(Self::ChannelBackendSqs),
+            "CHANNEL_BACKEND_PROCESS_GROUP" => Some(Self::ChannelBackendProcessGroup),
+            "CHANNEL_BACKEND_POSTGRES" => Some(Self::ChannelBackendPostgres),
             "CHANNEL_BACKEND_CUSTOM" => Some(Self::ChannelBackendCustom),
             _ => None,
         }

@@ -58,8 +58,9 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats, SqliteConfig,
+    channel_config, ChannelBackend, ChannelConfig, ChannelStats, SqliteConfig,
 };
+use plexspaces_proto::common::v1::Message;
 use prost_types::Timestamp;
 use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
 use std::collections::HashMap;
@@ -88,7 +89,7 @@ pub struct SqliteChannel {
     table_name: String,
     stats: Arc<ChannelStatsData>,
     closed: Arc<AtomicBool>,
-    pending_acks: Arc<RwLock<HashMap<String, ChannelMessage>>>,
+    pending_acks: Arc<RwLock<HashMap<String, Message>>>,
 }
 
 struct ChannelStatsData {
@@ -266,8 +267,8 @@ impl SqliteChannel {
             let payload: Vec<u8> = row.get(2);
             let timestamp_ms: i64 = row.get(3);
 
-            // Reconstruct ChannelMessage
-            let message = ChannelMessage {
+            // Reconstruct Message
+            let message = Message {
                 id: id.clone(),
                 channel: self.config.name.clone(),
                 payload,
@@ -361,7 +362,7 @@ impl SqliteChannel {
 
 #[async_trait]
 impl Channel for SqliteChannel {
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String> {
+    async fn send(&self, message: Message) -> ChannelResult<String> {
         // Check if closed
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
@@ -399,7 +400,7 @@ impl Channel for SqliteChannel {
         Ok(msg_id)
     }
 
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         let mut messages = Vec::new();
 
         // Query unacked messages
@@ -428,7 +429,7 @@ impl Channel for SqliteChannel {
             let payload: Vec<u8> = row.get(2);
             let timestamp_ms: i64 = row.get(3);
 
-            let message = ChannelMessage {
+            let message = Message {
                 id: id.clone(),
                 channel: self.config.name.clone(),
                 payload,
@@ -456,7 +457,7 @@ impl Channel for SqliteChannel {
         Ok(messages)
     }
 
-    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         // Same as receive for SQLite (no blocking needed)
         self.receive(max_messages).await
     }
@@ -464,7 +465,7 @@ impl Channel for SqliteChannel {
     async fn subscribe(
         &self,
         _consumer_group: Option<String>,
-    ) -> ChannelResult<BoxStream<'static, ChannelMessage>> {
+    ) -> ChannelResult<BoxStream<'static, Message>> {
         // SQLite doesn't support pub/sub natively
         // Could implement with polling, but not recommended
         Err(ChannelError::BackendError(
@@ -472,7 +473,7 @@ impl Channel for SqliteChannel {
         ))
     }
 
-    async fn publish(&self, message: ChannelMessage) -> ChannelResult<u32> {
+    async fn publish(&self, message: Message) -> ChannelResult<u32> {
         // SQLite doesn't support pub/sub natively
         // Could implement by storing and having subscribers poll
         // For now, just send to database (subscribers would need to poll)
@@ -797,8 +798,8 @@ mod tests {
         }
     }
 
-    fn create_test_message(id: &str, payload: &str) -> ChannelMessage {
-        ChannelMessage {
+    fn create_test_message(id: &str, payload: &str) -> Message {
+        Message {
             id: id.to_string(),
             channel: "test-channel".to_string(),
             payload: payload.as_bytes().to_vec(),

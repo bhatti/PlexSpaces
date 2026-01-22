@@ -29,7 +29,7 @@
 
 use crate::{Actor, ActorContext, BehaviorError, BehaviorType};
 use async_trait::async_trait;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use std::sync::{Arc, Mutex};
 
 /// Counter actor pattern
@@ -103,11 +103,10 @@ impl Actor for CounterActor {
                 // Note: ActorService is accessed via ServiceLocator, but we can't easily get it in core
                 // due to circular dependencies. For now, reply sending is disabled in patterns.
                 // Actors should handle replies directly using ctx.service_locator or ActorRef.
-                if let Some(_sender_id) = msg.sender_id() {
+                if !msg.sender_id.is_empty() {
                     // TODO: Implement reply sending via ServiceLocator or ActorRef
                     // For now, replies are not sent from patterns
-                    // let reply = Message::new(count.to_string().into_bytes())
-                    //     .with_message_type("count".to_string());
+                    // let reply = Message { payload: count.to_string().into_bytes(), ..Default::default() };
                     // Use ActorRef or ActorService from ServiceLocator to send reply
                 }
             }
@@ -246,12 +245,11 @@ impl Actor for CoordinatorActor {
                 // Note: ActorService is accessed via ServiceLocator, but we can't easily get it in core
                 // due to circular dependencies. For now, reply sending is disabled in patterns.
                 // Actors should handle replies directly using ctx.service_locator or ActorRef.
-                if let Some(_sender_id) = msg.sender_id() {
+                if !msg.sender_id.is_empty() {
                     // TODO: Implement reply sending via ServiceLocator or ActorRef
                     // For now, replies are not sent from patterns
                     // let reply_payload = serde_json::to_vec(&workers).unwrap_or_default();
-                    // let reply = Message::new(reply_payload)
-                    //     .with_message_type("workers".to_string());
+                    // let reply = Message { payload: reply_payload, ..Default::default() };
                     // Use ActorRef or ActorService from ServiceLocator to send reply
                 }
             }

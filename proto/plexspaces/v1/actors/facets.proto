@@ -208,6 +208,7 @@
 syntax = "proto3";
 
 package plexspaces.facets.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/facets;plexspaces_facets_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/struct.proto";

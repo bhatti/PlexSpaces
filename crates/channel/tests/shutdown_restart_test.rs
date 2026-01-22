@@ -36,6 +36,7 @@
 
 use plexspaces_channel::*;
 use plexspaces_proto::channel::v1::*;
+use plexspaces_proto::common::v1::Message;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -64,8 +65,8 @@ fn create_test_config_with_retry_dlq(
 }
 
 // Helper to create test message
-fn create_test_message(id: &str, payload: &str) -> ChannelMessage {
-    ChannelMessage {
+fn create_test_message(id: &str, payload: &str) -> Message {
+    Message {
         id: id.to_string(),
         channel: "test-channel".to_string(),
         payload: payload.as_bytes().to_vec(),
@@ -126,7 +127,7 @@ async fn test_mock_shutdown_complete_in_progress() {
     }
 
     // Receive some messages (in-progress)
-    let in_progress: Vec<ChannelMessage> = Channel::receive(&channel, 3).await.unwrap();
+    let in_progress: Vec<Message> = Channel::receive(&channel, 3).await.unwrap();
     assert_eq!(in_progress.len(), 3);
 
     // Initiate shutdown
@@ -164,7 +165,7 @@ async fn test_mock_restart_recover_unacked() {
     }
 
     // Receive 2 messages but don't ACK (simulating crash)
-    let received: Vec<ChannelMessage> = Channel::receive(&channel1, 2).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel1, 2).await.unwrap();
     assert_eq!(received.len(), 2);
     let _unacked_ids: Vec<String> = received.iter().map(|m| m.id.clone()).collect();
     
@@ -184,7 +185,7 @@ async fn test_mock_restart_recover_unacked() {
     // In a real scenario, unacked messages would be redelivered
     // For mock, we verify the pattern works
     // The remaining 3 messages should still be available
-    let remaining: Vec<ChannelMessage> = Channel::receive(&channel2, 10).await.unwrap();
+    let remaining: Vec<Message> = Channel::receive(&channel2, 10).await.unwrap();
     // Note: Mock doesn't persist, so this would be empty
     // But the test verifies the shutdown/restart pattern
     assert!(remaining.len() <= 3, "Should not have more than remaining messages");
@@ -241,7 +242,7 @@ mod sqlite_tests {
             }
 
             // Receive 2 messages but don't ACK (simulating crash)
-            let received: Vec<ChannelMessage> = Channel::receive(&channel, 2).await.unwrap();
+            let received: Vec<Message> = Channel::receive(&channel, 2).await.unwrap();
             assert_eq!(received.len(), 2);
             // Channel is dropped (simulating crash/restart)
         }
@@ -281,14 +282,14 @@ mod sqlite_tests {
             }
 
             // Process first 3 messages and ACK them
-            let batch1: Vec<ChannelMessage> = channel.receive(3).await.unwrap();
+            let batch1: Vec<Message> = channel.receive(3).await.unwrap();
             assert_eq!(batch1.len(), 3);
             for msg in batch1 {
                 Channel::ack(&channel, &msg.id).await.unwrap();
             }
 
             // Receive next 2 messages but crash before ACK
-            let batch2: Vec<ChannelMessage> = channel.receive(2).await.unwrap();
+            let batch2: Vec<Message> = channel.receive(2).await.unwrap();
             assert_eq!(batch2.len(), 2);
             // Don't ACK - simulate crash
         }
@@ -324,7 +325,7 @@ mod sqlite_tests {
         }
 
         // Receive some messages (in-progress)
-        let in_progress: Vec<ChannelMessage> = channel.receive(3).await.unwrap();
+        let in_progress: Vec<Message> = channel.receive(3).await.unwrap();
         assert_eq!(in_progress.len(), 3);
 
         // Initiate shutdown
@@ -427,7 +428,7 @@ mod redis_tests {
             }
 
             // Receive 2 messages but don't ACK (simulating crash)
-            let received: Vec<ChannelMessage> = Channel::receive(&channel, 2).await.unwrap();
+            let received: Vec<Message> = Channel::receive(&channel, 2).await.unwrap();
             assert_eq!(received.len(), 2);
             // Channel is dropped (simulating crash/restart)
         }
@@ -471,7 +472,7 @@ mod redis_tests {
         }
 
         // Receive some messages (in-progress)
-        let in_progress: Vec<ChannelMessage> = channel.receive(3).await.unwrap();
+        let in_progress: Vec<Message> = channel.receive(3).await.unwrap();
         assert_eq!(in_progress.len(), 3);
 
         // Initiate shutdown

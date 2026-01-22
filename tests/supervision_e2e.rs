@@ -39,13 +39,23 @@ use tokio::time::{sleep, Duration};
 use async_trait::async_trait;
 use plexspaces::ActorId;
 use plexspaces::{ActorContext, BehaviorError, BehaviorType};
-use plexspaces_actor::Actor as ActorStruct;
+use plexspaces_actor::{Actor as ActorStruct, TestServiceLocatorStub};
 use plexspaces_core::Actor as ActorTrait;
 use plexspaces_core::Message;
 use plexspaces_core::ServiceLocator;
 use plexspaces_mailbox::Mailbox;
 use plexspaces_persistence::MemoryJournal;
-use plexspaces_supervisor::{
+use ulid::Ulid;
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+use plexspaces_actor::supervisor::{
     ActorSpec, ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
 };
 
@@ -140,7 +150,7 @@ impl ActorTrait for CounterWorker {
 #[tokio::test]
 async fn test_one_for_one_restart() {
     // Create supervisor with ONE_FOR_ONE strategy
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "one-for-one-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -228,7 +238,7 @@ async fn test_one_for_one_restart() {
 
     // Send messages to faulty worker to trigger crash
     for _ in 0..3 {
-        let _ = faulty_ref.tell(Message::new(b"test".to_vec())).await;
+        let _ = faulty_ref.tell(create_test_message(b"test".to_vec())).await;
         sleep(Duration::from_millis(10)).await;
     }
 
@@ -268,7 +278,7 @@ async fn test_one_for_one_restart() {
 #[tokio::test]
 async fn test_one_for_all_restart() {
     // Create supervisor with ONE_FOR_ALL strategy
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "one-for-all-supervisor".to_string(),
         SupervisionStrategy::OneForAll {
@@ -353,8 +363,8 @@ async fn test_one_for_all_restart() {
     let _ = event_rx.recv().await;
 
     // Trigger crash in worker1
-    let _ = worker1_ref.tell(Message::new(b"crash".to_vec())).await;
-    let _ = worker1_ref.tell(Message::new(b"crash".to_vec())).await;
+    let _ = worker1_ref.tell(create_test_message(b"crash".to_vec())).await;
+    let _ = worker1_ref.tell(create_test_message(b"crash".to_vec())).await;
 
     sleep(Duration::from_millis(100)).await;
 
@@ -369,7 +379,7 @@ async fn test_one_for_all_restart() {
 #[tokio::test]
 async fn test_rest_for_one_restart() {
     // Create supervisor with REST_FOR_ONE strategy
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "rest-for-one-supervisor".to_string(),
         SupervisionStrategy::RestForOne {
@@ -437,7 +447,7 @@ async fn test_rest_for_one_restart() {
 #[tokio::test]
 async fn test_restart_limits() {
     // Create supervisor with low restart limit
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "limited-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -486,7 +496,7 @@ async fn test_restart_limits() {
 
     // Trigger multiple crashes
     for _ in 0..5 {
-        let _ = crasher_ref.tell(Message::new(b"crash".to_vec())).await;
+        let _ = crasher_ref.tell(create_test_message(b"crash".to_vec())).await;
         sleep(Duration::from_millis(50)).await;
     }
 
@@ -503,7 +513,7 @@ async fn test_restart_limits() {
 #[tokio::test]
 async fn test_hierarchical_supervision() {
     // Create root supervisor
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(TestServiceLocatorStub::new());
     let (mut root_supervisor, _root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -570,7 +580,7 @@ async fn test_hierarchical_supervision() {
 
 #[tokio::test]
 async fn test_permanent_restart_policy() {
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "policy-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -622,7 +632,7 @@ async fn test_permanent_restart_policy() {
 
 #[tokio::test]
 async fn test_temporary_restart_policy() {
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "temp-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -674,7 +684,7 @@ async fn test_temporary_restart_policy() {
 
 #[tokio::test]
 async fn test_transient_restart_policy() {
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "transient-supervisor".to_string(),
         SupervisionStrategy::OneForOne {

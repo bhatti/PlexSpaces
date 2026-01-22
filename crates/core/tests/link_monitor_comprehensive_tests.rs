@@ -37,7 +37,7 @@ use plexspaces_core::{
     ActorId, ActorRegistry, ExitReason, ExitAction, ActorContext, Actor, ActorError, BehaviorError,
     Message, BehaviorType, ServiceLocator, RequestContext, ActorRef,
 };
-use plexspaces_mailbox::Message as MailboxMessage;
+// Note: Message is now unified proto Message from plexspaces_proto::common::v1
 use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
 use plexspaces_keyvalue::InMemoryKVStore;
 use std::sync::Arc;
@@ -100,6 +100,30 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
     ) -> Result<Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
             .discover(ctx, object_type, object_id_prefix, object_ids, tags, health_status, limit, offset)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn unregister(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .unregister(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn heartbeat(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .heartbeat(ctx, object_type, object_id)
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -176,9 +200,9 @@ impl Actor for TestActor {
         _ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        // Check if this is an EXIT message
-        if msg.is_exit() {
-            // Extract EXIT information (would need Message::exit_info() helper)
+        // Check if this is an EXIT message (message_type == "__EXIT__")
+        if msg.message_type == "__EXIT__" {
+            // EXIT information is in the payload/headers
             // For now, we'll handle it in handle_exit
         }
         Ok(())

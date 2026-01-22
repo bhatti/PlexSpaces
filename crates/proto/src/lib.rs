@@ -259,8 +259,11 @@ pub use v1::tuplespace::{
     tuple_plex_space_service_server::TuplePlexSpaceServiceServer,
 };
 
-// Re-export v1 process groups types for convenience
+// Re-export v1 process groups types and service for convenience
 pub use v1::processgroups::{
+    process_group_service_client::ProcessGroupServiceClient,
+    process_group_service_server::ProcessGroupService as ProcessGroupServiceTrait,
+    process_group_service_server::ProcessGroupServiceServer,
     GroupMembership, ProcessGroup,
 };
 
@@ -272,8 +275,7 @@ mod tests {
     fn test_proto_modules_exist() {
         // Simple test to ensure modules are accessible
         // The actual types are tested in integration tests
-        use v1::actor::Message;
-        use v1::common::*;
+        use v1::common::Message;
 
         // Verify basic types exist
         let _ = Message::default();

@@ -330,6 +330,7 @@
 syntax = "proto3";
 
 package plexspaces.actor_groups.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/actor_groups;plexspaces_actor_groups_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
@@ -407,7 +408,7 @@ message ScatterGatherQuery {
   string group_id = 1;
 
   // Query message to send to all shards
-  plexspaces.actor.v1.Message query = 2;
+  plexspaces.common.v1.Message query = 2;
 
   // Timeout for gathering results
   google.protobuf.Duration timeout = 3;
@@ -432,7 +433,7 @@ enum AggregationStrategy {
 // Scatter-gather response
 message ScatterGatherResponse {
   // Aggregated result
-  plexspaces.actor.v1.Message result = 1;
+  plexspaces.common.v1.Message result = 1;
 
   // Individual shard responses
   repeated ShardResponse shard_responses = 2;
@@ -447,7 +448,7 @@ message ShardResponse {
   uint32 shard_id = 1;
 
   // Response message
-  plexspaces.actor.v1.Message response = 2;
+  plexspaces.common.v1.Message response = 2;
 
   // Response latency
   google.protobuf.Duration latency = 3;
@@ -644,7 +645,7 @@ message SendToShardRequest {
   bytes partition_key = 2;
 
   // Message to send
-  plexspaces.actor.v1.Message message = 3;
+  plexspaces.common.v1.Message message = 3;
 
   // Wait for response
   bool wait_for_response = 4;
@@ -658,5 +659,5 @@ message SendToShardResponse {
   uint32 shard_id = 1;
 
   // Response from shard (if wait_for_response = true)
-  plexspaces.actor.v1.Message response = 2;
+  plexspaces.common.v1.Message response = 2;
 }

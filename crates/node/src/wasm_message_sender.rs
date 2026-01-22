@@ -8,7 +8,7 @@
 
 use async_trait::async_trait;
 use plexspaces_core::{ActorService, ServiceLocator};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_wasm_runtime::MessageSender;
 use std::sync::Arc;
 

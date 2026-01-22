@@ -44,7 +44,7 @@ import "plexspaces/v1/metrics/metrics.proto";
 import "plexspaces/v1/system/system.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/dashboard/v1;dashboardv1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/dashboard/dashboard;plexspaces_dashboard_v1";
 option java_package = "com.bhatti.plexspaces.dashboard.v1";
 option java_multiple_files = true;
 

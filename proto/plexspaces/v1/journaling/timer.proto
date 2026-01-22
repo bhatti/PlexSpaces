@@ -288,6 +288,7 @@
 syntax = "proto3";
 
 package plexspaces.timer.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/journaling/timer;plexspaces_timer_v1";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";

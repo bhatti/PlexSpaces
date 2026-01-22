@@ -20,8 +20,7 @@
 
 use plexspaces_actor::ActorBuilder;
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{ActorContext, BehaviorError, Actor, BehaviorType};
-use plexspaces_mailbox::Message;
+use plexspaces_core::{ActorContext, BehaviorError, Actor, BehaviorType, Message};
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -67,24 +66,29 @@ impl GenServer for TestGenServer {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        let request: TestMessage = serde_json::from_slice(msg.payload())
+        let request: TestMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
         let reply_msg = match request {
             TestMessage::Request(data) => {
                 self.state = data.clone();
                 info!("✅ GenServer: Received request: {}, state now: {}", data, self.state);
-                Message::new(serde_json::to_vec(&TestMessage::Reply(format!("Echo: {}", data))).unwrap())
+                Message {
+                    id: ulid::Ulid::new().to_string(),
+                    payload: serde_json::to_vec(&TestMessage::Reply(format!("Echo: {}", data))).unwrap(),
+                    ..Default::default()
+                }
             }
             _ => return Err(BehaviorError::ProcessingError("Invalid message".to_string())),
         };
         
         // Send reply using ctx.send_reply() (matches working tests)
-        if let Some(sender_id) = &msg.sender {
+        if !msg.sender_id.is_empty() {
+            let correlation = if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) };
             ctx.send_reply(
-                msg.correlation_id.as_deref(),
-                sender_id,
-                msg.receiver.clone(),
+                correlation,
+                &msg.sender_id,
+                msg.receiver_id.clone(),
                 reply_msg,
             ).await
                 .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;

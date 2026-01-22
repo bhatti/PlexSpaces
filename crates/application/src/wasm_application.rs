@@ -37,7 +37,7 @@ use async_trait::async_trait;
 use crate::{Application, ApplicationError, ApplicationNode};
 use plexspaces_proto::v1::application::HealthStatus;
 use plexspaces_core::{Actor, BehaviorError, BehaviorType};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
 use prost::Message as ProstMessage;
 use plexspaces_proto::wasm::v1::WasmModule;
@@ -68,7 +68,7 @@ impl Actor for WasmActorBehavior {
         message: Message,
     ) -> Result<(), BehaviorError> {
         // Extract message details
-        let from = message.sender.as_deref().unwrap_or("unknown");
+        let from = if message.sender_id.is_empty() { "unknown" } else { &message.sender_id };
         // For now, use a default message type - in the future, this could come from metadata
         let message_type = "call";
         
@@ -83,23 +83,26 @@ impl Actor for WasmActorBehavior {
             Ok(response) => {
                 // Handle response for request-reply patterns
                 // If message has sender_id, send reply using ActorRef::send_reply()
-                if let Some(sender_id) = &message.sender {
-                    let mut reply_message = Message::new(response)
-                        .with_sender(message.receiver.clone()) // Use receiver as sender of reply
-                        .with_message_type("reply".to_string());
+                if !message.sender_id.is_empty() {
+                    let sender_id = message.sender_id.clone();
+                    let mut reply_message = Message {
+                        id: ulid::Ulid::new().to_string(),
+                        payload: response,
+                        sender_id: message.receiver_id.clone(), // Use receiver as sender of reply
+                        message_type: "reply".to_string(),
+                        ..Default::default()
+                    };
                     // Preserve correlation_id if present
-                    if let Some(corr_id) = &message.correlation_id {
-                        reply_message = reply_message.with_correlation_id(corr_id.clone());
+                    if !message.correlation_id.is_empty() {
+                        reply_message.correlation_id = message.correlation_id.clone();
                     }
                     // Use ActorService::send() to send reply (handles local/remote automatically)
                     // ActorService::send() will route via ActorRef::tell() which handles temporary sender IDs and correlation_id routing
                     if let Some(actor_service) = ctx.service_locator.get_actor_service().await {
                         // Set receiver to sender_id (the actor that called ask())
-                        reply_message.receiver = sender_id.clone();
-                        // Set sender to this actor's ID
-                        reply_message.sender = Some(message.receiver.clone());
+                        reply_message.receiver_id = sender_id.clone();
                         
-                        if let Err(e) = actor_service.send(sender_id, reply_message).await {
+                        if let Err(e) = actor_service.send(&sender_id, reply_message).await {
                             tracing::warn!(error = %e, "Failed to send reply via ActorService::send()");
                         }
                     } else {

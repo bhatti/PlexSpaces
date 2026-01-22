@@ -4,8 +4,8 @@
 // Tests for ActorContext ChannelService receive_from_queue with None timeout
 
 use plexspaces_core::actor_context::{ActorContext, ChannelService};
-use plexspaces_core::{ActorId, ServiceLocator};
-use plexspaces_mailbox::Message;
+use plexspaces_core::{ActorId, ServiceLocator, Message};
+use ulid::Ulid;
 use async_trait::async_trait;
 use std::sync::Arc;
 use futures::stream::BoxStream;
@@ -14,7 +14,11 @@ struct MockChannelService {
     return_none: bool,
 }
 
-impl plexspaces_core::Service for MockChannelService {}
+impl plexspaces_core::Service for MockChannelService {
+    fn service_name(&self) -> String {
+        "MockChannelService".to_string()
+    }
+}
 
 #[async_trait]
 impl ChannelService for MockChannelService {
@@ -53,7 +57,11 @@ impl ChannelService for MockChannelService {
             if self.return_none {
                 Ok(None)
             } else {
-                Ok(Some(Message::new(vec![1, 2, 3])))
+                Ok(Some(Message {
+                    id: Ulid::new().to_string(),
+                    payload: vec![1, 2, 3],
+                    ..Default::default()
+                }))
             }
         } else {
             Ok(None)

@@ -20,6 +20,7 @@
 syntax = "proto3";
 
 package plexspaces.node.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node/node;plexspaces_node_v1";
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
@@ -31,6 +32,7 @@ import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/actors/actor_runtime.proto";
 import "plexspaces/v1/security/security.proto";
+import "plexspaces/v1/node/release.proto";
 
 
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
@@ -356,5 +358,393 @@ message DiscoverNodesRequest {
 
 message DiscoverNodesResponse {
   repeated NodeDiscovery nodes = 1;
+}
+
+// ============================================================================
+// NODE SERVICE - Node Management gRPC Service
+// ============================================================================
+
+// NodeService provides node management operations
+//
+// ## Purpose
+// Centralized service for:
+// - Node registration and discovery
+// - Health and metrics reporting
+// - Capacity calculation
+// - Application listing on nodes
+//
+// ## Design
+// - Replaces direct Node methods with gRPC service
+// - Uses ServiceLocator for accessing required services
+// - Supports pagination and streaming for scalability
+service NodeService {
+  // Get release specification for a node
+  rpc GetReleaseSpec(GetReleaseSpecRequest) returns (GetReleaseSpecResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/nodes/{node_id}/release-spec"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get release specification for node"
+      description: "Returns the release specification configured for the node"
+    };
+  }
+
+  // Register one or more nodes (replaces connect_to)
+  rpc RegisterNodes(RegisterNodesRequest) returns (RegisterNodesResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/nodes:register"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Register nodes"
+      description: "Registers one or more nodes in the cluster"
+    };
+  }
+
+  // Unregister a node
+  rpc UnregisterNode(UnregisterNodeRequest) returns (UnregisterNodeResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/nodes/{node_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Unregister a node"
+      description: "Removes a node from the cluster"
+    };
+  }
+
+  // List connected nodes (paginated)
+  rpc ListConnectedNodes(ListConnectedNodesRequest) returns (ListConnectedNodesResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/nodes"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List connected nodes"
+      description: "Returns list of connected nodes with pagination"
+    };
+  }
+
+  // Stream connected nodes (for large clusters)
+  rpc StreamConnectedNodes(StreamConnectedNodesRequest) returns (stream NodeRegistration) {
+    option (google.api.http) = {
+      post: "/api/v1/nodes:stream"
+      body: "*"
+    };
+  }
+
+  // Get node metrics
+  rpc GetMetrics(GetMetricsRequest) returns (NodeMetrics) {
+    option (google.api.http) = {
+      get: "/api/v1/nodes/{node_id}/metrics"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get node metrics"
+      description: "Returns CPU, memory, and operational metrics for a node"
+    };
+  }
+
+  // Calculate node capacity
+  rpc CalculateCapacity(CalculateCapacityRequest) returns (NodeCapacity) {
+    option (google.api.http) = {
+      get: "/api/v1/nodes/{node_id}/capacity"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Calculate node capacity"
+      description: "Returns total, allocated, and available resources"
+    };
+  }
+
+  // List applications deployed on a node
+  rpc ListNodeApplications(ListNodeApplicationsRequest) returns (ListNodeApplicationsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/nodes/{node_id}/applications"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List applications on node"
+      description: "Returns list of applications deployed on the node"
+    };
+  }
+
+  // Get node health status
+  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/nodes/{node_id}/health"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get node health"
+      description: "Returns health status for the node"
+    };
+  }
+
+  // Send heartbeat (used by nodes to report liveness)
+  rpc SendHeartbeat(SendHeartbeatRequest) returns (SendHeartbeatResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/nodes/{node_id}:heartbeat"
+      body: "*"
+    };
+  }
+
+  // ============================================================================
+  // SWIM Protocol RPCs - Scalable Failure Detection
+  // ============================================================================
+  // These RPCs implement the SWIM protocol for robust node discovery without
+  // requiring a shared database. Based on the SWIM paper (Das et al., 2002).
+
+  // Direct ping - Primary failure detection
+  // Used to check if a node is alive. Fast, low-overhead.
+  rpc Ping(PingRequest) returns (PingResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/nodes:ping"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Ping a node"
+      description: "SWIM protocol direct ping for failure detection"
+    };
+  }
+
+  // Indirect ping request - Fallback failure detection
+  // If direct ping fails, ask intermediary nodes to ping the suspect.
+  // This reduces false positives from asymmetric network partitions.
+  rpc PingReq(PingReqRequest) returns (PingReqResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/nodes:ping-req"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Indirect ping request"
+      description: "SWIM protocol indirect ping for robust failure detection"
+    };
+  }
+
+  // Sync membership state - Anti-entropy protocol
+  // Periodic full state sync to ensure consistency across nodes.
+  rpc SyncMembership(SyncMembershipRequest) returns (SyncMembershipResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/nodes:sync"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Sync membership state"
+      description: "Full membership state sync for anti-entropy"
+    };
+  }
+}
+
+// GetReleaseSpec request
+message GetReleaseSpecRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// GetReleaseSpec response
+message GetReleaseSpecResponse {
+  ReleaseSpec release_spec = 1;
+}
+
+// RegisterNodes request - supports multiple nodes
+message RegisterNodesRequest {
+  // Nodes to register
+  repeated NodeRegistration nodes = 1 [(google.api.field_behavior) = REQUIRED];
+  // Cluster name for grouping
+  string cluster = 2;
+  // Labels for categorization
+  map<string, string> labels = 3;
+}
+
+// RegisterNodes response
+message RegisterNodesResponse {
+  // IDs of successfully registered nodes
+  repeated string registered_node_ids = 1;
+  // Errors for nodes that failed to register
+  map<string, string> errors = 2;
+}
+
+// UnregisterNode response
+message UnregisterNodeResponse {
+  bool success = 1;
+}
+
+// ListConnectedNodes request (paginated)
+message ListConnectedNodesRequest {
+  // Filter by cluster name
+  string cluster = 1;
+  // Page size (default: 100, max: 1000)
+  int32 page_size = 2;
+  // Page token for pagination
+  string page_token = 3;
+  // Include health status in response
+  bool include_health = 4;
+}
+
+// ListConnectedNodes response
+message ListConnectedNodesResponse {
+  // List of node registrations
+  repeated NodeRegistration nodes = 1;
+  // Token for next page
+  string next_page_token = 2;
+  // Total count (if available)
+  int32 total_count = 3;
+}
+
+// StreamConnectedNodes request
+message StreamConnectedNodesRequest {
+  // Filter by cluster name
+  string cluster = 1;
+  // Include health status
+  bool include_health = 2;
+}
+
+// GetMetrics request
+message GetMetricsRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Include extended metrics (actor details, etc.)
+  bool include_extended = 2;
+}
+
+// CalculateCapacity request
+message CalculateCapacityRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// ListNodeApplications request
+message ListNodeApplicationsRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Page size
+  int32 page_size = 2;
+  // Page token
+  string page_token = 3;
+  // Filter by status
+  string status_filter = 4;
+}
+
+// ListNodeApplications response
+message ListNodeApplicationsResponse {
+  repeated NodeApplicationInfo applications = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+// NodeApplicationInfo - Information about an application on a node
+message NodeApplicationInfo {
+  string name = 1;
+  string version = 2;
+  string status = 3;
+  google.protobuf.Timestamp started_at = 4;
+  int32 actor_count = 5;
+  map<string, string> metadata = 6;
+}
+
+// GetHealth request
+message GetHealthRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// GetHealth response
+message GetHealthResponse {
+  NodeHealthStatus status = 1;
+  string message = 2;
+  google.protobuf.Timestamp last_checked = 3;
+  map<string, string> details = 4;
+}
+
+// SendHeartbeat request
+message SendHeartbeatRequest {
+  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  NodeCapacity capacity = 2;
+  map<string, double> metrics = 3;
+}
+
+// SendHeartbeat response
+message SendHeartbeatResponse {
+  bool acknowledged = 1;
+  google.protobuf.Timestamp server_time = 2;
+}
+
+// ============================================================================
+// SWIM Protocol Messages
+// ============================================================================
+
+// Ping request - Direct failure detection
+message PingRequest {
+  // Source node sending the ping
+  string source_node_id = 1;
+  // Sequence number for correlation
+  uint64 sequence_number = 2;
+  // Piggybacked membership updates (for efficient dissemination)
+  repeated MembershipUpdate updates = 3;
+}
+
+// Ping response
+message PingResponse {
+  // Responding node's ID
+  string node_id = 1;
+  // Echo back sequence number
+  uint64 sequence_number = 2;
+  // Current incarnation number (for conflict resolution)
+  uint64 incarnation = 3;
+  // Piggybacked membership updates
+  repeated MembershipUpdate updates = 4;
+}
+
+// Indirect ping request - Ask intermediary to ping target
+message PingReqRequest {
+  // Node requesting the indirect ping
+  string source_node_id = 1;
+  // Target node to ping
+  string target_node_id = 2;
+  // Target's address (in case intermediary doesn't know it)
+  string target_address = 3;
+  // Sequence number for correlation
+  uint64 sequence_number = 4;
+}
+
+// Indirect ping response
+message PingReqResponse {
+  // Whether the target responded to indirect ping
+  bool target_alive = 1;
+  // Target's incarnation (if alive)
+  uint64 target_incarnation = 2;
+  // Piggybacked membership updates
+  repeated MembershipUpdate updates = 3;
+}
+
+// Membership update - Piggybacked on protocol messages
+message MembershipUpdate {
+  // Node ID this update is about
+  string node_id = 1;
+  // Node address
+  string address = 2;
+  // Membership state
+  MemberState state = 3;
+  // Incarnation number (higher wins)
+  uint64 incarnation = 4;
+  // Metadata/capabilities
+  map<string, string> metadata = 5;
+}
+
+// Membership state enum
+enum MemberState {
+  MEMBER_STATE_UNSPECIFIED = 0;
+  MEMBER_STATE_ALIVE = 1;
+  MEMBER_STATE_SUSPECT = 2;
+  MEMBER_STATE_DEAD = 3;
+  MEMBER_STATE_LEFT = 4;
+}
+
+// Sync membership request - Full state exchange
+message SyncMembershipRequest {
+  // Requesting node's ID
+  string source_node_id = 1;
+  // Requesting node's full membership state
+  repeated MembershipUpdate members = 2;
+  // Whether this is a push (true) or pull (false) sync
+  bool is_push = 3;
+}
+
+// Sync membership response
+message SyncMembershipResponse {
+  // Responding node's full membership state
+  repeated MembershipUpdate members = 1;
+  // Number of updates received that were new/updated
+  int32 updates_applied = 2;
 }
 

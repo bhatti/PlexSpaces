@@ -5134,6 +5134,7 @@ impl RegistryImpl {
             ObjectType::ObjectTypeApplication => plexspaces::actor::registry::ObjectType::Application,
             ObjectType::ObjectTypeWorkflow => plexspaces::actor::registry::ObjectType::Workflow,
             ObjectType::ObjectTypeNode => plexspaces::actor::registry::ObjectType::Node,
+            ObjectType::ObjectTypeProcessGroup => plexspaces::actor::registry::ObjectType::ProcessGroup,
         }
     }
 
@@ -5242,6 +5243,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
             plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
             plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
         };
 
         // Convert WIT labels to proto labels (Vec<String>)
@@ -5328,6 +5330,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
             plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
             plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
         };
 
         // Drop span before await to ensure Send
@@ -5395,6 +5398,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
             plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
             plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
         };
 
         // Drop span before await to ensure Send
@@ -5473,6 +5477,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
             plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
             plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
         });
 
         let proto_health_status = health_status.map(|hs| match hs {
@@ -5551,6 +5556,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
             plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
             plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
         };
 
         // Drop span before await to ensure Send

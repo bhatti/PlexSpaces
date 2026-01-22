@@ -386,3 +386,67 @@ impl plexspaces_core::Service for BlobService {
         "BlobService".to_string()
     }
 }
+
+// Implement BlobServiceTrait for ServiceLocator access
+#[async_trait::async_trait]
+impl plexspaces_core::BlobServiceTrait for BlobService {
+    async fn upload(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        data: Vec<u8>,
+        content_type: Option<String>,
+        metadata: std::collections::HashMap<String, String>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let name = key.split('/').last().unwrap_or(key);
+        let blob_metadata = self.upload_blob(
+            ctx,
+            name,
+            data,
+            content_type,
+            None, // blob_group
+            None, // kind
+            metadata,
+            std::collections::HashMap::new(), // tags
+            None, // expires_after
+        ).await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        Ok(blob_metadata.blob_id)
+    }
+
+    async fn download(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        let data = self.download_blob(ctx, key).await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        Ok(data)
+    }
+
+    async fn delete(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.delete_blob(ctx, key).await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        Ok(())
+    }
+
+    async fn exists(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        match self.get_metadata(ctx, key).await {
+            Ok(_) => Ok(true),
+            Err(BlobError::NotFound(_)) => Ok(false),
+            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+        }
+    }
+
+    fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync> {
+        self
+    }
+}

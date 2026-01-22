@@ -82,13 +82,12 @@ pub enum JournalError {
     #[error("Serialization error: {0}")]
     Serialization(String),
 
-    /// Configuration error (alias for InvalidConfiguration for backward compatibility)
+    /// Configuration error
     #[error("Configuration error: {0}")]
     Configuration(String),
 
-    /// Invalid configuration error (deprecated, use Configuration instead)
+    /// Invalid configuration error (alias for Configuration)
     #[error("Invalid configuration: {0}")]
-    #[deprecated(note = "Use Configuration instead")]
     InvalidConfiguration(String),
 
     /// Replay error

@@ -54,7 +54,7 @@ async fn test_05_facet_storage_access() {
 async fn test_06_spawn_actor_no_facets() {
     use plexspaces_actor::ActorBuilder;
     use plexspaces_core::{Actor, ActorContext, ActorId};
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::Message;
     
     struct TestBehavior;
     

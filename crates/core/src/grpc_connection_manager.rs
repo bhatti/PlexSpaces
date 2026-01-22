@@ -33,15 +33,25 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::transport::{Channel, Endpoint};
 
-/// Service type identifier
+/// Service type identifier for gRPC connection pooling
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum ServiceType {
+    /// Actor service for actor lifecycle and messaging
     ActorService,
+    /// TupleSpace service for Linda-style tuple coordination
     TupleSpaceService,
+    /// Channel service for pub/sub messaging
     ChannelService,
+    /// Blob service for binary large object storage
     BlobService,
+    /// Workflow service for workflow orchestration
     WorkflowService,
+    /// System service for node management
     SystemService,
+    /// Process group service for Erlang-style process groups (pub/sub)
+    ProcessGroupService,
+    /// Node service for node management and discovery
+    NodeService,
 }
 
 /// Connection pool for a specific service type and node
@@ -165,6 +175,54 @@ impl GrpcConnectionManager {
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
         self.get_connection(ServiceType::ActorService, node_id, node_address).await
+    }
+
+    /// Get a connection for TupleSpaceService (convenience method)
+    ///
+    /// ## Arguments
+    /// * `node_id` - Node ID
+    /// * `node_address` - gRPC address of the node
+    ///
+    /// ## Returns
+    /// Channel ready for use, or error if connection failed
+    pub async fn get_tuplespace_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(ServiceType::TupleSpaceService, node_id, node_address).await
+    }
+
+    /// Get a connection for ProcessGroupService (convenience method)
+    ///
+    /// ## Arguments
+    /// * `node_id` - Node ID
+    /// * `node_address` - gRPC address of the node
+    ///
+    /// ## Returns
+    /// Channel ready for use, or error if connection failed
+    pub async fn get_process_group_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(ServiceType::ProcessGroupService, node_id, node_address).await
+    }
+
+    /// Get a connection for NodeService (convenience method)
+    ///
+    /// ## Arguments
+    /// * `node_id` - Node ID
+    /// * `node_address` - gRPC address of the node
+    ///
+    /// ## Returns
+    /// Channel ready for use, or error if connection failed
+    pub async fn get_node_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(ServiceType::NodeService, node_id, node_address).await
     }
 
     /// Return a connection to the pool

@@ -25,8 +25,7 @@
 #[cfg(test)]
 mod tests {
     use plexspaces_actor::ActorBuilder;
-    use plexspaces_core::{Actor, BehaviorType};
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::{Actor, BehaviorType, Message};
     use async_trait::async_trait;
 
     struct TestBehavior;

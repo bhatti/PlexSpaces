@@ -141,6 +141,7 @@
 syntax = "proto3";
 
 package plexspaces.mailbox.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/mailbox/mailbox;plexspaces_mailbox_v1";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
@@ -366,43 +367,6 @@ message MailboxStats {
 
   // Last update timestamp
   google.protobuf.Timestamp updated_at = 10;
-}
-
-// Message envelope for mailbox
-//
-// ## Note
-// This is the proto representation of the internal `Message` struct.
-// The Rust `Message` type should use this proto-generated type.
-message MessageEnvelope {
-  // Unique message ID
-  string message_id = 1;
-
-  // Message type
-  string message_type = 2;
-
-  // Message payload
-  bytes payload = 3;
-
-  // Sender actor ID
-  string sender_id = 4;
-
-  // Recipient actor ID
-  string recipient_id = 5;
-
-  // Message priority
-  MessagePriority priority = 6;
-
-  // When message was enqueued
-  google.protobuf.Timestamp enqueued_at = 7;
-
-  // Message expiration time
-  google.protobuf.Timestamp expires_at = 8;
-
-  // Correlation ID for request-reply
-  string correlation_id = 9;
-
-  // Message metadata
-  map<string, string> metadata = 10;
 }
 
 message CreateMailboxRequest {

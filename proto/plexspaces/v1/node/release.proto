@@ -43,8 +43,11 @@
 
 syntax = "proto3";
 package plexspaces.node.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node/release;plexspaces_node_v1";
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/security/security.proto";
 import "plexspaces/v1/storage/blob.proto";
@@ -142,6 +145,323 @@ message NodeConfig {
 
   // Node metadata (key-value pairs for extensibility)
   map<string, string> metadata = 11;
+
+  // ==================== NODE REGISTRY CONFIGURATION ====================
+  
+  // Node registry configuration (SWIM protocol, caching, DB fallback)
+  //
+  // Configures how nodes discover and track each other. Uses SWIM protocol
+  // for efficient failure detection without requiring a shared database.
+  NodeRegistryConfig node_registry = 20;
+
+  // gRPC address this node advertises to other nodes
+  //
+  // If not set, derived from listen_addr. Should be externally reachable.
+  // Example: "http://node1.example.com:8000"
+  string grpc_address = 21;
+}
+
+// Node registry configuration
+//
+// ## Purpose
+// Configures node discovery, failure detection, and membership tracking.
+// Uses SWIM protocol for scalable, decentralized failure detection.
+//
+// ## Design
+// Based on SWIM (Scalable Weakly-consistent Infection-style Process Group
+// Membership Protocol) with enhancements from Lifeguard (HashiCorp).
+//
+// ## References
+// - SWIM: Das, Gupta, Motivala (2002)
+// - Lifeguard: HashiCorp (2017)
+message NodeRegistryConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Node Registry Configuration"
+      description: "Configuration for node discovery and SWIM protocol"
+    }
+  };
+
+  // ==================== CACHE CONFIGURATION ====================
+
+  // Cache TTL in seconds for node entries
+  //
+  // How long to cache node registrations before considering them stale.
+  // Lower values mean more DB/network traffic but fresher data.
+  // Default: 60 seconds
+  uint32 cache_ttl_seconds = 1 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Cache TTL in seconds"
+      minimum: 1
+      maximum: 3600
+      default: "60"
+    }
+  ];
+
+  // ==================== SWIM PROTOCOL CONFIGURATION ====================
+
+  // Enable SWIM gossip protocol
+  //
+  // When enabled, nodes use SWIM for failure detection and membership
+  // propagation. Recommended when not using a shared database.
+  // Default: true
+  bool gossip_enabled = 10 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Enable SWIM gossip protocol"
+      default: "true"
+    }
+  ];
+
+  // SWIM protocol configuration
+  SwimConfig swim = 11;
+
+  // ==================== DATABASE FALLBACK CONFIGURATION ====================
+
+  // Use shared database as source of truth
+  //
+  // When true, ObjectRegistry database is the authoritative source.
+  // SWIM protocol supplements DB with faster failure detection.
+  // When false, SWIM is the only source (suitable for dev/testing).
+  // Default: false
+  bool use_shared_db = 20 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Use shared database as source of truth"
+      default: "false"
+    }
+  ];
+
+  // DB operation backoff configuration
+  DbBackoffConfig db_backoff = 21;
+
+  // Anti-entropy sync interval in seconds
+  //
+  // How often to sync local state with database (if use_shared_db=true).
+  // Default: 30 seconds
+  uint32 db_sync_interval_seconds = 22 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "DB sync interval in seconds"
+      minimum: 5
+      maximum: 600
+      default: "30"
+    }
+  ];
+}
+
+// SWIM protocol configuration
+//
+// ## Purpose
+// Configures the SWIM (Scalable Weakly-consistent Infection-style Membership)
+// protocol for robust failure detection without a shared database.
+//
+// ## Key Concepts
+// - **Protocol Period**: How often to probe a random node
+// - **Probe Timeout**: How long to wait for ping response
+// - **Indirect Probes**: Number of intermediary nodes for fallback probing
+// - **Suspicion**: Grace period before declaring a node dead
+message SwimConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "SWIM Protocol Configuration"
+      description: "Configuration for SWIM failure detection protocol"
+    }
+  };
+
+  // Protocol period in milliseconds
+  //
+  // How often to probe a random cluster member. Lower values mean faster
+  // failure detection but more network traffic.
+  // Default: 1000ms (1 second)
+  uint32 protocol_period_ms = 1 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Protocol period in milliseconds"
+      minimum: 100
+      maximum: 60000
+      default: "1000"
+    }
+  ];
+
+  // Probe timeout in milliseconds
+  //
+  // How long to wait for a ping response before trying indirect probing.
+  // Should be less than protocol_period_ms.
+  // Default: 500ms
+  uint32 probe_timeout_ms = 2 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Probe timeout in milliseconds"
+      minimum: 50
+      maximum: 30000
+      default: "500"
+    }
+  ];
+
+  // Number of nodes to use for indirect probing
+  //
+  // When direct probe fails, ask this many random nodes to probe the target.
+  // Higher values reduce false positives but increase network traffic.
+  // Default: 3
+  uint32 indirect_ping_nodes = 3 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Number of indirect probe nodes"
+      minimum: 1
+      maximum: 10
+      default: "3"
+    }
+  ];
+
+  // Suspicion timeout multiplier
+  //
+  // Multiplied by log(cluster_size) * protocol_period to calculate
+  // how long a node stays in suspect state before being declared dead.
+  // Higher values reduce false positives in unstable networks.
+  // Default: 4
+  uint32 suspicion_multiplier = 4 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Suspicion timeout multiplier"
+      minimum: 1
+      maximum: 20
+      default: "4"
+    }
+  ];
+
+  // Minimum suspicion timeout in milliseconds
+  //
+  // Lower bound for suspicion timeout regardless of cluster size.
+  // Default: 3000ms (3 seconds)
+  uint32 suspicion_min_ms = 5 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Minimum suspicion timeout in milliseconds"
+      minimum: 1000
+      maximum: 60000
+      default: "3000"
+    }
+  ];
+
+  // Maximum suspicion timeout in milliseconds
+  //
+  // Upper bound for suspicion timeout regardless of cluster size.
+  // Default: 30000ms (30 seconds)
+  uint32 suspicion_max_ms = 6 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Maximum suspicion timeout in milliseconds"
+      minimum: 5000
+      maximum: 300000
+      default: "30000"
+    }
+  ];
+
+  // Dead node reap timeout in seconds
+  //
+  // How long to keep dead nodes in membership before removing them.
+  // Allows late-arriving messages about the dead node to be processed.
+  // Default: 300 seconds (5 minutes)
+  uint32 dead_node_reap_seconds = 7 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Dead node reap timeout in seconds"
+      minimum: 60
+      maximum: 3600
+      default: "300"
+    }
+  ];
+
+  // Maximum membership updates to piggyback on messages
+  //
+  // SWIM piggybacks membership updates on protocol messages for
+  // efficient dissemination. This limits how many updates per message.
+  // Default: 10
+  uint32 max_piggyback_updates = 8 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Maximum piggyback updates per message"
+      minimum: 1
+      maximum: 50
+      default: "10"
+    }
+  ];
+
+  // Broadcast limit for membership updates
+  //
+  // How many times to broadcast an update before dropping it.
+  // Calculated as broadcast_limit * log(cluster_size) in practice.
+  // Default: 5
+  uint32 broadcast_limit = 9 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Broadcast limit for updates"
+      minimum: 1
+      maximum: 20
+      default: "5"
+    }
+  ];
+
+  // Anti-entropy sync interval in seconds
+  //
+  // How often to perform full state sync with a random peer.
+  // Ensures consistency even if some updates are lost.
+  // Default: 30 seconds
+  uint32 anti_entropy_interval_seconds = 10 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Anti-entropy sync interval in seconds"
+      minimum: 10
+      maximum: 600
+      default: "30"
+    }
+  ];
+}
+
+// Database backoff configuration
+//
+// ## Purpose
+// Configures exponential backoff with jitter for database operations.
+// Prevents thundering herd and reduces DB load during failures.
+//
+// ## Algorithm
+// Uses decorrelated jitter: sleep = min(cap, random(base, sleep * 3))
+// Based on AWS Architecture Blog recommendations.
+message DbBackoffConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Database Backoff Configuration"
+      description: "Exponential backoff configuration for DB operations"
+    }
+  };
+
+  // Base delay in milliseconds
+  //
+  // Initial backoff delay for the first retry.
+  // Default: 100ms
+  uint32 base_delay_ms = 1 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Base delay in milliseconds"
+      minimum: 10
+      maximum: 10000
+      default: "100"
+    }
+  ];
+
+  // Maximum delay cap in milliseconds
+  //
+  // Upper bound for backoff delay regardless of retry count.
+  // Default: 30000ms (30 seconds)
+  uint32 max_delay_ms = 2 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Maximum delay cap in milliseconds"
+      minimum: 100
+      maximum: 300000
+      default: "30000"
+    }
+  ];
+
+  // Maximum retry attempts
+  //
+  // How many times to retry a failed DB operation before giving up.
+  // Set to 0 for unlimited retries (not recommended).
+  // Default: 10
+  uint32 max_attempts = 3 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Maximum retry attempts"
+      minimum: 0
+      maximum: 100
+      default: "10"
+    }
+  ];
 }
 
 // Runtime configuration

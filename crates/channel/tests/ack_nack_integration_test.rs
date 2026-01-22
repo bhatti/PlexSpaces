@@ -44,6 +44,7 @@
 
 use plexspaces_channel::{Channel, ChannelError, ChannelResult};
 use plexspaces_proto::channel::v1::{ChannelStats, *};
+use plexspaces_proto::common::v1::Message;
 
 // Helper to create test config with retry/DLQ
 fn create_test_config_with_retry_dlq(
@@ -70,8 +71,8 @@ fn create_test_config_with_retry_dlq(
 }
 
 // Helper to create test message
-fn create_test_message(id: &str, payload: &str) -> ChannelMessage {
-    ChannelMessage {
+fn create_test_message(id: &str, payload: &str) -> Message {
+    Message {
         id: id.to_string(),
         channel: "test-channel".to_string(),
         payload: payload.as_bytes().to_vec(),
@@ -100,7 +101,7 @@ async fn test_mock_channel_ack_success() {
     let _: String = Channel::send(&channel, msg.clone()).await.unwrap();
 
     // Receive message
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1);
     assert_eq!(received[0].id, "msg-1");
 
@@ -131,7 +132,7 @@ async fn test_mock_channel_nack_requeue() {
     let _: String = Channel::send(&channel, msg.clone()).await.unwrap();
 
     // Receive and NACK with requeue
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1);
 
     let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
@@ -141,7 +142,7 @@ async fn test_mock_channel_nack_requeue() {
     assert_eq!(delivery_count, 1);
 
     // Message should be available again
-    let received_again: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received_again: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received_again.len(), 1);
     assert_eq!(received_again[0].delivery_count, 2); // Incremented again on receive
 }
@@ -166,7 +167,7 @@ async fn test_mock_channel_poisonous_message_dlq() {
     let _: String = Channel::send(&channel, msg).await.unwrap();
 
     // Receive poisonous message
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1);
     assert_eq!(received[0].id, "poison-1");
 
@@ -174,7 +175,7 @@ async fn test_mock_channel_poisonous_message_dlq() {
     let _: () = Channel::nack(&channel, "poison-1", true).await.unwrap();
 
     // Poisonous message should be in DLQ immediately (not requeued)
-    let dlq_messages: Vec<ChannelMessage> = channel.get_dlq_messages().await;
+    let dlq_messages: Vec<Message> = channel.get_dlq_messages().await;
     assert!(!dlq_messages.is_empty(), "Poisonous message should be in DLQ immediately");
     let poison_in_dlq = dlq_messages.iter().any(|m| m.id == "poison-1");
     assert!(poison_in_dlq, "Poisonous message should be in DLQ");
@@ -198,7 +199,7 @@ async fn test_mock_channel_max_retries_dlq() {
 
     // Fail 3 times (exceeds max_retries of 2)
     // First failure: delivery_count = 1, requeue (1 < 2)
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1, "Should receive message on first attempt");
     let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
     
@@ -206,25 +207,25 @@ async fn test_mock_channel_max_retries_dlq() {
     // Actually, delivery_count starts at 0, increments to 1 on first receive, so:
     // First receive: delivery_count = 1, nack with requeue=true -> requeue (1 < 2)
     // Second receive: delivery_count = 2, nack with requeue=true -> requeue (2 < 2 is false, so should DLQ)
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1, "Should receive message on second attempt");
     let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
     
     // After second nack, delivery_count = 2, which equals max_retries (2), so should go to DLQ
     // But we need to check if it was actually requeued or sent to DLQ
     // Let's check DLQ - if delivery_count >= max_retries, it should be in DLQ
-    let dlq_messages: Vec<ChannelMessage> = channel.get_dlq_messages().await;
+    let dlq_messages: Vec<Message> = channel.get_dlq_messages().await;
     if !dlq_messages.is_empty() {
         // Message is in DLQ (delivery_count >= max_retries)
         assert!(dlq_messages.iter().any(|m| m.id == "msg-1"), "Message should be in DLQ after max retries");
     } else {
         // Message was requeued, try one more time
-        let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+        let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
         assert_eq!(received.len(), 1, "Should receive message on third attempt if requeued");
         let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
         
         // Now it should definitely be in DLQ
-        let dlq_messages: Vec<ChannelMessage> = channel.get_dlq_messages().await;
+        let dlq_messages: Vec<Message> = channel.get_dlq_messages().await;
         assert!(!dlq_messages.is_empty(), "Message should be in DLQ after exceeding max retries");
     }
 }
@@ -248,7 +249,7 @@ async fn test_mock_channel_shutdown_graceful() {
     }
 
     // Receive some messages (in-progress)
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 3).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 3).await.unwrap();
     assert_eq!(received.len(), 3);
 
     // Close channel (shutdown)
@@ -262,7 +263,7 @@ async fn test_mock_channel_shutdown_graceful() {
 
     // After shutdown, receive should fail (channel is closed)
     // In a real scenario, in-progress messages would complete, but for mock we test the closed state
-    let remaining_result: ChannelResult<Vec<ChannelMessage>> = Channel::receive(&channel, 10).await;
+    let remaining_result: ChannelResult<Vec<Message>> = Channel::receive(&channel, 10).await;
     assert!(remaining_result.is_err() || remaining_result.unwrap().is_empty(), "Should not receive after shutdown");
 }
 
@@ -374,7 +375,7 @@ mod redis_tests {
         let _: String = Channel::send(&channel, msg).await.unwrap();
 
         // Receive message
-        let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+        let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
         assert_eq!(received.len(), 1);
         let message_id = received[0].id.clone();
 
@@ -404,7 +405,7 @@ mod redis_tests {
         let _: String = Channel::send(&channel, msg).await.unwrap();
 
         // Receive and NACK with requeue
-        let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+        let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
         assert_eq!(received.len(), 1);
         let message_id = received[0].id.clone();
 
@@ -450,18 +451,18 @@ async fn test_poisonous_message_scenario() {
     channel.mark_poisonous("poison-1").await;
 
     // Process normal message (should succeed)
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received[0].id, "normal-1");
     let _: () = Channel::ack(&channel, "normal-1").await.unwrap();
 
     // Process poisonous message (should fail and go to DLQ immediately, not requeue)
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received[0].id, "poison-1");
     // Nack with requeue=true, but since it's poisonous, it should go to DLQ
     let _: () = Channel::nack(&channel, "poison-1", true).await.unwrap();
 
     // Verify poisonous message in DLQ (poisonous messages skip retries)
-    let dlq: Vec<ChannelMessage> = channel.get_dlq_messages().await;
+    let dlq: Vec<Message> = channel.get_dlq_messages().await;
     assert!(dlq.iter().any(|m| m.id == "poison-1"), "Poisonous message should be in DLQ");
 }
 
@@ -484,7 +485,7 @@ async fn test_crash_recovery_scenario() {
     }
 
     // Simulate crash: receive 2 messages, then "crash"
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 2).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 2).await.unwrap();
     assert_eq!(received.len(), 2);
 
     // Simulate crash (don't ACK, channel "restarts")
@@ -492,7 +493,7 @@ async fn test_crash_recovery_scenario() {
     // For mock, we can simulate by not ACKing and checking pending
 
     // After "recovery", remaining messages should still be available
-    let remaining: Vec<ChannelMessage> = Channel::receive(&channel, 10).await.unwrap();
+    let remaining: Vec<Message> = Channel::receive(&channel, 10).await.unwrap();
     assert_eq!(remaining.len(), 3); // 5 - 2 = 3 remaining
 }
 
@@ -515,7 +516,7 @@ async fn test_shutdown_during_processing() {
     }
 
     // Start processing (receive some)
-    let in_progress: Vec<ChannelMessage> = Channel::receive(&channel, 3).await.unwrap();
+    let in_progress: Vec<Message> = Channel::receive(&channel, 3).await.unwrap();
     assert_eq!(in_progress.len(), 3);
 
     // Initiate shutdown
@@ -528,7 +529,7 @@ async fn test_shutdown_during_processing() {
 
     // After shutdown, receive should fail (channel is closed)
     // In a real scenario, in-progress messages would complete, but for mock we test the closed state
-    let remaining_result: ChannelResult<Vec<ChannelMessage>> = Channel::receive(&channel, 10).await;
+    let remaining_result: ChannelResult<Vec<Message>> = Channel::receive(&channel, 10).await;
     assert!(remaining_result.is_err() || remaining_result.unwrap().is_empty(), "Should not receive after shutdown");
 
     // ACK in-progress messages (simulating completion)
@@ -574,7 +575,7 @@ async fn test_ack_message_already_acked() {
     // Send and receive message
     let msg = create_test_message("msg-1", "test payload");
     let _: String = Channel::send(&channel, msg).await.unwrap();
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1);
 
     // ACK first time (should succeed)
@@ -619,7 +620,7 @@ async fn test_nack_message_already_acked() {
     // Send and receive message
     let msg = create_test_message("msg-1", "test payload");
     let _: String = Channel::send(&channel, msg).await.unwrap();
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1);
 
     // ACK message
@@ -670,7 +671,7 @@ async fn test_concurrent_ack_same_message() {
     // Send and receive message
     let msg = create_test_message("msg-1", "test payload");
     let _: String = Channel::send(channel.as_ref(), msg).await.unwrap();
-    let received: Vec<ChannelMessage> = Channel::receive(channel.as_ref(), 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(channel.as_ref(), 1).await.unwrap();
     assert_eq!(received.len(), 1);
 
     // Try to ACK the same message concurrently
@@ -716,7 +717,7 @@ async fn test_ack_after_nack() {
     // Send and receive message
     let msg = create_test_message("msg-1", "test payload");
     let _: String = Channel::send(&channel, msg).await.unwrap();
-    let received: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1);
 
     // NACK with requeue
@@ -729,7 +730,7 @@ async fn test_ack_after_nack() {
     assert!(matches!(result.unwrap_err(), ChannelError::MessageNotFound(_)));
 
     // Receive again (message was requeued)
-    let received_again: Vec<ChannelMessage> = Channel::receive(&channel, 1).await.unwrap();
+    let received_again: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received_again.len(), 1);
     assert_eq!(received_again[0].id, "msg-1");
 

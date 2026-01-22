@@ -252,7 +252,7 @@ graph TB
         end
         
         subgraph ServiceLayer["Service Layer (plexspaces-services)"]
-            GRPCServices["gRPC Services<br/>(Actor, Application, TupleSpace, etc.)"]
+            GRPCServices["gRPC Services<br/>(Actor, Application, TupleSpace, ProcessGroup, etc.)"]
             ServiceLocator["Service Locator<br/>(Discovery & Client Pooling)"]
         end
     end
@@ -595,6 +595,15 @@ pub trait ActorContext {
 }
 ```
 
+**ProcessGroupService** provides Erlang pg/pg2-style distributed pub/sub:
+- **Named Groups**: Actors join named groups for coordination
+- **Topic-based Pub/Sub**: Fine-grained subscriptions within groups
+- **Multi-tenancy**: Groups scoped by tenant_id + namespace
+- **gRPC Service**: Full gRPC service for remote access
+- **ServiceLocator Integration**: Available via `service_locator.get_process_group_service()`
+
+See [Process Groups README](../crates/process-groups/README.md) and [Channel ProcessGroup Backend](../crates/channel/README.md#5-process-group-backend-srcprocess_group_backendrs) for details.
+
 See [Detailed Design - APIs](detailed-design.md#apis-and-primitives) for complete API documentation.
 
 ### Message
@@ -921,6 +930,135 @@ Ready for AWS Lambda Function URLs:
 - **Default Namespace**: "default" when not provided in path
 
 See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) and [Detailed Design: InvokeActor Service](detailed-design.md#invokeactor-service) for implementation details.
+
+## Infrastructure Services
+
+### Node Management Architecture
+
+PlexSpaces provides a comprehensive node management layer with caching, gossip protocol support, and production-grade observability.
+
+```mermaid
+graph TB
+    subgraph NodeManagement["Node Management Layer"]
+        NodeService["NodeService<br/>(gRPC Service)"]
+        NodeRegistry["NodeRegistry<br/>(TTL Cache + Gossip)"]
+        ObjectRegistry["ObjectRegistry<br/>(Persistent Storage)"]
+    end
+    
+    subgraph ServiceLocator["ServiceLocator"]
+        SL["Service Locator<br/>(Central Hub)"]
+    end
+    
+    subgraph Clients["Clients"]
+        Dashboard["Dashboard"]
+        CLI["CLI"]
+        RemoteNodes["Remote Nodes"]
+    end
+    
+    Dashboard -->|"gRPC"| NodeService
+    CLI -->|"gRPC"| NodeService
+    RemoteNodes -->|"Heartbeat"| NodeService
+    
+    NodeService --> SL
+    SL --> NodeRegistry
+    NodeRegistry -->|"Cache Miss"| ObjectRegistry
+    NodeRegistry -->|"Gossip"| RemoteNodes
+    
+    style NodeManagement fill:#7c3aed,stroke:#a78bfa,stroke-width:3px,color:#fff
+    style ServiceLocator fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
+    style Clients fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+```
+
+#### NodeService
+
+The `NodeService` gRPC service provides comprehensive node management operations:
+
+| RPC Method | Description |
+|-----------|-------------|
+| `GetReleaseSpec` | Get node configuration (secrets masked) |
+| `RegisterNodes` | Register multiple nodes (batch operation) |
+| `UnregisterNode` | Remove node from registry |
+| `ListConnectedNodes` | Paginated list of connected nodes |
+| `StreamConnectedNodes` | Streaming for large clusters |
+| `GetMetrics` | Node CPU, memory, operational metrics |
+| `CalculateCapacity` | Total, allocated, available resources |
+| `ListNodeApplications` | Applications deployed on node |
+| `GetHealth` | Node health status |
+| `SendHeartbeat` | Heartbeat with capacity info |
+
+**Security Feature**: The `GetReleaseSpec` RPC automatically masks all secrets (passwords, API keys, tokens) before returning the configuration via the `SecretMasker` utility.
+
+#### NodeRegistry
+
+The `NodeRegistry` wraps `ObjectRegistry` with:
+
+- **TTL-based Caching**: Configurable cache duration (default 60s)
+- **Gossip Protocol Support**: Peer-to-peer liveness checking
+- **Cache Statistics**: Hits, misses, evictions for observability
+- **Atomic Operations**: Lock-free where possible
+
+```rust
+// NodeRegistry usage via ServiceLocator
+let node_registry = service_locator.get_node_registry().await?;
+let node = node_registry.lookup_node(&ctx, "node-123").await?;
+let (nodes, next_token) = node_registry.list_nodes(&ctx, None, 100, "").await?;
+```
+
+### Channel Factory Architecture
+
+The `ServiceLocator` includes a channel factory with priority-based backend selection:
+
+```mermaid
+graph LR
+    subgraph ChannelFactory["Channel Factory"]
+        Create["create_channel()"]
+        Select["select_backend()"]
+    end
+    
+    subgraph Backends["Available Backends"]
+        Kafka["Kafka<br/>(Priority 1)"]
+        NATS["NATS<br/>(Priority 2)"]
+        SQS["SQS<br/>(Priority 3)"]
+        ProcessGroup["ProcessGroup<br/>(Priority 4)"]
+        InMemory["InMemory<br/>(Fallback)"]
+    end
+    
+    Create --> Select
+    Select -->|"Check Available"| Kafka
+    Select -->|"Fallback"| NATS
+    Select -->|"Fallback"| SQS
+    Select -->|"Fallback"| ProcessGroup
+    Select -->|"Final Fallback"| InMemory
+    
+    style ChannelFactory fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+    style Backends fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+```
+
+**Backend Priority Order**:
+1. **Kafka**: Enterprise-grade, when `brokers` configured
+2. **NATS**: Lightweight messaging, when `servers` configured
+3. **SQS**: AWS integration, when `region` configured
+4. **ProcessGroup**: In-cluster multicast
+5. **InMemory**: Local development fallback
+
+### Secret Masking
+
+All API responses containing sensitive data use the `SecretMasker` utility:
+
+```rust
+use plexspaces_core::{mask_release_spec, SecretMasker};
+
+// Mask all secrets in ReleaseSpec before returning via API
+let masked_spec = mask_release_spec(release_spec);
+
+// Custom masking patterns
+let masker = SecretMasker::new()
+    .with_pattern("api_key")
+    .with_pattern("connection_string");
+let masked = masker.mask("password", sensitive_value);
+```
+
+**Default Masked Fields**: `password`, `secret`, `token`, `key`, `api_key`, `access_key`, `secret_key`, `private_key`, `credential`, `auth`
 
 ## Security
 

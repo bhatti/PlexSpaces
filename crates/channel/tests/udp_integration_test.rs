@@ -28,8 +28,9 @@
 mod tests {
 use plexspaces_channel::{create_channel, Channel};
 use plexspaces_proto::channel::v1::{
-    ChannelBackend, ChannelConfig, ChannelMessage, UdpConfig,
+    ChannelBackend, ChannelConfig, UdpConfig,
 };
+use plexspaces_proto::common::v1::Message;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tokio::time::timeout;
@@ -112,7 +113,7 @@ use futures::StreamExt;
         let channel2 = create_udp_channel("test-udp-2", "test-cluster-2", port).await;
 
         // Send message from channel1
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-udp-2".to_string(),
             payload: b"test message".to_vec(),
@@ -142,7 +143,7 @@ use futures::StreamExt;
         let mut stream = subscriber.subscribe(None).await.unwrap();
 
         // Publish message
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: "test-udp-3".to_string(),
             payload: b"pub/sub test".to_vec(),
@@ -194,7 +195,7 @@ use futures::StreamExt;
 
         // Send some messages
         for i in 0..5 {
-            let msg = ChannelMessage {
+            let msg = Message {
                 id: ulid::Ulid::new().to_string(),
                 channel: "test-udp-6".to_string(),
                 payload: format!("msg{}", i).into_bytes(),

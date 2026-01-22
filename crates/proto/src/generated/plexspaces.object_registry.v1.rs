@@ -396,6 +396,13 @@ pub enum ObjectType {
     /// object_category: "Node"
     /// grpc_address: Node's gRPC endpoint
     ObjectTypeNode = 7,
+    /// ProcessGroup: Erlang pg/pg2-style process group for pub/sub coordination
+    /// Examples: config-updates, user-events, cluster-nodes
+    /// object_category: Group type (e.g., "pubsub", "broadcast", "topic")
+    /// grpc_address: Node's ProcessGroupService endpoint
+    /// node_id: Node hosting the group members
+    /// capabilities: \["topic-filtering", "multiple-joins", "distributed"\]
+    ObjectTypeProcessGroup = 8,
 }
 impl ObjectType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -412,6 +419,7 @@ impl ObjectType {
             ObjectType::ObjectTypeApplication => "OBJECT_TYPE_APPLICATION",
             ObjectType::ObjectTypeWorkflow => "OBJECT_TYPE_WORKFLOW",
             ObjectType::ObjectTypeNode => "OBJECT_TYPE_NODE",
+            ObjectType::ObjectTypeProcessGroup => "OBJECT_TYPE_PROCESS_GROUP",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -425,6 +433,7 @@ impl ObjectType {
             "OBJECT_TYPE_APPLICATION" => Some(Self::ObjectTypeApplication),
             "OBJECT_TYPE_WORKFLOW" => Some(Self::ObjectTypeWorkflow),
             "OBJECT_TYPE_NODE" => Some(Self::ObjectTypeNode),
+            "OBJECT_TYPE_PROCESS_GROUP" => Some(Self::ObjectTypeProcessGroup),
             _ => None,
         }
     }

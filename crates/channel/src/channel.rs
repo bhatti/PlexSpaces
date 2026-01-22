@@ -20,7 +20,8 @@
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats};
+use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, ChannelStats};
+use plexspaces_proto::common::v1::Message;
 use thiserror::Error;
 
 /// Errors that can occur during channel operations
@@ -98,7 +99,7 @@ pub trait Channel: Send + Sync {
     /// # use plexspaces_channel::*;
     /// # use plexspaces_proto::plexspaces::channel::v1::*;
     /// # async fn example(channel: &dyn Channel) -> ChannelResult<()> {
-    /// let msg = ChannelMessage {
+    /// let msg = Message {
     ///     id: ulid::Ulid::new().to_string(),
     ///     channel: "work-queue".to_string(),
     ///     payload: b"task data".to_vec(),
@@ -108,7 +109,7 @@ pub trait Channel: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String>;
+    async fn send(&self, message: Message) -> ChannelResult<String>;
 
     /// Receive messages from the channel (blocking until available)
     ///
@@ -126,7 +127,7 @@ pub trait Channel: Send + Sync {
     /// ## Performance
     /// Blocks until at least one message available or timeout. Use `try_receive`
     /// for non-blocking operation.
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>>;
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>>;
 
     /// Try to receive messages without blocking
     ///
@@ -138,7 +139,7 @@ pub trait Channel: Send + Sync {
     ///
     /// ## Performance
     /// Non-blocking, returns immediately with available messages.
-    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>>;
+    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>>;
 
     /// Subscribe to channel messages (streaming, for pub/sub pattern)
     ///
@@ -163,7 +164,7 @@ pub trait Channel: Send + Sync {
     async fn subscribe(
         &self,
         consumer_group: Option<String>,
-    ) -> ChannelResult<BoxStream<'static, ChannelMessage>>;
+    ) -> ChannelResult<BoxStream<'static, Message>>;
 
     /// Publish a message to all subscribers (pub/sub pattern)
     ///
@@ -175,7 +176,7 @@ pub trait Channel: Send + Sync {
     ///
     /// ## Design Notes
     /// Unlike `send`, publish delivers to ALL subscribers, not just one consumer.
-    async fn publish(&self, message: ChannelMessage) -> ChannelResult<u32>;
+    async fn publish(&self, message: Message) -> ChannelResult<u32>;
 
     /// Acknowledge message processing (for at-least-once delivery)
     ///
@@ -317,8 +318,19 @@ pub async fn create_channel(config: ChannelConfig) -> ChannelResult<Box<dyn Chan
         ChannelBackend::ChannelBackendUdp => Err(ChannelError::InvalidConfiguration(
             "UDP backend not enabled. Enable 'udp-backend' feature.".to_string(),
         )),
+        ChannelBackend::ChannelBackendProcessGroup => Err(ChannelError::InvalidConfiguration(
+            "ProcessGroup backend requires ServiceLocator. Use ProcessGroupChannel::new() directly.".to_string(),
+        )),
+        ChannelBackend::ChannelBackendPostgres => Err(ChannelError::InvalidConfiguration(
+            "PostgreSQL backend not yet implemented.".to_string(),
+        )),
         ChannelBackend::ChannelBackendCustom => Err(ChannelError::InvalidConfiguration(
             "Custom backend requires manual instantiation".to_string(),
+        )),
+        // Handle unspecified backend (default enum value 0 conflicts with InMemory)
+        // For any other/unknown backends, return error
+        _ => Err(ChannelError::InvalidConfiguration(
+            "Unknown or unsupported channel backend".to_string(),
         )),
     }
 }

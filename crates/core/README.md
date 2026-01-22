@@ -85,6 +85,14 @@ let client = service_locator.get_node_client("remote-node").await?;
 - **ProcessGroupService**: Group communication
 - **FacetService**: Dynamic capability composition
 - **NodeOperations**: Node-level operations
+- **NodeRegistryTrait**: TTL-cached node discovery with gossip protocol support
+- **BlobServiceTrait**: Type-safe blob storage operations
+
+### Security Utilities
+
+- **SecretMasker**: Mask sensitive data in API responses
+- **mask_release_spec**: Mask secrets in ReleaseSpec configurations
+- **mask_map_secrets**: Mask secrets in HashMap values
 
 ### Application Trait
 

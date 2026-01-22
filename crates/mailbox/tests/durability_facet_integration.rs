@@ -25,6 +25,16 @@
 
 #[cfg(test)]
 mod tests {
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
     use plexspaces_mailbox::{Mailbox, MailboxBuilder, Message};
     use plexspaces_journaling::{DurabilityFacet, DurabilityConfig, JournalBackend, CompressionType, JournalStorage};
     use std::sync::Arc;
@@ -100,8 +110,8 @@ mod tests {
         let mailbox = create_durable_mailbox("test-graceful").await;
         
         // Send some messages
-        mailbox.enqueue(Message::new(b"msg1".to_vec())).await.unwrap();
-        mailbox.enqueue(Message::new(b"msg2".to_vec())).await.unwrap();
+        mailbox.enqueue(create_test_message(b"msg1".to_vec())).await.unwrap();
+        mailbox.enqueue(create_test_message(b"msg2".to_vec())).await.unwrap();
         
         // Wait for processing
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -121,8 +131,8 @@ mod tests {
         let mailbox = create_durable_mailbox("test-observability").await;
         
         // Send messages
-        mailbox.enqueue(Message::new(b"msg1".to_vec())).await.unwrap();
-        mailbox.enqueue(Message::new(b"msg2".to_vec())).await.unwrap();
+        mailbox.enqueue(create_test_message(b"msg1".to_vec())).await.unwrap();
+        mailbox.enqueue(create_test_message(b"msg2".to_vec())).await.unwrap();
         
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         
@@ -261,8 +271,8 @@ mod tests {
             facet.on_attach("recovery-actor", serde_json::json!({})).await.unwrap();
             
             // Send messages
-            mailbox.enqueue(Message::new(b"recovery-msg1".to_vec())).await.unwrap();
-            mailbox.enqueue(Message::new(b"recovery-msg2".to_vec())).await.unwrap();
+            mailbox.enqueue(create_test_message(b"recovery-msg1".to_vec())).await.unwrap();
+            mailbox.enqueue(create_test_message(b"recovery-msg2".to_vec())).await.unwrap();
             
             // Wait for processing
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -331,7 +341,7 @@ mod tests {
             assert!(stats.is_durable);
             
             // Send new message
-            mailbox.enqueue(Message::new(b"new-msg".to_vec())).await.unwrap();
+            mailbox.enqueue(create_test_message(b"new-msg".to_vec())).await.unwrap();
             
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             

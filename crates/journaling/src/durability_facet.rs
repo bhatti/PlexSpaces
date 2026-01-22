@@ -94,7 +94,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH, Instant};
 use tokio::sync::RwLock;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_core::ActorContext;
 
 // Observability
@@ -491,16 +491,16 @@ impl DurabilityFacet {
                 use plexspaces_proto::v1::journaling::journal_entry::Entry;
                 if let Some(Entry::MessageReceived(ref msg_received)) = entry.entry {
                     // Reconstruct Message from journal entry
-                    let mut message = Message::new(msg_received.payload.clone());
-                    message.id = msg_received.message_id.clone();
-                    message.metadata = msg_received.metadata.clone();
-                    message.priority = plexspaces_mailbox::MessagePriority::Normal;
-                    message.correlation_id = Some(entry.correlation_id.clone());
-                    message.reply_to = None;
-                    message.sender = Some(msg_received.sender_id.clone());
-                    message.receiver = actor_id.to_string();
-                    message.message_type = msg_received.message_type.clone();
-                    message.idempotency_key = None;
+                    let message = Message {
+                        id: msg_received.message_id.clone(),
+                        payload: msg_received.payload.clone(),
+                        headers: msg_received.metadata.clone(),
+                        correlation_id: entry.correlation_id.clone(),
+                        sender_id: msg_received.sender_id.clone(),
+                        receiver_id: actor_id.to_string(),
+                        message_type: msg_received.message_type.clone(),
+                        ..Default::default()
+                    };
 
                     // Replay message through handler (ExecutionContext is in REPLAY mode)
                     // Use the stored ActorContext instead of creating a dummy one

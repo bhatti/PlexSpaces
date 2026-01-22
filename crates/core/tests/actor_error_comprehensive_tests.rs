@@ -4,7 +4,6 @@
 // Comprehensive tests for ActorError to improve coverage
 
 use plexspaces_core::ActorError;
-use plexspaces_persistence::JournalError;
 
 #[test]
 fn test_actor_error_mailbox_error() {
@@ -70,70 +69,56 @@ fn test_actor_error_facet_error() {
 }
 
 #[test]
-fn test_actor_error_from_journal_error_io() {
-    let journal_error = JournalError::IoError("io error".to_string());
-    let actor_error: ActorError = journal_error.into();
-    
-    match actor_error {
-        ActorError::JournalError(msg) => {
-            assert!(msg.contains("io error"));
-        },
-        _ => panic!("Expected JournalError"),
-    }
+fn test_actor_error_journal_io_error() {
+    // Test JournalError with various io error messages
+    let error = ActorError::JournalError("io error: failed to read file".to_string());
+    let error_msg = error.to_string();
+    assert!(error_msg.contains("io error"));
 }
 
 #[test]
-fn test_actor_error_from_journal_error_serialization() {
-    let journal_error = JournalError::SerializationError("serialization error".to_string());
-    let actor_error: ActorError = journal_error.into();
-    
-    match actor_error {
-        ActorError::JournalError(msg) => {
-            assert!(msg.contains("serialization error"));
-        },
-        _ => panic!("Expected JournalError"),
-    }
+fn test_actor_error_journal_serialization_error() {
+    // Test JournalError with serialization error messages
+    let error = ActorError::JournalError("serialization error: invalid format".to_string());
+    let error_msg = error.to_string();
+    assert!(error_msg.contains("serialization error"));
 }
 
 #[test]
-fn test_actor_error_from_journal_error_sequence_mismatch() {
-    let journal_error = JournalError::SequenceMismatch {
-        expected: 10,
-        actual: 5,
-    };
-    let actor_error: ActorError = journal_error.into();
-    
-    match actor_error {
-        ActorError::JournalError(msg) => {
-            assert!(!msg.is_empty());
-        },
-        _ => panic!("Expected JournalError"),
-    }
+fn test_actor_error_journal_sequence_mismatch() {
+    // Test JournalError with sequence mismatch messages
+    let error = ActorError::JournalError("sequence mismatch: expected 10, got 5".to_string());
+    let error_msg = error.to_string();
+    assert!(error_msg.contains("sequence mismatch"));
 }
 
 #[test]
-fn test_actor_error_from_journal_error_not_found() {
-    let journal_error = JournalError::NotFound;
-    let actor_error: ActorError = journal_error.into();
-    
-    match actor_error {
-        ActorError::JournalError(msg) => {
-            assert!(!msg.is_empty());
-        },
-        _ => panic!("Expected JournalError"),
-    }
+fn test_actor_error_journal_not_found() {
+    // Test JournalError with not found messages
+    let error = ActorError::JournalError("journal not found".to_string());
+    let error_msg = error.to_string();
+    assert!(error_msg.contains("not found"));
 }
 
 #[test]
-fn test_actor_error_from_journal_error_corrupted() {
-    let journal_error = JournalError::Corrupted("corrupted data".to_string());
-    let actor_error: ActorError = journal_error.into();
-    
-    match actor_error {
-        ActorError::JournalError(msg) => {
-            assert!(msg.contains("corrupted data"));
-        },
-        _ => panic!("Expected JournalError"),
-    }
+fn test_actor_error_journal_corrupted() {
+    // Test JournalError with corrupted data messages
+    let error = ActorError::JournalError("corrupted data: checksum mismatch".to_string());
+    let error_msg = error.to_string();
+    assert!(error_msg.contains("corrupted"));
 }
 
+#[test]
+fn test_actor_error_debug_format() {
+    let error = ActorError::NotFound("test".to_string());
+    let debug_str = format!("{:?}", error);
+    assert!(debug_str.contains("NotFound"));
+}
+
+#[test]
+fn test_actor_error_partial_eq() {
+    let error1 = ActorError::Timeout;
+    let error2 = ActorError::Timeout;
+    // Both have the same string representation
+    assert_eq!(error1.to_string(), error2.to_string());
+}

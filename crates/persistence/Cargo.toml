@@ -41,6 +41,8 @@ tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
 rand = "0.8"
+ulid = { workspace = true }
+plexspaces-core = { workspace = true }
 
 [[bench]]
 name = "persistence_benchmarks"

@@ -196,11 +196,18 @@ async fn create_test_registry_with_actors(
     use plexspaces_proto::node::v1::NodeConfig;
     let node_config = NodeConfig {
         id: "test-node".to_string(),
-        listen_address: String::new(),
+        listen_addr: String::new(),
         cluster_seed_nodes: vec![],
         default_tenant_id: tenant_id.to_string(),
         default_namespace: "default".to_string(),
         cluster_name: String::new(),
+        grpc_connection_pool_size: 2,
+        max_connections: 100,
+        heartbeat_interval_ms: 5000,
+        clustering_enabled: true,
+        metadata: std::collections::HashMap::new(),
+        node_registry: None,
+        grpc_address: String::new(),
     };
     service_locator.register_node_config(node_config).await;
     

@@ -61,7 +61,7 @@ async fn create_test_node_with_actor() -> (Arc<Node>, ActorRef) {
         async fn handle_message(
             &mut self,
             _ctx: &plexspaces_core::ActorContext,
-            _msg: plexspaces_mailbox::Message,
+            _msg: plexspaces_core::Message,
         ) -> Result<(), plexspaces_core::BehaviorError> {
             // Just consume the message - no processing needed for gRPC service tests
             Ok(())

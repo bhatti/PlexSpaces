@@ -10,7 +10,7 @@ use plexspaces_core::{ChannelService, RequestContext, KeyValueStore, LockManager
 use plexspaces_core::actor_context::ObjectRegistry;
 use plexspaces_core::JournalStorage;
 use plexspaces_process_groups::ProcessGroupRegistry;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
 
 use plexspaces_blob::BlobService;
@@ -459,7 +459,12 @@ impl HostFunctions {
         payload: Vec<u8>,
     ) -> Result<String, String> {
         if let Some(channel_service) = &self.channel_service {
-            let message = Message::new(payload).with_message_type(message_type.to_string());
+            let message = Message {
+                id: ulid::Ulid::new().to_string(),
+                payload,
+                message_type: message_type.to_string(),
+                ..Default::default()
+            };
             channel_service
                 .send_to_queue(queue_name, message)
                 .await
@@ -477,7 +482,12 @@ impl HostFunctions {
         payload: Vec<u8>,
     ) -> Result<String, String> {
         if let Some(channel_service) = &self.channel_service {
-            let message = Message::new(payload).with_message_type(message_type.to_string());
+            let message = Message {
+                id: ulid::Ulid::new().to_string(),
+                payload,
+                message_type: message_type.to_string(),
+                ..Default::default()
+            };
             channel_service
                 .publish_to_topic(topic_name, message)
                 .await
@@ -501,8 +511,8 @@ impl HostFunctions {
             };
             match channel_service.receive_from_queue(queue_name, timeout).await {
                 Ok(Some(message)) => {
-                    let message_type = message.message_type_str().to_string();
-                    Ok(Some((message_type, message.payload().to_vec())))
+                    let message_type = message.message_type.clone();
+                    Ok(Some((message_type, message.payload.clone())))
                 }
                 Ok(None) => Ok(None),
                 Err(e) => Err(e.to_string()),
@@ -523,7 +533,7 @@ impl Default for HostFunctions {
 mod tests {
     use super::*;
     use plexspaces_core::ChannelService;
-    use plexspaces_mailbox::Message;
+    use plexspaces_proto::common::v1::Message;
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use std::collections::HashMap;
@@ -639,8 +649,8 @@ mod tests {
         let message = channel_service.get_queue_message("test-queue").await;
         assert!(message.is_some());
         let msg = message.unwrap();
-        assert_eq!(msg.message_type_str(), "test-type");
-        assert_eq!(msg.payload(), b"test payload");
+        assert_eq!(msg.message_type.as_str(), "test-type");
+        assert_eq!(msg.payload.as_slice(), b"test payload");
     }
 
     #[tokio::test]
@@ -671,8 +681,8 @@ mod tests {
         let message = channel_service.get_topic_message("test-topic").await;
         assert!(message.is_some());
         let msg = message.unwrap();
-        assert_eq!(msg.message_type_str(), "event-type");
-        assert_eq!(msg.payload(), b"event data");
+        assert_eq!(msg.message_type.as_str(), "event-type");
+        assert_eq!(msg.payload.as_slice(), b"event data");
     }
 
     #[tokio::test]

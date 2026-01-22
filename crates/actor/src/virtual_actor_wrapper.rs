@@ -63,7 +63,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use plexspaces_core::{MessageSender, ActorId, VirtualActorManager, ServiceLocator as ServiceLocatorTrait};
 use crate::ActorFactory;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 
 /// Virtual Actor Wrapper - automatically activates actor on tell()
 ///
@@ -97,7 +97,7 @@ impl MessageSender for VirtualActorWrapper {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
             "[VIRTUAL_ACTOR_WRAPPER] tell() called: actor_id={}, message_id={}, correlation_id={:?}, sender={:?}, receiver={}",
-            self.actor_id, message.id, message.correlation_id, message.sender, message.receiver
+            self.actor_id, message.id, message.correlation_id, message.sender_id, message.receiver_id
             );
         }
         
@@ -166,14 +166,14 @@ impl MessageSender for VirtualActorWrapper {
             // This is critical for ask() pattern - the reply must route back via correlation_id
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] Queueing message for activation: id={}, correlation_id={:?}, sender={:?}, receiver={}", 
-                    message.id, message.correlation_id, message.sender, message.receiver);
+                    message.id, message.correlation_id, message.sender_id, message.receiver_id);
             }
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                 actor_id = %self.actor_id,
                 message_id = %message.id,
                 correlation_id = ?message.correlation_id,
-                sender = ?message.sender,
+                sender = ?message.sender_id,
                 "VirtualActorWrapper: Queueing message for activation (preserves correlation_id and sender for reply routing)"
             );
             }

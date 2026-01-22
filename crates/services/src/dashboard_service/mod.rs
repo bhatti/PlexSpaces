@@ -409,32 +409,41 @@ impl DashboardServiceImpl {
     /// Query remote nodes via ObjectRegistry
     async fn query_remote_nodes(
         &self,
-        tenant_id: Option<String>,
+        _tenant_id: Option<String>,
         cluster_id: Option<String>,
     ) -> Result<Vec<ProtoNode>, Status> {
-        // Get ObjectRegistry to discover remote nodes
-        // Get service using helper method
-        use plexspaces_core::service_names;
-        let object_registry_opt: Option<Arc<dyn plexspaces_core::actor_context::ObjectRegistry>> = self.service_locator.get_object_registry().await;
-        let object_registry: Arc<dyn plexspaces_core::ObjectRegistry + Send + Sync> = if let Some(reg) = object_registry_opt {
-            reg
-        } else {
-            return Err(Status::internal("ObjectRegistry not found in ServiceLocator"));
-        };
-        
-        // Use request_context_for_system_operations for internal lookups
         let ctx = self.service_locator.request_context_for_system_operations().await;
         
-        // Query for node registrations
-        // ObjectRegistry stores nodes with object_id = node_id (using ObjectTypeNode)
-        let mut remote_nodes = Vec::new();
+        // Use NodeRegistry (which internally uses ObjectRegistry with caching)
+        let node_registry = self.service_locator.get_node_registry().await
+            .ok_or_else(|| Status::internal("NodeRegistry not found in ServiceLocator"))?;
         
-        // Remote node discovery:
-        // Would require querying ObjectRegistry for node registrations
-        // This is a future enhancement for multi-node aggregation
-        // For now, only local node is returned
+        let cluster = cluster_id.as_deref();
+        let (registrations, _next_token) = node_registry
+            .list_nodes(&ctx, cluster, 1000, "")
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list nodes: {}", e)))?;
         
-        Ok(remote_nodes)
+        // Convert NodeRegistrations to ProtoNodes
+        let nodes = registrations.into_iter().map(|reg| {
+            ProtoNode {
+                id: reg.node_id.clone(),
+                node_type: NodeType::NodeTypeProcess as i32,
+                status: reg.status,
+                capabilities: None,
+                metadata: None,
+                created_at: reg.registered_at.clone(),
+                last_heartbeat: reg.last_heartbeat.clone(),
+                metrics: None,
+                mtls_identity: None,
+                public_certificate: vec![],
+                auto_generate_certs: false,
+                cluster_name: reg.capabilities.get("cluster").cloned().unwrap_or_default(),
+                actor_ids: vec![],
+            }
+        }).collect();
+        
+        Ok(nodes)
     }
 }
 
@@ -987,47 +996,34 @@ impl DashboardServiceImpl {
         }
     }
 
-    /// Query remote node via ObjectRegistry
+    /// Query remote node via NodeRegistry (which internally uses ObjectRegistry with caching)
     async fn query_remote_node(&self, node_id: &str) -> Result<ProtoNode, Status> {
-        // Get node address from ObjectRegistry
-        let object_registry = self.service_locator.get_object_registry().await
-            .ok_or_else(|| Status::internal("ObjectRegistry not found in ServiceLocator"))?;
-        
-        // Use request_context_for_system_operations for internal lookups
         let ctx = self.service_locator.request_context_for_system_operations().await;
-        // Lookup node registration (nodes are registered with object_id = node_id using ObjectTypeNode)
-        use plexspaces_proto::object_registry::v1::ObjectType;
-        let registration = object_registry
-            .lookup_full(&ctx, ObjectType::ObjectTypeNode, node_id)
+        
+        let node_registry = self.service_locator.get_node_registry().await
+            .ok_or_else(|| Status::internal("NodeRegistry not found in ServiceLocator"))?;
+        
+        let reg = node_registry
+            .lookup_node(&ctx, node_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to lookup node: {}", e)))?
             .ok_or_else(|| Status::not_found(format!("Node not found: {}", node_id)))?;
         
-        // Convert ObjectRegistration to ProtoNode
-        // For now, return basic node info from registration
-        // Full node details would require additional gRPC call or storing more info in ObjectRegistry
-        let mut node = ProtoNode {
-            id: node_id.to_string(),
-            node_type: plexspaces_proto::node::v1::NodeType::NodeTypeProcess as i32,
-            status: plexspaces_proto::node::v1::NodeStatus::NodeStatusReady as i32,
+        Ok(ProtoNode {
+            id: reg.node_id.clone(),
+            node_type: NodeType::NodeTypeProcess as i32,
+            status: reg.status,
             capabilities: None,
             metadata: None,
-            created_at: None,
-            last_heartbeat: None,
+            created_at: reg.registered_at.clone(),
+            last_heartbeat: reg.last_heartbeat.clone(),
             metrics: None,
             mtls_identity: None,
             public_certificate: vec![],
             auto_generate_certs: false,
-            cluster_name: String::new(),
+            cluster_name: reg.capabilities.get("cluster").cloned().unwrap_or_default(),
             actor_ids: vec![],
-        };
-        
-        // Use registration metadata if available
-        if let Some(meta) = registration.metadata {
-            node.metadata = Some(meta);
-        }
-        
-        Ok(node)
+        })
     }
 
     /// Query remote applications via ApplicationService

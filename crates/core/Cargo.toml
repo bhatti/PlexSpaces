@@ -12,13 +12,9 @@ description = "Core types and traits for PlexSpaces actor system"
 [dependencies]
 # Common types (RequestContext)
 plexspaces-common = { path = "../common" }
-# Core depends on mailbox, journal, and tuplespace
 plexspaces-proto = { workspace = true }
-plexspaces-mailbox = { workspace = true }
-plexspaces-persistence = { workspace = true }
 plexspaces-tuplespace = { workspace = true }
 plexspaces-facet = { workspace = true }
-plexspaces-channel = { workspace = true }  # For create_default_channel
 
 # Service adapters (optional feature to avoid circular dependencies)
 # Note: supervisor and journaling are optional to avoid circular dependencies
@@ -44,11 +40,11 @@ once_cell = "1.19"  # For lazy static initialization of discovery cache
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }
-plexspaces-channel = { workspace = true }  # For integration tests
 plexspaces-object-registry = { workspace = true }  # For ServiceLocator tests
 plexspaces-keyvalue = { workspace = true, features = ["sql-backend"] }  # For ServiceLocator tests and SQLite integration tests
 plexspaces-node = { workspace = true }  # For create_default_service_locator in tests
 plexspaces-services = { path = "../services" }  # For ServiceLocatorImpl in tests
+plexspaces-channel = { path = "../channel" }  # For channel integration tests
 chrono = { workspace = true }  # For timestamp in integration tests
 prost-types = "0.12"  # For proto types in integration tests
 async-trait = { workspace = true }  # For trait implementations in tests

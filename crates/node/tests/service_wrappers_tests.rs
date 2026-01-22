@@ -28,13 +28,23 @@ use plexspaces_node::NodeBuilder;
 use plexspaces_actor_service::ActorServiceImpl;
 use plexspaces_core::actor_context::{ActorService, ObjectRegistry, TupleSpaceProvider};
 use plexspaces_core::actor_registry::ActorRegistry;
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField};
 use std::sync::Arc;
 
 #[path = "test_helpers.rs"]
 mod test_helpers;
 use test_helpers::{spawn_actor_helper, find_actor_helper};
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
 
 #[tokio::test]
 async fn test_node_operations_wrapper() {
@@ -98,7 +108,7 @@ async fn test_actor_service_wrapper_send_message_local() {
         async fn handle_message(
         &mut self,
         _ctx: &plexspaces_core::ActorContext,
-        _msg: plexspaces_mailbox::Message,
+        _msg: plexspaces_core::Message,
     ) -> Result<(), plexspaces_core::BehaviorError> {
             Ok(())
         }
@@ -142,7 +152,7 @@ async fn test_actor_service_wrapper_send_message_local() {
 
     // Send a message using ActorServiceImpl directly
     // Note: This tests the wrapper's send method, which uses find_actor internally
-    let message = Message::new(b"hello".to_vec());
+    let message = create_test_message(b"hello".to_vec());
     let result = actor_service.send("test-actor@test-node", message, false, None).await;
 
     // The actor should be findable and message should be sent
@@ -178,7 +188,7 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
     let actor_service = Arc::new(ActorServiceImpl::new(service_locator, node.id().as_str().to_string()));
 
     // Try to send to remote actor (will fail because actor doesn't exist or remote not implemented)
-    let message = Message::new(b"hello".to_vec());
+    let message = create_test_message(b"hello".to_vec());
     let result = actor_service.send("remote-actor@remote-node", message, false, None).await;
 
     // Should fail - either "Actor not found", "Node not found", or "not yet implemented"

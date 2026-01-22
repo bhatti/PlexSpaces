@@ -44,7 +44,9 @@ prost-types = { workspace = true }
 # Async
 tokio = { workspace = true }
 tokio-stream = "0.1"
+async-stream = { workspace = true }
 async-trait = { workspace = true }
+futures = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }

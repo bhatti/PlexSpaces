@@ -4,8 +4,18 @@
 // Tests for BehaviorContext and related types
 
 use plexspaces_core::{ActorContext, BehaviorContext, BehaviorType, BehaviorError};
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use std::sync::Arc;
+use ulid::Ulid;
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
 
 #[tokio::test]
 async fn test_behavior_context_creation() {
@@ -23,7 +33,7 @@ async fn test_behavior_context_creation() {
     );
     let ctx_arc = Arc::new(ctx);
 
-    let message = Message::new(vec![1, 2, 3]);
+    let message = create_test_message(vec![1, 2, 3]);
     let behavior_ctx = BehaviorContext {
         actor_context: ctx_arc.clone(),
         message: message.clone(),
@@ -34,7 +44,7 @@ async fn test_behavior_context_creation() {
     };
 
     // actor_id removed from ActorContext
-    assert_eq!(behavior_ctx.message.payload(), message.payload());
+    assert_eq!(behavior_ctx.message.payload, message.payload);
     assert!(behavior_ctx.sender.is_none());
     assert_eq!(behavior_ctx.correlation_id, None);
 }
@@ -42,8 +52,6 @@ async fn test_behavior_context_creation() {
 #[tokio::test]
 async fn test_behavior_context_with_sender() {
     use plexspaces_core::ActorRef;
-    use plexspaces_mailbox::{Mailbox, mailbox_config_default};
-
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
@@ -58,10 +66,9 @@ async fn test_behavior_context_with_sender() {
     );
     let ctx_arc = Arc::new(ctx);
 
-    let sender_mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "sender@node1".to_string()).await.expect("Failed to create mailbox"));
     let sender = ActorRef::new("sender@node1".to_string()).unwrap();
 
-    let message = Message::new(vec![1, 2, 3]);
+    let message = create_test_message(vec![1, 2, 3]);
     let behavior_ctx = BehaviorContext {
         actor_context: ctx_arc.clone(),
         message: message.clone(),

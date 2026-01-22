@@ -26,6 +26,7 @@
 //! - Error handling (invalid modules, missing runtime, etc.)
 
 use plexspaces_node::{Node, NodeId};
+use plexspaces_core::ApplicationManager;
 use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType,

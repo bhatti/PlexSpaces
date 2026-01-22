@@ -4,7 +4,7 @@
 // Tests for ActorContext methods to improve coverage
 
 use plexspaces_core::{ActorContext, ServiceLocator, ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider, ProcessGroupService, FacetService};
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField, TupleSpaceError};
 use std::sync::Arc;
 
@@ -101,17 +101,29 @@ impl TupleSpaceProvider for MockTupleSpaceProvider {
 struct MockProcessGroupService;
 #[async_trait::async_trait]
 impl ProcessGroupService for MockProcessGroupService {
-    async fn join_group(&self, _group_name: &str, _tenant_id: &str, _namespace: &str, _actor_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn create_group(&self, _ctx: &plexspaces_core::RequestContext, _group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
-    async fn leave_group(&self, _group_name: &str, _tenant_id: &str, _namespace: &str, _actor_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn delete_group(&self, _ctx: &plexspaces_core::RequestContext, _group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
-    async fn publish_to_group(&self, _group_name: &str, _tenant_id: &str, _namespace: &str, _message: Message) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn join_group(&self, _ctx: &plexspaces_core::RequestContext, _group_name: &str, _actor_id: &str, _topics: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+    async fn leave_group(&self, _ctx: &plexspaces_core::RequestContext, _group_name: &str, _actor_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+    async fn get_members(&self, _ctx: &plexspaces_core::RequestContext, _group_name: &str) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(vec![])
     }
-    async fn get_members(&self, _group_name: &str, _tenant_id: &str, _namespace: &str) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_local_members(&self, _ctx: &plexspaces_core::RequestContext, _group_name: &str) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(vec![])
+    }
+    async fn list_groups(&self, _ctx: &plexspaces_core::RequestContext) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    async fn publish_to_group(&self, _ctx: &plexspaces_core::RequestContext, _group_name: &str, _topic: Option<&str>, _message: Message) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(0)
     }
 }
 

@@ -5,7 +5,8 @@
 
 #[cfg(feature = "firecracker")]
 mod firecracker_service_tests {
-    use plexspaces_node::{firecracker_service::FirecrackerVmServiceImpl, Node, NodeId, default_node_config, NodeBuilder};
+    use plexspaces_node::{Node, NodeId, default_node_config, NodeBuilder};
+    use plexspaces_services::firecracker_service::FirecrackerVmServiceImpl;
     use plexspaces_proto::firecracker::v1::{
         firecracker_vm_service_server::FirecrackerVmService,
         CreateVmRequest, BootVmRequest, GetVmStateRequest, ListVmsRequest,

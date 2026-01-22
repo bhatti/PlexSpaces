@@ -5,7 +5,7 @@ use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
 use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, MemoryJournalStorage, StateLoader, JournalResult, JournalError, JournalStorage};
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use plexspaces_node::{Node, NodeBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -18,6 +18,27 @@ use tokio::sync::RwLock;
 #[path = "test_helpers.rs"]
 mod test_helpers;
 use test_helpers::{lookup_actor_ref, get_or_activate_actor_helper};
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
+/// Helper to create a test message with message type
+fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        message_type: message_type.to_string(),
+        ..Default::default()
+    }
+}
+
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum TestMessage {
@@ -110,18 +131,18 @@ impl ActorTrait for CounterActor {
     ) -> Result<(), BehaviorError> {
         // CRITICAL DEBUG: This MUST print - if it doesn't, the code isn't being executed
         let message_id = msg.id.clone();
-        let sender_clone = msg.sender.clone();
-        let receiver_clone = msg.receiver.clone();
+        let sender_clone = msg.sender_id.clone();
+        let receiver_clone = msg.receiver_id.clone();
         let correlation_id_clone = msg.correlation_id.clone();
-        let message_type_str = msg.message_type_str().to_string();
+        let message_type_str = msg.message_type.to_string();
         
         eprintln!("\n\n🔴🔴🔴 [COUNTER_ACTOR::handle_message] START: message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}\n\n", 
             message_id, sender_clone, receiver_clone, correlation_id_clone, message_type_str);
         
         // Check if sender is temporary sender
-        if let Some(sender_id) = &sender_clone {
-            let is_temp = sender_id.starts_with("ask-") && sender_id.contains('@');
-            eprintln!("🔴🔴🔴 [COUNTER_ACTOR::handle_message] Sender check: sender_id={}, is_temporary_sender={}\n", sender_id, is_temp);
+        if !sender_clone.is_empty() {
+            let is_temp = sender_clone.starts_with("ask-") && sender_clone.contains('@');
+            eprintln!("🔴🔴🔴 [COUNTER_ACTOR::handle_message] Sender check: sender_id={}, is_temporary_sender={}\n", sender_clone, is_temp);
         } else {
             eprintln!("🔴🔴🔴 [COUNTER_ACTOR::handle_message] NO SENDER IN MESSAGE!\n");
         }
@@ -144,44 +165,46 @@ impl GenServer for CounterActor {
         msg: Message,
     ) -> Result<(), BehaviorError> {
         eprintln!("🔵 [COUNTER_ACTOR::handle_request] START: message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
-            msg.id, msg.sender, msg.receiver, msg.correlation_id, msg.message_type_str());
+            msg.id, msg.sender_id, msg.receiver_id, msg.correlation_id, msg.message_type);
         
         // DEBUG: Check if sender is temporary sender
-        if let Some(sender_id) = &msg.sender {
+        if !msg.sender_id.is_empty() {
+            let sender_id = &msg.sender_id;
             let is_temp = sender_id.starts_with("ask-") && sender_id.contains('@');
             eprintln!("🔵 [COUNTER_ACTOR::handle_request] Sender check: sender_id={}, is_temporary_sender={}", sender_id, is_temp);
         }
         
-        let test_msg: TestMessage = serde_json::from_slice(msg.payload())
+        let test_msg: TestMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
         let reply_msg = match test_msg {
             TestMessage::Ping => {
-                Message::new(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
             }
             TestMessage::Increment => {
                 let mut count = self.count.lock().await;
                 *count += 1;
-                Message::new(serde_json::to_vec(&TestMessage::Pong("incremented".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("incremented".to_string())).unwrap())
             }
             TestMessage::GetCount => {
                 let count = *self.count.lock().await;
                 eprintln!("🔵 [COUNTER_ACTOR::handle_request] GetCount: count={}", count);
-                Message::new(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Count(count)).unwrap())
             }
             _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         };
         
         // Send reply using ActorContext
-        // CRITICAL: sender_id should be current actor (msg.receiver), target_actor_id should be ask caller (msg.sender)
-        if let Some(target_actor_id) = &msg.sender {
+        // CRITICAL: sender_id should be current actor (msg.receiver_id), target_actor_id should be ask caller (msg.sender)
+        if !msg.sender_id.is_empty() {
+            let target_actor_id = &msg.sender_id;
             let is_temp = target_actor_id.starts_with("ask-") && target_actor_id.contains('@');
-            let current_actor_id = &msg.receiver; // Current actor is the receiver of the message
+            let current_actor_id = &msg.receiver_id; // Current actor is the receiver of the message
             eprintln!("🔵 [COUNTER_ACTOR::handle_request] Sending reply: current_actor={}, target_actor_id={}, is_temporary_sender={}, correlation_id={:?}", 
                 current_actor_id, target_actor_id, is_temp, msg.correlation_id);
             ctx.send_reply(
-                msg.correlation_id.as_deref(),
-                current_actor_id, // Current actor (who is sending the reply) - msg.receiver
+                if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
+                current_actor_id, // Current actor (who is sending the reply) - msg.receiver_id
                 target_actor_id.clone(), // Target actor (ask caller/temporary sender) - msg.sender
                 reply_msg,
             ).await
@@ -212,7 +235,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     let mut registry = BehaviorRegistry::new();
     registry.register_simple("GenServer", || CounterActor::new()).await;
-    node.service_locator().register_service(Arc::new(registry)).await;
+    node.service_locator().register_behavior_registry(Arc::new(registry)).await;
     
     let actor_id: ActorId = "counter-suspend-ask@test-node".to_string();
     
@@ -270,15 +293,15 @@ async fn test_suspend_active_virtual_actor_then_ask() {
         .unwrap()
         .unwrap();
     
-    let increment_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+    let increment_msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
         .with_message_type("call".to_string());
     let _ = actor_ref.ask(increment_msg, Duration::from_secs(5)).await.unwrap();
     
     // Verify count is 1
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(1)));
     
     // NOTE: State preservation is not yet fully implemented
@@ -321,10 +344,10 @@ async fn test_suspend_active_virtual_actor_then_ask() {
         .unwrap()
         .unwrap();
     
-    let ask_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let ask_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(ask_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     
     // NOTE: State preservation is not yet fully implemented
     // See docs/state-preservation-design.md for the design plan
@@ -351,7 +374,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     // actor_type is "GenServer" (extracted from behavior.behavior_type())
     let mut registry = BehaviorRegistry::new();
     registry.register_simple("GenServer", || CounterActor::new()).await;
-    node.service_locator().register_service(Arc::new(registry)).await;
+    node.service_locator().register_behavior_registry(Arc::new(registry)).await;
     eprintln!("🟢 [TEST] Registered CounterActor in BehaviorRegistry as 'GenServer'");
     
     let actor_id: ActorId = "counter-suspend-tell@test-node".to_string();
@@ -408,7 +431,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
         .unwrap();
     
     // Use "call" message type for GenServer (tell() can be used with call messages too)
-    let tell_msg = Message::new(serde_json::to_vec(&TestMessage::Increment).unwrap())
+    let tell_msg = create_test_message(serde_json::to_vec(&TestMessage::Increment).unwrap())
         .with_message_type("call".to_string());
     actor_ref.tell(tell_msg).await.unwrap();
     eprintln!("🟢 [TEST] tell() completed - actor should be activated: actor_id={}", actor_id);
@@ -421,10 +444,10 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     assert!(is_active_final, "Actor should be active again after tell() (synchronous activation)");
     
     // Verify message was processed
-    let get_msg = Message::new(serde_json::to_vec(&TestMessage::GetCount).unwrap())
+    let get_msg = create_test_message(serde_json::to_vec(&TestMessage::GetCount).unwrap())
         .with_message_type("call".to_string());
     let result = actor_ref.ask(get_msg, Duration::from_secs(5)).await.unwrap();
-    let reply: TestMessage = serde_json::from_slice(result.payload()).unwrap();
+    let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(1)));
 }
 

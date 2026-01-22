@@ -33,6 +33,8 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             clustering_enabled: true,
             grpc_connection_pool_size: 2,
             metadata: HashMap::new(),
+            node_registry: None,
+            grpc_address: String::new(),
         }),
         runtime: Some({
             let runtime_config = RuntimeConfig {

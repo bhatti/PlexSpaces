@@ -5,7 +5,7 @@ use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
 use plexspaces_journaling::VirtualActorFacet;
-use plexspaces_mailbox::{Message, mailbox_config_default, Mailbox};
+use plexspaces_core::Message;
 use plexspaces_node::{Node, NodeConfig, NodeId, NodeBuilder};
 use plexspaces_node::default_node_config;
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,27 @@ use std::time::Duration;
 use async_trait::async_trait;
 mod test_helpers;
 use test_helpers::{lookup_actor_ref, activate_virtual_actor, get_or_activate_actor_helper, spawn_actor_builder_helper};
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
+/// Helper to create a test message with message type
+fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        message_type: message_type.to_string(),
+        ..Default::default()
+    }
+}
+
+
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,22 +77,23 @@ impl GenServer for TestActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        let test_msg: TestMessage = serde_json::from_slice(msg.payload())
+        let test_msg: TestMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
         let reply_msg = match test_msg {
             TestMessage::Ping => {
-                Message::new(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
             }
             _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         };
         
         // Send reply using ActorContext
-        if let Some(sender_id) = &msg.sender {
+        if !msg.sender_id.is_empty() {
+            let correlation_id = if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) };
             ctx.send_reply(
-                msg.correlation_id.as_deref(),
-                sender_id,
-                msg.receiver.clone(),
+                correlation_id,
+                &msg.sender_id,
+                msg.receiver_id.clone(),
                 reply_msg,
             ).await
                 .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
@@ -125,7 +147,7 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     
     // Test ask() - this should work
-    let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     
     let result = actor_ref
@@ -134,7 +156,7 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
     
     assert!(result.is_ok(), "ask() should succeed with VirtualActorFacet (eager)");
     let reply = result.unwrap();
-    let reply_msg: TestMessage = serde_json::from_slice(reply.payload()).unwrap();
+    let reply_msg: TestMessage = serde_json::from_slice(reply.payload).unwrap();
     assert!(matches!(reply_msg, TestMessage::Pong(_)));
 }
 
@@ -183,7 +205,7 @@ async fn test_get_or_activate_with_virtual_facet_lazy() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     
     // Test ask() - this should work (lazy activation should activate on first message)
-    let msg = Message::new(serde_json::to_vec(&TestMessage::Ping).unwrap())
+    let msg = create_test_message(serde_json::to_vec(&TestMessage::Ping).unwrap())
         .with_message_type("call".to_string());
     
     let result = actor_ref
@@ -192,6 +214,6 @@ async fn test_get_or_activate_with_virtual_facet_lazy() {
     
     assert!(result.is_ok(), "ask() should succeed with VirtualActorFacet (lazy) - should activate on first message");
     let reply = result.unwrap();
-    let reply_msg: TestMessage = serde_json::from_slice(reply.payload()).unwrap();
+    let reply_msg: TestMessage = serde_json::from_slice(reply.payload).unwrap();
     assert!(matches!(reply_msg, TestMessage::Pong(_)));
 }

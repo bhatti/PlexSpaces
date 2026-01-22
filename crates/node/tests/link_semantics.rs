@@ -33,7 +33,7 @@ async fn create_test_actor_ref(node: &Node, actor_id: &str) -> plexspaces_actor:
         async fn handle_message(
             &mut self,
             _ctx: &plexspaces_core::ActorContext,
-            _msg: plexspaces_mailbox::Message,
+            _msg: plexspaces_core::Message,
         ) -> Result<(), plexspaces_core::BehaviorError> {
             // Just consume the message - no processing needed for link tests
             Ok(())

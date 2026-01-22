@@ -98,7 +98,7 @@ shutdown:
     let spec = loader.load_release_spec(&path).await.unwrap();
 
     assert_eq!(spec.node.as_ref().unwrap().id, "env-node-123");
-    assert_eq!(spec.node.as_ref().unwrap().listen_address, "0.0.0.0:9999");
+    assert_eq!(spec.node.as_ref().unwrap().listen_addr, "0.0.0.0:9999");
     assert_eq!(spec.runtime.as_ref().unwrap().grpc.as_ref().unwrap().address, "0.0.0.0:9999");
 
     // Clean up

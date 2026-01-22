@@ -65,6 +65,7 @@
 
 syntax = "proto3";
 package plexspaces.wasm.v1;
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/wasm/wasm;plexspaces_wasm_v1";
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";

@@ -25,7 +25,7 @@
 //! - Multiple facets per actor in supervisor context
 
 use plexspaces_supervisor::{Supervisor, SupervisionStrategy, ChildSpec, StartedChild};
-use plexspaces_actor::{Actor, ActorRef as ActorActorRef};
+use plexspaces_actor::{Actor, ActorRef as ActorActorRef, TestServiceLocatorStub};
 use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorError, BehaviorError, Message, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
@@ -101,7 +101,7 @@ async fn test_supervisor_start_child_with_facets() {
                 let actor_ref = ActorActorRef::local(
                     actor_id.clone(),
                     actor.mailbox().clone(),
-                    Arc::new(ServiceLocator::new()),
+                    Arc::new(TestServiceLocatorStub::new()),
                 );
                 Ok(StartedChild::Worker { actor, actor_ref })
             })

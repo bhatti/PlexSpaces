@@ -8,7 +8,7 @@
 use plexspaces_actor::ActorBuilder;
 use plexspaces_core::{Actor, ActorContext, ActorId};
 use plexspaces_journaling::TimerFacet;
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
 use std::time::Duration;

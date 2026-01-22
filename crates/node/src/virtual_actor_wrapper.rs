@@ -31,7 +31,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use plexspaces_core::{MessageSender, ActorId, VirtualActorManager, ServiceLocator};
 use plexspaces_actor::ActorFactory;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 
 /// Virtual Actor Wrapper - automatically activates actor on tell()
 ///

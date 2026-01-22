@@ -43,6 +43,7 @@ use plexspaces_mailbox::Message;
 use plexspaces_persistence::{
     execution_context::{ExecutionContext, ExecutionMode},
     Journal, MemoryJournal, PromiseMetadata, PromiseResult, RetentionConfig, SideEffect, Snapshot,
+    CompressionType, EncryptionType,
 };
 use tokio::runtime::Runtime;
 
@@ -67,6 +68,8 @@ fn benchmark_snapshot_creation(c: &mut Criterion) {
                         sequence: 1,
                         timestamp: chrono::Utc::now(),
                         state_data: data.clone(),
+                        compression: CompressionType::None,
+                        encryption: EncryptionType::None,
                         metadata: Default::default(),
                     };
                     journal.save_snapshot(snapshot).await.unwrap();
@@ -95,6 +98,8 @@ fn benchmark_snapshot_loading(c: &mut Criterion) {
                 sequence: 1,
                 timestamp: chrono::Utc::now(),
                 state_data: state_data.clone(),
+                compression: CompressionType::None,
+                encryption: EncryptionType::None,
                 metadata: Default::default(),
             };
             journal.save_snapshot(snapshot).await.unwrap();
@@ -154,7 +159,7 @@ fn benchmark_side_effects(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &cnt| {
             b.to_async(&rt).iter(|| async {
-                let mut ctx = ExecutionContext::new("bench-actor", ExecutionMode::ExecutionModeNormal);
+                let mut ctx = ExecutionContext::new("bench-actor", ExecutionMode::Normal);
 
                 for i in 0..cnt {
                     let effect_id = format!("effect-{}", i);
@@ -179,7 +184,7 @@ fn benchmark_side_effect_replay(c: &mut Criterion) {
 
         // Pre-record side effects
         let ctx = rt.block_on(async {
-            let mut ctx = ExecutionContext::new("bench-actor", ExecutionMode::ExecutionModeNormal);
+            let mut ctx = ExecutionContext::new("bench-actor", ExecutionMode::Normal);
             for i in 0..count {
                 let effect_id = format!("effect-{}", i);
                 ctx.record_side_effect(&effect_id, || Ok(i as u32))
@@ -191,7 +196,7 @@ fn benchmark_side_effect_replay(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(count), &ctx, |b, c| {
             b.to_async(&rt).iter(|| async {
-                let mut replay_ctx = ExecutionContext::new("bench-actor", ExecutionMode::ExecutionModeReplay);
+                let mut replay_ctx = ExecutionContext::new("bench-actor", ExecutionMode::Replay);
                 // Copy cache from original context
                 for i in 0..count {
                     let effect_id = format!("effect-{}", i);
@@ -228,6 +233,8 @@ fn benchmark_retention(c: &mut Criterion) {
                     sequence: seq,
                     timestamp: chrono::Utc::now(),
                     state_data: vec![0u8; 1024],
+                    compression: CompressionType::None,
+                    encryption: EncryptionType::None,
                     metadata: Default::default(),
                 };
                 journal.save_snapshot(snapshot).await.unwrap();

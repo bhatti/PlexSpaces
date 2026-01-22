@@ -43,7 +43,7 @@ use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
 use plexspaces_journaling::VirtualActorFacet;
-use plexspaces_mailbox::Message;
+use plexspaces_core::Message;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -56,6 +56,16 @@ use async_trait::async_trait;
 #[path = "test_helpers.rs"]
 mod test_helpers;
 use test_helpers::{lookup_actor_ref, get_or_activate_actor_helper};
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
 
 // ============================================================================
 // TEST ACTOR BEHAVIOR
@@ -91,21 +101,22 @@ impl GenServer for TestActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        let test_msg: TestMessage = serde_json::from_slice(msg.payload())
+        let test_msg: TestMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
         
         let reply_msg = match test_msg {
             TestMessage::Ping => {
-                Message::new(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
+                create_test_message(serde_json::to_vec(&TestMessage::Pong("pong".to_string())).unwrap())
             }
             _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
         };
         
-        if let Some(sender_id) = &msg.sender {
+        if !msg.sender_id.is_empty() {
+            let correlation_id = if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) };
             ctx.send_reply(
-                msg.correlation_id.as_deref(),
-                sender_id,
-                msg.receiver.clone(),
+                correlation_id,
+                &msg.sender_id,
+                msg.receiver_id.clone(),
                 reply_msg,
             ).await
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
@@ -169,7 +180,7 @@ async fn create_test_node_with_server() -> Arc<Node> {
             panic!("WASM runtime not initialized - {} - cannot run integration test", error);
         }
         
-        if node.wasm_runtime().await.is_some() {
+        if node.service_locator().get_wasm_runtime().await.is_some() {
             eprintln!("🟢 [TEST] WASM runtime initialized after {} attempts (elapsed: {:?})", attempts, start.elapsed());
             break;
         }
@@ -182,7 +193,7 @@ async fn create_test_node_with_server() -> Arc<Node> {
     }
     
     // Verify WASM runtime is initialized
-    if node.wasm_runtime().await.is_none() {
+    if node.service_locator().get_wasm_runtime().await.is_none() {
         let error_msg = start_error.lock().await.clone();
         start_handle.abort();
         if let Some(error) = error_msg {

@@ -82,7 +82,6 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
     // Register NodeMetricsAccessor
     use plexspaces_node::service_wrappers::NodeMetricsAccessorWrapper;
     let metrics_accessor = Arc::new(NodeMetricsAccessorWrapper::new(node.clone()));
-    service_locator.register_service(metrics_accessor.clone()).await;
     let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> = 
         metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
     service_locator.register_node_metrics_accessor(metrics_accessor_trait).await;
@@ -95,14 +94,10 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
     
     // Ensure ObjectRegistry is registered (needed for query_remote_nodes)
     use plexspaces_object_registry::ObjectRegistry;
-    use plexspaces_core::service_names;
-    if let Some(object_registry) = service_locator.get_service_by_name::<ObjectRegistry>(service_names::OBJECT_REGISTRY).await {
-        // Also register as generic service for get_service() lookup
-        service_locator.register_service(object_registry.clone()).await;
-    }
+    // ObjectRegistry is already registered via ServiceLocator initialization
     
     // Create HealthReporterAccess implementation
-    use plexspaces_node::health_service::PlexSpacesHealthReporter;
+    use plexspaces_core::PlexSpacesHealthReporter;
     let (health_reporter, _service) = PlexSpacesHealthReporter::new();
     let health_reporter = Arc::new(health_reporter);
     

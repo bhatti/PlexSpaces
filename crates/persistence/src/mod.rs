@@ -567,7 +567,7 @@ impl Journal for MemoryJournal {
             timestamp: Utc::now(),
             message: MessageRecord {
                 id: message.id().to_string(),
-                payload: message.payload().to_vec(),
+                payload: message.payload.to_vec(),
                 metadata: Default::default(),
             },
         };

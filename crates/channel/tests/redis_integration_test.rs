@@ -45,6 +45,7 @@
 use futures::StreamExt;
 use plexspaces_channel::*;
 use plexspaces_proto::channel::v1::*;
+use plexspaces_proto::common::v1::Message;
 
 // Helper to check if Redis is available
 async fn is_redis_available() -> bool {
@@ -114,7 +115,7 @@ async fn test_redis_send_and_receive_single_message() {
         .expect("Failed to create Redis channel");
 
     // Send message
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: stream_name.to_string(),
         payload: b"Hello Redis".to_vec(),
@@ -149,7 +150,7 @@ async fn test_redis_send_and_receive_multiple_messages() {
 
     // Send 5 messages
     for i in 0..5 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: stream_name.to_string(),
             payload: format!("Message {}", i).into_bytes(),
@@ -208,7 +209,7 @@ async fn test_redis_try_receive_with_messages() {
         .expect("Failed to create channel");
 
     // Send message
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: stream_name.to_string(),
         payload: b"Quick message".to_vec(),
@@ -246,7 +247,7 @@ async fn test_redis_publish_subscribe() {
     let channel_clone = channel.clone();
     let publish_handle = tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: channel_name.to_string(),
             payload: b"Pub/Sub Event".to_vec(),
@@ -284,7 +285,7 @@ async fn test_redis_ack() {
         .expect("Failed to create channel");
 
     // Send message
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: stream_name.to_string(),
         payload: b"Ack me".to_vec(),
@@ -322,7 +323,7 @@ async fn test_redis_nack_requeue() {
         .expect("Failed to create channel");
 
     // Send message
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: stream_name.to_string(),
         payload: b"Nack me".to_vec(),
@@ -371,7 +372,7 @@ async fn test_redis_consumer_group() {
 
     // Send messages
     for i in 0..3 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: stream_name.to_string(),
             payload: format!("Group message {}", i).into_bytes(),
@@ -404,7 +405,7 @@ async fn test_redis_get_stats() {
 
     // Send some messages
     for i in 0..5 {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: stream_name.to_string(),
             payload: format!("Stats message {}", i).into_bytes(),
@@ -443,7 +444,7 @@ async fn test_redis_close_channel() {
     assert!(channel.is_closed());
 
     // Sending should fail
-    let msg = ChannelMessage {
+    let msg = Message {
         id: ulid::Ulid::new().to_string(),
         channel: stream_name.to_string(),
         payload: b"Should fail".to_vec(),
@@ -472,7 +473,7 @@ async fn test_redis_message_persistence() {
             .await
             .expect("Failed to create channel");
 
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
             channel: stream_name.to_string(),
             payload: b"Persistent message".to_vec(),

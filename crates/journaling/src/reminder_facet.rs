@@ -46,7 +46,7 @@ use crate::storage::{JournalStorage, ReminderRegistration, ReminderState};
 use async_trait::async_trait;
 use plexspaces_core::{ActorId, ActorRef, ActorService};
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -389,9 +389,16 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
                         let payload = prost::Message::encode_to_vec(&reminder_fired);
                         
                         // Create message with reminder type
-                        let message = Message::new(payload)
-                            .with_metadata("type".to_string(), "ReminderFired".to_string())
-                            .with_metadata("reminder_name".to_string(), reg.reminder_name.clone());
+                        let mut headers = std::collections::HashMap::new();
+                        headers.insert("type".to_string(), "ReminderFired".to_string());
+                        headers.insert("reminder_name".to_string(), reg.reminder_name.clone());
+                        let message = Message {
+                            id: ulid::Ulid::new().to_string(),
+                            payload,
+                            message_type: "ReminderFired".to_string(),
+                            headers,
+                            ..Default::default()
+                        };
                         
                         // Use ActorService to send message (handles local/remote routing)
                         if let Err(e) = service_guard.send(ref_guard.id.as_str(), message).await {

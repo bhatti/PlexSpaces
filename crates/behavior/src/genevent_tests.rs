@@ -27,7 +27,16 @@ mod tests {
     use plexspaces_core::{
         Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType,
     };
-    use plexspaces_mailbox::Message;
+    use plexspaces_proto::common::v1::Message;
+    
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: ulid::Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
     use std::sync::{Arc, Mutex};
 
     // Shared event log for testing
@@ -55,7 +64,7 @@ mod tests {
             ctx: &plexspaces_core::ActorContext,
             event: Message,
         ) -> Result<(), BehaviorError> {
-            let payload = String::from_utf8_lossy(event.payload());
+            let payload = String::from_utf8_lossy(event.payload);
             self.log
                 .lock()
                 .unwrap()
@@ -106,7 +115,7 @@ mod tests {
         assert_eq!(behavior.behavior_type(), BehaviorType::GenEvent);
 
         // Send event
-        let msg = Message::new(b"test event".to_vec());
+        let msg = create_test_message(b"test event".to_vec());
         let (ctx, msg_actual) = create_test_context_and_message(msg);
 
         behavior.handle_message(&*ctx, msg_actual).await.unwrap();
@@ -128,7 +137,7 @@ mod tests {
         behavior.add_handler(Box::new(LoggingHandler::new("h3", log.clone())));
 
         // Send event
-        let msg = Message::new(b"broadcast".to_vec());
+        let msg = create_test_message(b"broadcast".to_vec());
         let (ctx, msg_actual) = create_test_context_and_message(msg);
 
         behavior.handle_message(&*ctx, msg_actual).await.unwrap();
@@ -147,7 +156,7 @@ mod tests {
         let mut behavior = GenEventBehavior::new();
 
         // Send event with no handlers - should succeed
-        let msg = Message::new(b"ignored".to_vec());
+        let msg = create_test_message(b"ignored".to_vec());
         let (ctx, msg_actual) = create_test_context_and_message(msg);
 
         // Should not fail even with no handlers
@@ -166,7 +175,7 @@ mod tests {
         behavior.add_handler(Box::new(LoggingHandler::new("h3", log.clone())));
 
         // Send event
-        let msg = Message::new(b"test".to_vec());
+        let msg = create_test_message(b"test".to_vec());
         let (ctx, msg_actual) = create_test_context_and_message(msg);
 
         // Should fail because one handler fails
@@ -189,7 +198,7 @@ mod tests {
 
         // Send multiple events
         for i in 1..=5 {
-            let msg = Message::new(format!("event{}", i).into_bytes());
+            let msg = create_test_message(format!("event{}", i).into_bytes());
             let (ctx, msg_actual) = create_test_context_and_message(msg);
             behavior.handle_message(&*ctx, msg_actual).await.unwrap();
         }
@@ -212,7 +221,7 @@ mod tests {
         behavior.add_handler(Box::new(LoggingHandler::new("h2", log.clone())));
 
         // Send event - should reach handlers
-        let msg1 = Message::new(b"before clear".to_vec());
+        let msg1 = create_test_message(b"before clear".to_vec());
         let (ctx1, msg1_actual) = create_test_context_and_message(msg1);
         behavior.handle_message(&*ctx1, msg1_actual).await.unwrap();
 
@@ -222,7 +231,7 @@ mod tests {
         behavior.clear_handlers();
 
         // Send event - should not reach any handlers
-        let msg2 = Message::new(b"after clear".to_vec());
+        let msg2 = create_test_message(b"after clear".to_vec());
         let (ctx2, msg2_actual) = create_test_context_and_message(msg2);
         behavior.handle_message(&*ctx2, msg2_actual).await.unwrap();
 
@@ -246,7 +255,7 @@ mod tests {
                 event: Message,
             ) -> Result<(), BehaviorError> {
                 self.count += 1;
-                let payload = String::from_utf8_lossy(event.payload());
+                let payload = String::from_utf8_lossy(event.payload);
                 self.log
                     .lock()
                     .unwrap()
@@ -266,7 +275,7 @@ mod tests {
 
         // Send multiple events
         for i in 1..=3 {
-            let msg = Message::new(format!("evt{}", i).into_bytes());
+            let msg = create_test_message(format!("evt{}", i).into_bytes());
             let (ctx, msg_actual) = create_test_context_and_message(msg);
             behavior.handle_message(&*ctx, msg_actual).await.unwrap();
         }
@@ -290,7 +299,7 @@ mod tests {
 
         // Send large event (1MB)
         let large_payload = vec![b'x'; 1024 * 1024];
-        let msg = Message::new(large_payload.clone());
+        let msg = create_test_message(large_payload.clone());
         let (ctx, msg_actual) = create_test_context_and_message(msg);
 
         behavior.handle_message(&*ctx, msg_actual).await.unwrap();
@@ -317,7 +326,7 @@ mod tests {
         }
 
         // Send event
-        let msg = Message::new(b"concurrent".to_vec());
+        let msg = create_test_message(b"concurrent".to_vec());
         let (ctx, msg_actual) = create_test_context_and_message(msg);
 
         behavior.handle_message(&*ctx, msg_actual).await.unwrap();
@@ -341,7 +350,7 @@ mod tests {
         behavior.add_handler(Box::new(LoggingHandler::new("third", log.clone())));
 
         // Send event
-        let msg = Message::new(b"order".to_vec());
+        let msg = create_test_message(b"order".to_vec());
         let (ctx, msg_actual) = create_test_context_and_message(msg);
 
         behavior.handle_message(&*ctx, msg_actual).await.unwrap();

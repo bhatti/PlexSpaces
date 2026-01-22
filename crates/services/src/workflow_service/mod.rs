@@ -618,7 +618,7 @@ impl WorkflowService for WorkflowServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::WorkflowStorage;
+    use plexspaces_workflow::storage::WorkflowStorage;
     use plexspaces_proto::workflow::v1::{
         CreateDefinitionRequest, DeleteDefinitionRequest, GetDefinitionRequest,
         GetExecutionRequest, GetStepExecutionsRequest, ListDefinitionsRequest,

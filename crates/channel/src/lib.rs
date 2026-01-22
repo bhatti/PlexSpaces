@@ -55,7 +55,7 @@
 //! - [`Channel`]: Core trait for channel operations (send, receive, subscribe)
 //! - [`InMemoryChannel`]: Go-like MPSC channel for same-node communication
 //! - [`ChannelConfig`]: Configuration for channel creation
-//! - [`ChannelMessage`]: Message envelope with metadata
+//! - [`Message`]: Message envelope with metadata (from plexspaces_proto::common::v1)
 //!
 //! ## Dependencies
 //! This crate depends on:
@@ -90,7 +90,7 @@
 //! let channel = InMemoryChannel::new(config).await?;
 //!
 //! // Send message
-//! let msg = ChannelMessage {
+//! let msg = Message {
 //!     id: ulid::Ulid::new().to_string(),
 //!     channel: "work-queue".to_string(),
 //!     payload: b"task data".to_vec(),
@@ -126,7 +126,7 @@
 //! let mut stream = channel.subscribe(None).await?;
 //!
 //! // Publish event (in another task)
-//! let msg = ChannelMessage {
+//! let msg = Message {
 //!     id: ulid::Ulid::new().to_string(),
 //!     channel: "events".to_string(),
 //!     payload: b"event occurred".to_vec(),
@@ -208,6 +208,9 @@ mod udp_backend;
 #[cfg(feature = "sqs-backend")]
 mod sqs_backend;
 
+#[cfg(feature = "process-group-backend")]
+mod process_group_backend;
+
 // Mock backend for testing
 // Available when test-utils feature is enabled (required for integration tests)
 #[cfg(feature = "test-utils")]
@@ -238,3 +241,6 @@ pub use udp_backend::*;
 
 #[cfg(feature = "sqs-backend")]
 pub use sqs_backend::*;
+
+#[cfg(feature = "process-group-backend")]
+pub use process_group_backend::*;

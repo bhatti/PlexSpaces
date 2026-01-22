@@ -30,7 +30,7 @@
 
 use plexspaces_channel::Channel;
 use plexspaces_proto::{
-    channel::v1::ChannelMessage,
+    common::v1::Message,
     scheduling::v1::ActorGroup,
 };
 use std::collections::HashMap;
@@ -227,17 +227,24 @@ impl TaskRouter {
 
         // Create channel message
         let message_id = ulid::Ulid::new().to_string();
-        let channel_msg = ChannelMessage {
+        let channel_msg = Message {
             id: message_id.clone(),
-            channel: group_name.to_string(),
             sender_id: String::new(),
+            receiver_id: String::new(),
+            channel: group_name.to_string(),
+            message_type: "task".to_string(),
             payload: task_payload,
-            headers: HashMap::new(),
             timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(std::time::SystemTime::now())),
-            partition_key: String::new(),
-            correlation_id: String::new(),
+            headers: HashMap::new(),
+            priority: 50, // Normal priority
+            ttl: None,
             delivery_count: 0,
+            idempotency_key: String::new(),
+            correlation_id: String::new(),
             reply_to: String::new(),
+            partition_key: String::new(),
+            uri_path: String::new(),
+            uri_method: String::new(),
         };
 
         // Route based on strategy

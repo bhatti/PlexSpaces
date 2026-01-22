@@ -44,6 +44,16 @@ use plexspaces_persistence::MemoryJournal;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
+
 /// Test that subscribers receive full lifecycle events during actor spawn
 ///
 /// ## Purpose
@@ -190,7 +200,7 @@ async fn test_lifecycle_event_subscription_receives_termination() {
     }
 
     // Send message to actor to trigger some activity
-    let msg = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
+    let msg = plexspaces_mailbox::create_test_message(vec![1, 2, 3]);
     let _: Result<(), _> = actor_ref.tell(msg).await;
 
     // Wait for message to be processed - route_message completes after enqueueing
@@ -568,10 +578,19 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
         .expect("Server should start quickly");
     let node2_address = format!("http://{}", bound_addr);
 
-    // Register node2 in node1's registry
-    let _: Result<(), plexspaces_node::NodeError> = node1
-        .register_remote_node(NodeId::new("node2"), node2_address)
-        .await;
+    // Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
+    use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+    let ctx = node1.service_locator().request_context_for_system_operations().await;
+    let registration = ObjectRegistration {
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_id: "node2".to_string(),
+        grpc_address: node2_address,
+        object_category: "Node".to_string(),
+        ..Default::default()
+    };
+    if let Some(object_registry) = node1.service_locator().get_object_registry().await {
+        let _ = object_registry.register(&ctx, registration).await;
+    }
 
     // Node1 subscribes to lifecycle events (simulates observability backend)
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -615,7 +634,7 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
     }
 
     // Send message and terminate
-    let msg = plexspaces_mailbox::Message::new(vec![1, 2, 3]);
+    let msg = plexspaces_mailbox::create_test_message(vec![1, 2, 3]);
     let _: Result<(), _> = actor_ref.tell(msg).await;
     // Wait for message to be processed - route_message completes after enqueueing
     let processing_future = async {

@@ -27,7 +27,7 @@
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_core::ChannelService;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_wasm_runtime::{WasmInstance, WasmRuntime};
 use std::sync::Arc;
 use std::time::Duration;
@@ -274,8 +274,8 @@ async fn test_send_to_queue_host_function() {
     assert_eq!(messages.len(), 1);
     let (queue_name, message) = &messages[0];
     assert_eq!(queue_name, "test-queue");
-    assert_eq!(message.payload(), b"hello");
-    assert_eq!(message.message_type_str(), "test");
+    assert_eq!(message.payload.as_slice(), b"hello");
+    assert_eq!(message.message_type.as_str(), "test");
 }
 
 #[tokio::test]
@@ -328,8 +328,8 @@ async fn test_publish_to_topic_host_function() {
     assert_eq!(messages.len(), 1);
     let (topic_name, message) = &messages[0];
     assert_eq!(topic_name, "test-topic");
-    assert_eq!(message.payload(), b"data");
-    assert_eq!(message.message_type_str(), "event");
+    assert_eq!(message.payload.as_slice(), b"data");
+    assert_eq!(message.message_type.as_str(), "event");
 }
 
 #[tokio::test]

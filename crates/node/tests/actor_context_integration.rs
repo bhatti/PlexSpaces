@@ -28,6 +28,16 @@ use plexspaces_node::{Node, NodeId, default_node_config};
 mod test_helpers;
 use test_helpers::{lookup_actor_ref, spawn_actor_helper};
 
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
+
 /// Test behavior that uses ActorContext
 struct ContextAwareBehavior {
     received_messages: usize,
@@ -47,7 +57,7 @@ impl plexspaces_core::Actor for ContextAwareBehavior {
     async fn handle_message(
         &mut self,
         ctx: &plexspaces_core::ActorContext,
-        _msg: plexspaces_mailbox::Message,
+        _msg: plexspaces_core::Message,
     ) -> Result<(), plexspaces_core::BehaviorError> {
         self.received_messages += 1;
 
@@ -123,9 +133,9 @@ async fn test_node_spawns_actor_with_full_context() {
     // Send a message to verify context is working
     // Use lookup_actor_ref + tell() to send message
     // If the actor is not registered, this will fail with ActorNotFound
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::Message;
 
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     // The actor should be registered - if not, the error will tell us what's wrong
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.expect("Actor should be registered").expect("Actor should exist");
     actor_ref.tell(message).await.expect("Should send message successfully");

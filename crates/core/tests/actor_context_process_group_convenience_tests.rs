@@ -5,9 +5,19 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_core::{ActorContext, ProcessGroupService};
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::{ProcessGroupService, RequestContext};
+    use plexspaces_core::Message;
     use std::sync::Arc;
+    use ulid::Ulid;
+
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
 
     // Mock ProcessGroupService for testing
     struct MockProcessGroupService {
@@ -17,49 +27,58 @@ mod tests {
         members: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>>, // group_name -> actor_ids
     }
 
+    impl MockProcessGroupService {
+        fn new() -> Self {
+            Self {
+                joined_groups: Arc::new(std::sync::Mutex::new(Vec::new())),
+                left_groups: Arc::new(std::sync::Mutex::new(Vec::new())),
+                published_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
+                members: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            }
+        }
+    }
+
     #[async_trait::async_trait]
     impl ProcessGroupService for MockProcessGroupService {
+        async fn create_group(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn delete_group(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
         async fn join_group(
             &self,
+            ctx: &RequestContext,
             group_name: &str,
-            tenant_id: &str,
-            namespace: &str,
             actor_id: &str,
+            _topics: Vec<String>,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.joined_groups
                 .lock()
                 .unwrap()
                 .push((
                     group_name.to_string(),
-                    tenant_id.to_string(),
-                    namespace.to_string(),
+                    ctx.tenant_id().to_string(),
+                    ctx.namespace().to_string(),
                     actor_id.to_string(),
                 ));
             Ok(())
-        
-    async fn unregister(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        _object_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
-    async fn heartbeat(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        _object_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
-}
+        }
 
         async fn leave_group(
             &self,
+            ctx: &RequestContext,
             group_name: &str,
-            tenant_id: &str,
-            namespace: &str,
             actor_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.left_groups
@@ -67,37 +86,17 @@ mod tests {
                 .unwrap()
                 .push((
                     group_name.to_string(),
-                    tenant_id.to_string(),
-                    namespace.to_string(),
+                    ctx.tenant_id().to_string(),
+                    ctx.namespace().to_string(),
                     actor_id.to_string(),
                 ));
             Ok(())
         }
 
-        async fn publish_to_group(
-            &self,
-            group_name: &str,
-            tenant_id: &str,
-            namespace: &str,
-            message: Message,
-        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-            self.published_messages
-                .lock()
-                .unwrap()
-                .push((
-                    group_name.to_string(),
-                    tenant_id.to_string(),
-                    namespace.to_string(),
-                    message,
-                ));
-            Ok(vec!["actor-1".to_string(), "actor-2".to_string()])
-        }
-
         async fn get_members(
             &self,
+            _ctx: &RequestContext,
             group_name: &str,
-            _tenant_id: &str,
-            _namespace: &str,
         ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
             let members = self.members.lock().unwrap();
             Ok(members
@@ -105,51 +104,91 @@ mod tests {
                 .cloned()
                 .unwrap_or_default())
         }
+
+        async fn get_local_members(
+            &self,
+            _ctx: &RequestContext,
+            group_name: &str,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+            let members = self.members.lock().unwrap();
+            Ok(members
+                .get(group_name)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        async fn list_groups(
+            &self,
+            _ctx: &RequestContext,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+            let members = self.members.lock().unwrap();
+            Ok(members.keys().cloned().collect())
+        }
+
+        async fn publish_to_group(
+            &self,
+            ctx: &RequestContext,
+            group_name: &str,
+            _topic: Option<&str>,
+            message: Message,
+        ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+            self.published_messages
+                .lock()
+                .unwrap()
+                .push((
+                    group_name.to_string(),
+                    ctx.tenant_id().to_string(),
+                    ctx.namespace().to_string(),
+                    message,
+                ));
+            Ok(2) // Return count of 2 as mock response
+        }
     }
 
-    struct MockActorService;
-    #[async_trait::async_trait]
-    impl plexspaces_core::ActorService for MockActorService {
-        async fn spawn_actor(&self, _actor_id: &str, _actor_type: &str, _initial_state: Vec<u8>) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
-            Err("Not implemented".into())
-        }
-        async fn send(&self, _actor_id: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            Ok("msg-id".to_string())
-        }
+    #[tokio::test]
+    async fn test_join_group_records_tenant_info() {
+        let service = MockProcessGroupService::new();
+        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
+        
+        service.join_group(&ctx, "test-group", "actor-1", vec![]).await.unwrap();
+        
+        let joined = service.joined_groups.lock().unwrap();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].0, "test-group");
+        assert_eq!(joined[0].1, "tenant-123");
+        assert_eq!(joined[0].2, "namespace-abc");
+        assert_eq!(joined[0].3, "actor-1");
     }
 
-    struct MockObjectRegistry;
-    #[async_trait::async_trait]
-    impl plexspaces_core::ObjectRegistry for MockObjectRegistry {
-        async fn lookup(&self, _ctx: &plexspaces_core::RequestContext, _object_id: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(None)
-        }
-        async fn lookup_full(&self, _ctx: &plexspaces_core::RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(None)
-        }
-        async fn register(&self, _ctx: &plexspaces_core::RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            Ok(())
-        }
-        async fn discover(&self, _ctx: &plexspaces_core::RequestContext, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>, _object_category: Option<String>, _capabilities: Option<Vec<String>>, _labels: Option<Vec<String>>, _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>, _offset: usize, _limit: usize) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(vec![])
-        }
+    #[tokio::test]
+    async fn test_leave_group_records_tenant_info() {
+        let service = MockProcessGroupService::new();
+        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
+        
+        service.leave_group(&ctx, "test-group", "actor-1").await.unwrap();
+        
+        let left = service.left_groups.lock().unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].0, "test-group");
+        assert_eq!(left[0].1, "tenant-123");
+        assert_eq!(left[0].2, "namespace-abc");
+        assert_eq!(left[0].3, "actor-1");
     }
 
-    struct MockTupleSpaceProvider;
-    #[async_trait::async_trait]
-    impl plexspaces_core::TupleSpaceProvider for MockTupleSpaceProvider {
-        async fn write(&self, _tuple: plexspaces_tuplespace::Tuple) -> Result<(), plexspaces_tuplespace::TupleSpaceError> {
-            Ok(())
-        }
-        async fn read(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<Vec<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError> {
-            Ok(vec![])
-        }
-        async fn take(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<Option<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError> {
-            Ok(None)
-        }
-        async fn count(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<usize, plexspaces_tuplespace::TupleSpaceError> {
-            Ok(0)
-        }
+    #[tokio::test]
+    async fn test_publish_to_group_records_tenant_info() {
+        let service = MockProcessGroupService::new();
+        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
+        
+        let message = create_test_message(b"test payload".to_vec());
+        let count = service.publish_to_group(&ctx, "test-group", None, message).await.unwrap();
+        
+        assert_eq!(count, 2);
+        
+        let published = service.published_messages.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0, "test-group");
+        assert_eq!(published[0].1, "tenant-123");
+        assert_eq!(published[0].2, "namespace-abc");
     }
 }
-

@@ -35,6 +35,79 @@ mod tests {
         Arc::new(HostFunctions::new())
     }
 
+    fn create_test_host_functions_with_channel_service() -> Arc<HostFunctions> {
+        use plexspaces_core::ChannelService;
+        use plexspaces_proto::common::v1::Message;
+        use std::collections::HashMap;
+        use futures::stream;
+        use async_trait::async_trait;
+
+        struct MockChannelService {
+            queues: Arc<tokio::sync::RwLock<HashMap<String, Vec<Message>>>>,
+            topics: Arc<tokio::sync::RwLock<HashMap<String, Vec<Message>>>>,
+        }
+
+        impl MockChannelService {
+            fn new() -> Self {
+                Self {
+                    queues: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+                    topics: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+                }
+            }
+        }
+
+        #[async_trait]
+        impl ChannelService for MockChannelService {
+            async fn send_to_queue(
+                &self,
+                queue_name: &str,
+                message: Message,
+            ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+                let mut queues = self.queues.write().await;
+                queues.entry(queue_name.to_string())
+                    .or_insert_with(Vec::new)
+                    .push(message);
+                Ok("msg-001".to_string())
+            }
+
+            async fn publish_to_topic(
+                &self,
+                topic_name: &str,
+                message: Message,
+            ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+                let mut topics = self.topics.write().await;
+                topics.entry(topic_name.to_string())
+                    .or_insert_with(Vec::new)
+                    .push(message);
+                Ok("msg-001".to_string())
+            }
+
+            async fn subscribe_to_topic(
+                &self,
+                _topic_name: &str,
+            ) -> Result<futures::stream::BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(Box::pin(stream::empty()))
+            }
+
+            async fn receive_from_queue(
+                &self,
+                queue_name: &str,
+                _timeout: Option<std::time::Duration>,
+            ) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
+                let mut queues = self.queues.write().await;
+                if let Some(queue) = queues.get_mut(queue_name) {
+                    if !queue.is_empty() {
+                        return Ok(Some(queue.remove(0)));
+                    }
+                }
+                Ok(None)
+            }
+        }
+
+        let channel_service = Arc::new(MockChannelService::new());
+        Arc::new(HostFunctions::with_channel_service(channel_service))
+    }
+
     /// Test that all messaging functions are accessible
     #[tokio::test]
     async fn test_messaging_functions_accessible() {
@@ -61,9 +134,9 @@ mod tests {
         let ask_result: Result<Vec<u8>, ActorError> = messaging.ask("target".to_string(), "msg".to_string(), vec![], 1000).await;
         assert!(ask_result.is_err()); // Expected without message sender
 
-        // Test reply
+        // Test reply (will fail without pending ask, which is expected behavior)
         let reply_result: Result<(), ActorError> = messaging.reply("corr-123".to_string(), vec![]).await;
-        assert!(reply_result.is_ok()); // Reply always succeeds (routing handled by system)
+        assert!(reply_result.is_err()); // Reply fails without pending ask (expected behavior)
 
         // Test spawn (should return error without message sender)
         let spawn_options = SpawnOptions {
@@ -80,11 +153,13 @@ mod tests {
         let stop_result = messaging.stop("target".to_string(), 5000).await;
         assert!(stop_result.is_err()); // Expected without message sender
 
-        // Test link/unlink/monitor/demonitor (all should succeed as placeholders)
-        assert!(messaging.link("target".to_string()).await.is_ok());
-        assert!(messaging.unlink("target".to_string()).await.is_ok());
-        let monitor_ref = messaging.monitor("target".to_string()).await.unwrap();
-        assert!(messaging.demonitor(monitor_ref).await.is_ok());
+        // Test link/unlink/monitor/demonitor (all return error without message sender)
+        assert!(messaging.link("target".to_string()).await.is_err()); // Requires message sender
+        assert!(messaging.unlink("target".to_string()).await.is_err()); // Requires message sender
+        // monitor returns error without message sender
+        assert!(messaging.monitor("target".to_string()).await.is_err());
+        // demonitor returns error (not implemented)
+        assert!(messaging.demonitor(0).await.is_err());
 
         // Test send_after/cancel_timer
         let timer_id = messaging.send_after(100, "msg".to_string(), vec![]).await.unwrap();
@@ -101,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn test_channel_functions_accessible() {
         use ChannelsHost;
-        let host_functions = create_test_host_functions();
+        let host_functions = create_test_host_functions_with_channel_service();
         let mut channels = ChannelsImpl::new(host_functions.clone());
 
         // Test send_to_queue

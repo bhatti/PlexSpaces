@@ -289,7 +289,13 @@ async fn test_init_called_before_any_messages() {
     assert!(init_called.load(Ordering::SeqCst), "init() should be called");
     
     // Now send a message after actor has started (init() already called)
-    let msg = Message::new(b"test".to_vec());
+    let proto_msg = Message {
+        id: Ulid::new().to_string(),
+        payload: b"test".to_vec(),
+        ..Default::default()
+    };
+    // Convert proto Message to mailbox Message for enqueueing
+    let msg = plexspaces_mailbox::Message::from_proto(&proto_msg);
     // Mailbox might be full, so we handle that gracefully
     if let Err(e) = actor.mailbox().enqueue(msg).await {
         // If mailbox is full, that's okay - the key test is that init() was called
@@ -439,7 +445,7 @@ async fn test_handle_exit_called_when_trap_exit_true() {
     
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -469,7 +475,7 @@ async fn test_handle_exit_propagate_action_terminates_actor() {
     
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -498,7 +504,7 @@ async fn test_handle_exit_handle_action_continues_actor() {
     
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -531,7 +537,7 @@ async fn test_handle_exit_receives_correct_parameters() {
     
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -587,8 +593,8 @@ async fn test_exit_message_terminates_actor_when_not_trapping() {
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
     
-    // Send EXIT message
-    let exit_msg = Message::exit("linked-actor".to_string(), "Error:crashed");
+    // Send EXIT message (using mailbox's exit message factory)
+    let exit_msg = plexspaces_mailbox::Message::exit("linked-actor".to_string(), "Error:crashed");
     // Mailbox might be full, so we handle that gracefully
     match actor.mailbox().enqueue(exit_msg).await {
         Ok(_) => {
@@ -646,7 +652,7 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
     
     // Test handle_exit() directly
     use plexspaces_core::ServiceLocator;
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -743,7 +749,7 @@ async fn test_multiple_exit_messages_handled_correctly() {
     // Note: Since we can't modify context.trap_exit directly (it's private),
     // we test handle_exit() directly by calling it multiple times
     use plexspaces_core::ServiceLocator;
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -782,7 +788,7 @@ async fn test_exit_message_with_linked_reason() {
     
     // Test handle_exit() with Linked reason directly (no need to create actor)
     use plexspaces_core::ServiceLocator;
-    let service_locator = Arc::new(ServiceLocator::new());
+    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),

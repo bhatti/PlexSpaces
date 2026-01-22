@@ -30,7 +30,7 @@ use crate::{ActorId, ActorRef, MessageSender, RequestContext, ActorMetricsHandle
 use crate::actor_context::ObjectRegistry;
 use crate::actor_context::ObjectRegistration;
 use crate::Service;
-use plexspaces_mailbox::{Mailbox, Message};
+use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::ObjectType;
 use plexspaces_proto::ActorLifecycleEvent;
 use plexspaces_facet::{FacetManager, ExitReason as FacetExitReason};
@@ -38,6 +38,24 @@ use plexspaces_facet::{FacetManager, ExitReason as FacetExitReason};
 // Observability
 use metrics;
 use tracing;
+
+/// Create an EXIT message for linked actor notification
+/// This is the message sent when an actor terminates to notify linked actors
+fn create_exit_message(from: String, reason_str: &str) -> Message {
+    let mut headers = std::collections::HashMap::new();
+    headers.insert("type".to_string(), "__EXIT__".to_string());
+    headers.insert("exit_from".to_string(), from.clone());
+    headers.insert("exit_reason".to_string(), reason_str.to_string());
+    
+    Message {
+        id: ulid::Ulid::new().to_string(),
+        sender_id: from,
+        message_type: "__EXIT__".to_string(),
+        payload: b"__EXIT__".to_vec(),
+        headers,
+        ..Default::default()
+    }
+}
 
 /// Cached node lookup entry with expiration
 #[derive(Clone, Debug)]
@@ -1944,8 +1962,8 @@ impl ActorRegistry {
                     }
                 };
 
-                // Create EXIT message using Message::exit() helper
-                let exit_message = Message::exit(actor_id.to_string(), &reason_str);
+                // Create EXIT message
+                let exit_message = create_exit_message(actor_id.to_string(), &reason_str);
                 
                 // Send EXIT signal to linked actor's mailbox
                 // The actor's message loop will handle it based on trap_exit setting

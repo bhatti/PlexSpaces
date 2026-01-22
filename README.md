@@ -83,6 +83,15 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 - **UDP Multicast Channels**: Low-latency pub/sub for cluster-wide messaging
 - **Cluster Configuration**: Node grouping via `cluster_name` for shared channels
 
+### 🔧 Infrastructure Services
+
+- **NodeService**: Comprehensive node management with metrics, health checks, and capacity calculation
+- **NodeRegistry**: TTL-based caching with gossip protocol for efficient node discovery
+- **Channel Factory**: Priority-based backend selection (Kafka → NATS → SQS → ProcessGroup → InMemory)
+- **SecretMasker**: Automatic masking of passwords, API keys, and tokens in API responses
+- **ServiceLocator**: Centralized service discovery with typed accessors for all services
+- **BlobServiceTrait**: Type-safe blob storage access via ServiceLocator
+
 ## Design Philosophy
 
 PlexSpaces follows three core principles:

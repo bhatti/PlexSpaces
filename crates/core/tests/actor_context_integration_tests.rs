@@ -6,12 +6,22 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_mailbox::Message;
+    use plexspaces_core::Message;
     use std::sync::Arc;
     use futures::StreamExt;
     use plexspaces_channel::{Channel, InMemoryChannel};
     use async_trait::async_trait;
-    use plexspaces_core::{ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider};
+    use plexspaces_core::{ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider, RequestContext};
+    use ulid::Ulid;
+
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> Message {
+        Message {
+            id: Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
+    }
 
     // Integration test: Test ActorContext with real ChannelServiceWrapper from node crate
     // Note: We can't directly import from node crate due to circular dependencies,
@@ -59,22 +69,15 @@ mod tests {
         async fn send_to_queue(&self, queue_name: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             let channel = self.get_or_create_channel(queue_name).await?;
             
-            use plexspaces_proto::channel::v1::ChannelMessage;
-            let channel_msg = ChannelMessage {
-                id: message.id.clone(),
-                channel: queue_name.to_string(),
-                sender_id: message.sender.clone().unwrap_or_default(),
-                payload: message.payload.clone(),
-                headers: message.metadata.clone(),
-                timestamp: Some(prost_types::Timestamp {
+            // Message is already the unified proto Message type
+            let mut channel_msg = message.clone();
+            channel_msg.channel = queue_name.to_string();
+            if channel_msg.timestamp.is_none() {
+                channel_msg.timestamp = Some(prost_types::Timestamp {
                     seconds: chrono::Utc::now().timestamp(),
                     nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
-                }),
-                partition_key: String::new(),
-                correlation_id: message.correlation_id.clone().unwrap_or_default(),
-                reply_to: message.reply_to.clone().unwrap_or_default(),
-                delivery_count: 0,
-            };
+                });
+            }
             
             channel.send(channel_msg).await
                 .map_err(|e| format!("Failed to send to queue {}: {}", queue_name, e).into())
@@ -83,22 +86,15 @@ mod tests {
         async fn publish_to_topic(&self, topic_name: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             let channel = self.get_or_create_channel(topic_name).await?;
             
-            use plexspaces_proto::channel::v1::ChannelMessage;
-            let channel_msg = ChannelMessage {
-                id: message.id.clone(),
-                channel: topic_name.to_string(),
-                sender_id: message.sender.clone().unwrap_or_default(),
-                payload: message.payload.clone(),
-                headers: message.metadata.clone(),
-                timestamp: Some(prost_types::Timestamp {
+            // Message is already the unified proto Message type
+            let mut channel_msg = message.clone();
+            channel_msg.channel = topic_name.to_string();
+            if channel_msg.timestamp.is_none() {
+                channel_msg.timestamp = Some(prost_types::Timestamp {
                     seconds: chrono::Utc::now().timestamp(),
                     nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
-                }),
-                partition_key: String::new(),
-                correlation_id: message.correlation_id.clone().unwrap_or_default(),
-                reply_to: message.reply_to.clone().unwrap_or_default(),
-                delivery_count: 0,
-            };
+                });
+            }
             
             channel.publish(channel_msg).await
                 .map(|_| message.id.clone())
@@ -111,31 +107,8 @@ mod tests {
             let stream = channel.subscribe(None).await
                 .map_err(|e| format!("Failed to subscribe to topic {}: {}", topic_name, e))?;
             
-            let message_stream = stream.map(|channel_msg| {
-                let mut msg = Message::new(channel_msg.payload);
-                msg.metadata = channel_msg.headers;
-                msg.priority = plexspaces_mailbox::MessagePriority::Normal;
-                msg.correlation_id = if channel_msg.correlation_id.is_empty() {
-                    None
-                } else {
-                    Some(channel_msg.correlation_id)
-                };
-                msg.reply_to = if channel_msg.reply_to.is_empty() {
-                    None
-                } else {
-                    Some(channel_msg.reply_to)
-                };
-                msg.sender = if channel_msg.sender_id.is_empty() {
-                    None
-                } else {
-                    Some(channel_msg.sender_id)
-                };
-                msg.receiver = channel_msg.channel.clone();
-                msg.message_type = String::new();
-                msg
-            });
-            
-            Ok(Box::pin(message_stream))
+            // Message from channel is already the unified proto Message type
+            Ok(Box::pin(stream))
         }
 
         async fn receive_from_queue(&self, queue_name: &str, timeout: Option<std::time::Duration>) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
@@ -149,32 +122,8 @@ mod tests {
                     .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?
             };
             
-            if messages.is_empty() {
-                return Ok(None);
-            }
-            
-            let channel_msg = &messages[0];
-            let mut msg = Message::new(channel_msg.payload.clone());
-            msg.metadata = channel_msg.headers.clone();
-            msg.priority = plexspaces_mailbox::MessagePriority::Normal;
-            msg.correlation_id = if channel_msg.correlation_id.is_empty() {
-                None
-            } else {
-                Some(channel_msg.correlation_id.clone())
-            };
-            msg.reply_to = if channel_msg.reply_to.is_empty() {
-                None
-            } else {
-                Some(channel_msg.reply_to.clone())
-            };
-            msg.sender = if channel_msg.sender_id.is_empty() {
-                None
-            } else {
-                Some(channel_msg.sender_id.clone())
-            };
-            msg.receiver = channel_msg.channel.clone();
-            msg.message_type = String::new();
-            Ok(Some(msg))
+            // Message from channel is already the unified proto Message type
+            Ok(messages.into_iter().next())
         }
     }
 
@@ -193,43 +142,22 @@ mod tests {
     struct MockObjectRegistry;
     #[async_trait::async_trait]
     impl ObjectRegistry for MockObjectRegistry {
-        async fn lookup(&self, _ctx: &plexspaces_core::RequestContext, _object_id: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn lookup(&self, _ctx: &RequestContext, _object_id: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(None)
         }
-        async fn lookup_full(&self, _ctx: &plexspaces_core::RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn lookup_full(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(None)
         }
-        async fn register(&self, _ctx: &plexspaces_core::RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn register(&self, _ctx: &RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
-        
-    async fn unregister(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        _object_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
-    async fn heartbeat(
-        &self,
-        _ctx: &plexspaces_core::RequestContext,
-        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
-        _object_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Ok(())
-    }
-}
-        async fn discover(
-            &self,
-            _ctx: &plexspaces_core::RequestContext,
-            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-            _object_category: Option<String>,
-            _capabilities: Option<Vec<String>>,
-            _labels: Option<Vec<String>>,
-            _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            _offset: usize,
-            _limit: usize,
-        ) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        }
+        async fn unregister(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+        async fn heartbeat(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+        async fn discover(&self, _ctx: &RequestContext, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>, _object_category: Option<String>, _capabilities: Option<Vec<String>>, _labels: Option<Vec<String>>, _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>, _offset: usize, _limit: usize) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }
     }
@@ -250,5 +178,52 @@ mod tests {
             Ok(0)
         }
     }
-}
 
+    #[tokio::test]
+    async fn test_integration_channel_send_receive() {
+        let service = IntegrationChannelService::new();
+        let queue_name = "test-queue";
+        
+        let message = create_test_message(b"hello world".to_vec());
+        let msg_id = message.id.clone();
+        
+        // Send message
+        let result = service.send_to_queue(queue_name, message).await;
+        assert!(result.is_ok(), "Failed to send message: {:?}", result);
+        
+        // Receive message
+        let received = service.receive_from_queue(queue_name, Some(std::time::Duration::from_secs(1))).await;
+        assert!(received.is_ok(), "Failed to receive message: {:?}", received);
+        
+        let msg = received.unwrap();
+        assert!(msg.is_some(), "No message received");
+        assert_eq!(msg.unwrap().id, msg_id);
+    }
+
+    #[tokio::test]
+    async fn test_integration_channel_pubsub() {
+        let service = IntegrationChannelService::new();
+        let topic_name = "test-topic";
+        
+        // Subscribe first
+        let mut stream = service.subscribe_to_topic(topic_name).await.unwrap();
+        
+        // Publish message
+        let message = create_test_message(b"broadcast".to_vec());
+        let msg_id = message.id.clone();
+        
+        let result = service.publish_to_topic(topic_name, message).await;
+        assert!(result.is_ok());
+        
+        // Receive from subscription
+        tokio::select! {
+            msg = stream.next() => {
+                assert!(msg.is_some(), "No message received from subscription");
+                assert_eq!(msg.unwrap().id, msg_id);
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                panic!("Timeout waiting for message");
+            }
+        }
+    }
+}

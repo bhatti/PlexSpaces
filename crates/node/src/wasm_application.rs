@@ -37,7 +37,7 @@ use async_trait::async_trait;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
 use plexspaces_proto::v1::application::HealthStatus;
 use plexspaces_core::{Actor, BehaviorError, BehaviorType};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
 use prost::Message as ProstMessage;
 use plexspaces_proto::wasm::v1::WasmModule;

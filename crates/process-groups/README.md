@@ -255,6 +255,39 @@ This crate depends on:
 This crate is used by:
 - `plexspaces_node`: Node provides process groups to actors
 - `plexspaces_core`: ActorContext includes ProcessGroupService
+- `plexspaces_services`: ProcessGroupServiceImpl provides gRPC service
+- `plexspaces_channel`: ProcessGroupChannel uses ProcessGroupService for pub/sub
+
+## ProcessGroupService gRPC Service
+
+Process groups are exposed via `ProcessGroupService` gRPC service in `plexspaces-services`:
+
+- **ProcessGroupServiceImpl**: Core implementation following actor_service pattern
+- **ProcessGroupServiceGrpc**: gRPC wrapper for remote access
+- **ServiceLocator Integration**: Registered in ServiceLocator for ActorContext access
+- **gRPC Server**: Registered in Node's gRPC server for remote access
+
+### Accessing ProcessGroupService
+
+**Via ActorContext** (in-process):
+```rust
+let pg_service = ctx.process_group_service().await?;
+pg_service.create_group(&ctx, "my-group").await?;
+```
+
+**Via ServiceLocator** (in-process):
+```rust
+let pg_service = service_locator.get_process_group_service().await?;
+pg_service.create_group(&ctx, "my-group").await?;
+```
+
+**Via gRPC** (remote):
+```rust
+// Use ProcessGroupServiceClient from plexspaces_proto
+let mut client = ProcessGroupServiceClient::connect("http://node:50051").await?;
+let request = CreateGroupRequest { ... };
+client.create_group(request).await?;
+```
 
 ## Comparison: Process Groups vs Channels
 

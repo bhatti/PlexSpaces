@@ -42,8 +42,9 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats,
+    ChannelBackend, ChannelConfig, ChannelStats,
 };
+use plexspaces_proto::common::v1::Message;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -57,10 +58,10 @@ use tokio::sync::RwLock;
 /// - `crash_on_message`: Message ID that triggers a crash
 pub struct MockChannel {
     config: ChannelConfig,
-    messages: Arc<RwLock<VecDeque<ChannelMessage>>>,
-    pending_acks: Arc<RwLock<HashMap<String, ChannelMessage>>>,
+    messages: Arc<RwLock<VecDeque<Message>>>,
+    pending_acks: Arc<RwLock<HashMap<String, Message>>>,
     delivery_count: Arc<RwLock<HashMap<String, u32>>>,
-    dlq: Arc<RwLock<Vec<ChannelMessage>>>,
+    dlq: Arc<RwLock<Vec<Message>>>,
     stats: Arc<ChannelStatsData>,
     closed: Arc<AtomicBool>,
     // Test configuration
@@ -121,7 +122,7 @@ impl MockChannel {
     }
 
     /// Get DLQ messages (for testing)
-    pub async fn get_dlq_messages(&self) -> Vec<ChannelMessage> {
+    pub async fn get_dlq_messages(&self) -> Vec<Message> {
         let dlq = self.dlq.read().await;
         dlq.clone()
     }
@@ -154,7 +155,7 @@ impl MockChannel {
 
 #[async_trait]
 impl Channel for MockChannel {
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String> {
+    async fn send(&self, message: Message) -> ChannelResult<String> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -172,7 +173,7 @@ impl Channel for MockChannel {
         Ok(message_id)
     }
 
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -201,14 +202,14 @@ impl Channel for MockChannel {
         Ok(result)
     }
 
-    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         self.receive(max_messages).await
     }
 
     async fn subscribe(
         &self,
         _consumer_group: Option<String>,
-    ) -> ChannelResult<BoxStream<'static, ChannelMessage>> {
+    ) -> ChannelResult<BoxStream<'static, Message>> {
         // For testing, we'll use a simple stream
         use futures::stream;
         let messages = self.messages.clone();
@@ -260,7 +261,7 @@ impl Channel for MockChannel {
         Ok(Box::pin(stream))
     }
 
-    async fn publish(&self, message: ChannelMessage) -> ChannelResult<u32> {
+    async fn publish(&self, message: Message) -> ChannelResult<u32> {
         self.send(message).await?;
         Ok(1) // Mock returns 1 subscriber
     }

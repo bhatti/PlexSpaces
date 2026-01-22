@@ -33,6 +33,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU32, Ordering};
 use plexspaces_node::{Node, NodeBuilder};
+use plexspaces_core::ApplicationManager;
 use plexspaces_core::{ApplicationManager, ActorId};
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata, ExitReason};
 use serde_json::Value;
@@ -161,10 +162,7 @@ async fn test_application_deploy_with_facets() {
     let app_spec = create_application_spec_with_facets("test-app", "1.0.0");
     
     // ACT: Deploy application
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     // Create SpecApplication from spec
     use plexspaces_application::SpecApplication;
@@ -189,7 +187,7 @@ async fn test_application_deploy_with_facets() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -242,10 +240,7 @@ async fn test_application_undeploy_with_facets() {
     let app_spec = create_application_spec_with_facets("test-app-undeploy", "1.0.0");
     
     // ACT: Deploy application
-    let app_manager: Arc<ApplicationManager> = service_locator
-        .application_manager()
-        .await
-        .expect("ApplicationManager should be registered");
+    let app_manager = node.application_manager();
     
     // Create SpecApplication from spec
     use plexspaces_application::SpecApplication;
@@ -270,7 +265,7 @@ async fn test_application_undeploy_with_facets() {
             "127.0.0.1:50051"
         }
         
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }

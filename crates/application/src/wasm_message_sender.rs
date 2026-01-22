@@ -8,7 +8,7 @@
 
 use async_trait::async_trait;
 use plexspaces_core::{ActorService, ServiceLocator};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use plexspaces_wasm_runtime::MessageSender;
 use std::sync::Arc;
 
@@ -38,9 +38,13 @@ impl ActorServiceMessageSender {
 impl MessageSender for ActorServiceMessageSender {
     async fn send_message(&self, from: &str, to: &str, message: &str) -> Result<(), String> {
         // Create Message from string payload
-        let mut msg = Message::new(message.as_bytes().to_vec());
-        msg.sender = Some(from.to_string());
-        msg.receiver = to.to_string();
+        let msg = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: message.as_bytes().to_vec(),
+            sender_id: from.to_string(),
+            receiver_id: to.to_string(),
+            ..Default::default()
+        };
         
         // Use ActorService to send message
         self.actor_service
@@ -63,10 +67,14 @@ impl MessageSender for ActorServiceMessageSender {
         use plexspaces_core::ActorId;
         
         // Create Message with correlation_id for ask pattern
-        let mut msg = Message::new(payload);
-        msg.sender = Some(from.to_string());
-        msg.receiver = to.to_string();
-        msg.message_type = message_type.to_string();
+        let msg = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload,
+            sender_id: from.to_string(),
+            receiver_id: to.to_string(),
+            message_type: message_type.to_string(),
+            ..Default::default()
+        };
         
         // Parse actor ID to determine if local or remote
         let (actor_name, node_id) = if let Some((name, node)) = to.split_once('@') {

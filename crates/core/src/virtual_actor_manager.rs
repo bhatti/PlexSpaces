@@ -83,7 +83,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::{ActorId, ActorRegistry};
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 
 /// Virtual Actor Error types
 #[derive(Debug, Clone, thiserror::Error)]

@@ -79,6 +79,7 @@
 //! ```
 
 use plexspaces_node::NodeBuilder;
+use plexspaces_core::ApplicationManager;  // Trait for get_state() method
 use plexspaces_proto::v1::application::ApplicationState;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService,
@@ -110,20 +111,15 @@ async fn create_dashboard_service(node: Arc<plexspaces_node::Node>) -> Dashboard
     // Register NodeMetricsAccessor
     use plexspaces_node::service_wrappers::NodeMetricsAccessorWrapper;
     let metrics_accessor = Arc::new(NodeMetricsAccessorWrapper::new(node.clone()));
-    service_locator.register_service(metrics_accessor.clone()).await;
     let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> = 
         metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
     service_locator.register_node_metrics_accessor(metrics_accessor_trait).await;
     
-    // Ensure ApplicationManager is registered
-    // ApplicationManager is not in ServiceLocator - get from Node directly
-    // Note: In tests, we can access it via node.application_manager() if needed
-    // For now, this test doesn't actually use app_manager, so we can remove this
-        service_locator.register_service(app_manager.clone()).await;
-    }
+    // ApplicationManager is accessed via node.application_manager(), not ServiceLocator
+    // This test doesn't need explicit app_manager registration
     
     // Create HealthReporterAccess implementation
-    use plexspaces_node::health_service::PlexSpacesHealthReporter;
+    use plexspaces_core::PlexSpacesHealthReporter;
     let (health_reporter, _service) = PlexSpacesHealthReporter::new();
     let health_reporter = Arc::new(health_reporter);
     

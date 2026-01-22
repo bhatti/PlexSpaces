@@ -10,7 +10,7 @@
 
 use plexspaces_wasm_runtime::*;
 use plexspaces_core::ChannelService;
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;

@@ -28,6 +28,16 @@ use tonic::transport::Server;
 mod test_helpers;
 use test_helpers::lookup_actor_ref;
 
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
+
 /// Helper to start a gRPC server for testing
 async fn start_test_server(node: Arc<Node>) -> String {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -82,7 +92,7 @@ async fn test_node_route_local_message() {
     // Actor already registered - no need to update config
 
     // Act: Send message via ActorRef (use the one we already created)
-    let message = Message::new(vec![1, 2, 3]);
+    let message = create_test_message(vec![1, 2, 3]);
     let result = actor_ref.tell(message).await;
 
     // Assert: Message delivered to local mailbox
@@ -128,15 +138,10 @@ async fn test_node_route_remote_message() {
     let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
     actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
-    // Register node2 in node1's registry
-    let _: Result<(), _> = node1
-        .register_remote_node(NodeId::new("node2"), node2_address.clone())
-        .await;
-
-    // Also register node2 in ObjectRegistry (required for ActorRef::remote to find the node)
+    // Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
     // Use the same tenant/namespace that get_node_client will use (from NodeConfig defaults: "internal"/"system")
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = node1.service_locator().object_registry().await.unwrap();
+    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = node1.service_locator().get_object_registry().await.unwrap();
     // NodeConfig defaults are "internal"/"system" (not "default"/"default")
     let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     // Ensure address format is correct (host:port, not http://host:port)
@@ -162,7 +167,7 @@ async fn test_node_route_remote_message() {
     // Create remote ActorRef for node1 to send to node2
     let service_locator1 = node1.service_locator().clone();
     let remote_actor_ref = ActorRef::remote("remote-actor@node2".to_string(), "node2".to_string(), service_locator1);
-    let message = Message::new(vec![4, 5, 6]);
+    let message = create_test_message(vec![4, 5, 6]);
     let result = remote_actor_ref.tell(message).await;
 
     // Assert: Message delivered via gRPC
@@ -173,7 +178,7 @@ async fn test_node_route_remote_message() {
     let received_opt = mailbox2.dequeue_with_timeout(Some(tokio::time::Duration::from_secs(5)))
         .await;
     let received = received_opt.expect("Message should arrive within 5 seconds");
-    assert_eq!(received.payload(), &vec![4, 5, 6]);
+    assert_eq!(received.payload, &vec![4, 5, 6]);
 }
 
 /// Test: Node fails gracefully when remote node not registered
@@ -183,7 +188,7 @@ async fn test_node_route_to_unregistered_remote() {
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     // Act: Try to send to actor on unregistered remote node
-    let message = Message::new(vec![7, 8, 9]);
+    let message = create_test_message(vec![7, 8, 9]);
     let result = match lookup_actor_ref(&node, &"actor@node999".to_string()).await {
         Ok(Some(actor_ref)) => actor_ref.tell(message).await
             .map_err(|e| plexspaces_node::NodeError::DeliveryFailed(format!("{}", e))),
@@ -243,15 +248,10 @@ async fn test_connection_pooling() {
     let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
     actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
 
-    // Register node2 in node1's registry
-    let _: Result<(), _> = node1
-        .register_remote_node(NodeId::new("node2"), node2_address.clone())
-        .await;
-
-    // Also register node2 in ObjectRegistry (required for ActorRef::remote to find the node)
+    // Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
     // Use the same tenant/namespace that get_node_client will use (from NodeConfig defaults: "internal"/"system")
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = node1.service_locator().object_registry().await.unwrap();
+    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> = node1.service_locator().get_object_registry().await.unwrap();
     // NodeConfig defaults are "internal"/"system" (not "default"/"default")
     let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     // Ensure address format is correct (host:port, not http://host:port)
@@ -279,7 +279,7 @@ async fn test_connection_pooling() {
     let remote_actor_ref = ActorRef::remote("pooled-actor@node2".to_string(), "node2".to_string(), service_locator1);
 
     for i in 0..5 {
-        let message = Message::new(vec![i]);
+        let message = create_test_message(vec![i]);
         let result = remote_actor_ref.tell(message).await;
         assert!(result.is_ok(), "Message {} should succeed, got error: {:?}", i, result.err());
     }
@@ -305,15 +305,23 @@ async fn test_node_discovery() {
 
     let node2_address = start_test_server(node2.clone()).await;
 
-    // Act: Register node2 as remote node
-    let _: Result<(), _> = node1
-        .register_remote_node(NodeId::new("node2"), node2_address)
-        .await;
+    // Act: Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
+    use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+    let ctx = node1.service_locator().request_context_for_system_operations().await;
+    let registration = ObjectRegistration {
+        object_type: ObjectType::ObjectTypeNode as i32,
+        object_id: "node2".to_string(),
+        grpc_address: node2_address,
+        object_category: "Node".to_string(),
+        ..Default::default()
+    };
+    let object_registry = node1.service_locator().get_object_registry().await.unwrap();
+    object_registry.register(&ctx, registration).await.unwrap();
 
-    // Assert: node1 knows about node2
-    let connected_nodes: Vec<NodeId> = node1.connected_nodes().await;
+    // Assert: node2 is now discoverable via ObjectRegistry
+    let lookup_result = object_registry.lookup(&ctx, "node2").await;
     assert!(
-        connected_nodes.contains(&NodeId::new("node2")),
-        "node2 should be in connected nodes"
+        lookup_result.is_ok() && lookup_result.unwrap().is_some(),
+        "node2 should be registered in ObjectRegistry"
     );
 }

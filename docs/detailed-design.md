@@ -2345,46 +2345,83 @@ See [Durability Documentation](durability.md) for comprehensive channel and mail
 
 ### Process Group Service API
 
-Group communication for actor sets:
+Group communication for actor sets (Erlang pg/pg2-inspired):
 
 ```rust
 pub trait ProcessGroupService: Send + Sync {
-    // Join process group
+    /// Create a new process group
+    async fn create_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<(), Error>;
+    
+    /// Delete a process group
+    async fn delete_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<(), Error>;
+    
+    /// Join process group with optional topic subscriptions
     async fn join_group(
         &self,
+        ctx: &RequestContext,
         group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
-        actor_id: &str
+        actor_id: &str,
+        topics: Vec<String>,
     ) -> Result<(), Error>;
     
-    // Leave process group
+    /// Leave process group
     async fn leave_group(
         &self,
+        ctx: &RequestContext,
         group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
-        actor_id: &str
+        actor_id: &str,
     ) -> Result<(), Error>;
     
-    // Send to all group members
-    async fn send_to_group(
-        &self,
-        group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
-        message: Message
-    ) -> Result<(), Error>;
-    
-    // Get group members
+    /// Get all group members across cluster
     async fn get_members(
         &self,
+        ctx: &RequestContext,
         group_name: &str,
-        tenant_id: &str,
-        namespace: &str
-    ) -> Result<Vec<ActorId>, Error>;
+    ) -> Result<Vec<String>, Error>;
+    
+    /// Get only local members (this node)
+    async fn get_local_members(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<Vec<String>, Error>;
+    
+    /// List all groups for tenant/namespace
+    async fn list_groups(
+        &self,
+        ctx: &RequestContext,
+    ) -> Result<Vec<String>, Error>;
+    
+    /// Publish message to group members (with optional topic filter)
+    async fn publish_to_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+        topic: Option<&str>,
+        message: Message,
+    ) -> Result<u32, Error>; // Returns number of recipients
 }
 ```
+
+**Key Features**:
+- **RequestContext**: All operations use `RequestContext` for tenant/namespace isolation
+- **Topic Filtering**: Optional topic parameter for fine-grained pub/sub
+- **Multi-tenancy**: Groups scoped by tenant_id + namespace from RequestContext
+- **Erlang pg2 Semantics**: Multiple joins, local vs global members, join_count tracking
+- **gRPC Service**: Full gRPC service implementation in `plexspaces-services`
+- **ServiceLocator Integration**: Available via `service_locator.get_process_group_service()`
+
+**See Also**:
+- [Process Groups README](../../crates/process-groups/README.md) - Detailed usage and examples
+- [Channel ProcessGroup Backend](../../crates/channel/README.md#5-process-group-backend-srcprocess_group_backendrs) - Channel implementation using ProcessGroupService
 
 ### Object Registry API
 

@@ -54,7 +54,7 @@ import "google/protobuf/struct.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/workflow/workflow;plexspaces_workflow_v1";
 option java_package = "com.bhatti.plexspaces.workflow.v1";
 option java_multiple_files = true;
 

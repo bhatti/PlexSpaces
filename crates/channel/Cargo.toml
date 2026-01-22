@@ -54,10 +54,16 @@ aws-config = { version = "1", optional = true }
 plexspaces-common = { path = "../common", optional = true }
 metrics = { version = "0.23", optional = true }
 
+# Optional: Process Group backend (for Erlang pg/pg2-style pub/sub)
+plexspaces-core = { path = "../core", optional = true }
+
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
 tempfile = { workspace = true }
+tonic = { workspace = true }
+plexspaces-core = { workspace = true }
+ulid = { workspace = true }
 
 [features]
 default = []
@@ -67,6 +73,7 @@ nats-backend = ["async-nats"]
 sqlite-backend = ["sqlx"]
 udp-backend = ["socket2"]
 sqs-backend = ["aws-sdk-sqs", "aws-config", "plexspaces-common", "metrics", "base64"]
+process-group-backend = ["plexspaces-core", "metrics"]
 test-helpers = ["plexspaces-common/test-helpers"]
 test-utils = []  # Enable mock_backend for integration tests
 

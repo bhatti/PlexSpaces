@@ -23,7 +23,7 @@ use crate::state_store::SchedulingStateStore;
 use plexspaces_channel::Channel;
 use plexspaces_core::RequestContext;
 use plexspaces_proto::{
-    channel::v1::ChannelMessage,
+    common::v1::Message,
     prost_types,
     scheduling::v1::{
         scheduling_service_server::SchedulingService, GetNodeCapacityRequest,
@@ -32,7 +32,7 @@ use plexspaces_proto::{
         ScheduleActorRequest, ScheduleActorResponse, SchedulingRequest, SchedulingStatus,
     },
 };
-use prost::Message;
+use prost::Message as ProstMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -148,17 +148,24 @@ impl SchedulingService for SchedulingServiceImpl {
             .encode(&mut payload)
             .map_err(|e| Status::internal(format!("Failed to encode request: {}", e)))?;
 
-        let channel_msg = ChannelMessage {
+        let channel_msg = Message {
             id: ulid::Ulid::new().to_string(),
-            channel: "scheduling:requests".to_string(),
             sender_id: String::new(),
+            receiver_id: String::new(),
+            channel: "scheduling:requests".to_string(),
+            message_type: "scheduling_request".to_string(),
             payload,
-            headers: HashMap::new(),
             timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
-            partition_key: String::new(),
-            correlation_id: String::new(),
+            headers: HashMap::new(),
+            priority: 50, // Normal priority
+            ttl: None,
             delivery_count: 0,
+            idempotency_key: String::new(),
+            correlation_id: String::new(),
             reply_to: String::new(),
+            partition_key: String::new(),
+            uri_path: String::new(),
+            uri_method: String::new(),
         };
 
         self.request_channel

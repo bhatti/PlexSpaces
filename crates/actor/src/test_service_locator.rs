@@ -35,7 +35,7 @@ use plexspaces_core::{
     ActorRegistry, VirtualActorManager, ReplyWaiterRegistry, Service,
     ActorService, ChannelService, TupleSpaceProvider, ObjectRegistry,
     NodeMetricsAccessor, NodeConnectionInfo, JournalStorage, BehaviorRegistry,
-    GrpcConnectionManager, RequestContext, ApplicationManager,
+    GrpcConnectionManager, RequestContext, ApplicationManager, ProcessGroupService,
 };
 use plexspaces_core::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 
@@ -79,6 +79,10 @@ impl ServiceLocator for TestServiceLocatorStub {
 
     async fn actor_registry(&self) -> Option<Arc<ActorRegistry>> {
         None
+    }
+
+    async fn register_actor_registry(&self, _registry: Arc<ActorRegistry>) {
+        // No-op for stub
     }
 
     async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
@@ -185,6 +189,10 @@ impl ServiceLocator for TestServiceLocatorStub {
         None
     }
 
+    async fn register_application_manager(&self, _manager: Arc<dyn plexspaces_core::ApplicationManager>) {
+        // No-op for stub
+    }
+
     async fn get_behavior_registry(&self) -> Option<Arc<BehaviorRegistry>> {
         None
     }
@@ -217,6 +225,42 @@ impl ServiceLocator for TestServiceLocatorStub {
     }
 
     async fn register_wasm_runtime(&self, _runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>) {
+        // No-op for stub
+    }
+
+    async fn get_process_group_service(&self) -> Option<Arc<dyn ProcessGroupService>> {
+        None
+    }
+
+    async fn register_process_group_service(&self, _service: Arc<dyn ProcessGroupService>) {
+        // No-op for stub
+    }
+
+    async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig> {
+        None
+    }
+
+    async fn register_security_config(&self, _config: plexspaces_proto::node::v1::SecurityConfig) {
+        // No-op for stub
+    }
+
+    async fn is_auth_disabled(&self) -> bool {
+        false // Auth enabled by default for security
+    }
+
+    async fn get_blob_service(&self) -> Option<Arc<dyn plexspaces_core::BlobServiceTrait>> {
+        None
+    }
+
+    async fn register_blob_service(&self, _service: Arc<dyn plexspaces_core::BlobServiceTrait>) {
+        // No-op for stub
+    }
+
+    async fn get_node_registry(&self) -> Option<Arc<dyn plexspaces_core::NodeRegistryTrait>> {
+        None
+    }
+
+    async fn register_node_registry(&self, _registry: Arc<dyn plexspaces_core::NodeRegistryTrait>) {
         // No-op for stub
     }
 }

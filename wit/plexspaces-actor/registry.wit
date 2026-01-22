@@ -18,6 +18,7 @@ interface registry {
         application,
         workflow,
         node,
+        process-group,
     }
 
     /// Health status enumeration

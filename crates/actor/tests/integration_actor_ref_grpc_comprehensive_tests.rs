@@ -6,9 +6,19 @@
 
 use plexspaces_actor::ActorRef;
 use plexspaces_core::{ActorRegistry, ServiceLocator, actor_context::ObjectRegistry as ObjectRegistryTrait};
-use plexspaces_mailbox::{Message, Mailbox, MailboxConfig};
+use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::sync::Arc;
+use ulid::Ulid;
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
 
 // Helper to wrap ObjectRegistry for ActorRegistry
 struct ObjectRegistryAdapter {
@@ -69,6 +79,30 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
             .await
             .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
     }
+
+    async fn unregister(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .unregister(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn heartbeat(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        object_type: ObjectType,
+        object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .heartbeat(ctx, object_type, object_id)
+            .await
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
 #[tokio::test]
@@ -86,7 +120,7 @@ async fn test_remote_actor_ref_node_not_found() {
         "test-node".to_string(),
     ));
     
-    service_locator.register_service(actor_registry).await;
+    service_locator.register_actor_registry(actor_registry).await;
     
     // Create remote ActorRef for node that doesn't exist
     let actor_ref = ActorRef::remote(
@@ -96,7 +130,7 @@ async fn test_remote_actor_ref_node_not_found() {
     );
     
     // Send message should fail with node not found
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     let result = actor_ref.tell(message).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -130,7 +164,7 @@ async fn test_remote_actor_ref_connection_failure() {
         "test-node".to_string(),
     ));
     
-    service_locator.register_service(actor_registry).await;
+    service_locator.register_actor_registry(actor_registry).await;
     
     // Create remote ActorRef
     let actor_ref = ActorRef::remote(
@@ -140,7 +174,7 @@ async fn test_remote_actor_ref_connection_failure() {
     );
     
     // Send message should fail with connection error
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     let result = actor_ref.tell(message).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -176,7 +210,7 @@ async fn test_remote_actor_ref_ask_timeout() {
         "test-node".to_string(),
     ));
     
-    service_locator.register_service(actor_registry).await;
+    service_locator.register_actor_registry(actor_registry).await;
     
     // Create remote ActorRef
     let actor_ref = ActorRef::remote(
@@ -186,7 +220,7 @@ async fn test_remote_actor_ref_ask_timeout() {
     );
     
     // Ask should fail (connection or timeout)
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     let result = actor_ref.ask(message, std::time::Duration::from_millis(100)).await;
     assert!(result.is_err());
 }
@@ -218,7 +252,7 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
         "test-node".to_string(),
     ));
     
-    service_locator.register_service(actor_registry).await;
+    service_locator.register_actor_registry(actor_registry).await;
     
     // Create multiple ActorRefs to same node
     let actor_ref1 = ActorRef::remote(
@@ -234,7 +268,7 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
     
     // Both should use the same cached gRPC client from ServiceLocator
     // (Both will fail to connect, but should use same client)
-    let message = Message::new(b"test".to_vec());
+    let message = create_test_message(b"test".to_vec());
     let result1 = actor_ref1.tell(message.clone()).await;
     let result2 = actor_ref2.tell(message).await;
     

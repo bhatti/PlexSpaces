@@ -749,7 +749,7 @@ mod tests {
         async fn handle_message(
             &mut self,
             _ctx: &plexspaces_core::ActorContext,
-            _msg: plexspaces_mailbox::Message,
+            _msg: plexspaces_proto::common::v1::Message,
         ) -> Result<(), plexspaces_core::BehaviorError> {
             Ok(())
         }
@@ -895,7 +895,7 @@ mod tests {
         // Create a test node with unique port to avoid conflicts
         // Services are automatically initialized in build()
         let node = Arc::new(NodeBuilder::new("test-node-spawn".to_string())
-            .with_listen_address("127.0.0.1:0") // Port 0 = OS-assigned free port
+            .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
             .build().await);
 
         // Spawn actor using ActorBuilder
@@ -937,7 +937,7 @@ mod tests {
         // Create a test node with unique port to avoid conflicts
         // Services are automatically initialized in build()
         let node = Arc::new(NodeBuilder::new("test-node-resource-spawn".to_string())
-            .with_listen_address("127.0.0.1:0") // Port 0 = OS-assigned free port
+            .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
             .build().await);
 
         // Spawn actor with resource requirements
@@ -989,7 +989,7 @@ mod tests {
         // Create a test node with unique port to avoid conflicts
         // Services are automatically initialized in build()
         let node = Arc::new(NodeBuilder::new("test-node-mailbox-spawn".to_string())
-            .with_listen_address("127.0.0.1:0") // Port 0 = OS-assigned free port
+            .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
             .build().await);
 
         // Create custom mailbox config
@@ -1059,7 +1059,7 @@ mod tests {
         // Create a test node with unique port to avoid conflicts
         // Services are automatically initialized in build()
         let node = Arc::new(NodeBuilder::new("test-node-multi-spawn".to_string())
-            .with_listen_address("127.0.0.1:0") // Port 0 = OS-assigned free port
+            .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
             .build().await);
 
         // Spawn multiple actors

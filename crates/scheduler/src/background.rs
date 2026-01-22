@@ -35,12 +35,12 @@ use futures::StreamExt;
 use plexspaces_channel::Channel;
 use plexspaces_locks::{AcquireLockOptions, LockManager, RenewLockOptions, ReleaseLockOptions};
 use plexspaces_proto::{
-    channel::v1::ChannelMessage,
+    common::v1::Message,
     prost_types::Timestamp,
     scheduling::v1::{SchedulingRequest, SchedulingStatus},
 };
 use plexspaces_core::RequestContext;
-use prost::Message;
+use prost::Message as ProstMessage;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::RwLock;
@@ -343,9 +343,9 @@ impl BackgroundScheduler {
     }
 
     /// Process a scheduling request
-    async fn process_request(&self, msg: &ChannelMessage) -> BackgroundSchedulerResult<()> {
+    async fn process_request(&self, msg: &Message) -> BackgroundSchedulerResult<()> {
         // Deserialize SchedulingRequest from message payload
-        let request: SchedulingRequest = Message::decode(&msg.payload[..])
+        let request: SchedulingRequest = SchedulingRequest::decode(&msg.payload[..])
             .map_err(|e| BackgroundSchedulerError::StateStoreError(format!("Failed to decode request: {}", e)))?;
 
         info!("Processing scheduling request: {}", request.request_id);
@@ -583,17 +583,24 @@ mod tests {
         // Create channel message
         let mut payload = Vec::new();
         request.encode(&mut payload).unwrap();
-        let msg = ChannelMessage {
+        let msg = Message {
             id: ulid::Ulid::new().to_string(),
-            channel: "scheduling:requests".to_string(),
             sender_id: String::new(),
+            receiver_id: String::new(),
+            channel: "scheduling:requests".to_string(),
+            message_type: "scheduling_request".to_string(),
             payload,
-            headers: HashMap::new(),
             timestamp: Some(Timestamp::from(SystemTime::now())),
-            partition_key: String::new(),
-            correlation_id: String::new(),
+            headers: HashMap::new(),
+            priority: 50, // Normal priority
+            ttl: None,
             delivery_count: 0,
+            idempotency_key: String::new(),
+            correlation_id: String::new(),
             reply_to: String::new(),
+            partition_key: String::new(),
+            uri_path: String::new(),
+            uri_method: String::new(),
         };
 
         // Process request (will fail because no nodes available, but tests the flow)

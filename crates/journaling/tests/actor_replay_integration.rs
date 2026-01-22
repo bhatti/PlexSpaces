@@ -8,6 +8,16 @@
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 mod actor_integration_tests {
+
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+    plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
+
     use plexspaces_journaling::*;
     #[cfg(feature = "sqlite-backend")]
     use plexspaces_journaling::sql::SqliteJournalStorage;
@@ -15,7 +25,7 @@ mod actor_integration_tests {
     use plexspaces_journaling::sql::PostgresJournalStorage;
     use plexspaces_core::{ActorContext, BehaviorError, BehaviorType, Actor as ActorTrait};
     use plexspaces_actor::Actor as ActorStruct;
-    use plexspaces_mailbox::{Mailbox, Message, mailbox_config_default};
+    use plexspaces_core::Message;
     use async_trait::async_trait;
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -120,9 +130,9 @@ mod actor_integration_tests {
 
         // Process messages through actor
         for i in 1..=5 {
-            let mut msg = Message::new(format!("increment-{}", i).into_bytes());
+            let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
-            msg.receiver = actor_id.clone();
+            msg.receiver_id = actor_id.clone();
             
             // Send message to actor (this will be journaled by DurabilityFacet)
             actor.send(msg).await.unwrap();
@@ -231,9 +241,9 @@ mod actor_integration_tests {
 
         // Process 10 messages
         for i in 1..=10 {
-            let mut msg = Message::new(format!("increment-{}", i).into_bytes());
+            let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
-            msg.receiver = actor_id.clone();
+            msg.receiver_id = actor_id.clone();
             actor.send(msg).await.unwrap();
         }
 
@@ -254,9 +264,9 @@ mod actor_integration_tests {
 
         // Process 5 more messages
         for i in 11..=15 {
-            let mut msg = Message::new(format!("increment-{}", i).into_bytes());
+            let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
-            msg.receiver = actor_id.clone();
+            msg.receiver_id = actor_id.clone();
             actor.send(msg).await.unwrap();
         }
 
@@ -361,9 +371,9 @@ mod actor_integration_tests {
 
         // Process messages
         for i in 1..=5 {
-            let mut msg = Message::new(format!("increment-{}", i).into_bytes());
+            let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
-            msg.receiver = actor_id.clone();
+            msg.receiver_id = actor_id.clone();
             actor.send(msg).await.unwrap();
         }
 

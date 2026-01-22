@@ -18,7 +18,8 @@
 
 //! Unit tests for SystemService implementation
 
-use plexspaces_node::{system_service::SystemServiceImpl, Node, NodeBuilder};
+use plexspaces_node::{Node, NodeBuilder};
+use plexspaces_services::system_service::SystemServiceImpl;
 use plexspaces_proto::system::v1::{
     GetSystemInfoRequest, GetMetricsRequest, GetConfigRequest, GetHealthRequest,
     GetDetailedHealthRequest, LivenessProbeRequest, ReadinessProbeRequest,
@@ -37,7 +38,7 @@ async fn create_test_node() -> Arc<Node> {
 /// Helper to create a SystemService with node
 async fn create_system_service_with_node() -> (SystemServiceImpl, Arc<Node>) {
     let node = create_test_node().await;
-    let (health_reporter, _) = plexspaces_node::health_service::PlexSpacesHealthReporter::new();
+    let (health_reporter, _) = plexspaces_core::PlexSpacesHealthReporter::new();
     let health_reporter = Arc::new(health_reporter);
     let service = SystemServiceImpl::with_node(health_reporter, node.clone());
     (service, node)
@@ -45,7 +46,7 @@ async fn create_system_service_with_node() -> (SystemServiceImpl, Arc<Node>) {
 
 /// Helper to create a SystemService without node
 fn create_system_service_without_node() -> SystemServiceImpl {
-    let (health_reporter, _) = plexspaces_node::health_service::PlexSpacesHealthReporter::new();
+    let (health_reporter, _) = plexspaces_core::PlexSpacesHealthReporter::new();
     let health_reporter = Arc::new(health_reporter);
     SystemServiceImpl::new(health_reporter)
 }

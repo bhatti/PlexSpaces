@@ -34,6 +34,17 @@ use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Helper to create a test message
+fn create_test_message(payload: Vec<u8>) -> Message {
+    let proto_msg = plexspaces_core::Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    };
+    proto_msg.into()
+}
+
+
 // ============================================================================
 // Chaos Injection Framework
 // ============================================================================
@@ -260,7 +271,7 @@ async fn test_journal_writes_with_random_failures() {
     let chaos = ChaosInjector::new(0.15); // 15% failure rate
 
     let journal = MemoryJournal::new();
-    let message = Message::new(b"chaos test".to_vec());
+    let message = create_test_message(b"chaos test".to_vec());
 
     let mut successes = 0;
     let mut failures = 0;
@@ -299,7 +310,7 @@ async fn test_journal_writes_with_network_partition() {
     let chaos = ChaosInjector::new(0.1); // 10% partition rate
 
     let journal = MemoryJournal::new();
-    let message = Message::new(b"partition test".to_vec());
+    let message = create_test_message(b"partition test".to_vec());
 
     let mut successes = 0;
     let mut timeouts = 0;
@@ -454,7 +465,7 @@ async fn test_actor_lifecycle_with_full_chaos() {
         state[i % state_len] = (i % 256) as u8;
 
         // Journal message
-        let message = Message::new(format!("message-{}", i).into_bytes());
+        let message = create_test_message(format!("message-{}", i).into_bytes());
         chaos.maybe_partition(10).await;
         let _ = journal.record_message_received(&message).await;
 
@@ -539,7 +550,7 @@ async fn test_concurrent_reads_writes_with_chaos() {
                 chaos.maybe_partition(5).await;
 
                 if chaos.maybe_fail().await.is_ok() {
-                    let message = Message::new(format!("writer-{}-msg-{}", i, j).into_bytes());
+                    let message = create_test_message(format!("writer-{}-msg-{}", i, j).into_bytes());
                     if journal.record_message_received(&message).await.is_ok() {
                         writes += 1;
                     }

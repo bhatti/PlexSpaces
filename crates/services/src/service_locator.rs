@@ -89,6 +89,7 @@ use plexspaces_core::{ActorRegistry, VirtualActorManager, ReplyWaiterRegistry};
 use plexspaces_core::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 use plexspaces_core::behavior_factory::BehaviorRegistry;
 use plexspaces_core::GrpcConnectionManager;
+use plexspaces_core::ServiceLocator;
 
 // Service names moved to plexspaces-core::service_names
 pub use plexspaces_core::service_names;
@@ -182,16 +183,13 @@ impl ServiceStorage {
             // - Data (of type T)
             //
             // The data is at the same offset in both cases, but the vtable is different.
-            // We can't just cast the Arc pointer because the memory layouts differ.
+            // We can't safely cast Arc<dyn Any> to Arc<T> because the memory layouts differ
+            // (trait objects have a vtable pointer that concrete types don't).
             //
-            // Instead, we need to:
-            // 1. Get the raw pointer to the data from Arc<dyn Any>
-            // 2. Reconstruct Arc<T> from that data pointer
-            //
-            // However, this is complex because we need to account for the vtable offset.
-            // For now, we'll return None and document this limitation.
-            // 
-            // TODO: Implement proper unsafe extraction that handles the vtable offset correctly.
+            // Design note: This is intentional - services should be retrieved via typed methods
+            // like get_node_registry(), get_blob_service() which store services in typed fields.
+            // The generic registry is kept for backwards compatibility but new code should use
+            // the typed accessors.
             None
         }
     }
@@ -263,10 +261,26 @@ pub struct ServiceLocatorImpl {
     /// Uses WasmRuntimeTrait from plexspaces-core for type-safe access.
     wasm_runtime: Arc<RwLock<Option<Arc<dyn plexspaces_core::WasmRuntimeTrait>>>>,
     
+    /// Registered ProcessGroupService (stored separately for type-safe access)
+    /// This allows components to retrieve ProcessGroupService for distributed pub/sub
+    /// Uses ProcessGroupService trait from plexspaces-core for Erlang pg/pg2-style process groups
+    process_group_service: Arc<RwLock<Option<Arc<dyn plexspaces_core::ProcessGroupService>>>>,
+    
+    /// Registered BlobService (stored separately for type-safe access)
+    /// This allows components to retrieve BlobService for blob storage operations
+    blob_service: Arc<RwLock<Option<Arc<dyn plexspaces_core::BlobServiceTrait>>>>,
+    
+    /// Registered NodeRegistry (stored separately for type-safe access)
+    /// This allows components to retrieve NodeRegistry for node discovery with caching
+    node_registry: Arc<RwLock<Option<Arc<dyn plexspaces_core::NodeRegistryTrait>>>>,
+    
     /// Node configuration (for accessing node_id, default_tenant_id, default_namespace, cluster_name, auth settings)
     /// Read-only after initialization, uses Mutex for one-time initialization
     node_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::NodeConfig>>>,
     
+    /// Security configuration (for accessing disable_auth, allow_disable_auth, service_identity, etc.)
+    /// Read-only after initialization, uses Mutex for one-time initialization
+    security_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::SecurityConfig>>>,
     
     /// Shutdown flag: when true, node is shutting down gracefully
     /// Components should stop accepting new requests but complete in-progress ones
@@ -294,7 +308,11 @@ impl ServiceLocatorImpl {
             behavior_registry: Arc::new(RwLock::new(None)),
             grpc_connection_manager: Arc::new(RwLock::new(None)),
             wasm_runtime: Arc::new(RwLock::new(None)),
+            process_group_service: Arc::new(RwLock::new(None)),
+            blob_service: Arc::new(RwLock::new(None)),
+            node_registry: Arc::new(RwLock::new(None)),
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
+            security_config: Arc::new(tokio::sync::Mutex::new(None)),
             shutdown_flag: Arc::new(RwLock::new(false)),
         }
     }
@@ -354,6 +372,30 @@ impl ServiceLocatorImpl {
     pub async fn get_node_id(&self) -> Option<String> {
         let node_config = self.node_config.lock().await;
         node_config.as_ref().map(|config| config.id.clone())
+    }
+
+    /// Get SecurityConfig (for accessing disable_auth, allow_disable_auth, etc.)
+    pub async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig> {
+        let security_config = self.security_config.lock().await;
+        security_config.clone()
+    }
+
+    /// Check if authentication is disabled (from SecurityConfig)
+    /// 
+    /// Returns true if auth is disabled AND allow_disable_auth is true.
+    /// For security, auth is enabled by default if SecurityConfig is not set.
+    pub async fn is_auth_disabled(&self) -> bool {
+        let security_config = self.security_config.lock().await;
+        match security_config.as_ref() {
+            Some(config) => config.allow_disable_auth && config.disable_auth,
+            None => false, // Auth enabled by default if no config
+        }
+    }
+
+    /// Register SecurityConfig
+    pub async fn register_security_config(&self, config: plexspaces_proto::node::v1::SecurityConfig) {
+        let mut config_guard = self.security_config.lock().await;
+        *config_guard = Some(config);
     }
 
     /// Register a service by name
@@ -769,6 +811,14 @@ impl ServiceLocatorImpl {
         self.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
     }
 
+    /// Register ActorRegistry service
+    ///
+    /// ## Arguments
+    /// * `registry` - The ActorRegistry to register
+    pub async fn register_actor_registry(&self, registry: Arc<ActorRegistry>) {
+        self.register_service_by_name(service_names::ACTOR_REGISTRY, registry).await;
+    }
+
     /// Get ObjectRegistry service as trait object
     ///
     /// ## Returns
@@ -979,6 +1029,198 @@ impl ServiceLocatorImpl {
         
         Ok(Arc::from(channel))
     }
+
+    /// Create a channel with specified configuration
+    ///
+    /// ## Purpose
+    /// Creates a channel using the specified configuration. If backend is 0 (undefined),
+    /// uses priority-based backend selection.
+    ///
+    /// ## Backend Priority (when backend = 0/undefined)
+    /// 1. Kafka (if config available)
+    /// 2. NATS (if config available)
+    /// 3. SQS (if config available)
+    /// 4. PostgreSQL (if config available)
+    /// 5. Process Group (if ProcessGroupService available) - DEFAULT
+    /// 6. In-Memory (explicit only, not default)
+    /// 7. Multicast (explicit only)
+    ///
+    /// ## Arguments
+    /// * `config` - Channel configuration
+    /// * `ctx` - Request context for tenant isolation
+    ///
+    /// ## Returns
+    /// Created Channel instance with appropriate backend
+    ///
+    /// ## Errors
+    /// Returns error if backend is specified but required config is missing
+    pub async fn create_channel(
+        &self,
+        config: plexspaces_proto::channel::v1::ChannelConfig,
+        ctx: &plexspaces_core::RequestContext,
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_proto::channel::v1::ChannelBackend;
+        
+        let backend = ChannelBackend::try_from(config.backend)
+            .unwrap_or(ChannelBackend::ChannelBackendInMemory);
+        
+        // If backend is explicitly specified (not 0/InMemory as default), use it
+        // Backend values: 0 = InMemory, 1 = Redis, 2 = Kafka, etc.
+        // We treat 0 as "undefined" for priority-based selection
+        let final_backend = if config.backend == 0 {
+            // Priority-based backend selection
+            self.select_channel_backend(&config).await?
+        } else {
+            backend
+        };
+        
+        // Create channel with the selected backend
+        let mut final_config = config.clone();
+        let backend_i32 = final_backend as i32;
+        final_config.backend = backend_i32;
+        
+        // Validate backend-specific config
+        self.validate_channel_config(&final_config)?;
+        
+        // Create channel based on backend type (use i32 for matching since enum moved)
+        match ChannelBackend::try_from(backend_i32).unwrap_or(ChannelBackend::ChannelBackendInMemory) {
+            ChannelBackend::ChannelBackendProcessGroup => {
+                self.create_process_group_channel(final_config, ctx).await
+            }
+            _ => {
+                // Use generic create_channel for other backends
+                let channel = plexspaces_channel::create_channel(final_config)
+                    .await
+                    .map_err(|e| format!("Failed to create channel: {}", e))?;
+                Ok(Arc::from(channel))
+            }
+        }
+    }
+
+    /// Select channel backend based on priority and config availability
+    async fn select_channel_backend(
+        &self,
+        config: &plexspaces_proto::channel::v1::ChannelConfig,
+    ) -> Result<plexspaces_proto::channel::v1::ChannelBackend, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_proto::channel::v1::ChannelBackend;
+        
+        // Check for Kafka config
+        if config.backend_config.is_some() {
+            if let Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(_)) = &config.backend_config {
+                return Ok(ChannelBackend::ChannelBackendKafka);
+            }
+        }
+        
+        // Check for NATS config
+        if config.backend_config.is_some() {
+            if let Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Nats(_)) = &config.backend_config {
+                return Ok(ChannelBackend::ChannelBackendNats);
+            }
+        }
+        
+        // Check for SQS config
+        if config.backend_config.is_some() {
+            if let Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqs(_)) = &config.backend_config {
+                return Ok(ChannelBackend::ChannelBackendSqs);
+            }
+        }
+        
+        // Check for Process Group service availability
+        if self.get_process_group_service().await.is_some() {
+            return Ok(ChannelBackend::ChannelBackendProcessGroup);
+        }
+        
+        // Default to in-memory
+        Ok(ChannelBackend::ChannelBackendInMemory)
+    }
+
+    /// Validate channel configuration for the specified backend
+    fn validate_channel_config(
+        &self,
+        config: &plexspaces_proto::channel::v1::ChannelConfig,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_proto::channel::v1::ChannelBackend;
+        
+        let backend = ChannelBackend::try_from(config.backend)
+            .unwrap_or(ChannelBackend::ChannelBackendInMemory);
+        
+        match backend {
+            ChannelBackend::ChannelBackendKafka => {
+                match &config.backend_config {
+                    Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(kafka)) => {
+                        if kafka.brokers.is_empty() {
+                            return Err("Kafka backend requires brokers configuration".into());
+                        }
+                    }
+                    _ => return Err("Kafka backend requires kafka config".into()),
+                }
+            }
+            ChannelBackend::ChannelBackendNats => {
+                match &config.backend_config {
+                    Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Nats(nats)) => {
+                        if nats.servers.is_empty() {
+                            return Err("NATS backend requires servers configuration".into());
+                        }
+                    }
+                    _ => return Err("NATS backend requires nats config".into()),
+                }
+            }
+            ChannelBackend::ChannelBackendSqs => {
+                match &config.backend_config {
+                    Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqs(sqs)) => {
+                        if sqs.region.is_empty() {
+                            return Err("SQS backend requires region configuration".into());
+                        }
+                    }
+                    _ => return Err("SQS backend requires sqs config".into()),
+                }
+            }
+            ChannelBackend::ChannelBackendRedis => {
+                match &config.backend_config {
+                    Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(redis)) => {
+                        if redis.url.is_empty() {
+                            return Err("Redis backend requires url configuration".into());
+                        }
+                    }
+                    _ => return Err("Redis backend requires redis config".into()),
+                }
+            }
+            // InMemory, ProcessGroup, SQLite, UDP don't require config validation
+            _ => {}
+        }
+        
+        Ok(())
+    }
+
+    /// Create a ProcessGroup-based channel
+    #[cfg(feature = "process-group-backend")]
+    async fn create_process_group_channel(
+        &self,
+        config: plexspaces_proto::channel::v1::ChannelConfig,
+        ctx: &plexspaces_core::RequestContext,
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
+        use plexspaces_channel::ProcessGroupChannel;
+        
+        // Get self as Arc for ProcessGroupChannel
+        // Since we can't get Arc<Self> from &self, we create the channel differently
+        let process_group_service = self.get_process_group_service().await
+            .ok_or("ProcessGroupService not available for ProcessGroup channel backend")?;
+        
+        // Create ProcessGroupChannel using ServiceLocator
+        // Note: ProcessGroupChannel requires Arc<dyn ServiceLocator>, which we can't easily get from &self
+        // For now, return error suggesting to use plexspaces_channel::create_channel directly
+        Err("ProcessGroup channel creation via ServiceLocator not yet supported. Use plexspaces_channel::create_channel with explicit ServiceLocator".into())
+    }
+
+    /// Create a ProcessGroup-based channel (fallback when feature disabled)
+    #[cfg(not(feature = "process-group-backend"))]
+    async fn create_process_group_channel(
+        &self,
+        _config: plexspaces_proto::channel::v1::ChannelConfig,
+        _ctx: &plexspaces_core::RequestContext,
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
+        Err("ProcessGroup channel backend not enabled. Enable 'process-group-backend' feature".into())
+    }
 }
 
 #[async_trait::async_trait]
@@ -1005,6 +1247,10 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     
     async fn actor_registry(&self) -> Option<Arc<ActorRegistry>> {
         self.actor_registry().await
+    }
+    
+    async fn register_actor_registry(&self, registry: Arc<ActorRegistry>) {
+        self.register_actor_registry(registry).await;
     }
     
     async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
@@ -1097,6 +1343,18 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         *config_guard = Some(config);
     }
     
+    async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig> {
+        self.get_security_config().await
+    }
+    
+    async fn register_security_config(&self, config: plexspaces_proto::node::v1::SecurityConfig) {
+        self.register_security_config(config).await
+    }
+    
+    async fn is_auth_disabled(&self) -> bool {
+        self.is_auth_disabled().await
+    }
+    
     async fn get_node_connection_info(&self) -> Option<Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>> {
         self.get_node_connection_info().await
     }
@@ -1122,6 +1380,11 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     
     async fn application_manager(&self) -> Option<Arc<dyn plexspaces_core::ApplicationManager>> {
         self.get_application_manager().await
+    }
+    
+    async fn register_application_manager(&self, manager: Arc<dyn plexspaces_core::ApplicationManager>) {
+        let mut app_manager = self.application_manager.write().await;
+        *app_manager = Some(manager);
     }
     
     async fn get_behavior_registry(&self) -> Option<Arc<BehaviorRegistry>> {
@@ -1197,6 +1460,36 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         let mut wasm_runtime = self.wasm_runtime.write().await;
         *wasm_runtime = Some(runtime);
     }
+
+    async fn get_process_group_service(&self) -> Option<std::sync::Arc<dyn plexspaces_core::ProcessGroupService>> {
+        let service = self.process_group_service.read().await;
+        service.clone()
+    }
+    
+    async fn register_process_group_service(&self, service: std::sync::Arc<dyn plexspaces_core::ProcessGroupService>) {
+        let mut process_group_service = self.process_group_service.write().await;
+        *process_group_service = Some(service);
+    }
+    
+    async fn get_blob_service(&self) -> Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>> {
+        let service = self.blob_service.read().await;
+        service.clone()
+    }
+    
+    async fn register_blob_service(&self, service: std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>) {
+        let mut blob_service = self.blob_service.write().await;
+        *blob_service = Some(service);
+    }
+    
+    async fn get_node_registry(&self) -> Option<std::sync::Arc<dyn plexspaces_core::NodeRegistryTrait>> {
+        let registry = self.node_registry.read().await;
+        registry.clone()
+    }
+    
+    async fn register_node_registry(&self, registry: std::sync::Arc<dyn plexspaces_core::NodeRegistryTrait>) {
+        let mut node_registry = self.node_registry.write().await;
+        *node_registry = Some(registry);
+    }
 }
 
 #[async_trait::async_trait]
@@ -1251,6 +1544,8 @@ async fn initialize_services_impl(
                 clustering_enabled: true,
                 grpc_connection_pool_size: 2,
                 metadata: HashMap::new(),
+                node_registry: None,
+                grpc_address: String::new(),
             }
         })
     } else {
@@ -1268,6 +1563,8 @@ async fn initialize_services_impl(
             heartbeat_interval_ms: 5000,
             clustering_enabled: true,
             metadata: HashMap::new(),
+            node_registry: None,
+            grpc_address: String::new(),
         }
     };
     
@@ -1323,6 +1620,15 @@ async fn initialize_services_impl(
     
     // Register NodeConfig (determined above)
     service_locator.register_node_config(final_node_config.clone()).await;
+    
+    // Register SecurityConfig from ReleaseSpec.runtime if available
+    if let Some(ref release) = release_config {
+        if let Some(ref runtime) = release.runtime {
+            if let Some(security) = runtime.security.clone() {
+                service_locator.register_security_config(security).await;
+            }
+        }
+    }
     
     // Create and register GrpcConnectionManager with connection pooling
     use plexspaces_core::GrpcConnectionManager;
@@ -1532,18 +1838,14 @@ mod tests {
 pub async fn request_context_from_grpc_request(
     metadata: &tonic::metadata::MetadataMap,
     labels: &std::collections::HashMap<String, String>,
-    service_locator: &Arc<ServiceLocatorImpl>,
+    service_locator: &Arc<dyn ServiceLocator>,
 ) -> Result<RequestContext, plexspaces_common::RequestContextError> {
     // Get NodeConfig from ServiceLocator
     let node_config = service_locator.get_node_config().await;
     
-    // Get auth_enabled from SecurityConfig (check runtime config)
-    // For now, infer from x-tenant-id header presence, but should come from SecurityConfig.disable_auth
-    // TODO: Get from RuntimeConfig.security.disable_auth
-    let auth_enabled = metadata.get("x-tenant-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .is_some();
+    // Determine if authentication is enabled from SecurityConfig
+    // Auth is enabled unless explicitly disabled via SecurityConfig (disable_auth=true AND allow_disable_auth=true)
+    let auth_enabled = !service_locator.is_auth_disabled().await;
     
     // Get defaults from NodeConfig
     let default_tenant_id = node_config.as_ref()

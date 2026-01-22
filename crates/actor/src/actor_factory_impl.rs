@@ -506,7 +506,7 @@ impl ActorFactory for ActorFactoryImpl {
                         actor_id = %actor_id,
                         message_id = %message.id,
                         correlation_id = ?message.correlation_id,
-                        sender = ?message.sender,
+                        sender = ?message.sender_id,
                         "Sending pending message to activated virtual actor"
                     );
                     }
@@ -858,7 +858,7 @@ impl ActorFactory for ActorFactoryImpl {
                             async fn handle_message(
                                 &mut self,
                                 _ctx: &plexspaces_core::ActorContext,
-                                _msg: plexspaces_mailbox::Message,
+                                _msg: plexspaces_proto::common::v1::Message,
                             ) -> Result<(), plexspaces_core::BehaviorError> {
                                 Ok(())
                             }
@@ -881,7 +881,7 @@ impl ActorFactory for ActorFactoryImpl {
                     async fn handle_message(
                         &mut self,
                         _ctx: &plexspaces_core::ActorContext,
-                        _msg: plexspaces_mailbox::Message,
+                        _msg: plexspaces_proto::common::v1::Message,
                     ) -> Result<(), plexspaces_core::BehaviorError> {
                         Ok(())
                     }

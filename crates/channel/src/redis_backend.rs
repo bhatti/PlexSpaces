@@ -45,8 +45,9 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats, RedisConfig,
+    channel_config, ChannelBackend, ChannelConfig, ChannelStats, RedisConfig,
 };
+use plexspaces_proto::common::v1::Message;
 use redis::aio::Connection;
 use redis::{Client, RedisResult, Value};
 use std::collections::HashMap;
@@ -210,7 +211,7 @@ impl RedisChannel {
     /// 
     /// Redis XADD requires field-value pairs. For binary data (payload), we use base64 encoding
     /// to ensure safe transmission. All other fields are strings.
-    fn serialize_message(msg: &ChannelMessage) -> Vec<(&str, String)> {
+    fn serialize_message(msg: &Message) -> Vec<(&str, String)> {
         vec![
             ("id", msg.id.clone()),
             ("channel", msg.channel.clone()),
@@ -227,10 +228,10 @@ impl RedisChannel {
     ///
     /// ## Important
     /// The `redis_id` parameter is the Redis stream ID (e.g., "1234567890-0") which is
-    /// required for ack/nack operations. We store it in ChannelMessage.id so it can be
+    /// required for ack/nack operations. We store it in Message.id so it can be
     /// used for acknowledgment. The original message ULID (if any) is stored in headers
     /// under "original_id" for reference.
-    fn deserialize_message(fields: HashMap<String, String>, redis_id: String) -> ChannelMessage {
+    fn deserialize_message(fields: HashMap<String, String>, redis_id: String) -> Message {
         // Store original message ID (ULID) in headers if present
         let mut headers = HashMap::new();
         if let Some(original_id) = fields.get("id") {
@@ -255,12 +256,13 @@ impl RedisChannel {
                 Timestamp { seconds, nanos }
             });
         
-        ChannelMessage {
+        Message {
             // Use Redis stream ID as the message ID (required for ack/nack)
             // Original ULID is stored in headers["original_id"] if needed
             id: redis_id,
             channel: fields.get("channel").cloned().unwrap_or_default(),
             sender_id: fields.get("sender_id").cloned().unwrap_or_default(),
+            receiver_id: fields.get("receiver_id").cloned().unwrap_or_default(),
             payload,
             correlation_id: fields.get("correlation_id").cloned().unwrap_or_default(),
             reply_to: fields.get("reply_to").cloned().unwrap_or_default(),
@@ -271,13 +273,19 @@ impl RedisChannel {
                 .unwrap_or(0),
             timestamp,
             headers,
+            message_type: fields.get("message_type").cloned().unwrap_or_default(),
+            priority: fields.get("priority").and_then(|s| s.parse().ok()).unwrap_or(0),
+            ttl: None,
+            idempotency_key: fields.get("idempotency_key").cloned().unwrap_or_default(),
+            uri_path: fields.get("uri_path").cloned().unwrap_or_default(),
+            uri_method: fields.get("uri_method").cloned().unwrap_or_default(),
         }
     }
 }
 
 #[async_trait]
 impl Channel for RedisChannel {
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String> {
+    async fn send(&self, message: Message) -> ChannelResult<String> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -314,7 +322,7 @@ impl Channel for RedisChannel {
         Ok(redis_id)
     }
 
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -362,7 +370,7 @@ impl Channel for RedisChannel {
         Ok(messages)
     }
 
-    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         if self.closed.load(Ordering::Relaxed) {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
         }
@@ -406,7 +414,7 @@ impl Channel for RedisChannel {
     async fn subscribe(
         &self,
         consumer_group: Option<String>,
-    ) -> ChannelResult<BoxStream<'static, ChannelMessage>> {
+    ) -> ChannelResult<BoxStream<'static, Message>> {
         let stream_key = self.stream_key.clone();
         let group = consumer_group.unwrap_or_else(|| self.consumer_group.clone());
         let consumer = self.consumer_name.clone();
@@ -458,7 +466,7 @@ impl Channel for RedisChannel {
         Ok(Box::pin(stream))
     }
 
-    async fn publish(&self, message: ChannelMessage) -> ChannelResult<u32> {
+    async fn publish(&self, message: Message) -> ChannelResult<u32> {
         // For Redis, publish is same as send (all consumers will receive)
         self.send(message).await?;
         Ok(1) // Redis doesn't track subscriber count easily
@@ -700,8 +708,8 @@ impl Channel for RedisChannel {
 }
 
 impl RedisChannel {
-    /// Parse XREAD/XREADGROUP response into ChannelMessages
-    fn parse_xread_response(result: RedisResult<Vec<Value>>) -> ChannelResult<Vec<ChannelMessage>> {
+    /// Parse XREAD/XREADGROUP response into Messages
+    fn parse_xread_response(result: RedisResult<Vec<Value>>) -> ChannelResult<Vec<Message>> {
         match result {
             Ok(values) => {
                 let mut messages = Vec::new();
@@ -780,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize_message() {
-        let msg = ChannelMessage {
+        let msg = Message {
             id: "test-123".to_string(),
             channel: "test-channel".to_string(),
             sender_id: "sender-1".to_string(),

@@ -22,8 +22,9 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelMessage, ChannelStats, DeliveryGuarantee,
+    channel_config, ChannelBackend, ChannelConfig, ChannelStats, DeliveryGuarantee,
 };
+use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,20 +33,20 @@ use tokio::time::timeout;
 
 // Enum to handle both bounded and unbounded channel types
 enum ChannelSender {
-    Bounded(mpsc::Sender<ChannelMessage>),
-    Unbounded(mpsc::UnboundedSender<ChannelMessage>),
+    Bounded(mpsc::Sender<Message>),
+    Unbounded(mpsc::UnboundedSender<Message>),
 }
 
 enum ChannelReceiver {
-    Bounded(mpsc::Receiver<ChannelMessage>),
-    Unbounded(mpsc::UnboundedReceiver<ChannelMessage>),
+    Bounded(mpsc::Receiver<Message>),
+    Unbounded(mpsc::UnboundedReceiver<Message>),
 }
 
 impl ChannelSender {
     async fn send(
         &self,
-        msg: ChannelMessage,
-    ) -> Result<(), mpsc::error::SendError<ChannelMessage>> {
+        msg: Message,
+    ) -> Result<(), mpsc::error::SendError<Message>> {
         match self {
             ChannelSender::Bounded(tx) => tx.send(msg).await,
             ChannelSender::Unbounded(tx) => tx.send(msg).map_err(|e| {
@@ -57,14 +58,14 @@ impl ChannelSender {
 }
 
 impl ChannelReceiver {
-    async fn recv(&mut self) -> Option<ChannelMessage> {
+    async fn recv(&mut self) -> Option<Message> {
         match self {
             ChannelReceiver::Bounded(rx) => rx.recv().await,
             ChannelReceiver::Unbounded(rx) => rx.recv().await,
         }
     }
 
-    fn try_recv(&mut self) -> Result<ChannelMessage, mpsc::error::TryRecvError> {
+    fn try_recv(&mut self) -> Result<Message, mpsc::error::TryRecvError> {
         match self {
             ChannelReceiver::Bounded(rx) => rx.try_recv(),
             ChannelReceiver::Unbounded(rx) => rx.try_recv(),
@@ -98,7 +99,7 @@ pub struct InMemoryChannel {
     config: ChannelConfig,
     sender: ChannelSender,
     receiver: Arc<RwLock<ChannelReceiver>>,
-    broadcast_tx: broadcast::Sender<ChannelMessage>,
+    broadcast_tx: broadcast::Sender<Message>,
     stats: Arc<RwLock<ChannelStatsData>>,
     closed: Arc<RwLock<bool>>,
 }
@@ -200,7 +201,7 @@ impl InMemoryChannel {
 
 #[async_trait]
 impl Channel for InMemoryChannel {
-    async fn send(&self, message: ChannelMessage) -> ChannelResult<String> {
+    async fn send(&self, message: Message) -> ChannelResult<String> {
         // Check if closed
         if *self.closed.read().await {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
@@ -237,7 +238,7 @@ impl Channel for InMemoryChannel {
         }
     }
 
-    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         let mut messages = Vec::new();
         let mut receiver = self.receiver.write().await;
 
@@ -285,7 +286,7 @@ impl Channel for InMemoryChannel {
         Ok(messages)
     }
 
-    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<ChannelMessage>> {
+    async fn try_receive(&self, max_messages: u32) -> ChannelResult<Vec<Message>> {
         let mut messages = Vec::new();
         let mut receiver = self.receiver.write().await;
 
@@ -316,7 +317,7 @@ impl Channel for InMemoryChannel {
     async fn subscribe(
         &self,
         _consumer_group: Option<String>,
-    ) -> ChannelResult<BoxStream<'static, ChannelMessage>> {
+    ) -> ChannelResult<BoxStream<'static, Message>> {
         let mut rx = self.broadcast_tx.subscribe();
 
         let stream = async_stream::stream! {
@@ -328,7 +329,7 @@ impl Channel for InMemoryChannel {
         Ok(Box::pin(stream))
     }
 
-    async fn publish(&self, message: ChannelMessage) -> ChannelResult<u32> {
+    async fn publish(&self, message: Message) -> ChannelResult<u32> {
         // Check if closed
         if *self.closed.read().await {
             return Err(ChannelError::ChannelClosed(self.config.name.clone()));
@@ -426,8 +427,8 @@ mod tests {
         }
     }
 
-    fn create_test_message(id: &str, payload: &str) -> ChannelMessage {
-        ChannelMessage {
+    fn create_test_message(id: &str, payload: &str) -> Message {
+        Message {
             id: id.to_string(),
             channel: "test-channel".to_string(),
             payload: payload.as_bytes().to_vec(),

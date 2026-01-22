@@ -336,6 +336,14 @@ For comprehensive documentation on durability, including recovery scenarios, edg
 ### Channel Backends
 
 PlexSpaces supports multiple channel backends:
+- **InMemory**: Fast, same-node MPSC channels
+- **Redis**: Distributed messaging with Redis Streams
+- **Kafka**: High-throughput streaming pipelines
+- **NATS**: Lightweight distributed pub/sub
+- **ProcessGroup**: Distributed pub/sub using Erlang pg/pg2-style process groups (no external dependencies)
+- **SQLite**: Single-node durability for testing
+- **UDP**: Multicast pub/sub within cluster
+- **SQS**: AWS SQS integration
 
 - **InMemory**: Fast, non-persistent (testing only)
 - **Redis**: Distributed, durable (Redis Streams with consumer groups)

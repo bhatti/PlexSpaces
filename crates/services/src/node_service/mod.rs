@@ -144,6 +144,13 @@ impl NodeServiceImpl {
         let mut guard = self.release_spec.write().await;
         *guard = Some(spec);
     }
+    
+    /// Get the release spec (for internal/testing use)
+    #[cfg(test)]
+    pub async fn get_release_spec_internal(&self) -> Option<ReleaseSpec> {
+        let guard = self.release_spec.read().await;
+        guard.clone()
+    }
 
     /// Get node uptime in seconds
     pub fn uptime_seconds(&self) -> u64 {
@@ -768,7 +775,7 @@ mod tests {
         let service = NodeServiceImpl::with_release_spec(
             service_locator.clone(), 
             node_id.clone(),
-            Some(release_spec.clone()),
+            release_spec.clone(),
         );
         
         assert_eq!(service.local_node_id, node_id);
@@ -795,7 +802,7 @@ mod tests {
             name: "updated-release".to_string(),
             ..Default::default()
         };
-        service.set_release_spec(Some(spec)).await;
+        service.set_release_spec(spec).await;
         
         // Now spec exists
         let retrieved = service.get_release_spec_internal().await;

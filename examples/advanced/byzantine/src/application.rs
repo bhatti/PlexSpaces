@@ -21,7 +21,8 @@
 //! Simple application wrapper that uses ByzantineAlgorithm
 
 use async_trait::async_trait;
-use plexspaces_core::application::{Application, ApplicationNode, ApplicationError};
+use plexspaces_application::{Application, ApplicationError};
+use plexspaces_core::ApplicationNode;
 use std::sync::Arc;
 
 use crate::byzantine::ByzantineAlgorithm;
@@ -68,7 +69,7 @@ impl Application for ByzantineApplication {
             .ok_or_else(|| ApplicationError::StartupFailed("ServiceLocator not available from node".to_string()))?;
         
         // Wait for services to be registered
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         for _ in 0..10 {
             if service_locator.actor_registry().await.is_some() {
                 break;

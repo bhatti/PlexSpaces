@@ -54,8 +54,9 @@ pub mod blob_http_router;
 
 // Health checker moved to plexspaces-core
 
-// Circuit breaker wrapper for health checkers
-pub mod health_checker_circuit_breaker;
+// Health module - consolidated health checking and service functionality
+pub mod health;
+pub use health::circuit_breaker as health_checker_circuit_breaker;
 
 // Metrics service moved to plexspaces-services/metrics_service
 
@@ -102,20 +103,22 @@ impl plexspaces_core::Service for Node {
     }
 }
 
-// Configuration bootstrap (Erlang/OTP-inspired)
-pub mod config_bootstrap;
-// TODO: Complete config_loader implementation - temporarily disabled due to proto mismatches
-pub mod config_loader;
-pub use config_loader::ConfigLoader;
-mod config_loader_yaml;
-mod config_loader_convert;
+// Config module - consolidated configuration loading and bootstrapping
+pub mod config;
+pub use config::loader::ConfigLoader;
+pub use config::bootstrap::{ConfigBootstrap, ConfigError};
+// Backward compatibility aliases
+pub use config::bootstrap as config_bootstrap;
+pub use config::loader as config_loader;
+
 pub mod metrics_helper;
 pub mod service_locator_helpers;
 pub use service_locator_helpers::create_default_service_locator;
-pub use config_bootstrap::{ConfigBootstrap, ConfigError};
 pub use metrics_helper::CoordinationComputeTracker;
-pub mod health_service_helpers;
-pub use health_service_helpers::{create_and_register_health_service, create_default_health_service};
+
+// Health service helpers (uses health module)
+pub use health::helpers::{create_and_register_health_service, create_default_health_service};
+pub use health::helpers as health_service_helpers;
 
 // Object registry helper functions
 pub mod object_registry_helpers;

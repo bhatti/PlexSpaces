@@ -1029,12 +1029,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_builder_spawn_error_when_actor_factory_not_found() {
-        use plexspaces_core::ServiceLocator;
+        use plexspaces_services::ServiceLocatorImpl;
         use std::sync::Arc;
 
         // Create an empty ServiceLocator without ActorFactory
         // This tests the error case when ActorFactory is not registered
-        let service_locator = Arc::new(ServiceLocator::new());
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
 
         // Attempt to spawn actor - should fail because ActorFactory is not registered
         use plexspaces_core::RequestContext;

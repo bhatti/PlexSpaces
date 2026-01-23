@@ -21,6 +21,7 @@ plexspaces-persistence = { path = "../../../crates/persistence" }
 plexspaces-tuplespace = { path = "../../../crates/tuplespace", features = ["redis-backend", "sql-backend"] }
 plexspaces-process-groups = { path = "../../../crates/process-groups" }
 plexspaces-keyvalue = { path = "../../../crates/keyvalue" }
+plexspaces-application = { path = "../../../crates/application" }
 plexspaces-object-registry = { path = "../../../crates/object-registry" }
 # tuplespace-registry removed - use object-registry instead
 plexspaces-grpc-middleware = { path = "../../../crates/grpc-middleware" }
@@ -32,11 +33,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tonic = { version = "0.10", features = ["transport"] }
 tracing-subscriber = "0.3"
+ulid = { version = "1.1", features = ["serde"] }
 
 [dev-dependencies]
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager", "aio"] }
 chrono = "0.4"
-ulid = { version = "1.1", features = ["serde"] }
 
 [features]
 default = ["sql-backend"]

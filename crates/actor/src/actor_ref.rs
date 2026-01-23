@@ -2106,11 +2106,12 @@ impl MockActorService {
 
     /// Helper to create test ActorContext
     fn create_test_context(actor_id: &str, node_id: &str) -> plexspaces_core::ActorContext {
-        use plexspaces_core::{ActorContext, ServiceLocator};
+        use plexspaces_core::ActorContext;
+        use plexspaces_services::ServiceLocatorImpl;
         use std::sync::Arc;
         
         // Create minimal ServiceLocator for test context (sync function, can't use async)
-        let service_locator = Arc::new(ServiceLocator::new());
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
         
         // Note: Services are not registered in test ServiceLocator
         // Tests that need services should register them explicitly
@@ -2233,12 +2234,12 @@ impl MockActorService {
         let mut message = create_test_message(b"test payload".to_vec());
         message.sender_id = "sender-actor".to_string();
         message.message_type = "call".to_string();
-        message.priority = MessagePriority::High;
+        message.priority = MessagePriority::High.into();
         message
-            .metadata
+            .headers
             .insert("key1".to_string(), "value1".to_string());
         message
-            .metadata
+            .headers
             .insert("key2".to_string(), "value2".to_string());
 
         let receiver_id = "receiver-actor".to_string();
@@ -2357,11 +2358,12 @@ impl MockActorService {
         node_id: &str,
         _actor_service: Arc<dyn plexspaces_core::ActorService>,
     ) -> ActorContext {
-        use plexspaces_core::{ActorContext, ServiceLocator};
+        use plexspaces_core::ActorContext;
+        use plexspaces_services::ServiceLocatorImpl;
         use std::sync::Arc;
         
         // Create minimal ServiceLocator for test context (sync function, can't use async)
-        let service_locator = Arc::new(ServiceLocator::new());
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
         
         // Note: Services are not registered in test ServiceLocator
         // Tests that need services should register them explicitly

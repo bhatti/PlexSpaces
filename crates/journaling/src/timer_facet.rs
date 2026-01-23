@@ -740,7 +740,9 @@ mod tests {
             Err("Not implemented".into())
         }
         async fn send(&self, _actor_id: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            self.mailbox.send(message).await
+            // Convert proto Message to mailbox Message
+            let mailbox_message = plexspaces_mailbox::Message::from_proto(&message);
+            self.mailbox.send(mailbox_message).await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
             Ok("msg-id".to_string())
         }

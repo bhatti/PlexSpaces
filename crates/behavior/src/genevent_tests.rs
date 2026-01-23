@@ -64,7 +64,7 @@ mod tests {
             ctx: &plexspaces_core::ActorContext,
             event: Message,
         ) -> Result<(), BehaviorError> {
-            let payload = String::from_utf8_lossy(event.payload);
+            let payload = String::from_utf8_lossy(&event.payload);
             self.log
                 .lock()
                 .unwrap()
@@ -255,7 +255,7 @@ mod tests {
                 event: Message,
             ) -> Result<(), BehaviorError> {
                 self.count += 1;
-                let payload = String::from_utf8_lossy(event.payload);
+                let payload = String::from_utf8_lossy(&event.payload);
                 self.log
                     .lock()
                     .unwrap()

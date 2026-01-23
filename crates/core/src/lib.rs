@@ -70,12 +70,15 @@ pub use monitoring::{NodeMetricsAccessor, NodeConnectionInfo};
 pub use message_metrics::{ActorMetrics, ActorMetricsHandle, ActorMetricsExt, new_actor_metrics};
 pub mod journal_storage;
 pub use journal_storage::{JournalStorage, JournalError, JournalResult};
-pub mod health_reporter;
-pub use health_reporter::HealthReporter;
-pub mod health_checker;
-pub use health_checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, run_health_check};
-pub mod health_service;
-pub use health_service::PlexSpacesHealthReporter;
+// Health module - consolidated health checking, reporting, and service functionality
+pub mod health;
+pub use health::reporter::HealthReporter;
+pub use health::checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, run_health_check};
+pub use health::service::PlexSpacesHealthReporter;
+// Backward compatibility aliases
+pub use health::reporter as health_reporter;
+pub use health::checker as health_checker;
+pub use health::service as health_service;
 pub mod secret_masker;
 pub use secret_masker::{SecretMasker, mask_release_spec, mask_map_secrets, DEFAULT_MASK};
 

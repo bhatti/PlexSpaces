@@ -30,6 +30,7 @@
 use plexspaces_supervisor::{Supervisor, SupervisionStrategy, ActorSpec, RestartPolicy, ChildType, ChildSpec, StartedChild, ShutdownSpec};
 use plexspaces_actor::{Actor, ActorRef as ActorActorRef};
 use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorError, BehaviorError, Message};
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
 use async_trait::async_trait;

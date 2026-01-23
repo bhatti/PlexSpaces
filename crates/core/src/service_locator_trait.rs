@@ -48,23 +48,45 @@ use crate::grpc_connection_manager::GrpcConnectionManager;
 /// ## Purpose
 /// Provides centralized service registration and retrieval interface.
 /// Concrete implementation is in `plexspaces-services` crate.
+///
+/// ## Object Safety
+/// This trait is designed to be object-safe. The generic methods have `where Self: Sized`
+/// bounds and cannot be called on trait objects (`Arc<dyn ServiceLocator>`).
+///
+/// ## Best Practice for Trait Objects
+/// When working with `Arc<dyn ServiceLocator>`, use the **strongly-typed accessor methods**
+/// instead of generic methods. For example:
+/// - Use `register_facet_registry()` instead of `register_service_by_name::<FacetRegistry>()`
+/// - Use `get_actor_service()` instead of `get_service::<ActorService>()`
+///
+/// The generic methods are intended for use with concrete `ServiceLocatorImpl` only.
 #[async_trait]
 pub trait ServiceLocator: Send + Sync {
-    /// Register a service by type
+    // ============================================================================
+    // GENERIC METHODS (require `Self: Sized`, cannot be called on trait objects)
+    // Use strongly-typed methods below when working with Arc<dyn ServiceLocator>
+    // ============================================================================
+    
+    /// Register a service by type (requires concrete type, cannot use on trait objects)
     async fn register_service<T: Service + 'static>(&self, service: Arc<T>)
     where Self: Sized;
     
-    /// Get a service by type
+    /// Get a service by type (requires concrete type, cannot use on trait objects)
     async fn get_service<T: Service + 'static>(&self) -> Option<Arc<T>>
     where Self: Sized;
     
-    /// Register a service by name
+    /// Register a service by name (requires concrete type, cannot use on trait objects)
     async fn register_service_by_name<T: Service + 'static>(&self, name: &str, service: Arc<T>)
     where Self: Sized;
     
-    /// Get a service by name
+    /// Get a service by name (requires concrete type, cannot use on trait objects)
     async fn get_service_by_name<T: Service + 'static>(&self, name: &str) -> Option<Arc<T>>
     where Self: Sized;
+    
+    // ============================================================================
+    // STRONGLY-TYPED ACCESSOR METHODS (object-safe, work with trait objects)
+    // Use these methods when working with Arc<dyn ServiceLocator>
+    // ============================================================================
     
     /// Get ActorRegistry
     async fn actor_registry(&self) -> Option<Arc<ActorRegistry>>;

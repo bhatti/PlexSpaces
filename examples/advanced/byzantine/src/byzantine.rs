@@ -31,9 +31,17 @@ use tokio::sync::RwLock;
 use async_trait::async_trait;
 use serde::{Serialize, Deserialize};
 
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
 use plexspaces_behavior::GenServer;
-use plexspaces_mailbox::Message;
+
+/// Helper to create a proto Message with payload
+fn create_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
 
 // ============================================================================
 // Message Types
@@ -212,7 +220,7 @@ impl General {
         let msg_bytes = bincode::serialize(&GeneralMessage::ReceiveMessage { path, value })
             .map_err(|e| BehaviorError::ProcessingError(format!("Serialization error: {}", e)))?;
         
-        let message = Message::new(msg_bytes);
+        let message = create_message(msg_bytes);
         let actor_service = ctx.get_actor_service().await
             .ok_or_else(|| BehaviorError::ProcessingError("ActorService not available".to_string()))?;
         
@@ -275,7 +283,7 @@ impl Actor for General {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        let general_msg: GeneralMessage = bincode::deserialize(msg.payload())
+        let general_msg: GeneralMessage = bincode::deserialize(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Deserialization error: {}", e)))?;
         
         match general_msg {
@@ -295,7 +303,7 @@ impl Actor for General {
                     .map_err(|e| BehaviorError::ProcessingError(format!("Serialization error: {}", e)))?;
                 
                 if let Some(sender_id) = &msg.sender {
-                    let reply = Message::new(result_bytes);
+                    let reply = create_message(result_bytes);
                     ctx.send_reply(
                         msg.correlation_id.as_deref(),
                         sender_id,
@@ -380,7 +388,7 @@ impl ByzantineAlgorithm {
             let msg_bytes = bincode::serialize(&init_msg)
                 .map_err(|e| format!("Serialization error: {}", e))?;
             
-            let message = Message::new(msg_bytes);
+            let message = create_message(msg_bytes);
             let actor_id = format!("general{}@{}", general_id, &ctx.node_id);
             let actor_service = ctx.get_actor_service().await
                 .ok_or_else(|| "ActorService not available".to_string())?;
@@ -396,7 +404,7 @@ impl ByzantineAlgorithm {
                 let msg_bytes = bincode::serialize(&send_msg)
                     .map_err(|e| format!("Serialization error: {}", e))?;
                 
-                let message = Message::new(msg_bytes);
+                let message = create_message(msg_bytes);
                 let actor_id = format!("general{}@{}", general_id, &ctx.node_id);
                 let actor_service = ctx.get_actor_service().await
                     .ok_or_else(|| "ActorService not available".to_string())?;
@@ -411,7 +419,7 @@ impl ByzantineAlgorithm {
         
         // Collect results using ActorRef::ask
         let mut results = Vec::new();
-        use plexspaces_core::service_locator::service_names;
+        use plexspaces_core::service_names;
         let actor_registry = ctx.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not available".to_string())?;
         
@@ -420,7 +428,7 @@ impl ByzantineAlgorithm {
             let msg_bytes = bincode::serialize(&get_result_msg)
                 .map_err(|e| format!("Serialization error: {}", e))?;
             
-            let mut message = Message::new(msg_bytes);
+            let mut message = create_message(msg_bytes);
             let actor_id = format!("general{}@{}", general_id, &ctx.node_id);
             
             // Get ActorRef and use ask pattern

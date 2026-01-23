@@ -32,6 +32,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 plexspaces-node = { path = "../node" }
+plexspaces-services = { path = "../services" }
 ulid = { workspace = true }
 
 [features]

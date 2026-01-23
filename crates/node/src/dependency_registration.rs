@@ -36,7 +36,7 @@
 //! - Supports both critical and non-critical dependencies
 
 use plexspaces_core::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, PlexSpacesHealthReporter};
-use crate::health_checker_circuit_breaker::CircuitBreakerHealthChecker;
+use crate::health::circuit_breaker::CircuitBreakerHealthChecker;
 use crate::external_dependency_checkers::{MinIOHealthChecker, DynamoDBHealthChecker, SQSHealthChecker};
 use plexspaces_core::ObjectRegistry;
 use plexspaces_proto::object_registry::v1::ObjectType;

@@ -1999,12 +1999,19 @@ mod tests {
 
     /// Helper to create ActorServiceImpl with proper ServiceLocator setup for tests
     async fn create_test_actor_service(actor_registry: Arc<ActorRegistry>, node_id: String) -> ActorServiceImpl {
-        use plexspaces_node::create_default_service_locator;
-        // Create default service locator which already has most services
-        let service_locator = create_default_service_locator(Some(node_id.clone()), None, None).await;
-        // Register actor_registry with explicit service name to ensure it's found
-        use plexspaces_core::service_names;
-        service_locator.register_service_by_name(service_names::ACTOR_REGISTRY, actor_registry.clone()).await;
+        use crate::service_locator::ServiceLocatorImpl;
+        use plexspaces_core::{ServiceLocatorInitialization, ServiceLocator as ServiceLocatorTrait};
+        // Create ServiceLocatorImpl directly
+        let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
+        // Register actor_registry using strongly-typed method
+        service_locator_impl.register_actor_registry(actor_registry.clone()).await;
+        // Initialize with default services
+        service_locator_impl.initialize_services(
+            Some(node_id.clone()),
+            None,
+            None,
+        ).await;
+        let service_locator: Arc<dyn ServiceLocatorTrait> = service_locator_impl;
         ActorServiceImpl::new(service_locator, node_id)
     }
 

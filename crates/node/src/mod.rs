@@ -369,7 +369,7 @@ impl Node {
     /// This is called automatically in `start()` if release_spec is not already set.
     /// For embedded applications, call `set_release_spec()` before `start()`.
     async fn load_release_config(&self) -> Result<plexspaces_proto::node::v1::ReleaseSpec, NodeError> {
-        use crate::config_loader::ConfigLoader;
+        use crate::config::loader::ConfigLoader;
         use std::env;
         
         // Check environment variable first
@@ -1401,7 +1401,7 @@ impl Node {
         
         // Create and register HealthService (source of truth for shutdown)
         // This helper ensures consistent creation and registration
-        use crate::health_service_helpers::create_and_register_health_service;
+        use crate::health::helpers::create_and_register_health_service;
         let (plexspaces_health_reporter, _) = create_and_register_health_service(
             self.service_locator.clone(),
             None, // Use default HealthProbeConfig

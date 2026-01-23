@@ -23,8 +23,8 @@ mod integration_tests {
     use async_trait::async_trait;
     use crate::actor::{Actor as ActorStruct, ActorState};
     use crate::behavior::{GenServer, MessageType, MessageTypeExt, MockBehavior};
-    use crate::core::{Actor, ActorContext, BehaviorError, BehaviorType};
-    use crate::mailbox::{mailbox_config_default, Mailbox, MailboxConfig, Message, MessagePriority, OrderingStrategy};
+    use crate::core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
+    use crate::mailbox::{mailbox_config_default, Mailbox, MailboxConfig, Message as MailboxMessage, MessagePriority, OrderingStrategy};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -36,27 +36,27 @@ mod integration_tests {
 
         // Enqueue messages with different priorities
         mailbox
-            .enqueue(Message::new(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(MailboxMessage::new(b"low".to_vec()).with_priority(MessagePriority::Low))
             .await
             .unwrap();
 
         mailbox
-            .enqueue(Message::new(b"high".to_vec()).with_priority(MessagePriority::High))
+            .enqueue(MailboxMessage::new(b"high".to_vec()).with_priority(MessagePriority::High))
             .await
             .unwrap();
 
         mailbox
-            .enqueue(Message::new(b"normal".to_vec()).with_priority(MessagePriority::Normal))
+            .enqueue(MailboxMessage::new(b"normal".to_vec()).with_priority(MessagePriority::Normal))
             .await
             .unwrap();
 
         mailbox
-            .enqueue(Message::signal(b"signal".to_vec()))
+            .enqueue(MailboxMessage::signal(b"signal".to_vec()))
             .await
             .unwrap();
 
         mailbox
-            .enqueue(Message::system(b"system".to_vec()))
+            .enqueue(MailboxMessage::system(b"system".to_vec()))
             .await
             .unwrap();
 
@@ -89,19 +89,19 @@ mod integration_tests {
 
         // Enqueue multiple messages
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(MailboxMessage::new(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(MailboxMessage::new(b"second".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"target".to_vec()))
+            .enqueue(MailboxMessage::new(b"target".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"fourth".to_vec()))
+            .enqueue(MailboxMessage::new(b"fourth".to_vec()))
             .await
             .unwrap();
 
@@ -134,8 +134,8 @@ mod integration_tests {
         assert_eq!(actor.state().await, ActorState::Active);
 
         // Send a message
-        let message = Message::new(b"hello".to_vec());
-        actor.send(message).await.unwrap();
+        let mailbox_msg = MailboxMessage::new(b"hello".to_vec());
+        actor.send(mailbox_msg.to_proto()).await.unwrap();
 
         // Give time for processing
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -216,20 +216,20 @@ mod integration_tests {
                 ctx: &ActorContext,
                 msg: Message,
             ) -> Result<(), BehaviorError> {
-                if msg.payload() == b"get" {
+                if msg.payload == b"get" {
                     // Send reply if sender is present
-                    if let Some(sender_id) = &msg.sender {
-                        let mut reply = Message::new(self.state.count.to_string().into_bytes());
-                        reply.receiver = sender_id.clone();
-                        reply.sender = Some(msg.receiver.clone());
-                        if let Some(corr_id) = &msg.correlation_id {
-                            reply.correlation_id = Some(corr_id.clone());
+                    if !msg.sender_id.is_empty() {
+                        let mut reply = MailboxMessage::new(self.state.count.to_string().into_bytes());
+                        reply.receiver = msg.sender_id.clone();
+                        reply.sender = Some(msg.receiver_id.clone());
+                        if !msg.correlation_id.is_empty() {
+                            reply.correlation_id = Some(msg.correlation_id.clone());
                         }
                         ctx.send_reply(
-                            msg.correlation_id.as_deref(),
-                            sender_id,
-                            msg.receiver.clone(),
-                            reply,
+                            Some(msg.correlation_id.as_str()).filter(|s| !s.is_empty()),
+                            &msg.sender_id,
+                            msg.receiver_id.clone(),
+                            reply.to_proto(),
                         ).await.map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
                     }
                     Ok(())
@@ -250,7 +250,7 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_message_with_metadata() {
-        let message = Message::new(b"test".to_vec())
+        let message = MailboxMessage::new(b"test".to_vec())
             .with_correlation_id("corr-123".to_string())
             .with_priority(MessagePriority::High)
             .with_metadata("type".to_string(), "call".to_string())
@@ -284,7 +284,7 @@ mod integration_tests {
 
         // Test send pattern (fire and forget) - ActorRef is now pure data, use ActorService
         // For this test, we'll use the mailbox directly since we're testing the actor_ref creation
-        let message = Message::new(b"hello".to_vec());
+        let message = MailboxMessage::new(b"hello".to_vec());
         mailbox.send(message).await.unwrap();
 
         // Verify message was enqueued

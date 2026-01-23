@@ -160,11 +160,11 @@ mod tests {
         ));
 
         // Set sender_id so envelope can send replies (required for GenServer handle_request)
-        message.sender = Some("test-sender@test-node".to_string());
+        message.sender_id = "test-sender@test-node".to_string();
         
         // Add correlation ID if provided
         if let Some(corr_id) = correlation_id {
-            message = message.with_correlation_id(corr_id);
+            message.correlation_id = corr_id;
         }
 
         (ctx, message, mailbox)

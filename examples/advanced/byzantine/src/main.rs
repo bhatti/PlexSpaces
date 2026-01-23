@@ -21,7 +21,7 @@
 //! Demonstrates Byzantine Fault Tolerant consensus using PlexSpaces actors.
 
 use byzantine_generals::{application::ByzantineApplication, config::ByzantineConfig};
-use plexspaces_core::application::Application;
+use plexspaces_application::Application;
 use plexspaces_node::NodeBuilder;
 use tracing_subscriber::fmt;
 

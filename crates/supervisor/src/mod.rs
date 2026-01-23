@@ -2766,7 +2766,7 @@ mod tests {
     }
 
     /// Helper function to create a test supervisor with ServiceLocator
-    fn create_test_supervisor(
+    async fn create_test_supervisor(
         id: String,
         strategy: SupervisionStrategy,
     ) -> (Supervisor, mpsc::Receiver<SupervisorEvent>) {
@@ -2823,7 +2823,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Add a child
         let spec = create_actor_spec_sync(
@@ -2879,7 +2879,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Add a child
         let spec = create_actor_spec_sync(
@@ -2915,7 +2915,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Try to remove a child that doesn't exist
         let result = supervisor
@@ -2936,7 +2936,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Add a child
         let spec = create_actor_spec_sync(
@@ -2986,7 +2986,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Add a temporary child (should not restart)
         let spec = create_actor_spec_sync(
@@ -3029,7 +3029,7 @@ mod tests {
                 max_restarts: 2, // Low limit to test
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         let spec = create_actor_spec_sync(
             "crash-child@localhost".to_string(),
@@ -3079,7 +3079,7 @@ mod tests {
                 max_restarts: 5,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         let spec = create_actor_spec_sync(
             "stats-child@localhost".to_string(),
@@ -3118,7 +3118,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Add multiple children (reduced to 2 for faster tests)
         for i in 0..2 {
@@ -3218,7 +3218,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Add 3 children
         for i in 0..3 {
@@ -3271,7 +3271,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Add 3 children
         for i in 0..3 {
@@ -3319,7 +3319,7 @@ mod tests {
                 }),
                 learning_rate: 0.1,
             },
-        );
+        ).await;
 
         // Add a child
         let spec = create_actor_spec_sync(
@@ -3372,7 +3372,7 @@ mod tests {
                 max_restarts: 5,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         // Add child with exponential backoff
         let id = "backoff-child@localhost".to_string();
@@ -3448,7 +3448,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         let parent = Arc::new(parent);
 
@@ -3458,7 +3458,7 @@ mod tests {
                 max_restarts: 3,
                 within_seconds: 60,
             },
-        );
+        ).await;
 
         child_supervisor = child_supervisor.with_parent(parent.clone());
 
@@ -3484,7 +3484,7 @@ mod tests {
                 max_restarts: 2,
                 within_seconds: 1, // 1 second window
             },
-        );
+        ).await;
 
         let spec = create_actor_spec_sync(
             "window-child@localhost".to_string(),

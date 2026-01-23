@@ -13,8 +13,16 @@
 
 use async_trait::async_trait;
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType};
-use plexspaces_mailbox::Message;
+use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
+
+/// Helper to create a proto Message with payload
+fn create_message(payload: Vec<u8>) -> Message {
+    Message {
+        id: ulid::Ulid::new().to_string(),
+        payload,
+        ..Default::default()
+    }
+}
 
 // ============================================================================
 // Simple Counter Actor
@@ -113,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Method 1: Using ActorService from ActorContext (location-transparent)
     println!("\n1. Sending via ActorService (location-transparent):");
-    let msg1 = Message::new(b"increment".to_vec());
+    let msg1 = create_message(b"increment".to_vec());
     let actor_service = ctx.get_actor_service().await
         .ok_or("ActorService not available")?;
     actor_service.send(&counter1_ref.id(), msg1).await.map_err(|e| format!("Failed to send message: {}", e))?;
@@ -134,7 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Method 3: Another message via ActorService
     println!("\n3. Sending 'get' command via ActorService:");
-    let msg3 = Message::new(b"get".to_vec());
+    let msg3 = create_message(b"get".to_vec());
     let actor_service = ctx.get_actor_service().await
         .ok_or("ActorService not available")?;
     actor_service.send(&counter1_ref.id(), msg3).await?;
@@ -144,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Method 4: Increment again
     println!("\n4. Sending another 'increment' command:");
-    let msg4 = Message::new(b"increment".to_vec());
+    let msg4 = create_message(b"increment".to_vec());
     actor_service.send(&counter1_ref.id(), msg4).await.map_err(|e| format!("Failed to send message: {}", e))?;
     println!("   ✅ Sent 'increment' to counter@node1 via ActorService.send_message()");
 
@@ -152,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Method 5: Final get
     println!("\n5. Sending final 'get' command:");
-    let msg5 = Message::new(b"get".to_vec());
+    let msg5 = create_message(b"get".to_vec());
     actor_service.send(&counter1_ref.id(), msg5).await.map_err(|e| format!("Failed to send message: {}", e))?;
     println!("   ✅ Sent 'get' to counter@node1 via ActorService.send_message()");
 

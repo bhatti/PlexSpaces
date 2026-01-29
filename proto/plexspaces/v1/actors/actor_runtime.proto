@@ -458,10 +458,6 @@ message Actor {
   // Examples: virtual_actor, otp_genserver, otp_supervisor, durable_execution, workflow
   repeated plexspaces.common.v1.Facet facets = 10;
 
-  // MULTI-TENANCY: Isolation context for tenant separation and security
-  // Enables hosting multiple customers/organizations on shared infrastructure
-  // while maintaining strict resource and security boundaries
-  plexspaces.common.v1.IsolationContext isolation = 11;
 
   // Schema version of actor_state serialization for format evolution
   //
@@ -573,6 +569,11 @@ message Actor {
   // - Empty string when state != ACTOR_STATE_FAILED
   // - Contains error message from actor crash or failure
   string error_message = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Namespace for this actor's data isolation.
+  // When actor is part of an application deployment, namespace must match application namespace.
+  // Source of truth for namespace is the application (when deploying) or actor creation request.
+  string namespace = 14;
 }
 
 // Actor lifecycle states.
@@ -1108,6 +1109,14 @@ message SpawnActorRequest {
   // Optional labels for tagging and filtering
   // Examples: {"env": "prod", "team": "platform", "version": "v2"}
   map<string, string> labels = 5;
+
+  // Optional facets to attach during spawn
+  // Facets are attached in priority order (high priority first) before actor.init() is called
+  // Examples:
+  // - VirtualActorFacet: Makes actor virtual (Orleans-style grain)
+  // - DurabilityFacet: Enables state persistence
+  // - MetricsFacet: Adds metrics collection
+  repeated plexspaces.common.v1.Facet facets = 6;
 
   // RESERVED for future WASM support (Week 11-12)
   // When WASM support is added, these fields will be used:

@@ -6,10 +6,14 @@
 //! These tests verify:
 //! 1. mTLS-based authentication between nodes
 //! 2. JWT-based authentication via gRPC
-//! 3. JWT-based authentication via HTTP API
+//! 3. JWT-based authentication via HTTP API (auth enabled/disabled, JWT required hint)
 //!
-//! To run:
-//!   cargo test --test integration_tests -- --ignored --test-threads=1
+//! Run with: `make test` (includes ignored tests) or
+//!   cargo test --test integration_tests -- --test-threads=1
+//!
+//! Note: HTTP auth tests require a node with HTTP gateway (e.g. full node via
+//! `cargo run -p plexspaces-cli -- start`). If the harness uses a minimal node
+//! without HTTP, HTTP tests may skip when the gateway is not ready.
 
 use super::TestHarness;
 use plexspaces_grpc_middleware::cert_gen::CertificateGenerator;
@@ -56,7 +60,6 @@ fn create_jwt_token(secret: &str, tenant_id: &str) -> String {
 /// 4. Register both nodes in object registry with public certificates
 /// 5. Call GetNodeMetrics from node1 to node2 using mTLS
 #[tokio::test]
-#[ignore] // Run with: cargo test --test integration_tests -- --ignored test_mtls_node_to_node_auth
 async fn test_mtls_node_to_node_auth() {
     // ARRANGE: Create temporary directory for certificates
     let cert_dir = TempDir::new().expect("Failed to create temp dir");
@@ -121,7 +124,6 @@ async fn test_mtls_node_to_node_auth() {
 /// 4. Call ActorService method with JWT token in Authorization header
 /// 5. Verify request succeeds
 #[tokio::test]
-#[ignore] // Run with: cargo test --test integration_tests -- --ignored test_jwt_grpc_auth
 async fn test_jwt_grpc_auth() {
     // ARRANGE: Set JWT secret environment variable
     let jwt_secret = "test-jwt-secret-key-for-integration-tests";
@@ -147,6 +149,7 @@ async fn test_jwt_grpc_auth() {
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
+        facets: vec![],
     });
     
     // Add JWT token to request metadata
@@ -186,80 +189,126 @@ async fn test_jwt_grpc_auth() {
 /// 4. Call HTTP API endpoint with JWT token in Authorization header
 /// 5. Verify request succeeds
 #[tokio::test]
-#[ignore] // Run with: cargo test --test integration_tests -- --ignored test_jwt_http_auth
 async fn test_jwt_http_auth() {
-    // ARRANGE: Set JWT secret environment variable
+    // ARRANGE: Set JWT secret environment variable (node inherits env)
     let jwt_secret = "test-jwt-secret-key-for-http-integration-tests";
     std::env::set_var("PLEXSPACES_JWT_SECRET", jwt_secret);
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
     
-    // Start node with JWT authentication
     let mut harness = TestHarness::new();
     let node = harness.spawn_node("jwt-http-test-node")
         .await
         .expect("Failed to spawn node");
     
-    // Wait for node to be ready
     tokio::time::sleep(Duration::from_millis(2000)).await;
     
-    // ACT: Create JWT token
     let token = create_jwt_token(jwt_secret, "default");
-    
-    // Get HTTP gateway endpoint (gRPC port + 1)
     let http_port = node.port + 1;
     let http_endpoint = format!("http://127.0.0.1:{}", http_port);
     
-    // Wait for HTTP gateway to be ready
-    let max_retries = 30;
-    let mut server_ready = false;
-    for _ in 0..max_retries {
-        match tokio::net::TcpStream::connect(format!("127.0.0.1:{}", http_port)).await {
-            Ok(_) => {
-                server_ready = true;
-                break;
-            }
-            Err(_) => {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
-    }
-    
-    if !server_ready {
+    if !wait_http_ready(http_port).await {
         println!("⚠️  HTTP gateway not ready, skipping HTTP JWT test");
-        std::env::remove_var("PLEXSPACES_JWT_SECRET");
+        cleanup_auth_env();
         harness.shutdown().await;
         return;
     }
     
-    // ACT: Call HTTP API with JWT token
     let client = reqwest::Client::new();
     let url = format!("{}/api/v1/actors/default/default/test?action=get", http_endpoint);
-    
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await;
     
-    // ASSERT: Request should succeed (or fail gracefully if JWT not fully implemented)
     match response {
         Ok(resp) => {
-            if resp.status().is_success() {
-                println!("✅ JWT HTTP authentication test passed");
-            } else {
-                println!("⚠️  HTTP request returned status: {}", resp.status());
-                println!("   This may be expected if JWT middleware is not configured");
-            }
+            assert!(resp.status().is_success(), "JWT HTTP auth: expected success, got {} body={:?}", resp.status(), resp.text().await.ok());
+            println!("✅ JWT HTTP authentication test passed");
         }
         Err(e) => {
-            // If JWT is not fully implemented, this is expected
-            println!("⚠️  JWT HTTP authentication not fully implemented: {}", e);
-            println!("   This is expected if JWT middleware is not configured on the HTTP gateway");
+            println!("⚠️  JWT HTTP request failed: {} (node may not have SecurityConfig with jwt.secret)", e);
         }
     }
     
-    // Cleanup
-    std::env::remove_var("PLEXSPACES_JWT_SECRET");
+    cleanup_auth_env();
     harness.shutdown().await;
+}
+
+/// Test: when auth is disabled, HTTP request without JWT succeeds (tenant from path or header).
+#[tokio::test]
+async fn test_http_auth_disabled_no_jwt_succeeds() {
+    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
+    std::env::remove_var("PLEXSPACES_JWT_SECRET");
+    
+    let mut harness = TestHarness::new();
+    let node = harness.spawn_node("auth-disabled-http-node").await.expect("spawn node");
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    
+    let http_port = node.port + 1;
+    if !wait_http_ready(http_port).await {
+        cleanup_auth_env();
+        harness.shutdown().await;
+        return;
+    }
+    
+    let url = format!("http://127.0.0.1:{}/api/v1/actors/tenant1/default/test", http_port);
+    let resp = reqwest::Client::new().get(&url).send().await;
+    cleanup_auth_env();
+    harness.shutdown().await;
+    
+    let resp = resp.expect("request should not fail");
+    // Without JWT and auth disabled we must not get 401 Unauthorized
+    assert_ne!(resp.status(), 401, "Auth disabled: request without JWT must not return 401");
+    // May be 200 or 4xx/5xx from backend (e.g. actor not found); key is no 401
+    println!("✅ Auth disabled: HTTP without JWT did not return 401 (status={})", resp.status());
+}
+
+/// Test: when auth is enabled, HTTP request without JWT fails with 401 or 503 and message contains hint.
+#[tokio::test]
+async fn test_http_auth_enabled_no_jwt_fails() {
+    std::env::set_var("PLEXSPACES_JWT_SECRET", "test-secret-for-auth-enabled");
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
+    
+    let mut harness = TestHarness::new();
+    let node = harness.spawn_node("auth-enabled-http-node").await.expect("spawn node");
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    
+    let http_port = node.port + 1;
+    if !wait_http_ready(http_port).await {
+        cleanup_auth_env();
+        harness.shutdown().await;
+        return;
+    }
+    
+    let url = format!("http://127.0.0.1:{}/api/v1/actors/tenant1/default/test", http_port);
+    let resp = reqwest::Client::new().get(&url).send().await;
+    let resp = resp.expect("request should not fail");
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    
+    cleanup_auth_env();
+    harness.shutdown().await;
+    
+    assert!(status == 401 || status == 503, "Auth enabled without JWT must return 401 or 503, got {} body={}", status, body);
+    assert!(body.contains("PLEXSPACES_DISABLE_AUTH") || body.contains("Bearer") || body.contains("Authentication") || body.contains("JWT"),
+        "Error body must tell user to use JWT or disable auth: {}", body);
+    println!("✅ Auth enabled: HTTP without JWT failed with {} and hint in body", status);
+}
+
+async fn wait_http_ready(port: u16) -> bool {
+    for _ in 0..30 {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await.is_ok() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    false
+}
+
+fn cleanup_auth_env() {
+    std::env::remove_var("PLEXSPACES_JWT_SECRET");
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
 }
 
 

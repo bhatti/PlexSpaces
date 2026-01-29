@@ -175,11 +175,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     service_locator_impl.register_object_registry(object_registry_trait).await;
     
     // Register GrpcConnectionManager (required for get_actor_service_client)
-    let connection_manager = Arc::new(GrpcConnectionManager::new(
-        "default".to_string(),
-        "default".to_string(),
-        Some(2),
-    ));
+    // NOTE: default_tenant_id and default_namespace have been removed.
+    // Tenant comes from auth (JWT/mTLS); namespace from application/actor.
+    let connection_manager = Arc::new(GrpcConnectionManager::new(Some(2)));
     service_locator_impl.register_grpc_connection_manager(connection_manager).await;
     
     // Register services using service_locator_impl directly (not trait object)
@@ -201,12 +199,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Register ActorFactoryImpl
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    // Cast to trait object for ActorFactoryImpl::new (which needs ServiceLocator trait)
+    // Cast to trait object for ActorFactoryImpl::new_arc (which needs ServiceLocator trait)
     let service_locator: Arc<dyn ServiceLocatorTrait> = service_locator_impl.clone();
-    let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
+    let actor_factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
     // Use service_locator_impl for registration (has Sized constraint)
-    service_locator_impl.register_service(actor_factory).await;
-    let service = ActorServiceImpl::new(service_locator, node_id.to_string());
+    service_locator_impl.register_service_by_name(plexspaces_core::service_names::ACTOR_FACTORY_IMPL, actor_factory.clone()).await;
+    let factory_trait: Arc<dyn ActorFactory> = actor_factory.clone();
+    service_locator_impl.register_actor_factory(factory_trait).await;
+    let service = ActorServiceImpl::new(service_locator_impl, node_id.to_string());
 
     // Start gRPC server
     let addr = format!("127.0.0.1:{}", port).parse()?;

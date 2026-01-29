@@ -23,12 +23,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 
-use crate::{ActorId, ActorRef, MessageSender, RequestContext, ActorMetricsHandle, ActorMetrics, ActorMetricsExt, ExitReason, actor_state_checker};
+use crate::{ActorId, ActorRef, MessageSender, RequestContext, ActorMetricsHandle, ActorMetricsExt, ExitReason, actor_state_checker};
 use crate::actor_context::ObjectRegistry;
-use crate::actor_context::ObjectRegistration;
 use crate::Service;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::ObjectType;
@@ -80,15 +79,19 @@ impl NodeCacheEntry {
 /// Error types for ActorRegistry operations
 #[derive(Debug, thiserror::Error)]
 pub enum ActorRegistryError {
+    /// Actor was not found in the registry
     #[error("Actor not found: {0}")]
     ActorNotFound(String),
 
+    /// Failed to lookup actor location
     #[error("Lookup failed: {0}")]
     LookupFailed(String),
 
+    /// Failed to register actor
     #[error("Registration failed: {0}")]
     RegistrationFailed(String),
 
+    /// Failed to unregister actor
     #[error("Unregistration failed: {0}")]
     UnregistrationFailed(String),
 }
@@ -96,8 +99,11 @@ pub enum ActorRegistryError {
 /// Routing information for an actor
 #[derive(Clone, Debug)]
 pub struct ActorRoutingInfo {
+    /// Node ID where actor is located
     pub node_id: String,
+    /// Network address of the node (for remote actors)
     pub node_address: Option<String>,
+    /// Whether the actor is on the local node
     pub is_local: bool,
 }
 
@@ -1934,7 +1940,7 @@ impl ActorRegistry {
         }
 
         // Create Linked exit reason for linked actors
-        let linked_reason = ExitReason::Linked {
+        let _linked_reason = ExitReason::Linked {
             actor_id: actor_id.clone(),
             reason: Box::new(reason.clone()),
         };
@@ -2112,7 +2118,7 @@ impl crate::LinkProvider for ActorRegistry {
             .map_err(|e| format!("Link failed: {}", e))
     }
 
-    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId, ctx: &crate::RequestContext) -> Result<(), String> {
+    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId, _ctx: &crate::RequestContext) -> Result<(), String> {
         // TODO: Support remote actor unlinking
         // For now, only support local actors. Remote unlinking requires:
         // 1. Checking if actors are local (via lookup_routing)
@@ -2144,10 +2150,10 @@ impl crate::ActivationProvider for ActorRegistry {
     async fn is_actor_active(&self, actor_id: &ActorId) -> bool {
         // Check if actor is registered and active in this registry
         // Use empty tenant/namespace for internal operations (auth disabled)
+        // Internal path (ReminderFacet): no request; use default tenant/namespace and admin for lookup
         use crate::RequestContext;
         let ctx = RequestContext::new_without_auth(String::new(), String::new())
-            .with_admin(true)
-            .with_internal(true);
+            .with_admin(true);
         let routing = self.lookup_routing(&ctx, actor_id).await.ok().flatten();
         routing.map(|r| r.is_local).unwrap_or(false)
     }

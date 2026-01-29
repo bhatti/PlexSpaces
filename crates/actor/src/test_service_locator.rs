@@ -27,15 +27,14 @@
 //! - Used only for creating ActorContext in tests and Actor::new()
 //! - Node will replace this with full ServiceLocatorImpl when spawning actors
 
-use std::any::Any;
 use std::sync::Arc;
 use async_trait::async_trait;
 use plexspaces_core::{
-    ServiceLocator, ServiceLocatorInitialization,
+    ServiceLocator,
     ActorRegistry, VirtualActorManager, ReplyWaiterRegistry, Service,
     ActorService, ChannelService, TupleSpaceProvider, ObjectRegistry,
-    NodeMetricsAccessor, NodeConnectionInfo, JournalStorage, BehaviorRegistry,
-    GrpcConnectionManager, RequestContext, ApplicationManager, ProcessGroupService,
+    NodeMetricsAccessor, JournalStorage, BehaviorRegistry,
+    GrpcConnectionManager, RequestContext, ProcessGroupService,
 };
 use plexspaces_core::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 
@@ -93,9 +92,8 @@ impl ServiceLocator for TestServiceLocatorStub {
         None
     }
 
-    async fn get_actor_factory(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        None
-    }
+    // Note: ActorFactory methods are not part of ServiceLocator trait (to avoid circular dependency)
+    // Test stubs don't need to implement them
 
     async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>> {
         None
@@ -137,6 +135,14 @@ impl ServiceLocator for TestServiceLocatorStub {
         // No-op for stub
     }
 
+    async fn get_lock_manager(&self) -> Option<Arc<dyn plexspaces_core::LockManager + Send + Sync>> {
+        None
+    }
+
+    async fn register_lock_manager(&self, _service: Arc<dyn plexspaces_core::LockManager + Send + Sync>) {
+        // No-op for stub
+    }
+
     async fn get_node_metrics_accessor(&self) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
         None
     }
@@ -161,6 +167,14 @@ impl ServiceLocator for TestServiceLocatorStub {
         // No-op for stub
     }
 
+    async fn get_actor_factory(&self) -> Option<Arc<dyn plexspaces_core::ActorFactory>> {
+        None
+    }
+
+    async fn register_actor_factory(&self, _factory: Arc<dyn plexspaces_core::ActorFactory>) {
+        // No-op for stub
+    }
+
     async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig> {
         None
     }
@@ -174,6 +188,15 @@ impl ServiceLocator for TestServiceLocatorStub {
     }
 
     async fn register_node_connection_info(&self, _accessor: Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>) {
+        // No-op for stub
+    }
+
+    async fn initialize_services(
+        &self,
+        _node_id: Option<String>,
+        _node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
+        _release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
+    ) {
         // No-op for stub
     }
 
@@ -203,6 +226,10 @@ impl ServiceLocator for TestServiceLocatorStub {
 
     async fn request_context_for_system_operations(&self) -> RequestContext {
         RequestContext::new_without_auth("default".to_string(), "default".to_string())
+    }
+    
+    async fn request_context_for_system_operations_with_namespace(&self, namespace: String) -> RequestContext {
+        RequestContext::new_without_auth("default".to_string(), namespace)
     }
 
     async fn get_grpc_connection_manager(&self) -> Option<Arc<GrpcConnectionManager>> {
@@ -266,16 +293,6 @@ impl ServiceLocator for TestServiceLocatorStub {
 }
 
 #[async_trait]
-impl ServiceLocatorInitialization for TestServiceLocatorStub {
-    async fn initialize_services(
-        &self,
-        _node_id: Option<String>,
-        _node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
-        _release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
-    ) {
-        // No-op for stub
-    }
-}
 
 impl Default for TestServiceLocatorStub {
     fn default() -> Self {

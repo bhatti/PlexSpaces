@@ -93,7 +93,9 @@ fn create_minimal_wasm_module() -> Vec<u8> {
 /// - ActorFactory, ApplicationManager, and other services are ready
 /// - gRPC server is NOT started (use create_test_node_with_server() for integration tests)
 async fn create_test_node() -> Arc<Node> {
-    let node = Arc::new(NodeBuilder::new("test-node").build().await);
+    let node = Arc::new(NodeBuilder::new("test-node")
+        .with_in_memory_backends()
+        .build().await);
     let node_clone = node.clone();
     node_clone.initialize_services().await.expect("Failed to initialize services");
     // Wait for services to be ready with polling (no gRPC server startup)
@@ -118,6 +120,7 @@ async fn create_test_node_with_server() -> Arc<Node> {
     let node = Arc::new(
         NodeBuilder::new("test-node")
             .with_listen_addr("127.0.0.1:0") // Ephemeral port to avoid conflicts
+            .with_in_memory_backends()
             .build()
             .await
     );

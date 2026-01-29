@@ -6,6 +6,7 @@
 
 #[cfg(feature = "firecracker")]
 mod firecracker_integration_tests {
+    use plexspaces_common::test_helpers::docker_available;
     use plexspaces_proto::firecracker::v1::{
         firecracker_vm_service_client::FirecrackerVmServiceClient,
         CreateVmRequest, BootVmRequest, GetVmStateRequest, ListVmsRequest,
@@ -22,14 +23,6 @@ mod firecracker_integration_tests {
     const CONTAINER_NAME: &str = "plexspaces-firecracker-test";
     const GRPC_PORT: u16 = 8000;
     const GRPC_ADDR: &str = "http://localhost:8000";
-
-    /// Helper to check if Docker is available
-    fn docker_available() -> bool {
-        Command::new("docker")
-            .arg("--version")
-            .output()
-            .is_ok()
-    }
 
     /// Helper to detect docker-compose command
     fn docker_compose_cmd() -> String {
@@ -211,11 +204,10 @@ mod firecracker_integration_tests {
     /// 4. Calls CreateVm API via gRPC
     /// 5. Verifies VM was created successfully
     #[tokio::test]
-    #[ignore] // Requires Docker, KVM, and Firecracker setup
     async fn test_create_vm_via_grpc() {
         // Skip test if Docker is not available
         if !docker_available() {
-            println!("Skipping test: Docker is not available");
+            eprintln!("Skipping test: Docker is not available");
             return;
         }
 
@@ -264,8 +256,11 @@ mod firecracker_integration_tests {
     /// 2. Lists all VMs via gRPC
     /// 3. Verifies the created VM appears in the list
     #[tokio::test]
-    #[ignore] // Requires Docker, KVM, and Firecracker setup
     async fn test_list_vms_via_grpc() {
+        if !docker_available() {
+            eprintln!("Skipping test: Docker is not available");
+            return;
+        }
         build_docker_image().expect("Failed to build Docker image");
         start_docker_container().expect("Failed to start container");
         let _guard = TestGuard;
@@ -315,10 +310,9 @@ mod firecracker_integration_tests {
     /// 2. Retrieves VM state via gRPC
     /// 3. Verifies state is correct
     #[tokio::test]
-    #[ignore] // Requires Docker, KVM, and Firecracker setup
     async fn test_get_vm_state_via_grpc() {
         if !docker_available() {
-            println!("Skipping test: Docker is not available");
+            eprintln!("Skipping test: Docker is not available");
             return;
         }
 
@@ -369,10 +363,9 @@ mod firecracker_integration_tests {
     /// 1. Deploys an application to a VM via gRPC
     /// 2. Verifies deployment succeeds (VM is created if needed)
     #[tokio::test]
-    #[ignore] // Requires Docker, KVM, and Firecracker setup
     async fn test_deploy_application_via_grpc() {
         if !docker_available() {
-            println!("Skipping test: Docker is not available");
+            eprintln!("Skipping test: Docker is not available");
             return;
         }
 
@@ -406,10 +399,9 @@ mod firecracker_integration_tests {
     /// 3. List VMs
     /// 4. Stop VM
     #[tokio::test]
-    #[ignore] // Requires Docker, KVM, and Firecracker setup
     async fn test_vm_lifecycle_via_grpc() {
         if !docker_available() {
-            println!("Skipping test: Docker is not available");
+            eprintln!("Skipping test: Docker is not available");
             return;
         }
 

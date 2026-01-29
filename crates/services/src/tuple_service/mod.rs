@@ -14,7 +14,7 @@
 //! gRPC TuplePlexSpace Service Implementation
 //!
 //! ## Purpose
-//! Implements the TuplePlexSpaceService gRPC interface for distributed TupleSpace operations.
+//! Implements the TupleSpaceService gRPC interface for distributed TupleSpace operations.
 //! This enables actors on different nodes to coordinate via shared tuple space.
 //!
 //! ## Architecture Context (Phase 3 - Distributed Coordination)
@@ -37,7 +37,7 @@
 use chrono::Utc;
 use plexspaces_proto::{
     tuplespace::v1::{
-        tuple_field::Value as ProtoValue, tuple_plex_space_service_server::TuplePlexSpaceService,
+        tuple_field::Value as ProtoValue, tuple_space_service_server::TupleSpaceService,
         CountRequest, CountResponse, ExistsRequest, ExistsResponse, ReadRequest, ReadResponse,
         Tuple as ProtoTuple, TupleField as ProtoTupleField, WriteRequest, WriteResponse,
     },
@@ -49,10 +49,9 @@ use plexspaces_tuplespace::{
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use crate::ServiceLocator;
 
 /// gRPC service implementation for TupleSpace operations
-pub struct TuplePlexSpaceServiceImpl {
+pub struct TupleSpaceServiceImpl {
     /// ServiceLocator for accessing TupleSpaceProvider
     service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
     /// Operation counters for stats
@@ -76,7 +75,7 @@ impl Default for TupleSpaceOperationStats {
     }
 }
 
-impl TuplePlexSpaceServiceImpl {
+impl TupleSpaceServiceImpl {
     /// Create new TupleSpace service
     pub fn new(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Self {
         Self {
@@ -252,8 +251,8 @@ impl TuplePlexSpaceServiceImpl {
         // Note: Tuple doesn't expose metadata() method, so we'll leave it empty for now
         // TODO: Add metadata() accessor to Tuple if needed
         // For now, metadata is not exposed, so we'll use empty map
-        use prost_types::Value;
-        let mut proto_metadata = std::collections::HashMap::new();
+        
+        let proto_metadata = std::collections::HashMap::new();
         // Metadata conversion will be implemented when Tuple exposes metadata accessor
         
         ProtoTuple {
@@ -293,7 +292,7 @@ impl TuplePlexSpaceServiceImpl {
 }
 
 #[tonic::async_trait]
-impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
+impl TupleSpaceService for TupleSpaceServiceImpl {
     /// Write tuples to the TupleSpace
     async fn write(
         &self,
@@ -319,8 +318,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(format!("Missing or invalid request context: {}. x-tenant-id header required.", e)))?;
+            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
         
         // Get TupleSpaceProvider from ServiceLocator
         let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
@@ -371,8 +370,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(format!("Missing or invalid request context: {}. x-tenant-id header required.", e)))?;
+            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
         
         // Get TupleSpaceProvider from ServiceLocator
         let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
@@ -417,8 +416,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(format!("Missing or invalid request context: {}. x-tenant-id header required.", e)))?;
+            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
         
         // Get TupleSpaceProvider from ServiceLocator
         let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
@@ -468,8 +467,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(format!("Missing or invalid request context: {}. x-tenant-id header required.", e)))?;
+            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
         
         // Get TupleSpaceProvider from ServiceLocator
         let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
@@ -505,8 +504,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(format!("Missing or invalid request context: {}. x-tenant-id header required.", e)))?;
+            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
         
         // Get TupleSpaceProvider from ServiceLocator
         let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
@@ -580,8 +579,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(format!("Missing or invalid request context: {}. x-tenant-id header required.", e)))?;
+            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
         
         // Get TupleSpaceProvider from ServiceLocator
         let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
@@ -637,8 +636,8 @@ impl TuplePlexSpaceService for TuplePlexSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(format!("Missing or invalid request context: {}. x-tenant-id header required.", e)))?;
+            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
         
         // Get TupleSpaceProvider from ServiceLocator
         let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
@@ -724,7 +723,7 @@ mod tests {
     #[test]
     fn test_convert_proto_field_integer() {
         let field = proto_int(42);
-        let result = TuplePlexSpaceServiceImpl::convert_proto_field_to_internal(&field);
+        let result = TupleSpaceServiceImpl::convert_proto_field_to_internal(&field);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), TupleField::Integer(42));
     }
@@ -732,7 +731,7 @@ mod tests {
     #[test]
     fn test_convert_proto_field_float() {
         let field = proto_float(3.14);
-        let result = TuplePlexSpaceServiceImpl::convert_proto_field_to_internal(&field);
+        let result = TupleSpaceServiceImpl::convert_proto_field_to_internal(&field);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), TupleField::Float(OrderedFloat::new(3.14)));
     }
@@ -740,7 +739,7 @@ mod tests {
     #[test]
     fn test_convert_proto_field_string() {
         let field = proto_string("test");
-        let result = TuplePlexSpaceServiceImpl::convert_proto_field_to_internal(&field);
+        let result = TupleSpaceServiceImpl::convert_proto_field_to_internal(&field);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), TupleField::String("test".to_string()));
     }
@@ -748,7 +747,7 @@ mod tests {
     #[test]
     fn test_convert_proto_field_boolean() {
         let field = proto_bool(true);
-        let result = TuplePlexSpaceServiceImpl::convert_proto_field_to_internal(&field);
+        let result = TupleSpaceServiceImpl::convert_proto_field_to_internal(&field);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), TupleField::Boolean(true));
     }
@@ -756,7 +755,7 @@ mod tests {
     #[test]
     fn test_convert_proto_field_binary() {
         let field = proto_binary(vec![1, 2, 3]);
-        let result = TuplePlexSpaceServiceImpl::convert_proto_field_to_internal(&field);
+        let result = TupleSpaceServiceImpl::convert_proto_field_to_internal(&field);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), TupleField::Binary(vec![1, 2, 3]));
     }
@@ -764,7 +763,7 @@ mod tests {
     #[test]
     fn test_convert_proto_field_null() {
         let field = proto_null();
-        let result = TuplePlexSpaceServiceImpl::convert_proto_field_to_internal(&field);
+        let result = TupleSpaceServiceImpl::convert_proto_field_to_internal(&field);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), TupleField::Null);
     }
@@ -772,7 +771,7 @@ mod tests {
     #[test]
     fn test_convert_proto_field_wildcard_error() {
         let field = proto_wildcard();
-        let result = TuplePlexSpaceServiceImpl::convert_proto_field_to_internal(&field);
+        let result = TupleSpaceServiceImpl::convert_proto_field_to_internal(&field);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code(), Code::InvalidArgument);
@@ -782,7 +781,7 @@ mod tests {
     #[test]
     fn test_convert_proto_field_none_error() {
         let field = proto_none();
-        let result = TuplePlexSpaceServiceImpl::convert_proto_field_to_internal(&field);
+        let result = TupleSpaceServiceImpl::convert_proto_field_to_internal(&field);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code(), Code::InvalidArgument);
@@ -800,7 +799,7 @@ mod tests {
             location: None,
         };
 
-        let result = TuplePlexSpaceServiceImpl::convert_proto_tuple_to_internal(&proto_tuple);
+        let result = TupleSpaceServiceImpl::convert_proto_tuple_to_internal(&proto_tuple);
         assert!(result.is_ok());
         let tuple = result.unwrap();
         assert_eq!(tuple.fields().len(), 2);
@@ -819,7 +818,7 @@ mod tests {
             location: None,
         };
 
-        let result = TuplePlexSpaceServiceImpl::convert_proto_tuple_to_internal(&proto_tuple);
+        let result = TupleSpaceServiceImpl::convert_proto_tuple_to_internal(&proto_tuple);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code(), Code::InvalidArgument);
@@ -840,7 +839,7 @@ mod tests {
             location: None,
         };
 
-        let result = TuplePlexSpaceServiceImpl::convert_proto_tuple_to_internal(&proto_tuple);
+        let result = TupleSpaceServiceImpl::convert_proto_tuple_to_internal(&proto_tuple);
         assert!(result.is_ok());
     }
 
@@ -866,7 +865,7 @@ mod tests {
             location: None,
         };
 
-        let result = TuplePlexSpaceServiceImpl::convert_proto_tuple_to_internal(&proto_tuple);
+        let result = TupleSpaceServiceImpl::convert_proto_tuple_to_internal(&proto_tuple);
         assert!(result.is_ok());
         let tuple = result.unwrap();
         assert!(tuple.lease().is_some());
@@ -883,7 +882,7 @@ mod tests {
             location: None,
         };
 
-        let result = TuplePlexSpaceServiceImpl::convert_proto_template_to_pattern(&proto_tuple);
+        let result = TupleSpaceServiceImpl::convert_proto_template_to_pattern(&proto_tuple);
         assert!(result.is_ok());
     }
 
@@ -907,7 +906,7 @@ mod tests {
             location: None,
         };
 
-        let result = TuplePlexSpaceServiceImpl::convert_proto_template_to_pattern(&proto_tuple);
+        let result = TupleSpaceServiceImpl::convert_proto_template_to_pattern(&proto_tuple);
         assert!(result.is_ok());
         // Pattern created successfully with all 7 field types
     }
@@ -923,7 +922,7 @@ mod tests {
             location: None,
         };
 
-        let result = TuplePlexSpaceServiceImpl::convert_proto_template_to_pattern(&proto_tuple);
+        let result = TupleSpaceServiceImpl::convert_proto_template_to_pattern(&proto_tuple);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code(), Code::InvalidArgument);
@@ -940,7 +939,7 @@ mod tests {
             location: None,
         };
 
-        let result = TuplePlexSpaceServiceImpl::convert_proto_template_to_pattern(&proto_tuple);
+        let result = TupleSpaceServiceImpl::convert_proto_template_to_pattern(&proto_tuple);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code(), Code::InvalidArgument);
@@ -950,42 +949,42 @@ mod tests {
     #[test]
     fn test_convert_internal_field_to_proto_integer() {
         let field = TupleField::Integer(42);
-        let proto = TuplePlexSpaceServiceImpl::convert_internal_field_to_proto(&field);
+        let proto = TupleSpaceServiceImpl::convert_internal_field_to_proto(&field);
         assert_eq!(proto.value, Some(ProtoValue::Integer(42)));
     }
 
     #[test]
     fn test_convert_internal_field_to_proto_float() {
         let field = TupleField::Float(OrderedFloat::new(3.14));
-        let proto = TuplePlexSpaceServiceImpl::convert_internal_field_to_proto(&field);
+        let proto = TupleSpaceServiceImpl::convert_internal_field_to_proto(&field);
         assert_eq!(proto.value, Some(ProtoValue::Float(3.14)));
     }
 
     #[test]
     fn test_convert_internal_field_to_proto_string() {
         let field = TupleField::String("test".to_string());
-        let proto = TuplePlexSpaceServiceImpl::convert_internal_field_to_proto(&field);
+        let proto = TupleSpaceServiceImpl::convert_internal_field_to_proto(&field);
         assert_eq!(proto.value, Some(ProtoValue::String("test".to_string())));
     }
 
     #[test]
     fn test_convert_internal_field_to_proto_boolean() {
         let field = TupleField::Boolean(true);
-        let proto = TuplePlexSpaceServiceImpl::convert_internal_field_to_proto(&field);
+        let proto = TupleSpaceServiceImpl::convert_internal_field_to_proto(&field);
         assert_eq!(proto.value, Some(ProtoValue::Boolean(true)));
     }
 
     #[test]
     fn test_convert_internal_field_to_proto_binary() {
         let field = TupleField::Binary(vec![1, 2, 3]);
-        let proto = TuplePlexSpaceServiceImpl::convert_internal_field_to_proto(&field);
+        let proto = TupleSpaceServiceImpl::convert_internal_field_to_proto(&field);
         assert_eq!(proto.value, Some(ProtoValue::Binary(vec![1, 2, 3])));
     }
 
     #[test]
     fn test_convert_internal_field_to_proto_null() {
         let field = TupleField::Null;
-        let proto = TuplePlexSpaceServiceImpl::convert_internal_field_to_proto(&field);
+        let proto = TupleSpaceServiceImpl::convert_internal_field_to_proto(&field);
         assert_eq!(proto.value, Some(ProtoValue::Null(true)));
     }
 
@@ -996,7 +995,7 @@ mod tests {
             TupleField::String("test".to_string()),
         ]);
 
-        let proto = TuplePlexSpaceServiceImpl::convert_internal_tuple_to_proto(&tuple);
+        let proto = TupleSpaceServiceImpl::convert_internal_tuple_to_proto(&tuple);
         assert_eq!(proto.fields.len(), 2);
         assert_eq!(proto.fields[0].value, Some(ProtoValue::Integer(1)));
         assert_eq!(
@@ -1010,14 +1009,14 @@ mod tests {
     #[test]
     fn test_tuplespace_error_to_status_not_found() {
         let err = TupleSpaceError::NotFound;
-        let status = TuplePlexSpaceServiceImpl::tuplespace_error_to_status(err);
+        let status = TupleSpaceServiceImpl::tuplespace_error_to_status(err);
         assert_eq!(status.code(), Code::NotFound);
     }
 
     #[test]
     fn test_tuplespace_error_to_status_pattern_error() {
         let err = TupleSpaceError::PatternError("invalid pattern".to_string());
-        let status = TuplePlexSpaceServiceImpl::tuplespace_error_to_status(err);
+        let status = TupleSpaceServiceImpl::tuplespace_error_to_status(err);
         assert_eq!(status.code(), Code::InvalidArgument);
         assert!(status.message().contains("Pattern error"));
     }
@@ -1025,7 +1024,7 @@ mod tests {
     #[test]
     fn test_tuplespace_error_to_status_lease_error() {
         let err = TupleSpaceError::LeaseError("expired".to_string());
-        let status = TuplePlexSpaceServiceImpl::tuplespace_error_to_status(err);
+        let status = TupleSpaceServiceImpl::tuplespace_error_to_status(err);
         assert_eq!(status.code(), Code::FailedPrecondition);
         assert!(status.message().contains("Lease error"));
     }
@@ -1033,7 +1032,7 @@ mod tests {
     #[test]
     fn test_tuplespace_error_to_status_invalid_configuration() {
         let err = TupleSpaceError::InvalidConfiguration("bad config".to_string());
-        let status = TuplePlexSpaceServiceImpl::tuplespace_error_to_status(err);
+        let status = TupleSpaceServiceImpl::tuplespace_error_to_status(err);
         assert_eq!(status.code(), Code::InvalidArgument);
         assert!(status.message().contains("Invalid configuration"));
     }
@@ -1041,14 +1040,14 @@ mod tests {
     #[test]
     fn test_tuplespace_error_to_status_not_implemented() {
         let err = TupleSpaceError::NotImplemented("future feature".to_string());
-        let status = TuplePlexSpaceServiceImpl::tuplespace_error_to_status(err);
+        let status = TupleSpaceServiceImpl::tuplespace_error_to_status(err);
         assert_eq!(status.code(), Code::Unimplemented);
     }
 
     #[test]
     fn test_tuplespace_error_to_status_other() {
         let err = TupleSpaceError::IoError("disk error".to_string());
-        let status = TuplePlexSpaceServiceImpl::tuplespace_error_to_status(err);
+        let status = TupleSpaceServiceImpl::tuplespace_error_to_status(err);
         assert_eq!(status.code(), Code::Internal);
     }
 
@@ -1060,7 +1059,7 @@ mod tests {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-write-read").build().await);
         let service_locator = node.service_locator();
-        let service = TuplePlexSpaceServiceImpl::new(service_locator);
+        let service = TupleSpaceServiceImpl::new(service_locator);
 
         // Write a tuple
         let write_req = Request::new(WriteRequest {
@@ -1116,7 +1115,7 @@ mod tests {
     async fn test_write_multiple_tuples() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-write-multiple").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Write multiple tuples
         let write_req = Request::new(WriteRequest {
@@ -1159,7 +1158,7 @@ mod tests {
     async fn test_read_with_pattern_matching() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-pattern-match").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Write tuples
         let write_req = Request::new(WriteRequest {
@@ -1221,7 +1220,7 @@ mod tests {
     async fn test_take_removes_tuple() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-take").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Write a tuple
         let write_req = Request::new(WriteRequest {
@@ -1288,7 +1287,7 @@ mod tests {
     async fn test_count_matching_tuples() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-count").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Write tuples
         let write_req = Request::new(WriteRequest {
@@ -1346,7 +1345,7 @@ mod tests {
     async fn test_exists_check() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-exists").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Check exists before write - should be false
         let exists_req = Request::new(ExistsRequest {
@@ -1401,7 +1400,7 @@ mod tests {
     async fn test_clear_all_tuples() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-clear").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Write tuples
         let write_req = Request::new(WriteRequest {
@@ -1455,7 +1454,7 @@ mod tests {
     async fn test_get_stats() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-stats").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Get initial stats
         let stats_req = Request::new(Empty {});
@@ -1531,7 +1530,7 @@ mod tests {
     async fn test_write_validation_empty_tuples() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-validation").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Try to write empty tuples array
         let write_req = Request::new(WriteRequest {
@@ -1548,7 +1547,7 @@ mod tests {
     async fn test_read_validation_missing_template() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-validation-read").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Try to read without template
         let read_req = Request::new(ReadRequest {
@@ -1570,7 +1569,7 @@ mod tests {
     async fn test_unimplemented_methods() {
         use plexspaces_node::NodeBuilder;
         let node = Arc::new(NodeBuilder::new("test-unimplemented").build().await);
-        let service = TuplePlexSpaceServiceImpl::new(node.service_locator());
+        let service = TupleSpaceServiceImpl::new(node.service_locator());
 
         // Test subscribe (unimplemented)
         let subscribe_req = Request::new(plexspaces_proto::tuplespace::v1::SubscribeRequest {

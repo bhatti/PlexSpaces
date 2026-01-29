@@ -56,7 +56,7 @@ pub async fn status(node_addr: &str) -> Result<()> {
 }
 
 /// Start a PlexSpaces node instance
-pub async fn start(node_id: &str, listen_addr: &str) -> Result<()> {
+pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str>) -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -68,22 +68,58 @@ pub async fn start(node_id: &str, listen_addr: &str) -> Result<()> {
     info!("╔════════════════════════════════════════════════════════════════╗");
     info!("║     Starting PlexSpaces Node                                  ║");
     info!("╚════════════════════════════════════════════════════════════════╝");
-    info!("Node ID: {}", node_id);
-    info!("Listen Address: {}", listen_addr);
+    info!(node_id = %node_id, listen_addr = %listen_addr, "Node starting");
 
-    // Create node using NodeBuilder
-    let node = NodeBuilder::new(node_id.to_string())
-        .with_listen_addr(listen_addr.to_string())
-        .build()
-        .await;
+    // Create shutdown channel for fatal errors FIRST (before any initialization)
+    // This allows fatal errors during node construction to signal the main thread to exit
+    // CRITICAL: Must be registered BEFORE NodeBuilder::build() which calls initialize_services()
+    let (fatal_error_tx, mut fatal_error_rx) = tokio::sync::oneshot::channel::<String>();
+    use plexspaces_services::service_locator::register_fatal_error_channel;
+    register_fatal_error_channel(fatal_error_tx);
 
+    // Load release config if provided
+    let mut builder = NodeBuilder::new(node_id.to_string())
+        .with_listen_addr(listen_addr.to_string());
+    
+    if let Some(release_config_path) = release_config {
+        info!("Loading release config from: {}", release_config_path);
+        use plexspaces_node::config::loader::ConfigLoader;
+        let loader = ConfigLoader::new();
+        match loader.load_release_spec(release_config_path).await {
+            Ok(spec) => {
+                builder = builder.with_release_spec(spec);
+                info!("Release config loaded successfully");
+            }
+            Err(e) => {
+                warn!("Failed to load release config: {}. Using defaults.", e);
+            }
+        }
+    } else {
+        // Use default release config
+        use plexspaces_common::release_config::create_default_release_config;
+        let default_spec = create_default_release_config(
+            "plexspaces-cluster".to_string(),
+            "1.0.0".to_string(),
+            node_id.to_string(),
+            listen_addr.to_string(),
+        ).await;
+        builder = builder.with_release_spec(default_spec);
+        info!("Using default release configuration");
+    }
+    
+    // Create node using NodeBuilder (this may call fatal_exit() if security validation fails)
+    let node = builder.build().await;
     let node = Arc::new(node);
-
-    // Start node
+    
+    // Start node in spawned task
     let node_for_start = node.clone();
     tokio::spawn(async move {
         if let Err(e) = node_for_start.start().await {
-            tracing::warn!("Node failed to start: {}", e);
+            let error_msg = format!("Node failed to start: {}", e);
+            tracing::error!(error = %e, "Node startup failed");
+            eprintln!("FATAL: {}", error_msg);
+            // For non-security startup errors, exit directly
+            // (Security errors are handled by fatal_exit() which signals via global channel)
             std::process::exit(1);
         }
     });
@@ -95,13 +131,35 @@ pub async fn start(node_id: &str, listen_addr: &str) -> Result<()> {
     info!("   Listening on: {}", listen_addr);
     info!("   gRPC endpoint: http://{}", listen_addr);
 
-    // Wait for shutdown signal
-    match signal::ctrl_c().await {
-        Ok(()) => {
-            info!("Shutdown signal received, stopping node...");
+    // Wait for either shutdown signal (Ctrl+C) OR fatal error from anywhere
+    // This follows the Go graceful shutdown pattern where the main thread listens
+    // for both OS signals and internal fatal error signals
+    tokio::select! {
+        result = signal::ctrl_c() => {
+            match result {
+                Ok(()) => {
+                    info!("Shutdown signal received, stopping node...");
+                }
+                Err(err) => {
+                    warn!("Unable to listen for shutdown signal: {}", err);
+                }
+            }
         }
-        Err(err) => {
-            warn!("Unable to listen for shutdown signal: {}", err);
+        fatal_error = &mut fatal_error_rx => {
+            match fatal_error {
+                Ok(msg) => {
+                    tracing::error!("Fatal error during startup: {}", msg);
+                    eprintln!("FATAL: {}", msg);
+                }
+                Err(_) => {
+                    // Channel closed - fatal_exit was called (sender dropped)
+                    // This happens when fatal_exit() calls _exit() after sending
+                    tracing::error!("Fatal error channel closed - fatal_exit() was called");
+                    eprintln!("FATAL: Process terminated due to fatal initialization error");
+                }
+            }
+            // Exit immediately on fatal error
+            std::process::exit(1);
         }
     }
 

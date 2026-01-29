@@ -44,6 +44,9 @@ pub mod grpc_client;
 // HTTP router for blob service endpoints
 pub mod blob_http_router;
 
+// JWT validation for HTTP gateway (tenant_id from claims when auth enabled)
+pub mod http_jwt;
+
 // HTTP router for gRPC-Gateway routes (actor invocation, etc.)
 // TODO: Implement HTTP gateway for InvokeActor routes
 // pub mod http_router;
@@ -91,7 +94,7 @@ pub mod shutdown_coordinator;
 // Node builder for fluent node creation API
 pub mod node_builder;
 pub mod service_wrappers;
-pub mod virtual_actor_wrapper;
+// VirtualActorWrapper is in plexspaces-actor crate - use plexspaces_actor::VirtualActorWrapper directly
 // TODO: regular_actor_wrapper module file missing - commented out until file is created
 // pub mod regular_actor_wrapper;
 pub use node_builder::NodeBuilder;
@@ -110,6 +113,9 @@ pub use config::bootstrap::{ConfigBootstrap, ConfigError};
 // Backward compatibility aliases
 pub use config::bootstrap as config_bootstrap;
 pub use config::loader as config_loader;
+
+// WASM applications auto-deploy loader (Tomcat-style webapps)
+pub mod wasm_apps_loader;
 
 pub mod metrics_helper;
 pub mod service_locator_helpers;

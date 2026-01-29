@@ -23,10 +23,18 @@
 //! Carries tenant isolation, tracing, and request metadata through the call chain.
 //!
 //! ## Design Philosophy
-//! - **Tenant Isolation**: tenant_id is REQUIRED for all operations
-//! - **Tracing**: request_id and correlation_id for distributed tracing
-//! - **Extensible**: metadata map for additional context
-//! - **Immutable**: Context should be passed by reference, not mutated
+//! - **Tenant Isolation**: tenant_id from auth (JWT/mTLS); empty when auth disabled.
+//! - **Namespace**: from application/actor or request; never hardcoded.
+//! - **Tracing**: request_id and correlation_id for distributed tracing.
+//! - **Immutable**: Context is passed by reference; no mutation in callees.
+//!
+//! ## Propagation (single source of truth)
+//! - **Entry points**: HTTP sets `x-tenant-id` and `x-namespace` from path/JWT; gRPC uses
+//!   `plexspaces_core::request_context_from_grpc_request(metadata, labels, service_locator)`.
+//! - **All service methods** take `ctx: &RequestContext` and use `ctx.tenant_id()` /
+//!   `ctx.namespace()`; no hardcoded tenant or namespace in business logic.
+//! - **System operations** (node registration, heartbeats) use
+//!   `ServiceLocator::request_context_for_system_operations()` (empty tenant, optional namespace).
 
 use std::collections::HashMap;
 use chrono::Utc;
@@ -49,7 +57,11 @@ pub struct RequestContext {
     /// Tenant ID (REQUIRED for all operations)
     pub tenant_id: String,
     
-    /// Namespace within tenant (REQUIRED, no defaults)
+    /// Namespace within tenant (optional, can be empty)
+    ///
+    /// Used for further isolation within a tenant. Can be empty string.
+    /// For admin/internal contexts with empty namespace, repository lookups
+    /// bypass namespace filtering to allow cross-namespace queries.
     pub namespace: String,
     
     /// User ID (from JWT, optional)
@@ -70,13 +82,16 @@ pub struct RequestContext {
     /// Admin flag (from JWT, optional)
     ///
     /// When true, indicates the user has admin privileges.
-    /// Admin users can bypass tenant filtering for administrative operations.
+    /// Admin users with empty namespace can bypass namespace filtering for
+    /// administrative operations (see should_skip_namespace_filter()).
     pub admin: bool,
     
     /// Internal flag (for system operations)
     ///
     /// When true, indicates this is an internal system operation.
     /// Internal operations bypass authn/authz and tenant filtering.
+    /// Internal contexts with empty namespace can bypass namespace filtering
+    /// for system operations (see should_skip_namespace_filter()).
     pub internal: bool,
     
     /// Auth enabled flag (from SecurityConfig)
@@ -257,6 +272,31 @@ impl RequestContext {
         self.internal
     }
 
+    /// Check if namespace filtering should be skipped for this context.
+    ///
+    /// ## Purpose
+    /// Returns true if this is an admin context with an empty namespace.
+    /// When true, repository lookup methods should skip namespace filtering to allow
+    /// cross-namespace queries for administrative operations.
+    ///
+    /// ## Usage
+    /// Used by repository implementations to determine whether to include namespace
+    /// in WHERE clauses or composite keys.
+    ///
+    /// ## Examples
+    /// ```rust
+    /// # use plexspaces_common::RequestContext;
+    /// let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+    ///     .with_admin(true);
+    /// assert!(admin_ctx.should_skip_namespace_filter());
+    ///
+    /// let normal_ctx = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
+    /// assert!(!normal_ctx.should_skip_namespace_filter());
+    /// ```
+    pub fn should_skip_namespace_filter(&self) -> bool {
+        (self.admin || self.internal) && self.namespace.is_empty()
+    }
+
     /// Get tenant_id
     pub fn tenant_id(&self) -> &str {
         &self.tenant_id
@@ -307,14 +347,14 @@ impl RequestContext {
     /// * `admin` - Admin flag (from JWT, optional)
     /// * `auth_enabled` - Whether authentication is enabled
     /// * `default_tenant_id` - Default tenant ID when auth is disabled (required if auth disabled)
-    /// * `default_namespace` - Default namespace (required if not provided)
+    /// * `default_namespace` - Unused; namespace must come from user request (kept for API compatibility).
     ///
     /// ## Returns
     /// RequestContext or error if validation fails
     ///
     /// ## Note
-    /// tenant_id and namespace are REQUIRED - no defaults. If auth is disabled,
-    /// default_tenant_id and default_namespace must be provided in config.
+    /// Tenant may fall back to config when auth is disabled. Namespace must come from user request
+    /// and is never substituted with config.
     pub fn from_auth(
         tenant_id: Option<String>,
         namespace: Option<String>,
@@ -322,7 +362,7 @@ impl RequestContext {
         admin: bool,
         auth_enabled: bool,
         default_tenant_id: Option<String>,
-        default_namespace: Option<String>,
+        _default_namespace: Option<String>,
     ) -> Result<Self, RequestContextError> {
         // Validate tenant_id: if auth is enabled, tenant_id must be provided
         // If auth is disabled, use default_tenant_id (can be empty)
@@ -335,10 +375,8 @@ impl RequestContext {
             tenant_id.or(default_tenant_id).unwrap_or_default()
         };
 
-        // Namespace can be empty - use provided, default, or empty string
-        let effective_namespace = namespace
-            .or(default_namespace)
-            .unwrap_or_default();
+        // Namespace must come from user request; do not substitute with config
+        let effective_namespace = namespace.unwrap_or_default();
 
         let mut ctx = Self::new(effective_tenant_id, effective_namespace, auth_enabled)?
             .with_admin(admin);
@@ -351,11 +389,16 @@ impl RequestContext {
     }
 }
 
+/// Hint appended to auth errors so users know how to fix or disable auth for testing.
+/// Use when returning 401/Unauthenticated so clients get actionable guidance.
+pub const AUTH_REQUIRED_HINT: &str =
+    " Authentication required: provide a valid JWT in Authorization header (HTTP) or use mTLS (gRPC). For local testing, set PLEXSPACES_DISABLE_AUTH=1.";
+
 /// RequestContext errors
 #[derive(Debug, thiserror::Error)]
 pub enum RequestContextError {
-    /// Missing required tenant_id
-    #[error("Missing required tenant_id in RequestContext")]
+    /// Missing required tenant_id (when auth is enabled)
+    #[error("Missing required tenant_id in RequestContext.{AUTH_REQUIRED_HINT}")]
     MissingTenantId,
 }
 
@@ -472,7 +515,17 @@ mod tests {
 
         let result = RequestContext::from_proto(&proto, true);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RequestContextError::MissingTenantId));
+        let err = result.unwrap_err();
+        assert!(matches!(err, RequestContextError::MissingTenantId));
+        assert!(err.to_string().contains("PLEXSPACES_DISABLE_AUTH"), "Auth error must include hint: {}", err);
+    }
+
+    #[test]
+    fn test_new_auth_enabled_missing_tenant_id_includes_hint() {
+        let result = RequestContext::new(String::new(), "ns".to_string(), true);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("PLEXSPACES_DISABLE_AUTH"), "MissingTenantId must include auth hint: {}", err);
     }
 
     #[test]
@@ -517,6 +570,37 @@ mod tests {
     }
 
     #[test]
+    fn test_should_skip_namespace_filter() {
+        // Admin context with empty namespace should skip filter
+        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        assert!(admin_ctx.should_skip_namespace_filter(), "Admin with empty namespace should skip filter");
+
+        // Internal context with empty namespace should skip filter
+        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_internal(true);
+        assert!(internal_ctx.should_skip_namespace_filter(), "Internal with empty namespace should skip filter");
+
+        // Admin context with non-empty namespace should NOT skip filter
+        let admin_with_ns = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string())
+            .with_admin(true);
+        assert!(!admin_with_ns.should_skip_namespace_filter(), "Admin with namespace should NOT skip filter");
+
+        // Internal context with non-empty namespace should NOT skip filter
+        let internal_with_ns = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string())
+            .with_internal(true);
+        assert!(!internal_with_ns.should_skip_namespace_filter(), "Internal with namespace should NOT skip filter");
+
+        // Normal context should NOT skip filter
+        let normal_ctx = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
+        assert!(!normal_ctx.should_skip_namespace_filter(), "Normal context should NOT skip filter");
+
+        // Normal context with empty namespace should NOT skip filter (not admin/internal)
+        let normal_empty_ns = RequestContext::new_without_auth("tenant1".to_string(), String::new());
+        assert!(!normal_empty_ns.should_skip_namespace_filter(), "Normal context with empty namespace should NOT skip filter");
+    }
+
+    #[test]
     fn test_to_proto_roundtrip() {
         let original = RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
             .with_user_id("user-456".to_string())
@@ -543,6 +627,101 @@ mod tests {
         assert_eq!(ctx1.tenant_id(), ctx2.tenant_id());
         assert_eq!(ctx1.namespace(), ctx2.namespace());
         assert_eq!(ctx1.user_id(), ctx2.user_id());
+    }
+
+    // ========== from_auth propagation (multi-tenancy) ==========
+
+    #[test]
+    fn test_from_auth_auth_disabled_empty_tenant_allowed() {
+        let ctx = RequestContext::from_auth(
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ctx.tenant_id(), "");
+        assert_eq!(ctx.namespace(), "");
+    }
+
+    #[test]
+    fn test_from_auth_auth_disabled_tenant_from_request() {
+        let ctx = RequestContext::from_auth(
+            Some("tenant-from-jwt".to_string()),
+            Some("ns-from-request".to_string()),
+            None,
+            false,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ctx.tenant_id(), "tenant-from-jwt");
+        assert_eq!(ctx.namespace(), "ns-from-request");
+    }
+
+    #[test]
+    fn test_from_auth_auth_enabled_missing_tenant_fails() {
+        let result = RequestContext::from_auth(
+            None,
+            Some("ns".to_string()),
+            None,
+            false,
+            true,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RequestContextError::MissingTenantId));
+    }
+
+    #[test]
+    fn test_from_auth_auth_enabled_tenant_required() {
+        let ctx = RequestContext::from_auth(
+            Some("tenant-required".to_string()),
+            Some("ns".to_string()),
+            None,
+            false,
+            true,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ctx.tenant_id(), "tenant-required");
+        assert_eq!(ctx.namespace(), "ns");
+    }
+
+    #[test]
+    fn test_from_auth_namespace_from_request_only() {
+        let ctx = RequestContext::from_auth(
+            Some("t1".to_string()),
+            Some("app-namespace".to_string()),
+            None,
+            false,
+            false,
+            Some("default-tenant".to_string()),
+            Some("default-ns".to_string()),
+        )
+        .unwrap();
+        assert_eq!(ctx.namespace(), "app-namespace");
+    }
+
+    #[test]
+    fn test_from_auth_namespace_empty_defaults_to_empty() {
+        let ctx = RequestContext::from_auth(
+            Some("t1".to_string()),
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ctx.namespace(), "");
     }
 }
 

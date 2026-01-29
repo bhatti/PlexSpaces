@@ -55,42 +55,27 @@ impl SqlBlobRepository {
     /// Detects database type and uses appropriate migration path
     /// For in-memory SQLite, uses a single connection for all operations to ensure consistency
     async fn migrate(pool: &Pool<sqlx::Any>) -> Result<(), sqlx::Error> {
-        use tracing::{debug, error, info, warn};
+        use tracing::{debug, error, info};
         
-        info!("[BLOB_MIGRATION] Starting migration for blob_metadata table");
-        
-        // Try to detect database type first
-        let is_sqlite = match sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
+        // Detect database type
+        let (is_sqlite, db_version) = match sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
             .fetch_optional(pool)
             .await
         {
-            Ok(Some(version)) => {
-                info!("[BLOB_MIGRATION] SQLite detected, version: {}", version);
-                true
-            }
-            Ok(None) => {
-                warn!("[BLOB_MIGRATION] sqlite_version() returned None, assuming SQLite");
-                true
-            }
-            Err(e) => {
-                debug!("[BLOB_MIGRATION] sqlite_version() failed: {}, assuming PostgreSQL", e);
-                false
-            }
+            Ok(Some(version)) => (true, format!("SQLite {}", version)),
+            Ok(None) => (true, "SQLite".to_string()),
+            Err(_) => (false, "PostgreSQL".to_string()),
         };
         
         if is_sqlite {
-            info!("[BLOB_MIGRATION] Running SQLite migrations");
-            
             // For SQLite (especially in-memory), use a single connection for all operations
-            // This ensures that CREATE TABLE and CREATE INDEX see the same database state
             let mut conn = pool.acquire().await.map_err(|e| {
-                error!("[BLOB_MIGRATION] Failed to acquire connection: {}", e);
+                error!("Blob migration failed to acquire connection: {}", e);
                 e
             })?;
             
-            // Create table
-            info!("[BLOB_MIGRATION] Creating blob_metadata table...");
-            match sqlx::query(
+            // Create table and indexes
+            sqlx::query(
                 r#"
                 CREATE TABLE IF NOT EXISTS blob_metadata (
                     blob_id TEXT PRIMARY KEY,
@@ -113,70 +98,48 @@ impl SqlBlobRepository {
             )
             .execute(&mut *conn)
             .await
-            {
-                Ok(result) => {
-                    info!("[BLOB_MIGRATION] CREATE TABLE executed successfully, rows_affected: {}", result.rows_affected());
-                }
-                Err(e) => {
-                    error!("[BLOB_MIGRATION] CREATE TABLE failed: {}", e);
-                    return Err(e);
-                }
+            .map_err(|e| {
+                error!("Blob migration CREATE TABLE failed: {}", e);
+                e
+            })?;
+
+            // Create indexes
+            for (idx_name, idx_sql) in [
+                ("idx_blob_metadata_tenant_namespace", 
+                 "CREATE INDEX IF NOT EXISTS idx_blob_metadata_tenant_namespace ON blob_metadata(tenant_id, namespace)"),
+                ("idx_blob_metadata_sha256", 
+                 "CREATE INDEX IF NOT EXISTS idx_blob_metadata_sha256 ON blob_metadata(tenant_id, namespace, sha256)"),
+                ("idx_blob_metadata_expires_at", 
+                 "CREATE INDEX IF NOT EXISTS idx_blob_metadata_expires_at ON blob_metadata(expires_at) WHERE expires_at IS NOT NULL"),
+            ] {
+                sqlx::query(idx_sql)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(|e| {
+                        error!("Blob migration failed to create index {}: {}", idx_name, e);
+                        e
+                    })?;
             }
 
-            // Create indexes using the same connection
-            info!("[BLOB_MIGRATION] Creating indexes...");
-            sqlx::query(
-                r#"
-                CREATE INDEX IF NOT EXISTS idx_blob_metadata_tenant_namespace
-                ON blob_metadata(tenant_id, namespace)
-                "#,
-            )
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| {
-                error!("[BLOB_MIGRATION] Failed to create idx_blob_metadata_tenant_namespace: {}", e);
-                e
-            })?;
-
-            sqlx::query(
-                r#"
-                CREATE INDEX IF NOT EXISTS idx_blob_metadata_sha256
-                ON blob_metadata(tenant_id, namespace, sha256)
-                "#,
-            )
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| {
-                error!("[BLOB_MIGRATION] Failed to create idx_blob_metadata_sha256: {}", e);
-                e
-            })?;
-
-            sqlx::query(
-                r#"
-                CREATE INDEX IF NOT EXISTS idx_blob_metadata_expires_at
-                ON blob_metadata(expires_at)
-                WHERE expires_at IS NOT NULL
-                "#,
-            )
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| {
-                error!("[BLOB_MIGRATION] Failed to create idx_blob_metadata_expires_at: {}", e);
-                e
-            })?;
-
-            info!("[BLOB_MIGRATION] SQLite migrations completed successfully");
+            info!(
+                db = %db_version, 
+                table = "blob_metadata",
+                "Blob storage migration completed"
+            );
             Ok(())
         } else {
-            info!("[BLOB_MIGRATION] Running PostgreSQL migrations");
             sqlx::migrate!("./migrations/postgres")
                 .run(pool)
                 .await
                 .map_err(|e| {
-                    error!("[BLOB_MIGRATION] PostgreSQL migration failed: {}", e);
+                    error!("Blob PostgreSQL migration failed: {}", e);
                     e
                 })?;
-            info!("[BLOB_MIGRATION] PostgreSQL migrations completed successfully");
+            info!(
+                db = %db_version, 
+                table = "blob_metadata",
+                "Blob storage migration completed"
+            );
             Ok(())
         }
     }
@@ -185,19 +148,19 @@ impl SqlBlobRepository {
 #[async_trait]
 impl BlobRepository for SqlBlobRepository {
     async fn get(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<Option<BlobMetadata>> {
-        // For internal context (empty tenant_id), look up by blob_id only
-        // This allows system operations to find blobs across tenants
-        let row = if ctx.is_internal() || ctx.tenant_id().is_empty() {
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let row = if ctx.should_skip_namespace_filter() {
             sqlx::query(
                 r#"
                 SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
                        content_length, etag, blob_group, kind, metadata_json, tags_json,
                        expires_at, created_at, updated_at
                 FROM blob_metadata
-                WHERE blob_id = $1
+                WHERE blob_id = $1 AND tenant_id = $2
                 "#,
             )
             .bind(blob_id)
+            .bind(ctx.tenant_id())
             .fetch_optional(&*self.pool)
             .await?
         } else {
@@ -229,8 +192,8 @@ impl BlobRepository for SqlBlobRepository {
         ctx: &RequestContext,
         sha256: &str,
     ) -> BlobResult<Option<BlobMetadata>> {
-        // Filter by namespace only if it's non-empty
-        let row = if ctx.namespace().is_empty() {
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let row = if ctx.should_skip_namespace_filter() {
             sqlx::query(
                 r#"
                 SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
@@ -414,12 +377,13 @@ impl BlobRepository for SqlBlobRepository {
         page_size: i64,
         offset: i64,
     ) -> BlobResult<(Vec<BlobMetadata>, i64)> {
-        // Build WHERE clause - filter by tenant_id always, namespace only if non-empty
+        // Build WHERE clause - filter by tenant_id always
+        // For admin/internal contexts with empty namespace, skip namespace filter
         let mut where_clauses: Vec<String> = vec!["tenant_id = $1".to_string()];
         let mut bind_index = 2;
         
-        // Add namespace filter only if non-empty
-        if !ctx.namespace().is_empty() {
+        // Add namespace filter only if not admin/internal with empty namespace
+        if !ctx.should_skip_namespace_filter() {
             where_clauses.push(format!("namespace = ${}", bind_index));
             bind_index += 1;
         }
@@ -446,8 +410,12 @@ impl BlobRepository for SqlBlobRepository {
         // Count total
         let count_query = format!("SELECT COUNT(*) FROM blob_metadata WHERE {}", where_clause);
         let mut count_query = sqlx::query(&count_query)
-            .bind(ctx.tenant_id())
-            .bind(ctx.namespace());
+            .bind(ctx.tenant_id());
+        
+        // Bind namespace only if not admin/internal with empty namespace
+        if !ctx.should_skip_namespace_filter() {
+            count_query = count_query.bind(ctx.namespace());
+        }
 
         if let Some(ref name_prefix) = filters.name_prefix {
             count_query = count_query.bind(format!("{}%", name_prefix));
@@ -484,8 +452,8 @@ impl BlobRepository for SqlBlobRepository {
         let mut list_query = sqlx::query(&list_query)
             .bind(ctx.tenant_id());
         
-        // Bind namespace only if non-empty
-        if !ctx.namespace().is_empty() {
+        // Bind namespace only if not admin/internal with empty namespace
+        if !ctx.should_skip_namespace_filter() {
             list_query = list_query.bind(ctx.namespace());
         }
 
@@ -521,8 +489,8 @@ impl BlobRepository for SqlBlobRepository {
     ) -> BlobResult<Vec<BlobMetadata>> {
         let now_str = Utc::now().to_rfc3339();
 
-        // Filter by namespace only if it's non-empty
-        let rows = if ctx.namespace().is_empty() {
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let rows = if ctx.should_skip_namespace_filter() {
             sqlx::query(
                 r#"
                 SELECT blob_id, tenant_id, namespace, name, sha256, content_type,

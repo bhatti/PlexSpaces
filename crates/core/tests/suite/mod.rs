@@ -19,5 +19,6 @@ pub mod link_monitor_comprehensive_tests;
 pub mod object_registry_helpers_integration_tests;
 pub mod process_group_service_tests;
 pub mod reply_waiter_tests;
+pub mod request_context_propagation_tests;
 pub mod service_wrappers_tests;
 pub mod stub_services_tests;

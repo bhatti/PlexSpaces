@@ -47,9 +47,9 @@ test_example() {
 
     cd "$example_dir"
 
-    # Test library compilation and tests
-    if cargo test --lib --quiet 2>&1 | tail -1 | grep -q "test result: ok"; then
-        local test_count=$(cargo test --lib --quiet 2>&1 | grep -oP '\d+(?= passed)' | head -1)
+    # Test library compilation and tests (include tests marked #[ignore])
+    if cargo test --lib --quiet -- --include-ignored 2>&1 | tail -1 | grep -q "test result: ok"; then
+        local test_count=$(cargo test --lib --quiet -- --include-ignored 2>&1 | grep -oP '\d+(?= passed)' | head -1)
         echo -e "  ${GREEN}✓${NC} Library tests: $test_count passed"
         PASSED_EXAMPLES=$((PASSED_EXAMPLES + 1))
     else
@@ -60,10 +60,10 @@ test_example() {
         return
     fi
 
-    # Test integration tests if they exist
+    # Test integration tests if they exist (include tests marked #[ignore])
     if [ -d "tests" ]; then
-        if cargo test --tests --quiet 2>&1 | tail -1 | grep -q "test result: ok"; then
-            local test_count=$(cargo test --tests --quiet 2>&1 | grep -oP '\d+(?= passed)' | head -1)
+        if cargo test --tests --quiet -- --include-ignored 2>&1 | tail -1 | grep -q "test result: ok"; then
+            local test_count=$(cargo test --tests --quiet -- --include-ignored 2>&1 | grep -oP '\d+(?= passed)' | head -1)
             echo -e "  ${GREEN}✓${NC} Integration tests: $test_count passed"
         else
             echo -e "  ${YELLOW}⚠${NC} Integration tests: some failures (non-critical)"

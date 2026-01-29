@@ -25,10 +25,11 @@
 //! 4. Handles both existing and new actors correctly
 
 use std::sync::Arc;
-use plexspaces_core::{ActorRegistry, VirtualActorManager, RequestContext, service_names};
-use plexspaces_actor::{ActorFactory, get_actor_factory};
+use plexspaces_core::{ActorRegistry, VirtualActorManager, RequestContext};
+use plexspaces_actor::ActorFactory;
 use plexspaces_proto::actor::v1::GetOrActivateActorRequest;
 use tonic::Status;
+use crate::ServiceLocatorImpl;
 
 /// Unified get_or_activate_actor implementation
 ///
@@ -42,8 +43,12 @@ use tonic::Status;
 ///
 /// ## Returns
 /// (was_activated, actor_id) - whether actor was activated/created and the final actor_id
+///
+/// ## Design
+/// Takes `&ServiceLocatorImpl` directly to access ActorFactory inherent methods.
+/// This is production-grade because ServiceLocatorImpl is the only production implementation.
 pub async fn get_or_activate_actor_impl(
-    service_locator: &Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: &ServiceLocatorImpl,
     local_node_id: &str,
     ctx: &RequestContext,
     req: &GetOrActivateActorRequest,
@@ -66,8 +71,8 @@ pub async fn get_or_activate_actor_impl(
         .await
         .ok_or_else(|| Status::internal("VirtualActorManager not found in ServiceLocator"))?;
     
-    use plexspaces_actor::{ActorFactory, get_actor_factory};
-    let actor_factory: Arc<dyn ActorFactory> = get_actor_factory(service_locator.as_ref()).await
+    use plexspaces_actor::ActorFactory;
+    let actor_factory: Arc<dyn ActorFactory> = service_locator.get_actor_factory().await
         .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
     
     // Use RequestContext from request for routing lookup (respects tenant/namespace)

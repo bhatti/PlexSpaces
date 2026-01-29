@@ -17,3 +17,9 @@ pub mod lifecycle_edge_cases_tests;
 pub mod pipeline_actors_test;
 pub mod registration_reliability_tests;
 pub mod ttl_support_tests;
+
+// Supervisor tests (moved from crates/supervisor)
+pub mod supervision_tree_tests;
+pub mod supervisor_hierarchy_tests;
+pub mod supervisor_lifecycle_tests;
+pub mod unified_lifecycle_supervisor_tests;

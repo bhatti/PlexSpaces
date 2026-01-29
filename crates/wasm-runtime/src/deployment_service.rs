@@ -133,7 +133,7 @@ impl WasmDeploymentService {
         }
 
         // Compile WASM module
-        tracing::info!(
+        tracing::debug!(
             module_name = name,
             module_version = version,
             module_size = module_bytes.len(),

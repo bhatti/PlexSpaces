@@ -41,7 +41,7 @@ use tokio::sync::RwLock;
 
 use crate::{Checkpoint, JournalEntry, JournalStats, ActorEvent, ActorHistory};
 use plexspaces_core::{JournalStorage, JournalError, JournalResult};
-use crate::storage::{ReminderState, ReminderRegistration};
+use crate::storage::ReminderState;
 use plexspaces_proto::prost_types;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use std::time::SystemTime;
@@ -157,6 +157,10 @@ impl MemoryJournalStorage {
     /// let storage = MemoryJournalStorage::new();
     /// ```
     pub fn new() -> Self {
+        tracing::info!(
+            backend = "InMemory",
+            "Journal storage initialized (non-persistent)"
+        );
         Self::default()
     }
 

@@ -400,6 +400,8 @@ pub struct ChannelStats {
     #[prost(map="string, string", tag="9")]
     pub backend_stats: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
+// Note: ChannelService gRPC service removed - channel operations use Rust ChannelService trait
+
 /// CreateChannel request
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -422,6 +424,7 @@ pub struct SendRequest {
     pub channel: ::prost::alloc::string::String,
     #[prost(message, optional, tag="2")]
     pub message: ::core::option::Option<super::super::common::v1::Message>,
+    /// Max 1 hour
     #[prost(message, optional, tag="3")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
@@ -440,9 +443,10 @@ pub struct SendResponse {
 pub struct ReceiveRequest {
     #[prost(string, tag="1")]
     pub channel: ::prost::alloc::string::String,
+    /// Max 1 hour
     #[prost(message, optional, tag="2")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
-    /// For batch receives
+    /// Max 10K messages per batch
     #[prost(uint32, tag="3")]
     pub max_messages: u32,
 }
@@ -707,5 +711,4 @@ impl OrderingGuarantee {
         }
     }
 }
-include!("plexspaces.channel.v1.tonic.rs");
 // @@protoc_insertion_point(module)

@@ -222,14 +222,14 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
 //
 // ## Storage
 // Stored in KeyValueStore with key format: `tenant:{tenant_id}:group:{group_name}`
+// NOTE: tenant_id comes from auth (JWT/mTLS) when creating/accessing groups, then stored here.
 message ProcessGroup {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
       title: "ProcessGroup"
       description: "Named group of actors for pub/sub coordination"
       required: [
-        "group_name",
-        "tenant_id"
+        "group_name"
       ]
     }
   };
@@ -247,12 +247,12 @@ message ProcessGroup {
     }
   ];
 
-  // Tenant ID for multi-tenancy isolation
+  // Tenant ID for multi-tenancy isolation (stored from auth context when created)
+  // NOTE: Tenant-id comes from auth (JWT/mTLS) when creating groups, stored here for isolation.
   string tenant_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255},
+    (buf.validate.field).string.max_len = 255,
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Tenant identifier"
+      description: "Tenant identifier (from auth when created)"
       example: "\"customer-acme\""
     }
   ];
@@ -363,17 +363,7 @@ message CreateGroupRequest {
     }
   ];
 
-  // Tenant ID (required for multi-tenancy isolation)
-  string tenant_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255},
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Tenant identifier"
-      example: "\"customer-acme\""
-    }
-  ];
-
-  // Namespace (optional hierarchical isolation)
+  // Namespace (optional hierarchical isolation within tenant)
   string namespace = 3 [
     (buf.validate.field).string.max_len = 255,
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
@@ -397,23 +387,11 @@ message DeleteGroupRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 255}
   ];
-
-  // Tenant ID (for security - prevent cross-tenant deletion)
-  string tenant_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
 }
 
 message JoinGroupRequest {
   // Group to join
   string group_name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
-
-  // Tenant ID
-  string tenant_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 255}
   ];
@@ -453,12 +431,6 @@ message LeaveGroupRequest {
     (buf.validate.field).string = {min_len: 1, max_len: 255}
   ];
 
-  // Tenant ID
-  string tenant_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
-
   // Actor ID to remove from group
   string actor_id = 3 [
     (google.api.field_behavior) = REQUIRED,
@@ -469,12 +441,6 @@ message LeaveGroupRequest {
 message GetMembersRequest {
   // Group name
   string group_name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
-
-  // Tenant ID
-  string tenant_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 255}
   ];
@@ -499,12 +465,6 @@ message GetLocalMembersRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 255}
   ];
-
-  // Tenant ID
-  string tenant_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
 }
 
 message GetLocalMembersResponse {
@@ -516,12 +476,6 @@ message GetLocalMembersResponse {
 }
 
 message ListGroupsRequest {
-  // Filter by tenant (required - prevents cross-tenant access)
-  string tenant_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
-
   // Filter by namespace (optional)
   string namespace = 2 [(buf.validate.field).string.max_len = 255];
 
@@ -545,12 +499,6 @@ message ListGroupsResponse {
 message PublishToGroupRequest {
   // Group to publish to
   string group_name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
-
-  // Tenant ID (for security - prevent cross-tenant publishing)
-  string tenant_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 255}
   ];

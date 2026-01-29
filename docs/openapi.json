@@ -7,10 +7,6 @@
   },
   "tags": [
     {
-      "name": "PersistenceService",
-      "description": "Service for event sourcing and state persistence"
-    },
-    {
       "name": "ActorService",
       "description": "Service for managing durable actors"
     },
@@ -19,27 +15,13 @@
       "description": "Event streaming for actor lifecycle observability"
     },
     {
-      "name": "ActorGroupService"
-    },
-    {
-      "name": "SecurityService",
-      "description": "Service for service-to-service authentication and authorization"
-    },
-    {
       "name": "BlobService"
-    },
-    {
-      "name": "JournalService",
-      "description": "Event sourcing and journaling for durable actor execution"
     },
     {
       "name": "WasmRuntimeService"
     },
     {
       "name": "ApplicationService"
-    },
-    {
-      "name": "ChannelService"
     },
     {
       "name": "NodeService"
@@ -84,7 +66,7 @@
       "name": "SchedulingService"
     },
     {
-      "name": "TuplePlexSpaceService",
+      "name": "TupleSpaceService",
       "description": "Service for Linda-style tuplespace operations"
     }
   ],
@@ -98,360 +80,6 @@
     "application/json"
   ],
   "paths": {
-    "/api/v1/actor-groups": {
-      "get": {
-        "summary": "List all actor groups",
-        "operationId": "ListGroups",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/actor_groups.v1.ListGroupsResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorType",
-            "description": "Filter by actor type (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "state",
-            "description": "Filter by state (optional)\n\n - GROUP_STATE_CREATING: Shards being created\n - GROUP_STATE_ACTIVE: All shards active\n - GROUP_STATE_REBALANCING: Shards being rebalanced\n - GROUP_STATE_DRAINING: Shards being drained\n - GROUP_STATE_STOPPED: All shards stopped",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "enum": [
-              "GROUP_STATE_UNSPECIFIED",
-              "GROUP_STATE_CREATING",
-              "GROUP_STATE_ACTIVE",
-              "GROUP_STATE_REBALANCING",
-              "GROUP_STATE_DRAINING",
-              "GROUP_STATE_STOPPED"
-            ],
-            "default": "GROUP_STATE_UNSPECIFIED"
-          },
-          {
-            "name": "pageRequest.offset",
-            "description": "Offset for pagination (0-based, default: 0)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.limit",
-            "description": "Limit/Page size (default: 50, max: 1000)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.filter",
-            "description": "Filter string (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "pageRequest.orderBy",
-            "description": "Order by field (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "ActorGroupService"
-        ]
-      },
-      "post": {
-        "summary": "Create an actor group with N shards",
-        "operationId": "CreateGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/actor_groups.v1.CreateGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/actor_groups.v1.CreateGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorGroupService"
-        ]
-      }
-    },
-    "/api/v1/actor-groups/{groupId}": {
-      "get": {
-        "summary": "Get group information",
-        "operationId": "GetGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/GetGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "groupId",
-            "description": "Group to retrieve",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "ActorGroupService"
-        ]
-      },
-      "delete": {
-        "summary": "Delete an actor group and all shards",
-        "operationId": "DeleteGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/v1.Empty"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "groupId",
-            "description": "Group to delete",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "force",
-            "description": "Force deletion even if shards are active",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "shutdownTimeout",
-            "description": "Graceful shutdown timeout",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "ActorGroupService"
-        ]
-      }
-    },
-    "/api/v1/actor-groups/{groupId}/shards:send": {
-      "post": {
-        "summary": "Send message to specific shard based on partition key",
-        "operationId": "SendToShard",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/SendToShardResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "groupId",
-            "description": "Group to send to",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/SendToShardBody"
-            }
-          }
-        ],
-        "tags": [
-          "ActorGroupService"
-        ]
-      }
-    },
-    "/api/v1/actor-groups/{groupId}:scale": {
-      "post": {
-        "summary": "Scale group (add or remove shards)",
-        "operationId": "ScaleGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ScaleGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "groupId",
-            "description": "Group to scale",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ScaleGroupBody"
-            }
-          }
-        ],
-        "tags": [
-          "ActorGroupService"
-        ]
-      }
-    },
-    "/api/v1/actor-groups/{groupId}:scatterGather": {
-      "post": {
-        "summary": "Scatter-gather query across all shards",
-        "operationId": "ScatterGather",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ScatterGatherResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "groupId",
-            "description": "Group to query",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ScatterGatherBody"
-            }
-          }
-        ],
-        "tags": [
-          "ActorGroupService"
-        ]
-      }
-    },
-    "/api/v1/actor-groups/{groupId}:scatterGatherStream": {
-      "post": {
-        "summary": "Stream responses as shards respond (for low-latency queries)",
-        "operationId": "ScatterGatherStream",
-        "responses": {
-          "200": {
-            "description": "A successful response.(streaming responses)",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "result": {
-                  "$ref": "#/definitions/ShardResponse"
-                },
-                "error": {
-                  "$ref": "#/definitions/Status"
-                }
-              },
-              "title": "Stream result of ShardResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "groupId",
-            "description": "Group to query",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ScatterGatherStreamBody"
-            }
-          }
-        ],
-        "tags": [
-          "ActorGroupService"
-        ]
-      }
-    },
     "/api/v1/actors": {
       "get": {
         "summary": "List Actors",
@@ -752,46 +380,6 @@
         ]
       }
     },
-    "/api/v1/actors/{actorId}/checkpoints": {
-      "post": {
-        "summary": "Create Checkpoint",
-        "description": "Create a checkpoint for an actor",
-        "operationId": "CreateCheckpoint",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/CreateCheckpointResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/CreateCheckpointBody"
-            }
-          }
-        ],
-        "tags": [
-          "Checkpoints"
-        ]
-      }
-    },
     "/api/v1/actors/{actorId}/deactivate": {
       "post": {
         "summary": "Deactivate Virtual Actor",
@@ -833,97 +421,6 @@
         ]
       }
     },
-    "/api/v1/actors/{actorId}/events": {
-      "get": {
-        "summary": "Read Events",
-        "description": "Read events from an actor's event journal",
-        "operationId": "ReadEvents",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ReadEventsResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "fromSequence",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "uint64"
-          },
-          {
-            "name": "toSequence",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "uint64"
-          },
-          {
-            "name": "maxEvents",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          }
-        ],
-        "tags": [
-          "Events"
-        ]
-      },
-      "post": {
-        "summary": "Append Events",
-        "description": "Append events to an actor's event journal",
-        "operationId": "AppendEvents",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/AppendEventsResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/AppendEventsBody"
-            }
-          }
-        ],
-        "tags": [
-          "Events"
-        ]
-      }
-    },
     "/api/v1/actors/{actorId}/exists": {
       "get": {
         "summary": "Check Actor Exists",
@@ -954,292 +451,6 @@
         ],
         "tags": [
           "Virtual Actors"
-        ]
-      }
-    },
-    "/api/v1/actors/{actorId}/journal/messages/processed": {
-      "post": {
-        "summary": "Record Message Processed",
-        "description": "Record the outcome of message processing",
-        "operationId": "RecordMessageProcessed",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/RecordMessageProcessedResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/RecordMessageProcessedBody"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
-    "/api/v1/actors/{actorId}/journal/messages/received": {
-      "post": {
-        "summary": "Record Message Received",
-        "description": "Record that an actor received a message",
-        "operationId": "RecordMessageReceived",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/RecordMessageReceivedResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/RecordMessageReceivedBody"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
-    "/api/v1/actors/{actorId}/journal/promises": {
-      "post": {
-        "summary": "Record Promise Created",
-        "description": "Create a durable promise",
-        "operationId": "RecordPromiseCreated",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/RecordPromiseCreatedResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/RecordPromiseCreatedBody"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
-    "/api/v1/actors/{actorId}/journal/promises/{promiseId}/resolve": {
-      "post": {
-        "summary": "Record Promise Resolved",
-        "description": "Record promise completion",
-        "operationId": "RecordPromiseResolved",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/RecordPromiseResolvedResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "promiseId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/RecordPromiseResolvedBody"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
-    "/api/v1/actors/{actorId}/journal/side-effects": {
-      "post": {
-        "summary": "Record Side Effect",
-        "description": "Record a non-deterministic operation for replay",
-        "operationId": "RecordSideEffect",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/RecordSideEffectResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/RecordSideEffectBody"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
-    "/api/v1/actors/{actorId}/journal/state-changes": {
-      "post": {
-        "summary": "Record State Change",
-        "description": "Record an actor state mutation",
-        "operationId": "RecordStateChange",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/RecordStateChangeResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/RecordStateChangeBody"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
-    "/api/v1/actors/{actorId}/journal/truncate": {
-      "post": {
-        "summary": "Truncate Journal",
-        "description": "Remove old journal entries after snapshot",
-        "operationId": "TruncateJournal",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/TruncateJournalResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/TruncateJournalBody"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
         ]
       }
     },
@@ -1846,197 +1057,6 @@
         ]
       }
     },
-    "/api/v1/auth/api": {
-      "post": {
-        "summary": "Authenticate API",
-        "description": "Authenticate using JWT token",
-        "operationId": "AuthenticateApi",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/AuthenticateApiResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "description": "Request to authenticate using JWT",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/AuthenticateApiRequest"
-            }
-          }
-        ],
-        "tags": [
-          "Authentication"
-        ]
-      }
-    },
-    "/api/v1/auth/api-keys": {
-      "get": {
-        "summary": "List API Keys",
-        "description": "List API keys",
-        "operationId": "ListApiKeys",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ListApiKeysResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "pageRequest.offset",
-            "description": "Offset for pagination (0-based, default: 0)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.limit",
-            "description": "Limit/Page size (default: 50, max: 1000)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.filter",
-            "description": "Filter string (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "pageRequest.orderBy",
-            "description": "Order by field (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "API Keys"
-        ]
-      },
-      "post": {
-        "summary": "Create API Key",
-        "description": "Create a new API key for service authentication",
-        "operationId": "CreateApiKey",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/CreateApiKeyResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "description": "Request to create an API key",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/CreateApiKeyRequest"
-            }
-          }
-        ],
-        "tags": [
-          "API Keys"
-        ]
-      }
-    },
-    "/api/v1/auth/api-keys/{keyId}": {
-      "delete": {
-        "summary": "Revoke API Key",
-        "description": "Revoke an API key",
-        "operationId": "RevokeApiKey",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/RevokeApiKeyResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "keyId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "API Keys"
-        ]
-      }
-    },
-    "/api/v1/auth/service": {
-      "post": {
-        "summary": "Authenticate Service",
-        "description": "Authenticate a service using mTLS",
-        "operationId": "AuthenticateService",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/AuthenticateServiceResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "description": "Request to authenticate a service using mTLS",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/AuthenticateServiceRequest"
-            }
-          }
-        ],
-        "tags": [
-          "Authentication"
-        ]
-      }
-    },
     "/api/v1/blobs": {
       "get": {
         "summary": "List blobs",
@@ -2345,356 +1365,6 @@
         ],
         "tags": [
           "Blob Storage"
-        ]
-      }
-    },
-    "/api/v1/channels": {
-      "post": {
-        "summary": "Create a new channel",
-        "operationId": "CreateChannel",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/CreateChannelResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/CreateChannelRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ChannelService"
-        ]
-      }
-    },
-    "/api/v1/channels/{channel}": {
-      "delete": {
-        "summary": "Delete channel",
-        "operationId": "DeleteChannel",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/DeleteChannelResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "ChannelService"
-        ]
-      }
-    },
-    "/api/v1/channels/{channel}/messages/{messageId}:ack": {
-      "post": {
-        "summary": "Acknowledge message (for at-least-once delivery)",
-        "operationId": "Ack",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/AckResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "messageId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/AckBody"
-            }
-          }
-        ],
-        "tags": [
-          "ChannelService"
-        ]
-      }
-    },
-    "/api/v1/channels/{channel}/messages/{messageId}:nack": {
-      "post": {
-        "summary": "Negative acknowledge (requeue message)",
-        "operationId": "Nack",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/NackResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "messageId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/NackBody"
-            }
-          }
-        ],
-        "tags": [
-          "ChannelService"
-        ]
-      }
-    },
-    "/api/v1/channels/{channel}/stats": {
-      "get": {
-        "summary": "Get channel statistics",
-        "operationId": "GetStats",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/channel.v1.GetStatsResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "ChannelService"
-        ]
-      }
-    },
-    "/api/v1/channels/{channel}:publish": {
-      "post": {
-        "summary": "Publish to channel (for pub/sub pattern)",
-        "operationId": "Publish",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/PublishResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/PublishBody"
-            }
-          }
-        ],
-        "tags": [
-          "ChannelService"
-        ]
-      }
-    },
-    "/api/v1/channels/{channel}:receive": {
-      "post": {
-        "summary": "Receive message from channel",
-        "operationId": "Receive",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ReceiveResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ReceiveBody"
-            }
-          }
-        ],
-        "tags": [
-          "ChannelService"
-        ]
-      }
-    },
-    "/api/v1/channels/{channel}:send": {
-      "post": {
-        "summary": "Send message to channel",
-        "operationId": "Send",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/SendResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/SendBody"
-            }
-          }
-        ],
-        "tags": [
-          "ChannelService"
-        ]
-      }
-    },
-    "/api/v1/channels/{channel}:subscribe": {
-      "post": {
-        "summary": "Subscribe to channel (streaming)",
-        "operationId": "Subscribe",
-        "responses": {
-          "200": {
-            "description": "A successful response.(streaming responses)",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "result": {
-                  "$ref": "#/definitions/Message"
-                },
-                "error": {
-                  "$ref": "#/definitions/Status"
-                }
-              },
-              "title": "Stream result of Message"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ChannelService.SubscribeBody"
-            }
-          }
-        ],
-        "tags": [
-          "ChannelService"
         ]
       }
     },
@@ -3566,425 +2236,6 @@
         ]
       }
     },
-    "/api/v1/journal/append": {
-      "post": {
-        "summary": "Append Entry",
-        "description": "Append a single journal entry for an actor",
-        "operationId": "Append",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/AppendResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/AppendRequest"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
-    "/api/v1/journal/append-batch": {
-      "post": {
-        "summary": "Append Batch",
-        "description": "Atomically append multiple journal entries",
-        "operationId": "AppendBatch",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/AppendBatchResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/AppendBatchRequest"
-            }
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
-    "/api/v1/journal/checkpoint": {
-      "post": {
-        "summary": "Save Checkpoint",
-        "description": "Save a snapshot of actor state for faster recovery",
-        "operationId": "SaveCheckpoint",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/SaveCheckpointResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/SaveCheckpointRequest"
-            }
-          }
-        ],
-        "tags": [
-          "Checkpoints"
-        ]
-      }
-    },
-    "/api/v1/journal/events/append": {
-      "post": {
-        "summary": "Append Event",
-        "description": "Append a single event to the actor's event log",
-        "operationId": "AppendEvent",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/AppendEventResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/AppendEventRequest"
-            }
-          }
-        ],
-        "tags": [
-          "Event Sourcing"
-        ]
-      }
-    },
-    "/api/v1/journal/stats": {
-      "get": {
-        "summary": "Get Statistics",
-        "description": "Retrieve journal metrics and statistics",
-        "operationId": "GetStats",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/JournalStats"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "description": "Optional: stats for specific actor",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "Monitoring"
-        ]
-      }
-    },
-    "/api/v1/journal/{actorId}/checkpoint": {
-      "get": {
-        "summary": "Get Latest Checkpoint",
-        "description": "Retrieve the most recent checkpoint for an actor",
-        "operationId": "GetLatestCheckpoint",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/Checkpoint"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "Checkpoints"
-        ]
-      }
-    },
-    "/api/v1/journal/{actorId}/events/replay": {
-      "get": {
-        "summary": "Replay Events",
-        "description": "Stream events from specified sequence for replay (paginated)",
-        "operationId": "ReplayEventsFrom",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ReplayEventsFromResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "fromSequence",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "uint64"
-          },
-          {
-            "name": "pageRequest.offset",
-            "description": "Offset for pagination (0-based, default: 0)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.limit",
-            "description": "Limit/Page size (default: 50, max: 1000)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.filter",
-            "description": "Filter string (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "pageRequest.orderBy",
-            "description": "Order by field (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "Event Sourcing"
-        ]
-      }
-    },
-    "/api/v1/journal/{actorId}/history": {
-      "get": {
-        "summary": "Get Actor History",
-        "description": "Retrieve paginated actor event history",
-        "operationId": "GetActorHistory",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ActorHistory"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "pageRequest.offset",
-            "description": "Offset for pagination (0-based, default: 0)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.limit",
-            "description": "Limit/Page size (default: 50, max: 1000)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.filter",
-            "description": "Filter string (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "pageRequest.orderBy",
-            "description": "Order by field (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "Event Sourcing"
-        ]
-      }
-    },
-    "/api/v1/journal/{actorId}/replay": {
-      "get": {
-        "summary": "Replay Journal",
-        "description": "Stream journal entries from specified sequence for replay",
-        "operationId": "ReplayFrom",
-        "responses": {
-          "200": {
-            "description": "A successful response.(streaming responses)",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "result": {
-                  "$ref": "#/definitions/v1.JournalEntry"
-                },
-                "error": {
-                  "$ref": "#/definitions/Status"
-                }
-              },
-              "title": "Stream result of v1.JournalEntry"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "fromSequence",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "uint64"
-          }
-        ],
-        "tags": [
-          "Replay"
-        ]
-      }
-    },
-    "/api/v1/journal/{actorId}/truncate": {
-      "delete": {
-        "summary": "Truncate Journal",
-        "description": "Delete journal entries up to specified sequence (cleanup after checkpoint)",
-        "operationId": "TruncateTo",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/TruncateToResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "sequence",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "uint64"
-          }
-        ],
-        "tags": [
-          "Journal"
-        ]
-      }
-    },
     "/api/v1/keyvalue": {
       "get": {
         "summary": "List all keys with prefix",
@@ -4063,14 +2314,14 @@
           },
           {
             "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
+            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
             "in": "query",
             "required": false,
             "type": "boolean"
           },
           {
             "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
+            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -4159,14 +2410,14 @@
           },
           {
             "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
+            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
             "in": "query",
             "required": false,
             "type": "boolean"
           },
           {
             "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
+            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -4262,14 +2513,14 @@
           },
           {
             "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
+            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
             "in": "query",
             "required": false,
             "type": "boolean"
           },
           {
             "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
+            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -4363,14 +2614,14 @@
           },
           {
             "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
+            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
             "in": "query",
             "required": false,
             "type": "boolean"
           },
           {
             "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
+            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -4504,14 +2755,14 @@
           },
           {
             "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
+            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
             "in": "query",
             "required": false,
             "type": "boolean"
           },
           {
             "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
+            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -4687,14 +2938,14 @@
           },
           {
             "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
+            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
             "in": "query",
             "required": false,
             "type": "boolean"
           },
           {
             "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
+            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -4910,14 +3161,14 @@
           },
           {
             "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
+            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
             "in": "query",
             "required": false,
             "type": "boolean"
           },
           {
             "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
+            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -5013,14 +3264,14 @@
           },
           {
             "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
+            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
             "in": "query",
             "required": false,
             "type": "boolean"
           },
           {
             "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
+            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -6588,7 +4839,7 @@
           },
           {
             "name": "maxHeartbeatAge",
-            "description": "Filter by minimum health age (exclude stale objects)\nExample: last_heartbeat \u003c (now - max_age) → excluded",
+            "description": "Filter by minimum health age (exclude stale objects)\nExample: last_heartbeat \u003c (now - max_age) → excluded\n\nMax 7 days",
             "in": "query",
             "required": false,
             "type": "string"
@@ -6938,7 +5189,7 @@
           },
           {
             "name": "maxHeartbeatAge",
-            "description": "Filter by minimum health age (exclude stale objects)\nExample: last_heartbeat \u003c (now - max_age) → excluded",
+            "description": "Filter by minimum health age (exclude stale objects)\nExample: last_heartbeat \u003c (now - max_age) → excluded\n\nMax 7 days",
             "in": "query",
             "required": false,
             "type": "string"
@@ -7174,95 +5425,6 @@
         ],
         "tags": [
           "SchedulingService"
-        ]
-      }
-    },
-    "/api/v1/security/audit-logs": {
-      "get": {
-        "summary": "Get Audit Logs",
-        "description": "Retrieve security audit logs",
-        "operationId": "GetAuditLogs",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/GetAuditLogsResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "startTime",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "endTime",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "serviceId",
-            "description": "Changed from user_id to service_id",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "action",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "resource",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "pageRequest.offset",
-            "description": "Offset for pagination (0-based, default: 0)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.limit",
-            "description": "Limit/Page size (default: 50, max: 1000)",
-            "in": "query",
-            "required": false,
-            "type": "integer",
-            "format": "int32"
-          },
-          {
-            "name": "pageRequest.filter",
-            "description": "Filter string (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "pageRequest.orderBy",
-            "description": "Order by field (optional)",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          }
-        ],
-        "tags": [
-          "Audit"
         ]
       }
     },
@@ -8246,7 +6408,7 @@
     },
     "/api/v1/tuplespace/tuples": {
       "delete": {
-        "summary": "Clear TuplePlexSpace",
+        "summary": "Clear TupleSpace",
         "description": "Clear all tuples from the tuplespace",
         "operationId": "Clear",
         "responses": {
@@ -9521,19 +7683,6 @@
         }
       }
     },
-    "AckBody": {
-      "type": "object",
-      "title": "Ack request"
-    },
-    "AckResponse": {
-      "type": "object",
-      "properties": {
-        "acknowledged": {
-          "type": "boolean"
-        }
-      },
-      "title": "Ack response"
-    },
     "ActionType": {
       "type": "string",
       "enum": [
@@ -9706,50 +7855,6 @@
         "reason"
       ]
     },
-    "ActorEvent": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "title": "/ Unique event ID (ULID for sortability)"
-        },
-        "actorId": {
-          "type": "string",
-          "title": "/ Actor ID this event belongs to"
-        },
-        "sequence": {
-          "type": "string",
-          "format": "uint64",
-          "title": "/ Sequence number (monotonic, per-actor)"
-        },
-        "eventType": {
-          "type": "string",
-          "title": "/ Event type (e.g., \"counter_incremented\", \"user_created\")"
-        },
-        "eventData": {
-          "type": "string",
-          "format": "byte",
-          "title": "/ Event payload (serialized, format depends on event_type)"
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "title": "/ Timestamp when event occurred"
-        },
-        "causedBy": {
-          "type": "string",
-          "title": "/ Correlation ID linking to journal entry that caused this event\n/\n/ ## Purpose\n/ Links events to messages (causal tracking). Enables answering:\n/ - \"Which message caused this event?\"\n/ - \"What events were caused by this message?\"\n/\n/ ## Example\n/ Journal entry has correlation_id = \"corr-1\"\n/ Event has caused_by = \"corr-1\"\n/ → This event was caused by that journal entry"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "/ Metadata (custom key-value data)"
-        }
-      },
-      "title": "/ Single event in actor history (state change)\n/\n/ ## Purpose\n/ Represents a single state change event. Events are the source of truth\n/ for event sourcing - state is derived by replaying events.\n/\n/ ## Why This Exists\n/ - **Event Sourcing Pattern**: State = f(events) instead of storing state directly\n/ - **Time-Travel**: Replay events up to any sequence to get state at that point\n/ - **Audit**: Complete history of what happened (not just current state)\n/ - **Causal Tracking**: Link events to messages/causes\n/\n/ ## Design Notes\n/ - sequence: Monotonically increasing per actor (for ordering)\n/ - event_type: Type of state change (e.g., \"counter_incremented\", \"user_created\")\n/ - event_data: Serialized event payload (format depends on event_type)\n/ - caused_by: Link to journal entry that caused this event (correlation)\n/ - timestamp: Wall-clock time (observability, not for ordering)\n/\n/ ## Event Types\n/ Common event types:\n/ - `state_changed`: Generic state mutation\n/ - `counter_incremented`: Counter increased by N\n/ - `user_created`: User entity created\n/ - `order_placed`: Order entity created\n/ - `payment_processed`: Payment completed\n/\n/ ## Example\n/ ```rust\n/ // Counter actor receives Increment message\n/ // Journal entry: MessageReceived { message_id: \"msg-1\", ... }\n/ // Event: ActorEvent {\n/ //   sequence: 1,\n/ //   event_type: \"counter_incremented\",\n/ //   event_data: b\"{\\\"amount\\\": 5}\",\n/ //   caused_by: \"msg-1\",\n/ //   ...\n/ // }\n/ ```"
-    },
     "ActorFailed": {
       "type": "object",
       "properties": {
@@ -9797,50 +7902,6 @@
         }
       },
       "title": "Actor handle (returned from checkout)"
-    },
-    "ActorHistory": {
-      "type": "object",
-      "properties": {
-        "actorId": {
-          "type": "string",
-          "title": "/ Actor ID this history belongs to"
-        },
-        "events": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/ActorEvent"
-          },
-          "title": "/ Events for this page (ordered by sequence)\n/ Note: For complete history, use pagination (see PageResponse)"
-        },
-        "latestSequence": {
-          "type": "string",
-          "format": "uint64",
-          "title": "/ Latest sequence number (for fast access)"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "title": "/ Creation timestamp (when first event was recorded)"
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time",
-          "title": "/ Last update timestamp (when last event was recorded)"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "/ Metadata (actor type, version, etc.)"
-        },
-        "pageResponse": {
-          "$ref": "#/definitions/PageResponse",
-          "title": "/ Pagination response (if paginated request)"
-        }
-      },
-      "title": "/ Actor event history for event sourcing (paginated)\n/\n/ ## Purpose\n/ Paginated event log for an actor, enabling event sourcing and time-travel debugging.\n/ Events represent state changes (not messages), allowing state to be reconstructed\n/ by replaying events.\n/\n/ ## Why This Exists\n/ - **Event Sourcing**: State derived from events (events are source of truth)\n/ - **Time-Travel Debugging**: Replay to any point in time\n/ - **Audit Trail**: Complete history of state changes\n/ - **Causal Tracking**: Link events to messages that caused them\n/ - **Performance**: Pagination enables efficient retrieval of large event logs\n/\n/ ## Design Notes\n/ - Events are separate from journal entries (journal = messages, events = state changes)\n/ - Events are immutable (append-only)\n/ - Events can be replayed to reconstruct state at any point\n/ - Shared snapshots with journaling (efficiency)\n/ - **Pagination**: Cursor-based pagination for efficient retrieval (O(1) per page)\n/\n/ ## Architecture Context\n/ Part of Phase 8.5 Event Sourcing Enhancement. Builds on DurabilityFacet:\n/ - Journaling: Messages → State (state is source of truth)\n/ - Event Sourcing: Events → State (events are source of truth)\n/ - Hybrid: Both messages AND events tracked (enhancement, not replacement)\n/\n/ ## Example Flow\n/ ```\n/ Message → Journal Entry → Event → Event Log\n/                          ↓\n/                    State Snapshot (shared)\n/ ```\n/\n/ ## Pagination\n/ Use `page_token` from `PageResponse` to fetch next page:\n/ ```rust\n/ let mut page_token = String::new();\n/ loop {\n/     let history = storage.get_actor_history_paginated(actor_id, page_token, 100).await?;\n/     // Process events...\n/     if history.page_response.next_page_token.is_empty() {\n/         break; // No more pages\n/     }\n/     page_token = history.page_response.next_page_token;\n/ }\n/ ```"
     },
     "ActorInfo": {
       "type": "object",
@@ -10035,20 +8096,6 @@
         "reason"
       ]
     },
-    "AggregationStrategy": {
-      "type": "string",
-      "enum": [
-        "AGGREGATION_STRATEGY_UNSPECIFIED",
-        "AGGREGATION_STRATEGY_CONCAT",
-        "AGGREGATION_STRATEGY_MERGE",
-        "AGGREGATION_STRATEGY_REDUCE",
-        "AGGREGATION_STRATEGY_FIRST",
-        "AGGREGATION_STRATEGY_MAJORITY"
-      ],
-      "default": "AGGREGATION_STRATEGY_UNSPECIFIED",
-      "description": "- AGGREGATION_STRATEGY_CONCAT: Concatenate all results\n - AGGREGATION_STRATEGY_MERGE: Merge using lattice (coordination-free)\n - AGGREGATION_STRATEGY_REDUCE: Custom reduce function\n - AGGREGATION_STRATEGY_FIRST: Return first response only\n - AGGREGATION_STRATEGY_MAJORITY: Return majority value",
-      "title": "Aggregation strategy for scatter-gather results"
-    },
     "Any": {
       "type": "object",
       "properties": {
@@ -10101,109 +8148,6 @@
         "id",
         "name"
       ]
-    },
-    "AppendBatchRequest": {
-      "type": "object",
-      "properties": {
-        "entries": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1.JournalEntry"
-          }
-        }
-      },
-      "title": "/ Append batch of journal entries request (atomic operation)"
-    },
-    "AppendBatchResponse": {
-      "type": "object",
-      "properties": {
-        "firstSequence": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "lastSequence": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "count": {
-          "type": "integer",
-          "format": "int64"
-        }
-      },
-      "title": "/ Append batch of journal entries response"
-    },
-    "AppendEventRequest": {
-      "type": "object",
-      "properties": {
-        "event": {
-          "$ref": "#/definitions/ActorEvent"
-        }
-      },
-      "title": "/ Append event request"
-    },
-    "AppendEventResponse": {
-      "type": "object",
-      "properties": {
-        "sequence": {
-          "type": "string",
-          "format": "uint64"
-        }
-      },
-      "title": "/ Append event response"
-    },
-    "AppendEventsBody": {
-      "type": "object",
-      "properties": {
-        "events": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/Event"
-          }
-        },
-        "expectedSequence": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Optimistic concurrency control"
-        }
-      },
-      "description": "Request to append events to the journal",
-      "title": "Append Events Request",
-      "required": [
-        "events"
-      ]
-    },
-    "AppendEventsResponse": {
-      "type": "object",
-      "properties": {
-        "sequenceNumbers": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uint64"
-          }
-        }
-      }
-    },
-    "AppendRequest": {
-      "type": "object",
-      "properties": {
-        "entry": {
-          "$ref": "#/definitions/v1.JournalEntry"
-        }
-      },
-      "title": "/ Append single journal entry request"
-    },
-    "AppendResponse": {
-      "type": "object",
-      "properties": {
-        "sequence": {
-          "type": "string",
-          "format": "uint64"
-        }
-      },
-      "title": "/ Append single journal entry response"
     },
     "ApplicationInfo": {
       "type": "object",
@@ -10356,128 +8300,6 @@
       "description": "- APPLICATION_TYPE_UNSPECIFIED: Unspecified (invalid)\n - APPLICATION_TYPE_LIBRARY: Library application (just modules, no processes)\ne.g., plexspaces-core\n - APPLICATION_TYPE_ACTIVE: Active application (has supervision tree and processes)\ne.g., byzantine-generals, heat-diffusion",
       "title": "Application type"
     },
-    "AuditLogEntry": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "serviceId": {
-          "type": "string",
-          "title": "Changed from user_id to service_id"
-        },
-        "serviceName": {
-          "type": "string",
-          "title": "Changed from username to service_name"
-        },
-        "action": {
-          "type": "string"
-        },
-        "resource": {
-          "type": "string"
-        },
-        "resourceId": {
-          "type": "string"
-        },
-        "success": {
-          "type": "boolean"
-        },
-        "ipAddress": {
-          "type": "string"
-        },
-        "userAgent": {
-          "type": "string"
-        },
-        "details": {
-          "type": "object",
-          "additionalProperties": {}
-        }
-      },
-      "description": "Security audit log entry",
-      "title": "Audit Log Entry"
-    },
-    "AuthenticateApiRequest": {
-      "type": "object",
-      "properties": {
-        "jwtToken": {
-          "type": "string"
-        }
-      },
-      "description": "Request to authenticate using JWT",
-      "title": "Authenticate API Request",
-      "required": [
-        "jwtToken"
-      ]
-    },
-    "AuthenticateApiResponse": {
-      "type": "object",
-      "properties": {
-        "serviceId": {
-          "type": "string",
-          "title": "Service ID from JWT claims"
-        },
-        "scopes": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "Scopes from JWT claims"
-        },
-        "expiresAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "description": "Response with service identity from JWT claims",
-      "title": "Authenticate API Response"
-    },
-    "AuthenticateServiceRequest": {
-      "type": "object",
-      "properties": {
-        "serviceId": {
-          "type": "string"
-        },
-        "certificate": {
-          "type": "string",
-          "format": "byte",
-          "title": "Client certificate"
-        },
-        "signature": {
-          "type": "string",
-          "format": "byte",
-          "title": "Signature of challenge"
-        }
-      },
-      "description": "Request to authenticate a service using mTLS",
-      "title": "Authenticate Service Request",
-      "required": [
-        "serviceId",
-        "certificate",
-        "signature"
-      ]
-    },
-    "AuthenticateServiceResponse": {
-      "type": "object",
-      "properties": {
-        "identity": {
-          "$ref": "#/definitions/ServiceIdentity"
-        },
-        "token": {
-          "type": "string",
-          "title": "Short-lived token for subsequent requests"
-        },
-        "expiresAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "description": "Response with service identity and short-lived token",
-      "title": "Authenticate Service Response"
-    },
     "BackupInfo": {
       "type": "object",
       "properties": {
@@ -10588,6 +8410,7 @@
         },
         "drainTimeout": {
           "type": "string",
+          "description": "Max 1 hour",
           "title": "Override default drain timeout"
         }
       },
@@ -10870,157 +8693,6 @@
       },
       "title": "Cas response"
     },
-    "ChannelBackend": {
-      "type": "string",
-      "enum": [
-        "CHANNEL_BACKEND_IN_MEMORY",
-        "CHANNEL_BACKEND_REDIS",
-        "CHANNEL_BACKEND_KAFKA",
-        "CHANNEL_BACKEND_SQLITE",
-        "CHANNEL_BACKEND_NATS",
-        "CHANNEL_BACKEND_UDP",
-        "CHANNEL_BACKEND_SQS",
-        "CHANNEL_BACKEND_PROCESS_GROUP",
-        "CHANNEL_BACKEND_POSTGRES",
-        "CHANNEL_BACKEND_CUSTOM"
-      ],
-      "default": "CHANNEL_BACKEND_IN_MEMORY",
-      "description": "- CHANNEL_BACKEND_IN_MEMORY: In-process multi-producer single-consumer channel (Go-like)\n- Fastest for same-node communication\n- No persistence, lost on crash\n- Bounded or unbounded capacity\n - CHANNEL_BACKEND_REDIS: Redis Streams for distributed messaging\n- Persistent, survives crashes\n- Consumer groups for load balancing\n- Cross-node communication\n - CHANNEL_BACKEND_KAFKA: Kafka for high-throughput distributed streaming\n- Durable, partitioned, replicated\n- Horizontal scalability\n- Cross-node, cross-datacenter\n - CHANNEL_BACKEND_SQLITE: SQLite for testing and single-node durability\n- Persistent, survives crashes\n- Good for testing recovery scenarios\n- Single-node only (not distributed)\n - CHANNEL_BACKEND_NATS: NATS for lightweight distributed messaging\n- High performance, low latency\n- Pub/sub and request/reply patterns\n- JetStream for persistence (optional)\n- Cross-node, cross-datacenter\n - CHANNEL_BACKEND_UDP: UDP multicast for lightweight pub/sub within a cluster\n- Very low latency, high throughput\n- Multicast pub/sub for cluster-wide messaging\n- Unicast point-to-point messaging\n- No persistence, best-effort delivery\n- Requires nodes to share same cluster_name\n - CHANNEL_BACKEND_SQS: AWS SQS for managed message queuing\n- Fully managed, serverless\n- Dead Letter Queue (DLQ) support\n- At-least-once delivery with visibility timeout\n- Auto-scaling, no infrastructure management\n - CHANNEL_BACKEND_PROCESS_GROUP: Process Group for Erlang pg/pg2-style pub/sub\n- Uses ProcessGroupService via ServiceLocator\n- Distributed across cluster nodes\n- Pub/sub with topic filtering\n- No external dependencies\n - CHANNEL_BACKEND_POSTGRES: PostgreSQL for durable distributed messaging\n- Uses FOR UPDATE SKIP LOCKED for queue semantics\n- LISTEN/NOTIFY for pub/sub notifications\n- Transactional message processing\n- Durable, survives crashes\n- Good for existing Postgres deployments\n - CHANNEL_BACKEND_CUSTOM: Custom backend (user-provided implementation)",
-      "title": "Channel backend type determines the underlying transport"
-    },
-    "ChannelConfig": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "title": "Unique channel name/topic"
-        },
-        "backend": {
-          "$ref": "#/definitions/ChannelBackend",
-          "title": "Backend type (in-memory, Redis, Kafka)"
-        },
-        "capacity": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Capacity (0 = unbounded, \u003e0 = bounded)\n- In-memory: buffer size\n- Redis: stream max length\n- Kafka: batch size hint"
-        },
-        "delivery": {
-          "$ref": "#/definitions/DeliveryGuarantee",
-          "title": "Delivery guarantee"
-        },
-        "ordering": {
-          "$ref": "#/definitions/OrderingGuarantee",
-          "title": "Ordering guarantee"
-        },
-        "inMemory": {
-          "$ref": "#/definitions/InMemoryConfig"
-        },
-        "redis": {
-          "$ref": "#/definitions/RedisConfig"
-        },
-        "kafka": {
-          "$ref": "#/definitions/KafkaConfig"
-        },
-        "sqlite": {
-          "$ref": "#/definitions/SqliteConfig"
-        },
-        "nats": {
-          "$ref": "#/definitions/NatsConfig"
-        },
-        "udp": {
-          "$ref": "#/definitions/UdpConfig"
-        },
-        "sqs": {
-          "$ref": "#/definitions/SqsConfig"
-        },
-        "messageTtl": {
-          "type": "string",
-          "title": "Optional: TTL for messages"
-        },
-        "deadLetterQueue": {
-          "type": "string",
-          "title": "Optional: Dead-letter queue for failed messages"
-        },
-        "maxRetries": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Maximum number of retries before sending to DLQ (default: 3)\nAfter N failures, message is sent to Dead Letter Queue instead of requeuing\nSet to 0 to disable retries (immediate DLQ on first failure)\nOnly applies to channels that support ack/nack/dlq (Redis, Kafka, etc.)\nInMemory channels ignore this (no retry/DLQ support)"
-        },
-        "dlqEnabled": {
-          "type": "boolean",
-          "title": "Enable Dead Letter Queue (DLQ) for failed messages (default: true)\nWhen enabled, messages that fail max_retries times are sent to DLQ\nWhen disabled, messages are dropped after max_retries failures\nOnly applies to channels that support DLQ (Redis, Kafka, etc.)\nInMemory channels ignore this (no retry/DLQ support)"
-        }
-      },
-      "title": "Channel configuration"
-    },
-    "ChannelService.SubscribeBody": {
-      "type": "object",
-      "properties": {
-        "consumerGroup": {
-          "type": "string",
-          "title": "For load-balanced consumption"
-        },
-        "filters": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Header-based filtering"
-        }
-      },
-      "title": "Subscribe request (streaming)"
-    },
-    "ChannelStats": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "title": "Channel name"
-        },
-        "backend": {
-          "$ref": "#/definitions/ChannelBackend",
-          "title": "Backend type"
-        },
-        "messagesSent": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Total messages sent"
-        },
-        "messagesReceived": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Total messages received"
-        },
-        "messagesPending": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Messages pending (in queue)"
-        },
-        "messagesFailed": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Messages failed"
-        },
-        "avgLatencyUs": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Average latency (microseconds)"
-        },
-        "throughput": {
-          "type": "number",
-          "format": "double",
-          "title": "Current throughput (messages/second)"
-        },
-        "backendStats": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Backend-specific stats"
-        }
-      },
-      "title": "Channel statistics"
-    },
     "CheckActorExistsResponse": {
       "type": "object",
       "properties": {
@@ -11104,48 +8776,6 @@
         }
       },
       "title": "Checkout response"
-    },
-    "Checkpoint": {
-      "type": "object",
-      "properties": {
-        "actorId": {
-          "type": "string",
-          "title": "Actor this checkpoint belongs to"
-        },
-        "sequence": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Sequence number at checkpoint"
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "title": "Checkpoint creation timestamp"
-        },
-        "stateData": {
-          "type": "string",
-          "format": "byte",
-          "title": "Serialized actor state (possibly compressed)"
-        },
-        "compression": {
-          "$ref": "#/definitions/v1.CompressionType",
-          "title": "Compression type used"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Custom metadata (actor type, version, etc.)"
-        },
-        "stateSchemaVersion": {
-          "type": "integer",
-          "format": "int64",
-          "description": "## Purpose\nEnables safe checkpoint loading across different actor schema versions.\n\n## Why This Exists\n- Actor state schemas evolve over time (new fields, removed fields, type changes)\n- Loading old checkpoint into new actor version must be safe\n- Prevents corrupt state from schema mismatches\n\n## Version Rules\n- Version 0 = unversioned (assume version 1)\n- Version \u003e= 1 = explicit schema version\n- Reject checkpoints with version \u003e current actor schema version\n\n## Example\nActor v1: state_schema_version = 1 (initial schema)\nActor v2: state_schema_version = 2 (added new field with default)\nActor v3: state_schema_version = 3 (breaking change, requires migration)",
-          "title": "Schema version of state_data for checkpoint format evolution"
-        }
-      },
-      "title": "/ Checkpoint for fast recovery\n/\n/ ## Purpose\n/ Snapshot of actor state at a specific sequence number for fast replay.\n/\n/ ## Why This Exists\n/ - Performance: Replay from checkpoint instead of full journal (90%+ faster)\n/ - Cleanup: Truncate old journal entries after checkpoint\n/ - Compression: Reduce storage size (3-5x with zstd)\n/\n/ ## Design Notes\n/ - sequence: Checkpoint at this sequence number (replay starts from here)\n/ - state_data: Serialized actor state (compressed with zstd)\n/ - metadata: Custom key-value data (e.g., actor type, version)\n/ - compression: Algorithm used (affects deserialization)\n/ - state_schema_version: Version of state_data format for evolution\n/\n/ ## Schema Versioning Strategy\n/ The `state_schema_version` field enables checkpoint format evolution:\n/\n/ ### Version Compatibility Rules\n/ - **Same Version**: Load checkpoint directly\n/ - **Newer Version**: Reject with error (forward compatibility not guaranteed)\n/ - **Older Version**: Attempt migration or reject based on compatibility matrix\n/\n/ ### Migration Strategy\n/ ```\n/ Version 1 → 2: Add new field with default value (backward compatible)\n/ Version 2 → 3: Remove deprecated field (backward compatible)\n/ Version 3 → 4: Change field type (BREAKING - requires migration)\n/ ```\n/\n/ ### Example Usage\n/ ```rust\n/ // Write checkpoint with current schema version\n/ let checkpoint = Checkpoint {\n/     actor_id: \"actor-123\".to_string(),\n/     sequence: 100,\n/     state_data: serialized_state,\n/     state_schema_version: 2, // Current actor state schema version\n/     // ...\n/ };\n/\n/ // Load checkpoint with version check\n/ if checkpoint.state_schema_version \u003e CURRENT_SCHEMA_VERSION {\n/     return Err(IncompatibleSchemaVersion { ... });\n/ }\n/ ```\n/\n/ ## Usage\n/ ```\n/ Create checkpoint every 100 messages:\n/ - Actor processes message #100 → create checkpoint\n/ - Journal entries 1-99 can be truncated\n/ - On replay: load checkpoint #100, replay entries 101+\n/ ```"
     },
     "CircuitBreakerHealthMetrics": {
       "type": "object",
@@ -11416,45 +9046,6 @@
         }
       }
     },
-    "CreateApiKeyRequest": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        },
-        "scopes": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "expiresIn": {
-          "type": "string"
-        }
-      },
-      "description": "Request to create an API key",
-      "title": "Create API Key Request",
-      "required": [
-        "name"
-      ]
-    },
-    "CreateApiKeyResponse": {
-      "type": "object",
-      "properties": {
-        "apiKey": {
-          "$ref": "#/definitions/ApiKey"
-        },
-        "key": {
-          "type": "string",
-          "title": "Only returned on creation"
-        }
-      },
-      "description": "Response with created API key",
-      "title": "Create API Key Response"
-    },
     "CreateBackupRequest": {
       "type": "object",
       "properties": {
@@ -11486,47 +9077,6 @@
       "properties": {
         "backup": {
           "$ref": "#/definitions/BackupInfo"
-        }
-      }
-    },
-    "CreateChannelRequest": {
-      "type": "object",
-      "properties": {
-        "config": {
-          "$ref": "#/definitions/ChannelConfig"
-        }
-      },
-      "title": "CreateChannel request"
-    },
-    "CreateChannelResponse": {
-      "type": "object",
-      "properties": {
-        "channelId": {
-          "type": "string"
-        }
-      },
-      "title": "CreateChannel response"
-    },
-    "CreateCheckpointBody": {
-      "type": "object",
-      "properties": {
-        "sequenceNumber": {
-          "type": "string",
-          "format": "uint64"
-        }
-      },
-      "description": "Request to create a checkpoint",
-      "title": "Create Checkpoint Request",
-      "required": [
-        "sequenceNumber"
-      ]
-    },
-    "CreateCheckpointResponse": {
-      "type": "object",
-      "properties": {
-        "checkpointTime": {
-          "type": "string",
-          "format": "date-time"
         }
       }
     },
@@ -11703,15 +9253,6 @@
       "description": "Response after deleting a blob",
       "title": "Delete Blob Response"
     },
-    "DeleteChannelResponse": {
-      "type": "object",
-      "properties": {
-        "deleted": {
-          "type": "boolean"
-        }
-      },
-      "title": "DeleteChannel response"
-    },
     "DeletePoolResponse": {
       "type": "object",
       "properties": {
@@ -11730,17 +9271,6 @@
         }
       },
       "title": "Delete response"
-    },
-    "DeliveryGuarantee": {
-      "type": "string",
-      "enum": [
-        "DELIVERY_GUARANTEE_AT_MOST_ONCE",
-        "DELIVERY_GUARANTEE_AT_LEAST_ONCE",
-        "DELIVERY_GUARANTEE_EXACTLY_ONCE"
-      ],
-      "default": "DELIVERY_GUARANTEE_AT_MOST_ONCE",
-      "description": "- DELIVERY_GUARANTEE_AT_MOST_ONCE: At-most-once: Fire and forget, may lose messages\n - DELIVERY_GUARANTEE_AT_LEAST_ONCE: At-least-once: Retries until acknowledged, may duplicate\n - DELIVERY_GUARANTEE_EXACTLY_ONCE: Exactly-once: Deduplication, no retries needed (Kafka only)",
-      "title": "Channel delivery semantics"
     },
     "DependencyCheck": {
       "type": "object",
@@ -12114,54 +9644,6 @@
       ],
       "default": "ERROR_TYPE_TIMEOUT"
     },
-    "Event": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "actorId": {
-          "type": "string"
-        },
-        "eventType": {
-          "type": "string"
-        },
-        "data": {
-          "type": "string",
-          "format": "byte"
-        },
-        "sequenceNumber": {
-          "type": "string",
-          "format": "uint64",
-          "readOnly": true
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "readOnly": true
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "correlationId": {
-          "type": "string"
-        },
-        "causationId": {
-          "type": "string"
-        }
-      },
-      "description": "Domain event for event sourcing",
-      "title": "Event",
-      "required": [
-        "id",
-        "actorId",
-        "eventType",
-        "data"
-      ]
-    },
     "ExecutionStatus": {
       "type": "string",
       "enum": [
@@ -12186,31 +9668,6 @@
           "title": "Prometheus text format"
         }
       }
-    },
-    "ExternalCall": {
-      "type": "object",
-      "properties": {
-        "service": {
-          "type": "string",
-          "title": "Service being called (e.g., \"payment-api\", \"user-db\")"
-        },
-        "method": {
-          "type": "string",
-          "title": "Method/endpoint being invoked (e.g., \"charge\", \"get_user\")"
-        },
-        "request": {
-          "type": "string",
-          "format": "byte",
-          "title": "Serialized request payload"
-        },
-        "response": {
-          "type": "string",
-          "format": "byte",
-          "title": "Serialized response payload (empty if call failed)"
-        }
-      },
-      "description": "## Purpose\nRecords external HTTP/gRPC/database calls for replay.\n\n## Why Needed\n- Network calls are non-deterministic (latency, failures, data changes)\n- Must cache response to replay identical behavior\n\n## How It Works\n- First execution: Call service, journal request + response\n- Replay: Return journaled response without calling service",
-      "title": "External service call side effect"
     },
     "Facet": {
       "type": "object",
@@ -12431,23 +9888,6 @@
       },
       "title": "Get applications response"
     },
-    "GetAuditLogsResponse": {
-      "type": "object",
-      "properties": {
-        "entries": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/AuditLogEntry"
-          }
-        },
-        "pageResponse": {
-          "$ref": "#/definitions/PageResponse"
-        }
-      },
-      "description": "Response with audit log entries",
-      "title": "Get Audit Logs Response"
-    },
     "GetBlobMetadataResponse": {
       "type": "object",
       "properties": {
@@ -12507,15 +9947,6 @@
       "properties": {
         "execution": {
           "$ref": "#/definitions/WorkflowExecution"
-        }
-      }
-    },
-    "GetGroupResponse": {
-      "type": "object",
-      "properties": {
-        "group": {
-          "$ref": "#/definitions/actor_groups.v1.ActorGroup",
-          "title": "Actor group"
         }
       }
     },
@@ -12840,20 +10271,6 @@
       },
       "title": "Get workflows response"
     },
-    "GroupState": {
-      "type": "string",
-      "enum": [
-        "GROUP_STATE_UNSPECIFIED",
-        "GROUP_STATE_CREATING",
-        "GROUP_STATE_ACTIVE",
-        "GROUP_STATE_REBALANCING",
-        "GROUP_STATE_DRAINING",
-        "GROUP_STATE_STOPPED"
-      ],
-      "default": "GROUP_STATE_UNSPECIFIED",
-      "description": "- GROUP_STATE_CREATING: Shards being created\n - GROUP_STATE_ACTIVE: All shards active\n - GROUP_STATE_REBALANCING: Shards being rebalanced\n - GROUP_STATE_DRAINING: Shards being drained\n - GROUP_STATE_STOPPED: All shards stopped",
-      "title": "Actor group state"
-    },
     "GrpcConfig": {
       "type": "object",
       "properties": {
@@ -13003,35 +10420,6 @@
         }
       },
       "title": "Histogram value"
-    },
-    "InMemoryConfig": {
-      "type": "object",
-      "properties": {
-        "backpressure": {
-          "$ref": "#/definitions/InMemoryConfig.BackpressureStrategy"
-        },
-        "sendTimeout": {
-          "type": "string",
-          "title": "Timeout for blocking sends"
-        },
-        "receiveTimeout": {
-          "type": "string",
-          "title": "Timeout for blocking receives"
-        }
-      },
-      "title": "In-memory channel configuration"
-    },
-    "InMemoryConfig.BackpressureStrategy": {
-      "type": "string",
-      "enum": [
-        "BACKPRESSURE_STRATEGY_BLOCK",
-        "BACKPRESSURE_STRATEGY_DROP_OLDEST",
-        "BACKPRESSURE_STRATEGY_DROP_NEWEST",
-        "BACKPRESSURE_STRATEGY_ERROR"
-      ],
-      "default": "BACKPRESSURE_STRATEGY_BLOCK",
-      "description": "- BACKPRESSURE_STRATEGY_BLOCK: Block sender until space available\n - BACKPRESSURE_STRATEGY_DROP_OLDEST: Drop oldest message\n - BACKPRESSURE_STRATEGY_DROP_NEWEST: Drop newest message (reject send)\n - BACKPRESSURE_STRATEGY_ERROR: Return error to sender",
-      "title": "Backpressure strategy when channel is full"
     },
     "IncrementBody": {
       "type": "object",
@@ -13280,39 +10668,6 @@
       "description": "- JOURNAL_BACKEND_MEMORY: In-memory (testing)\n - JOURNAL_BACKEND_POSTGRES: PostgreSQL (production)\n - JOURNAL_BACKEND_REDIS: Redis (distributed)\n - JOURNAL_BACKEND_SQLITE: SQLite (edge)",
       "title": "/ Journal backend provider\n/\n/ ## Purpose\n/ Defines which storage backend to use for journal persistence.\n/\n/ ## Why This Exists\n/ - Flexibility: Choose backend based on deployment environment\n/ - Testing: Use Memory backend for unit tests (no external dependencies)\n/ - Production: Use PostgreSQL for durability and ACID guarantees\n/ - Distributed: Use Redis for multi-node journaling\n/ - Edge: Use SQLite for single-node edge deployments\n/\n/ ## Design Notes\n/ - Memory: In-process HashMap, no persistence (testing only)\n/ - PostgreSQL: ACID transactions, auto-migration via sqlx::migrate!\n/ - Redis: Distributed, eventually consistent, TTL support\n/ - SQLite: Embedded, WAL mode, single-node"
     },
-    "JournalStats": {
-      "type": "object",
-      "properties": {
-        "totalEntries": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "totalCheckpoints": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "storageBytes": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "entriesByActor": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "format": "uint64"
-          }
-        },
-        "oldestEntry": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "newestEntry": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "title": "/ Journal statistics\n/\n/ ## Purpose\n/ Provides observability metrics for journal health and performance.\n/\n/ ## Why This Exists\n/ - Monitoring: Track journal growth and performance\n/ - Capacity planning: Know when to cleanup or scale storage\n/ - Debugging: Find actors with large journals\n/\n/ ## Metrics\n/ - total_entries: All journal entries across all actors\n/ - total_checkpoints: All checkpoints across all actors\n/ - storage_bytes: Total disk/memory usage\n/ - entries_by_actor: Per-actor entry counts for debugging\n/ - oldest_entry: Age of oldest entry (cleanup indicator)\n/ - newest_entry: Most recent activity timestamp"
-    },
     "JwtConfig": {
       "type": "object",
       "properties": {
@@ -13430,75 +10785,6 @@
         "PRODUCER_ACKS_ALL"
       ],
       "default": "PRODUCER_ACKS_NONE",
-      "title": "Producer acks"
-    },
-    "KafkaConfig": {
-      "type": "object",
-      "properties": {
-        "brokers": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "Kafka broker addresses"
-        },
-        "topic": {
-          "type": "string",
-          "title": "Topic name"
-        },
-        "consumerGroup": {
-          "type": "string",
-          "title": "Consumer group ID"
-        },
-        "partitions": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Number of partitions (for topic creation)"
-        },
-        "replicationFactor": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Replication factor"
-        },
-        "compression": {
-          "$ref": "#/definitions/KafkaConfig.CompressionType"
-        },
-        "acks": {
-          "$ref": "#/definitions/KafkaConfig.ProducerAcks"
-        },
-        "batchSize": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Batch size for producers"
-        },
-        "lingerMs": {
-          "type": "string",
-          "title": "Linger time for batching"
-        }
-      },
-      "title": "Kafka configuration"
-    },
-    "KafkaConfig.CompressionType": {
-      "type": "string",
-      "enum": [
-        "COMPRESSION_TYPE_NONE",
-        "COMPRESSION_TYPE_GZIP",
-        "COMPRESSION_TYPE_SNAPPY",
-        "COMPRESSION_TYPE_LZ4",
-        "COMPRESSION_TYPE_ZSTD"
-      ],
-      "default": "COMPRESSION_TYPE_NONE",
-      "title": "Compression type"
-    },
-    "KafkaConfig.ProducerAcks": {
-      "type": "string",
-      "enum": [
-        "PRODUCER_ACKS_NONE",
-        "PRODUCER_ACKS_LEADER",
-        "PRODUCER_ACKS_ALL"
-      ],
-      "default": "PRODUCER_ACKS_NONE",
-      "description": "- PRODUCER_ACKS_NONE: No acks (fastest, least reliable)\n - PRODUCER_ACKS_LEADER: Leader ack only\n - PRODUCER_ACKS_ALL: All replicas ack",
       "title": "Producer acks"
     },
     "KeyValueEntry": {
@@ -13641,23 +10927,6 @@
           "$ref": "#/definitions/PageResponse"
         }
       }
-    },
-    "ListApiKeysResponse": {
-      "type": "object",
-      "properties": {
-        "apiKeys": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/ApiKey"
-          }
-        },
-        "pageResponse": {
-          "$ref": "#/definitions/PageResponse"
-        }
-      },
-      "description": "Response with list of API keys",
-      "title": "List API Keys Response"
     },
     "ListApplicationsResponse": {
       "type": "object",
@@ -14163,73 +11432,6 @@
         "payload"
       ]
     },
-    "MessageProcessed": {
-      "type": "object",
-      "properties": {
-        "messageId": {
-          "type": "string"
-        },
-        "result": {
-          "$ref": "#/definitions/v1.ProcessingResult"
-        },
-        "errorMessage": {
-          "type": "string"
-        },
-        "responsePayload": {
-          "type": "string",
-          "format": "byte"
-        }
-      },
-      "title": "/ Message processing result"
-    },
-    "MessageReceived": {
-      "type": "object",
-      "properties": {
-        "messageId": {
-          "type": "string"
-        },
-        "senderId": {
-          "type": "string"
-        },
-        "messageType": {
-          "type": "string"
-        },
-        "payload": {
-          "type": "string",
-          "format": "byte"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
-      },
-      "title": "/ Message received by actor (before processing)"
-    },
-    "MessageRecord": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "title": "Unique message identifier (ULID for time-based ordering)"
-        },
-        "payload": {
-          "type": "string",
-          "format": "byte",
-          "title": "Serialized message payload (opaque bytes)"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Message metadata (headers, correlation IDs, etc.)"
-        }
-      },
-      "description": "## Purpose\nRecords actor messages in the journal for deterministic replay.\n\n## Why This Exists\n- Enables message replay after actor crashes (Restate-inspired)\n- Supports exactly-once message processing semantics\n- Provides audit trail of all actor communications\n\n## How It's Used\n- Actor runtime calls RecordMessageReceived before processing\n- On recovery, messages are replayed in order from journal\n- Message IDs prevent duplicate processing",
-      "title": "Message record for journaling"
-    },
     "Metadata": {
       "type": "object",
       "properties": {
@@ -14485,24 +11687,6 @@
       },
       "title": "MultiPut response"
     },
-    "NackBody": {
-      "type": "object",
-      "properties": {
-        "requeue": {
-          "type": "boolean"
-        }
-      },
-      "title": "Nack request"
-    },
-    "NackResponse": {
-      "type": "object",
-      "properties": {
-        "requeued": {
-          "type": "boolean"
-        }
-      },
-      "title": "Nack response"
-    },
     "NatsBackendConfig": {
       "type": "object",
       "properties": {
@@ -14560,61 +11744,6 @@
       "required": [
         "servers"
       ]
-    },
-    "NatsConfig": {
-      "type": "object",
-      "properties": {
-        "servers": {
-          "type": "string",
-          "title": "NATS server URLs (comma-separated for clustering)\nExample: \"nats://localhost:4222,nats://localhost:4223\""
-        },
-        "subject": {
-          "type": "string",
-          "title": "Subject/topic name (default: channel name)"
-        },
-        "queueGroup": {
-          "type": "string",
-          "title": "Queue group for load-balanced consumption (optional)\n- If set, messages are distributed across consumers in the group\n- If empty, all subscribers receive all messages (pub/sub)"
-        },
-        "jetstreamEnabled": {
-          "type": "boolean",
-          "title": "Enable JetStream for persistence (default: false)\n- Requires NATS server with JetStream enabled\n- Provides at-least-once delivery guarantees"
-        },
-        "jetstreamStream": {
-          "type": "string",
-          "title": "JetStream stream name (default: channel name)"
-        },
-        "jetstreamConsumer": {
-          "type": "string",
-          "title": "JetStream consumer name (default: queue_group or channel name)"
-        },
-        "connectTimeout": {
-          "type": "string",
-          "title": "Connection timeout (default: 5 seconds)"
-        },
-        "reconnectAttempts": {
-          "type": "integer",
-          "format": "int32",
-          "title": "Reconnect attempts (default: 10, -1 for unlimited)"
-        },
-        "tlsEnabled": {
-          "type": "boolean",
-          "title": "Enable TLS (default: false)"
-        },
-        "tlsCertPath": {
-          "type": "string",
-          "title": "TLS certificate path (optional)"
-        },
-        "tlsKeyPath": {
-          "type": "string",
-          "title": "TLS key path (optional)"
-        },
-        "tlsCaPath": {
-          "type": "string",
-          "title": "TLS CA certificate path (optional)"
-        }
-      },
-      "title": "NATS configuration (for lightweight distributed messaging)"
     },
     "NetworkInterface": {
       "type": "object",
@@ -14862,12 +11991,12 @@
         },
         "defaultTenantId": {
           "type": "string",
-          "description": "Used when auth is disabled or when creating actors from embedded applications.\nIf not set and auth is disabled, will use \"default\".\nIf auth is enabled and tenant_id is not provided, will error.",
+          "description": "Default tenant ID for this node. Used when auth is disabled or when creating actors from embedded applications.\nCan be empty string. If not set and auth is disabled, will be empty.\nIf auth is enabled and tenant_id is not provided, will error.",
           "title": "Default tenant ID for this node"
         },
         "defaultNamespace": {
           "type": "string",
-          "description": "Used when namespace is not specified in requests.\nDefaults to \"default\" if not set.",
+          "description": "Default namespace for this node. Used when namespace is not specified in requests.\nCan be empty string. If not set, will be empty (no default value).",
           "title": "Default namespace for this node"
         },
         "clusterName": {
@@ -15225,7 +12354,7 @@
         },
         "grpcAddress": {
           "type": "string",
-          "title": "gRPC address to connect to this object (PRIMARY PURPOSE!)\nFormat: \"http://host:port\" or \"https://host:port\"\nExamples:\n- Actor: \"http://node1:8000\" (ActorService endpoint)\n- TupleSpace: \"http://ts-node:8001\" (TuplePlexSpaceService endpoint)\n- Service: \"http://order-pod:50051\" (Custom service endpoint)"
+          "title": "gRPC address to connect to this object (PRIMARY PURPOSE!)\nFormat: \"http://host:port\" or \"https://host:port\"\nExamples:\n- Actor: \"http://node1:8000\" (ActorService endpoint)\n- TupleSpace: \"http://ts-node:8001\" (TupleSpaceService endpoint)\n- Service: \"http://order-pod:50051\" (Custom service endpoint)"
         },
         "objectCategory": {
           "type": "string",
@@ -15358,17 +12487,6 @@
         }
       },
       "title": "Object type summary"
-    },
-    "OrderingGuarantee": {
-      "type": "string",
-      "enum": [
-        "ORDERING_GUARANTEE_NONE",
-        "ORDERING_GUARANTEE_FIFO",
-        "ORDERING_GUARANTEE_TOTAL"
-      ],
-      "default": "ORDERING_GUARANTEE_NONE",
-      "description": "- ORDERING_GUARANTEE_NONE: No ordering guarantee (fastest)\n - ORDERING_GUARANTEE_FIFO: FIFO per producer\n - ORDERING_GUARANTEE_TOTAL: Total order across all producers (Kafka partition)",
-      "title": "Channel ordering guarantee"
     },
     "PageRequest": {
       "type": "object",
@@ -15890,96 +13008,6 @@
         "tenantId"
       ]
     },
-    "PromiseCreated": {
-      "type": "object",
-      "properties": {
-        "promiseId": {
-          "type": "string"
-        },
-        "timeout": {
-          "type": "string"
-        }
-      },
-      "title": "/ Promise created (durable promise)"
-    },
-    "PromiseMetadata": {
-      "type": "object",
-      "properties": {
-        "creatorId": {
-          "type": "string",
-          "title": "Actor ID that created the promise"
-        },
-        "timeoutMs": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Optional timeout in milliseconds (0 = no timeout)"
-        },
-        "idempotencyKey": {
-          "type": "string",
-          "title": "Optional idempotency key for deduplication"
-        }
-      },
-      "description": "## Purpose\nMetadata for creating durable promises that survive actor crashes.\n\n## Why This Exists\n- Promises enable async coordination between actors\n- Must survive crashes (unlike in-memory futures)\n- Supports exactly-once delivery with idempotency keys\n\n## How It's Used\n- Actor creates promise with journal.record_promise_created()\n- Promise persists across crashes/restarts\n- Completion triggers dependent actors",
-      "title": "Promise metadata (Restate-inspired durable promises)"
-    },
-    "PromiseResolved": {
-      "type": "object",
-      "properties": {
-        "promiseId": {
-          "type": "string"
-        },
-        "result": {
-          "type": "string",
-          "format": "byte"
-        },
-        "error": {
-          "type": "string"
-        }
-      },
-      "title": "/ Promise resolved"
-    },
-    "PromiseResult": {
-      "type": "object",
-      "properties": {
-        "fulfilled": {
-          "type": "string",
-          "format": "byte",
-          "title": "Promise fulfilled with value"
-        },
-        "rejected": {
-          "type": "string",
-          "title": "Promise rejected with error message"
-        },
-        "timeout": {
-          "type": "boolean",
-          "title": "Promise timed out (true if timed out)"
-        }
-      },
-      "description": "## Purpose\nRecords the outcome of a durable promise.\n\n## Why This Exists\n- Promises can succeed (fulfilled) or fail (rejected/timeout)\n- Result must be journaled for replay\n- Dependent actors need to know outcome\n\n## How It's Used\n- Promise resolver calls journal.record_promise_resolved()\n- Result is persisted and broadcast to waiters\n- On replay, promise completes with same result",
-      "title": "Promise result (fulfilled, rejected, or timed out)"
-    },
-    "PublishBody": {
-      "type": "object",
-      "properties": {
-        "message": {
-          "$ref": "#/definitions/Message"
-        }
-      },
-      "title": "Publish request (pub/sub)"
-    },
-    "PublishResponse": {
-      "type": "object",
-      "properties": {
-        "messageId": {
-          "type": "string"
-        },
-        "subscriberCount": {
-          "type": "integer",
-          "format": "int64"
-        }
-      },
-      "title": "Publish response"
-    },
     "PublishToGroupBody": {
       "type": "object",
       "properties": {
@@ -16134,18 +13162,6 @@
         "result": {}
       }
     },
-    "RandomGenerated": {
-      "type": "object",
-      "properties": {
-        "value": {
-          "type": "string",
-          "format": "byte",
-          "title": "Random bytes generated"
-        }
-      },
-      "description": "## Purpose\nRecords random values for deterministic replay.\n\n## Why Needed\n- Random number generation must replay with same values\n- Ensures randomized algorithms produce identical results",
-      "title": "Random value generation side effect"
-    },
     "RateLimiter": {
       "type": "object",
       "properties": {
@@ -16160,25 +13176,6 @@
       },
       "description": "## Purpose\nImplements token bucket rate limiting for network/disk I/O.\n\n## Why This Exists\n- Prevent noisy neighbor problems\n- Fair resource sharing\n- QoS guarantees",
       "title": "Rate limiter configuration (token bucket algorithm)"
-    },
-    "ReadEventsResponse": {
-      "type": "object",
-      "properties": {
-        "events": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/Event"
-          }
-        },
-        "hasMore": {
-          "type": "boolean"
-        },
-        "lastSequence": {
-          "type": "string",
-          "format": "uint64"
-        }
-      }
     },
     "ReadRequest": {
       "type": "object",
@@ -16261,119 +13258,6 @@
       "description": "- REBALANCE_POLICY_NONE: No automatic rebalancing\n - REBALANCE_POLICY_ON_SCALE: Rebalance when shards added/removed\n - REBALANCE_POLICY_LOAD_BASED: Rebalance based on load metrics",
       "title": "Rebalancing policy for data-parallel actors"
     },
-    "RebalanceStatus": {
-      "type": "object",
-      "properties": {
-        "isRebalancing": {
-          "type": "boolean",
-          "title": "Is currently rebalancing"
-        },
-        "oldShardCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Old shard count (before rebalancing)"
-        },
-        "newShardCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "New shard count (after rebalancing)"
-        },
-        "progressPercent": {
-          "type": "number",
-          "format": "double",
-          "title": "Progress (0.0 to 100.0)"
-        },
-        "startedAt": {
-          "type": "string",
-          "format": "date-time",
-          "title": "When rebalancing started"
-        },
-        "estimatedCompletion": {
-          "type": "string",
-          "format": "date-time",
-          "title": "Estimated completion time"
-        }
-      },
-      "title": "Rebalancing status"
-    },
-    "ReceiveBody": {
-      "type": "object",
-      "properties": {
-        "timeout": {
-          "type": "string"
-        },
-        "maxMessages": {
-          "type": "integer",
-          "format": "int64",
-          "title": "For batch receives"
-        }
-      },
-      "title": "Receive request"
-    },
-    "ReceiveResponse": {
-      "type": "object",
-      "properties": {
-        "messages": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/Message"
-          }
-        }
-      },
-      "title": "Receive response"
-    },
-    "RecordMessageProcessedBody": {
-      "type": "object",
-      "properties": {
-        "messageId": {
-          "type": "string"
-        },
-        "result": {
-          "$ref": "#/definitions/prv.ProcessingResult"
-        },
-        "errorMessage": {
-          "type": "string",
-          "title": "Populated if result is ERROR or RETRY"
-        }
-      },
-      "description": "## Purpose\nRecords the outcome of message processing.\n\n## Why This Exists\n- Completes exactly-once processing cycle\n- Records success/failure for retry logic\n- Enables time-travel debugging of message handling",
-      "title": "Request to record message processed",
-      "required": [
-        "messageId"
-      ]
-    },
-    "RecordMessageProcessedResponse": {
-      "type": "object",
-      "properties": {
-        "sequenceNumber": {
-          "type": "string",
-          "format": "uint64"
-        }
-      }
-    },
-    "RecordMessageReceivedBody": {
-      "type": "object",
-      "properties": {
-        "message": {
-          "$ref": "#/definitions/MessageRecord"
-        }
-      },
-      "description": "## Purpose\nRecords that an actor received a message (before processing).\n\n## Why This Exists\n- First step in exactly-once message processing\n- Enables replay to skip already-processed messages\n- Provides audit trail of all incoming messages\n\n## How It's Used\n- Called by actor runtime before invoking handle_message()\n- On replay, runtime checks if message was already processed",
-      "title": "Request to record message received",
-      "required": [
-        "message"
-      ]
-    },
-    "RecordMessageReceivedResponse": {
-      "type": "object",
-      "properties": {
-        "sequenceNumber": {
-          "type": "string",
-          "format": "uint64"
-        }
-      }
-    },
     "RecordMetricRequest": {
       "type": "object",
       "properties": {
@@ -16385,104 +13269,6 @@
       "required": [
         "metric"
       ]
-    },
-    "RecordPromiseCreatedBody": {
-      "type": "object",
-      "properties": {
-        "promiseId": {
-          "type": "string"
-        },
-        "metadata": {
-          "$ref": "#/definitions/PromiseMetadata"
-        }
-      },
-      "description": "## Purpose\nCreates a durable promise that survives actor crashes.\n\n## Why This Exists\n- Promises enable async actor coordination\n- Must persist across failures (Restate-inspired)\n- Supports idempotent promise creation\n\n## How It's Used\n- Actor calls this when creating async operation\n- Promise ID used to track completion\n- Timeout ensures promises don't hang forever",
-      "title": "Request to record promise created",
-      "required": [
-        "promiseId",
-        "metadata"
-      ]
-    },
-    "RecordPromiseCreatedResponse": {
-      "type": "object",
-      "properties": {
-        "sequenceNumber": {
-          "type": "string",
-          "format": "uint64"
-        }
-      }
-    },
-    "RecordPromiseResolvedBody": {
-      "type": "object",
-      "properties": {
-        "result": {
-          "$ref": "#/definitions/PromiseResult"
-        }
-      },
-      "description": "## Purpose\nRecords promise completion (fulfilled or rejected).\n\n## Why This Exists\n- Notifies waiting actors of promise outcome\n- Result is journaled for replay\n- Enables promise-based workflows\n\n## How It's Used\n- Called when async operation completes\n- Wakes up actors waiting on promise\n- On replay, promise completes immediately with cached result",
-      "title": "Request to record promise resolved",
-      "required": [
-        "result"
-      ]
-    },
-    "RecordPromiseResolvedResponse": {
-      "type": "object",
-      "properties": {
-        "sequenceNumber": {
-          "type": "string",
-          "format": "uint64"
-        }
-      }
-    },
-    "RecordSideEffectBody": {
-      "type": "object",
-      "properties": {
-        "effect": {
-          "$ref": "#/definitions/SideEffect"
-        }
-      },
-      "description": "## Purpose\nJournals non-deterministic operations for deterministic replay.\n\n## Why This Exists\n- External calls, timers, random numbers are non-deterministic\n- Replay must use cached results instead of re-executing\n- Ensures identical behavior on recovery\n\n## How It's Used\n- Actor wraps non-deterministic operations with this RPC\n- First execution performs operation and journals result\n- Replay returns journaled result without re-execution",
-      "title": "Request to record side effect",
-      "required": [
-        "effect"
-      ]
-    },
-    "RecordSideEffectResponse": {
-      "type": "object",
-      "properties": {
-        "sequenceNumber": {
-          "type": "string",
-          "format": "uint64"
-        }
-      }
-    },
-    "RecordStateChangeBody": {
-      "type": "object",
-      "properties": {
-        "oldState": {
-          "type": "string",
-          "format": "byte",
-          "title": "Hash or full state for verification"
-        },
-        "newState": {
-          "type": "string",
-          "format": "byte"
-        }
-      },
-      "description": "## Purpose\nJournals actor state mutations for recovery.\n\n## Why This Exists\n- Enables state reconstruction from journal\n- Supports incremental state updates between snapshots\n- Provides state change audit trail\n\n## How It's Used\n- Called after actor state is modified\n- On recovery, state changes are replayed in sequence\n- Snapshots periodically created to speed recovery",
-      "title": "Request to record state change",
-      "required": [
-        "newState"
-      ]
-    },
-    "RecordStateChangeResponse": {
-      "type": "object",
-      "properties": {
-        "sequenceNumber": {
-          "type": "string",
-          "format": "uint64"
-        }
-      }
     },
     "RedisBackendConfig": {
       "type": "object",
@@ -16515,42 +13301,6 @@
       "required": [
         "url"
       ]
-    },
-    "RedisConfig": {
-      "type": "object",
-      "properties": {
-        "url": {
-          "type": "string",
-          "title": "Redis connection URL"
-        },
-        "streamKey": {
-          "type": "string",
-          "title": "Stream key (channel name in Redis)"
-        },
-        "consumerGroup": {
-          "type": "string",
-          "title": "Consumer group name (for load balancing)"
-        },
-        "consumerName": {
-          "type": "string",
-          "title": "Consumer name (unique per worker)"
-        },
-        "maxLength": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Maximum stream length (MAXLEN in Redis)"
-        },
-        "claimTimeout": {
-          "type": "string",
-          "title": "Claim timeout for failed consumers"
-        },
-        "poolSize": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Connection pool size"
-        }
-      },
-      "title": "Redis Streams configuration"
     },
     "RedisJournalConfig": {
       "type": "object",
@@ -16867,22 +13617,6 @@
         }
       }
     },
-    "ReplayEventsFromResponse": {
-      "type": "object",
-      "properties": {
-        "events": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/ActorEvent"
-          }
-        },
-        "pageResponse": {
-          "$ref": "#/definitions/PageResponse"
-        }
-      },
-      "title": "/ Replay events from sequence response (paginated)"
-    },
     "RequestContext": {
       "type": "object",
       "properties": {
@@ -16893,8 +13627,8 @@
         },
         "namespace": {
           "type": "string",
-          "description": "Common values: \"production\", \"staging\", \"dev\", \"test\"",
-          "title": "Namespace within tenant (optional, defaults to \"default\")"
+          "description": "Namespace within tenant (optional, can be empty). Common values: \"production\", \"staging\", \"dev\", \"test\". For admin/internal contexts with empty namespace, repository lookups bypass namespace filtering to allow cross-namespace queries.",
+          "title": "Namespace within tenant (optional, can be empty)"
         },
         "userId": {
           "type": "string",
@@ -17187,11 +13921,6 @@
         "maxAttempts"
       ]
     },
-    "RevokeApiKeyResponse": {
-      "type": "object",
-      "description": "Response confirming API key revocation",
-      "title": "Revoke API Key Response"
-    },
     "RuntimeConfig": {
       "type": "object",
       "properties": {
@@ -17249,24 +13978,6 @@
       "description": "## Purpose\nDefines runtime services (gRPC, middleware, health monitoring, security, blob storage,\nand unified storage backends).",
       "title": "Runtime configuration"
     },
-    "SaveCheckpointRequest": {
-      "type": "object",
-      "properties": {
-        "checkpoint": {
-          "$ref": "#/definitions/Checkpoint"
-        }
-      },
-      "title": "/ Save checkpoint request"
-    },
-    "SaveCheckpointResponse": {
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean"
-        }
-      },
-      "title": "/ Save checkpoint response"
-    },
     "ScaleBody": {
       "type": "object",
       "properties": {
@@ -17282,37 +13993,6 @@
         }
       },
       "title": "Scale request (manual scaling)"
-    },
-    "ScaleGroupBody": {
-      "type": "object",
-      "properties": {
-        "newShardCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "New shard count"
-        },
-        "rebalancePolicy": {
-          "$ref": "#/definitions/RebalancePolicy",
-          "title": "Rebalancing policy"
-        },
-        "newShardConfig": {
-          "$ref": "#/definitions/actor.v1.ActorConfig",
-          "title": "Configuration for new shards (if scaling up)"
-        }
-      }
-    },
-    "ScaleGroupResponse": {
-      "type": "object",
-      "properties": {
-        "group": {
-          "$ref": "#/definitions/actor_groups.v1.ActorGroup",
-          "title": "Updated actor group"
-        },
-        "rebalanceStatus": {
-          "$ref": "#/definitions/RebalanceStatus",
-          "title": "Rebalancing status"
-        }
-      }
     },
     "ScaleResponse": {
       "type": "object",
@@ -17371,102 +14051,6 @@
       "default": "SCALING_STATE_STABLE",
       "description": "- SCALING_STATE_PAUSED: Manual override",
       "title": "Pool scaling state"
-    },
-    "ScatterGatherBody": {
-      "type": "object",
-      "properties": {
-        "query": {
-          "$ref": "#/definitions/Message",
-          "title": "Query message to send to all shards"
-        },
-        "timeout": {
-          "type": "string",
-          "title": "Timeout for gathering results"
-        },
-        "aggregation": {
-          "$ref": "#/definitions/AggregationStrategy",
-          "title": "Aggregation strategy for combining results"
-        },
-        "minResponses": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Minimum number of shards that must respond (default: all)"
-        }
-      },
-      "title": "Scatter-gather query across all shards in a group"
-    },
-    "ScatterGatherResponse": {
-      "type": "object",
-      "properties": {
-        "result": {
-          "$ref": "#/definitions/Message",
-          "title": "Aggregated result"
-        },
-        "shardResponses": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/ShardResponse"
-          },
-          "title": "Individual shard responses"
-        },
-        "stats": {
-          "$ref": "#/definitions/ScatterGatherStats",
-          "title": "Statistics"
-        }
-      },
-      "title": "Scatter-gather response"
-    },
-    "ScatterGatherStats": {
-      "type": "object",
-      "properties": {
-        "shardsQueried": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Total shards queried"
-        },
-        "shardsResponded": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Shards that responded"
-        },
-        "maxLatency": {
-          "type": "string",
-          "title": "Maximum latency across all shards"
-        },
-        "totalTime": {
-          "type": "string",
-          "title": "Total time for scatter-gather operation"
-        },
-        "avgLatency": {
-          "type": "string",
-          "title": "Average latency"
-        }
-      },
-      "title": "Scatter-gather statistics"
-    },
-    "ScatterGatherStreamBody": {
-      "type": "object",
-      "properties": {
-        "query": {
-          "$ref": "#/definitions/Message",
-          "title": "Query message to send to all shards"
-        },
-        "timeout": {
-          "type": "string",
-          "title": "Timeout for gathering results"
-        },
-        "aggregation": {
-          "$ref": "#/definitions/AggregationStrategy",
-          "title": "Aggregation strategy for combining results"
-        },
-        "minResponses": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Minimum number of shards that must respond (default: all)"
-        }
-      },
-      "title": "Scatter-gather query across all shards in a group"
     },
     "ScheduleActorRequest": {
       "type": "object",
@@ -17669,18 +14253,6 @@
       "description": "Per-tenant security rules and permissions",
       "title": "Security Policy"
     },
-    "SendBody": {
-      "type": "object",
-      "properties": {
-        "message": {
-          "$ref": "#/definitions/Message"
-        },
-        "timeout": {
-          "type": "string"
-        }
-      },
-      "title": "Send request"
-    },
     "SendHeartbeatBody": {
       "type": "object",
       "properties": {
@@ -17820,54 +14392,6 @@
         }
       }
     },
-    "SendResponse": {
-      "type": "object",
-      "properties": {
-        "messageId": {
-          "type": "string"
-        },
-        "sent": {
-          "type": "boolean"
-        }
-      },
-      "title": "Send response"
-    },
-    "SendToShardBody": {
-      "type": "object",
-      "properties": {
-        "partitionKey": {
-          "type": "string",
-          "format": "byte",
-          "title": "Partition key to determine target shard"
-        },
-        "message": {
-          "$ref": "#/definitions/Message",
-          "title": "Message to send"
-        },
-        "waitForResponse": {
-          "type": "boolean",
-          "title": "Wait for response"
-        },
-        "timeout": {
-          "type": "string",
-          "title": "Timeout for response"
-        }
-      }
-    },
-    "SendToShardResponse": {
-      "type": "object",
-      "properties": {
-        "shardId": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Shard that handled the message"
-        },
-        "response": {
-          "$ref": "#/definitions/Message",
-          "title": "Response from shard (if wait_for_response = true)"
-        }
-      }
-    },
     "ServiceIdentity": {
       "type": "object",
       "properties": {
@@ -17975,33 +14499,6 @@
           "type": "boolean"
         }
       }
-    },
-    "ShardResponse": {
-      "type": "object",
-      "properties": {
-        "shardId": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Shard ID that responded"
-        },
-        "response": {
-          "$ref": "#/definitions/Message",
-          "title": "Response message"
-        },
-        "latency": {
-          "type": "string",
-          "title": "Response latency"
-        },
-        "success": {
-          "type": "boolean",
-          "title": "Success flag"
-        },
-        "error": {
-          "type": "string",
-          "title": "Error message (if failed)"
-        }
-      },
-      "title": "Response from a single shard"
     },
     "SharedRelationalDbConfig": {
       "type": "object",
@@ -18117,7 +14614,8 @@
           "type": "boolean"
         },
         "timeout": {
-          "type": "string"
+          "type": "string",
+          "title": "Max 1 hour"
         },
         "reason": {
           "type": "string"
@@ -18200,68 +14698,6 @@
       "description": "## Purpose\nProvides detailed status of ongoing shutdown process.\n\n## Why This Exists\n- Observability: Monitor shutdown progress\n- Debugging: Understand where shutdown is stuck\n- Metrics: Track shutdown duration per phase\n\n## Usage\nCall GetShutdownStatus RPC to check shutdown progress.",
       "title": "Shutdown status (observability)"
     },
-    "SideEffect": {
-      "type": "object",
-      "properties": {
-        "externalCall": {
-          "$ref": "#/definitions/ExternalCall"
-        },
-        "timerScheduled": {
-          "$ref": "#/definitions/prv.TimerScheduled"
-        },
-        "timerFired": {
-          "$ref": "#/definitions/prv.TimerFired"
-        },
-        "sleep": {
-          "$ref": "#/definitions/Sleep"
-        },
-        "randomGenerated": {
-          "$ref": "#/definitions/RandomGenerated"
-        },
-        "timeAccessed": {
-          "$ref": "#/definitions/TimeAccessed"
-        }
-      },
-      "description": "## Purpose\nRecords non-deterministic operations for deterministic replay.\n\n## Why This Exists\n- External calls (HTTP, database) are non-deterministic\n- Timers/clocks/random numbers need to replay with same values\n- Ensures replay produces identical results\n\n## How It's Used\n- Actor wraps external calls with journal.record_side_effect()\n- On first execution, side effect is performed and result journaled\n- On replay, journaled result is returned without re-executing\n\n## Design Decisions\n- Uses oneof for different side effect types (extensible)\n- Response is optional (some side effects like timers have no response)",
-      "title": "Side effect for journaling external interactions"
-    },
-    "SideEffectExecuted": {
-      "type": "object",
-      "properties": {
-        "effectId": {
-          "type": "string",
-          "title": "Unique ID for caching"
-        },
-        "effectType": {
-          "$ref": "#/definitions/SideEffectType"
-        },
-        "request": {
-          "type": "string",
-          "format": "byte"
-        },
-        "response": {
-          "type": "string",
-          "format": "byte"
-        },
-        "error": {
-          "type": "string"
-        }
-      },
-      "title": "/ Side effect execution (external call, cached during replay)"
-    },
-    "SideEffectType": {
-      "type": "string",
-      "enum": [
-        "SIDE_EFFECT_TYPE_UNSPECIFIED",
-        "SIDE_EFFECT_TYPE_EXTERNAL_CALL",
-        "SIDE_EFFECT_TYPE_DATABASE_QUERY",
-        "SIDE_EFFECT_TYPE_FILE_IO",
-        "SIDE_EFFECT_TYPE_RANDOM_GENERATION"
-      ],
-      "default": "SIDE_EFFECT_TYPE_UNSPECIFIED",
-      "description": "- SIDE_EFFECT_TYPE_EXTERNAL_CALL: HTTP/gRPC call\n - SIDE_EFFECT_TYPE_RANDOM_GENERATION: RNG calls (must be cached!)",
-      "title": "/ Side effect type"
-    },
     "SignalExecutionBody": {
       "type": "object",
       "properties": {
@@ -18273,18 +14709,6 @@
       "required": [
         "signalName"
       ]
-    },
-    "Sleep": {
-      "type": "object",
-      "properties": {
-        "durationMs": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Sleep duration in milliseconds"
-        }
-      },
-      "description": "## Purpose\nRecords sleep duration for deterministic replay.\n\n## Why Needed\n- Sleep advances logical time in replay\n- Ensures timing-dependent logic replays correctly",
-      "title": "Sleep/delay side effect"
     },
     "SpatialLocation": {
       "type": "object",
@@ -18363,6 +14787,14 @@
             "type": "string"
           },
           "title": "Optional labels for tagging and filtering\nExamples: {\"env\": \"prod\", \"team\": \"platform\", \"version\": \"v2\"}"
+        },
+        "facets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/Facet"
+          },
+          "title": "Optional facets to attach during spawn\nFacets are attached in priority order (high priority first) before actor.init() is called\nExamples:\n- VirtualActorFacet: Makes actor virtual (Orleans-style grain)\n- DurabilityFacet: Enables state persistence\n- MetricsFacet: Adds metrics collection"
         }
       },
       "description": "Spawn actor on the node receiving this gRPC request (target node is implicit from endpoint)",
@@ -18411,33 +14843,6 @@
         "databasePath"
       ]
     },
-    "SqliteConfig": {
-      "type": "object",
-      "properties": {
-        "databasePath": {
-          "type": "string",
-          "title": "SQLite database path (\":memory:\" for in-memory, file path for persistent)"
-        },
-        "tableName": {
-          "type": "string",
-          "title": "Table name for storing messages (default: \"channel_messages\")"
-        },
-        "walMode": {
-          "type": "boolean",
-          "title": "Enable WAL mode for better concurrency (default: true)"
-        },
-        "cleanupAcked": {
-          "type": "boolean",
-          "title": "Cleanup old messages after ack (default: true)"
-        },
-        "cleanupAgeSeconds": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Maximum age for acked messages before cleanup (in seconds, 0 = no cleanup)"
-        }
-      },
-      "title": "SQLite configuration (for testing and single-node durability)"
-    },
     "SqliteJournalConfig": {
       "type": "object",
       "properties": {
@@ -18453,48 +14858,6 @@
         }
       },
       "title": "/ SQLite journal configuration\n/\n/ ## Purpose\n/ Configures SQLite backend for edge deployments.\n/\n/ ## Why This Exists\n/ - Edge computing: Single-node deployments (IoT, mobile, edge servers)\n/ - Embedded: No separate database process needed\n/ - Zero config: Single file, no setup\n/ - ACID: Full transaction support despite being embedded\n/\n/ ## Design Notes\n/ - wal_mode: Write-ahead logging for concurrency (recommended: true)\n/ - synchronous: NORMAL (default), FULL (safer), OFF (faster but risky)\n/ - db_path: File path for database (\":memory:\" for in-memory SQLite)\n/\n/ ## Performance\n/ - WAL mode: Concurrent reads + single writer\n/ - NORMAL synchronous: Balance safety vs speed\n/ - Batch transactions: Group 100s of entries in single transaction"
-    },
-    "SqsConfig": {
-      "type": "object",
-      "properties": {
-        "region": {
-          "type": "string",
-          "title": "AWS region (e.g., \"us-east-1\")"
-        },
-        "queuePrefix": {
-          "type": "string",
-          "title": "Queue name prefix (default: \"plexspaces-\")\nActual queue names will be: {prefix}{channel_name}"
-        },
-        "endpointUrl": {
-          "type": "string",
-          "title": "Endpoint URL (for local testing with SQS Local)\nLeave empty for production (uses AWS service)"
-        },
-        "visibilityTimeoutSeconds": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Visibility timeout in seconds (default: 30)\nHow long a message is invisible after being received"
-        },
-        "messageRetentionPeriodSeconds": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Message retention period in seconds (default: 345600 = 4 days)"
-        },
-        "dlqEnabled": {
-          "type": "boolean",
-          "title": "Dead Letter Queue configuration"
-        },
-        "dlqMaxReceiveCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Max receive count before sending to DLQ (default: 3)"
-        },
-        "receiveMessageWaitTimeSeconds": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Receive message wait time in seconds (long polling, default: 20)\n0 = short polling, \u003e0 = long polling"
-        }
-      },
-      "title": "AWS SQS configuration"
     },
     "StartExecutionRequest": {
       "type": "object",
@@ -18550,24 +14913,6 @@
         }
       },
       "title": "Startup probe response"
-    },
-    "StateChanged": {
-      "type": "object",
-      "properties": {
-        "oldState": {
-          "type": "string",
-          "format": "byte"
-        },
-        "newState": {
-          "type": "string",
-          "format": "byte"
-        },
-        "changeType": {
-          "type": "string",
-          "title": "e.g., \"counter_incremented\", \"status_updated\""
-        }
-      },
-      "title": "/ Actor state mutation"
     },
     "StateMgmtMode": {
       "type": "string",
@@ -19223,18 +15568,6 @@
         "tenantId"
       ]
     },
-    "TimeAccessed": {
-      "type": "object",
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "title": "Timestamp when current time was accessed"
-        }
-      },
-      "description": "## Purpose\nRecords wall-clock time reads for deterministic replay.\n\n## Why Needed\n- Current time is non-deterministic\n- Business logic using timestamps must replay with same values",
-      "title": "Time access side effect"
-    },
     "TimerRegistration": {
       "type": "object",
       "properties": {
@@ -19322,39 +15655,6 @@
       "default": "TRANSACTION_STATE_UNSPECIFIED",
       "title": "Transaction states"
     },
-    "TruncateJournalBody": {
-      "type": "object",
-      "properties": {
-        "upToSequence": {
-          "type": "string",
-          "format": "uint64"
-        }
-      },
-      "description": "## Purpose\nRemoves old journal entries after snapshot is created.\n\n## Why This Exists\n- Prevents journal from growing unbounded\n- Snapshots make old entries redundant\n- Improves recovery performance\n\n## How It's Used\n- Called after successful snapshot creation\n- Removes entries up to snapshot sequence number\n- Keeps recent entries for incremental recovery",
-      "title": "Request to truncate journal",
-      "required": [
-        "upToSequence"
-      ]
-    },
-    "TruncateJournalResponse": {
-      "type": "object",
-      "properties": {
-        "entriesRemoved": {
-          "type": "string",
-          "format": "uint64"
-        }
-      }
-    },
-    "TruncateToResponse": {
-      "type": "object",
-      "properties": {
-        "deletedCount": {
-          "type": "string",
-          "format": "uint64"
-        }
-      },
-      "title": "/ Truncate journal to sequence response"
-    },
     "Tuple": {
       "type": "object",
       "properties": {
@@ -19423,30 +15723,6 @@
       },
       "description": "A field value in a tuple",
       "title": "Tuple Field"
-    },
-    "UdpConfig": {
-      "type": "object",
-      "properties": {
-        "multicastAddress": {
-          "type": "string",
-          "title": "Multicast address for pub/sub (default: \"239.255.0.1\")\n- Must be in multicast range (224.0.0.0 to 239.255.255.255)\n- All nodes in cluster must use same multicast address"
-        },
-        "multicastPort": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Multicast port (default: 9999)\n- All nodes in cluster must use same port"
-        },
-        "bindAddress": {
-          "type": "string",
-          "title": "Local bind address (default: \"0.0.0.0\")"
-        },
-        "messageTtlSeconds": {
-          "type": "integer",
-          "format": "int64",
-          "title": "TTL for messages (default: 60 seconds)"
-        }
-      },
-      "title": "UDP configuration (for multicast pub/sub within a cluster)"
     },
     "UnlinkActorResponse": {
       "type": "object",
@@ -20362,120 +16638,6 @@
       "default": "SUPERVISION_STRATEGY_UNSPECIFIED",
       "title": "Supervision strategies"
     },
-    "actor_groups.v1.ActorGroup": {
-      "type": "object",
-      "properties": {
-        "groupId": {
-          "type": "string",
-          "title": "Unique group identifier"
-        },
-        "actorType": {
-          "type": "string",
-          "title": "Actor type for all shards (must be the same)"
-        },
-        "shardCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Number of shards in this group"
-        },
-        "partitionStrategy": {
-          "$ref": "#/definitions/PartitionStrategy",
-          "title": "Partition strategy for routing messages"
-        },
-        "shardActors": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "Actor IDs for each shard (indexed by shard_id)"
-        },
-        "state": {
-          "$ref": "#/definitions/GroupState",
-          "title": "Current group state"
-        },
-        "rebalanceStatus": {
-          "$ref": "#/definitions/RebalanceStatus",
-          "title": "Rebalancing status (if currently rebalancing)"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "title": "When the group was created"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Group metadata"
-        }
-      },
-      "title": "Actor group - collection of sharded actors with the same behavior"
-    },
-    "actor_groups.v1.CreateGroupRequest": {
-      "type": "object",
-      "properties": {
-        "groupId": {
-          "type": "string",
-          "title": "Group identifier"
-        },
-        "actorType": {
-          "type": "string",
-          "title": "Actor type for all shards"
-        },
-        "shardCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Number of shards to create"
-        },
-        "partitionStrategy": {
-          "$ref": "#/definitions/PartitionStrategy",
-          "title": "Partition strategy"
-        },
-        "shardConfig": {
-          "$ref": "#/definitions/actor.v1.ActorConfig",
-          "title": "Configuration for each shard actor"
-        },
-        "initialState": {
-          "type": "string",
-          "format": "byte",
-          "title": "Initial state for each shard (if any)"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Group metadata"
-        }
-      }
-    },
-    "actor_groups.v1.CreateGroupResponse": {
-      "type": "object",
-      "properties": {
-        "group": {
-          "$ref": "#/definitions/actor_groups.v1.ActorGroup",
-          "title": "Created actor group"
-        }
-      }
-    },
-    "actor_groups.v1.ListGroupsResponse": {
-      "type": "object",
-      "properties": {
-        "groups": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/actor_groups.v1.ActorGroup"
-          },
-          "title": "Actor groups"
-        },
-        "pageResponse": {
-          "$ref": "#/definitions/PageResponse",
-          "title": "Pagination"
-        }
-      }
-    },
     "application.v1.ChildSpec": {
       "type": "object",
       "properties": {
@@ -20612,15 +16774,6 @@
       },
       "title": "Undeploy application response"
     },
-    "channel.v1.GetStatsResponse": {
-      "type": "object",
-      "properties": {
-        "stats": {
-          "$ref": "#/definitions/ChannelStats"
-        }
-      },
-      "title": "GetStats response"
-    },
     "firecracker.v1.DeployApplicationResponse": {
       "type": "object",
       "properties": {
@@ -20722,15 +16875,6 @@
         }
       },
       "title": "UndeployApplication response"
-    },
-    "journaling.v1.TimerFired": {
-      "type": "object",
-      "properties": {
-        "timerId": {
-          "type": "string"
-        }
-      },
-      "title": "/ Timer fired"
     },
     "keyvalue.v1.ExistsResponse": {
       "type": "object",
@@ -21086,45 +17230,6 @@
         }
       }
     },
-    "prv.ProcessingResult": {
-      "type": "string",
-      "enum": [
-        "PROCESSING_RESULT_UNSPECIFIED",
-        "PROCESSING_RESULT_SUCCESS",
-        "PROCESSING_RESULT_ERROR",
-        "PROCESSING_RESULT_RETRY"
-      ],
-      "default": "PROCESSING_RESULT_UNSPECIFIED",
-      "description": "## Purpose\nRecords the outcome of message processing for replay decisions.\n\n## Why This Exists\n- Deterministic replay requires knowing if processing succeeded or failed\n- Retry logic needs to distinguish between retriable and non-retriable errors\n- Audit trail for debugging failed message processing\n\n## How It's Used\n- Actor runtime records result after handle_message() completes\n- On replay, successful messages are skipped (idempotent)\n- Failed messages can be retried or sent to dead letter queue\n\n - PROCESSING_RESULT_SUCCESS: Message processed successfully (skip on replay)\n - PROCESSING_RESULT_ERROR: Processing failed with non-retriable error\n - PROCESSING_RESULT_RETRY: Processing failed but should be retried",
-      "title": "Processing result for journaled messages"
-    },
-    "prv.TimerFired": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "title": "Timer name that fired"
-        }
-      },
-      "description": "## Purpose\nRecords when timer actually fired for replay.",
-      "title": "Timer fired side effect"
-    },
-    "prv.TimerScheduled": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "title": "Timer name/identifier"
-        },
-        "durationMs": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Duration in milliseconds"
-        }
-      },
-      "description": "## Purpose\nRecords timer creation for deterministic replay.\n\n## Why Needed\n- Timers are scheduled at specific wall-clock times\n- Replay must fire timers at same logical points",
-      "title": "Timer scheduled side effect"
-    },
     "storage.v1.StorageProvider": {
       "type": "string",
       "enum": [
@@ -21293,69 +17398,6 @@
       "description": "Used for RPC methods that don't return a meaningful value.\nWe define our own instead of using plexspaces.common.v1.Empty because\nprost_types doesn't include it.",
       "title": "Empty message (replacement for plexspaces.common.v1.Empty)"
     },
-    "v1.JournalEntry": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "title": "Unique entry ID (ULID for sortability)"
-        },
-        "actorId": {
-          "type": "string",
-          "title": "Actor this entry belongs to"
-        },
-        "sequence": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Sequence number (monotonic, per-actor)"
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "title": "Timestamp (observability only, not for ordering)"
-        },
-        "correlationId": {
-          "type": "string",
-          "title": "Correlation ID (link related entries)"
-        },
-        "messageReceived": {
-          "$ref": "#/definitions/MessageReceived"
-        },
-        "messageProcessed": {
-          "$ref": "#/definitions/MessageProcessed"
-        },
-        "stateChanged": {
-          "$ref": "#/definitions/StateChanged"
-        },
-        "sideEffectExecuted": {
-          "$ref": "#/definitions/SideEffectExecuted"
-        },
-        "timerScheduled": {
-          "$ref": "#/definitions/v1.TimerScheduled"
-        },
-        "timerFired": {
-          "$ref": "#/definitions/journaling.v1.TimerFired"
-        },
-        "promiseCreated": {
-          "$ref": "#/definitions/PromiseCreated"
-        },
-        "promiseResolved": {
-          "$ref": "#/definitions/PromiseResolved"
-        }
-      },
-      "title": "/ Journal entry for durable actor execution\n/\n/ ## Purpose\n/ Records all operations performed by an actor for deterministic replay.\n/\n/ ## Why This Exists\n/ - Enables exactly-once execution semantics (Restate-inspired)\n/ - Supports time-travel debugging (replay to any point in history)\n/ - Provides complete audit trail of actor behavior\n/\n/ ## Entry Types\n/ - **MessageReceived**: Record incoming message before processing\n/ - **MessageProcessed**: Record processing result (success/failure)\n/ - **StateChanged**: Record actor state mutations\n/ - **SideEffectExecuted**: Record external call results (for caching during replay)\n/ - **TimerScheduled**: Record timer creation\n/ - **TimerFired**: Record timer execution\n/ - **PromiseCreated**: Record durable promise creation\n/ - **PromiseResolved**: Record promise resolution\n/\n/ ## Design Notes\n/ - sequence: Monotonically increasing per actor (for ordering)\n/ - timestamp: Wall-clock time (not used for ordering, only observability)\n/ - actor_id: Partitioning key for storage (all entries for same actor together)\n/ - correlation_id: Link related entries (e.g., message received -\u003e processed)"
-    },
-    "v1.ProcessingResult": {
-      "type": "string",
-      "enum": [
-        "PROCESSING_RESULT_UNSPECIFIED",
-        "PROCESSING_RESULT_SUCCESS",
-        "PROCESSING_RESULT_ERROR",
-        "PROCESSING_RESULT_RETRY"
-      ],
-      "default": "PROCESSING_RESULT_UNSPECIFIED",
-      "title": "/ Processing result enum"
-    },
     "v1.RestartPolicy": {
       "type": "string",
       "enum": [
@@ -21367,22 +17409,6 @@
       "default": "RESTART_POLICY_UNSPECIFIED",
       "description": "- RESTART_POLICY_UNSPECIFIED: Unspecified (default to permanent)\n - RESTART_POLICY_PERMANENT: Permanent: Always restart on failure\nUse for critical long-running processes\n - RESTART_POLICY_TRANSIENT: Transient: Restart only if abnormal exit (error)\nDon't restart if normal exit (shutdown)\nUse for tasks that may complete successfully\n - RESTART_POLICY_TEMPORARY: Temporary: Never restart\nUse for one-shot tasks",
       "title": "Restart policy (Erlang/OTP)"
-    },
-    "v1.TimerScheduled": {
-      "type": "object",
-      "properties": {
-        "timerId": {
-          "type": "string"
-        },
-        "delay": {
-          "type": "string"
-        },
-        "timerData": {
-          "type": "string",
-          "format": "byte"
-        }
-      },
-      "title": "/ Timer scheduled"
     },
     "wasm.v1.MigrateActorResponse": {
       "type": "object",

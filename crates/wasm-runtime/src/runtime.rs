@@ -121,6 +121,10 @@ impl WasmRuntime {
 
         // Enable async support for tokio integration
         wasmtime_config.async_support(true);
+        
+        // Set async stack size (must be >= max_wasm_stack)
+        // Python components need larger stacks
+        wasmtime_config.async_stack_size(config.limits.max_stack_bytes as usize);
 
         // Enable fuel metering for resource limits (User Decision A6)
         wasmtime_config.consume_fuel(config.limits.max_fuel > 0);
@@ -268,7 +272,7 @@ impl WasmRuntime {
                     match Component::new(&self.engine, bytes) {
                         Ok(component) => {
                             let compile_duration = compile_start.elapsed();
-                            tracing::info!(
+                            tracing::debug!(
                                 module_name = name,
                                 module_version = version,
                                 "Successfully parsed as WASM component (WIT-based)"
@@ -295,7 +299,7 @@ impl WasmRuntime {
                             metrics::counter!("plexspaces_wasm_modules_loaded_total").increment(1);
                             metrics::counter!("plexspaces_wasm_components_loaded_total").increment(1);
 
-                            tracing::info!(
+                            tracing::debug!(
                                 module_name = name,
                                 module_version = version,
                                 module_hash = %module_hash,

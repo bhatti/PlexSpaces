@@ -1,0 +1,14 @@
+# Calculator WASM Application Configuration
+# Used for auto-deploy testing
+
+version = "1.0.0"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 5
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "calculator"
+type = "worker"
+restart = "permanent"

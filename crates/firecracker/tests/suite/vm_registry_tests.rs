@@ -3,6 +3,8 @@
 //
 // Integration tests for VM registry
 
+use plexspaces_common::skip_if_unavailable;
+use plexspaces_common::test_helpers::firecracker_available;
 use plexspaces_firecracker::VmRegistry;
 
 #[tokio::test]
@@ -28,16 +30,15 @@ async fn test_vm_registry_get_socket_path_not_found() {
 }
 
 #[tokio::test]
-#[ignore] // Requires running VM
 async fn test_vm_registry_discover_running_vm() {
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
+    
     use plexspaces_firecracker::{FirecrackerVm, VmConfig, VmState};
     use std::time::Duration;
     use tokio::time::sleep;
     use ulid::Ulid;
 
-    // Check prerequisites
-    if std::path::Path::new("/var/lib/firecracker/vmlinux").exists() &&
-       std::path::Path::new("/var/lib/firecracker/rootfs.ext4").exists() {
+    {
         let vm_id = Ulid::new().to_string();
         let config = VmConfig {
             vm_id: vm_id.clone(),
@@ -62,8 +63,6 @@ async fn test_vm_registry_discover_running_vm() {
         assert!(found.is_some(), "Should discover running VM");
 
         vm.stop().await.unwrap();
-    } else {
-        eprintln!("Skipping: Firecracker prerequisites not available");
     }
 }
 

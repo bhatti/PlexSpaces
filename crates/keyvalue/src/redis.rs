@@ -99,6 +99,20 @@ impl RedisKVStore {
         let client = Client::open(url)?;
         let manager = ConnectionManager::new(client).await?;
 
+        // Mask password in URL for logging
+        let display_url = url
+            .split('@')
+            .last()
+            .map(|s| format!("redis://...@{}", s))
+            .unwrap_or_else(|| url.to_string());
+
+        tracing::info!(
+            url = %display_url,
+            namespace = %namespace,
+            backend = "Redis",
+            "KeyValue storage initialized"
+        );
+
         Ok(Self {
             manager,
             namespace: format!("{}:", namespace),
@@ -410,6 +424,8 @@ impl KeyValueStore for RedisKVStore {
 mod tests {
     use super::*;
     use plexspaces_common::RequestContext;
+    use plexspaces_common::skip_if_unavailable;
+    use plexspaces_common::test_helpers::redis_available;
 
     // Helper to create test store (requires running Redis instance)
     async fn create_test_store() -> RedisKVStore {
@@ -424,8 +440,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running Redis instance
     async fn test_basic_put_get() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let store = create_test_store().await;
         let ctx = test_ctx();
 
@@ -439,8 +455,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_ttl_operations() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let store = create_test_store().await;
         let ctx = test_ctx();
 
@@ -458,8 +474,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_atomic_increment() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let store = create_test_store().await;
         let ctx = test_ctx();
 
@@ -474,8 +490,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_cas_success() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let store = create_test_store().await;
         let ctx = test_ctx();
 
@@ -496,8 +512,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_list_prefix() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let store = create_test_store().await;
         let ctx = test_ctx();
 

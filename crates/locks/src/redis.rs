@@ -62,6 +62,20 @@ impl RedisLockManager {
             .get_tokio_connection_manager()
             .await
             .map_err(|e| LockError::BackendError(format!("failed to connect redis: {e}")))?;
+        
+        // Mask password in URL for logging
+        let display_url = redis_url
+            .split('@')
+            .last()
+            .map(|s| format!("redis://...@{}", s))
+            .unwrap_or_else(|| redis_url.to_string());
+
+        tracing::info!(
+            url = %display_url,
+            backend = "Redis",
+            "Locks storage initialized"
+        );
+        
         Ok(Self { conn })
     }
 }

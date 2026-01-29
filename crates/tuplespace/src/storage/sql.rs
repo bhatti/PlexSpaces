@@ -226,6 +226,12 @@ impl SqlStorage {
                     .map_err(|e| {
                         TupleSpaceError::BackendError(format!("PostgreSQL migration failed: {}", e))
                     })?;
+                
+                tracing::info!(
+                    table = %self.table_name,
+                    backend = "PostgreSQL",
+                    "TupleSpace storage initialized"
+                );
             }
             SqlPool::Sqlite(pool) => {
                 sqlx::migrate!("./migrations/sqlite")
@@ -234,6 +240,12 @@ impl SqlStorage {
                     .map_err(|e| {
                         TupleSpaceError::BackendError(format!("SQLite migration failed: {}", e))
                     })?;
+                
+                tracing::info!(
+                    table = %self.table_name,
+                    backend = "SQLite",
+                    "TupleSpace storage initialized"
+                );
             }
         }
 

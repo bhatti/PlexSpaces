@@ -77,7 +77,7 @@ impl MessageSender for ActorServiceMessageSender {
         };
         
         // Parse actor ID to determine if local or remote
-        let (actor_name, node_id) = if let Some((name, node)) = to.split_once('@') {
+        let (_actor_name, node_id) = if let Some((name, node)) = to.split_once('@') {
             (name.to_string(), Some(node.to_string()))
         } else {
             (to.to_string(), None)
@@ -88,31 +88,28 @@ impl MessageSender for ActorServiceMessageSender {
         // So we create ActorRef directly based on routing info
         let actor_ref = if let Some(node) = node_id {
             // Remote actor
+            // TODO: get namespace from WASM context
             ActorRef::remote(
                 to.to_string(),
+                String::new(),
                 node,
                 self.service_locator.clone(),
             )
         } else {
             // Local actor - look up routing to determine if local or remote
-            use plexspaces_core::service_names;
-            use plexspaces_core::RequestContext;
-            let ctx = if let Some(node_config) = self.service_locator.get_node_config().await {
-                RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                    .with_admin(true)
-                    .with_internal(true)
-            } else {
-                RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true)
-                    .with_internal(true)
-            };
             
+            // User path (WASM invocation): tenant/namespace come from auth, not config
+            use plexspaces_core::RequestContext;
+            let ctx = RequestContext::new_without_auth(String::new(), String::new());
+
             if let Some(registry) = self.service_locator.actor_registry().await {
                 let actor_id = ActorId::from(to.to_string());
                 if let Some(routing) = registry.lookup_routing(&ctx, &actor_id).await.ok().flatten() {
                     // Create ActorRef based on routing info
+                    // TODO: get namespace from WASM context
                     ActorRef::remote(
                         to.to_string(),
+                        String::new(),
                         routing.node_id,
                         self.service_locator.clone(),
                     )
@@ -121,8 +118,10 @@ impl MessageSender for ActorServiceMessageSender {
                 }
             } else {
                 // No registry available, create remote ActorRef (will fail if actor doesn't exist)
+                // TODO: get namespace from WASM context
                 ActorRef::remote(
                     to.to_string(),
+                    String::new(),
                     "local".to_string(), // Default to local
                     self.service_locator.clone(),
                 )
@@ -148,27 +147,19 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn spawn_actor(
         &self,
-        from: &str,
+        _from: &str,
         module_ref: &str,
         initial_state: Vec<u8>,
         actor_id: Option<String>,
         labels: Vec<(String, String)>,
-        durable: bool,
+        _durable: bool,
     ) -> Result<String, String> {
         // Use ActorService to spawn actor
-        // Use NodeConfig defaults for system operations
+        // WASM spawn path: tenant/namespace come from auth, not config
         use plexspaces_core::RequestContext;
-        let ctx = if let Some(node_config) = self.service_locator.get_node_config().await {
-            RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                .with_admin(true)
-                .with_internal(true)
-        } else {
-            RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true)
-                .with_internal(true)
-        };
-        
-        let labels_map: std::collections::HashMap<String, String> = labels.into_iter().collect();
+        let _ctx = RequestContext::new_without_auth(String::new(), String::new());
+
+        let _labels_map: std::collections::HashMap<String, String> = labels.into_iter().collect();
         
         // For now, use module_ref as actor_type
         // TODO: Resolve module_ref to get actual actor_type
@@ -195,27 +186,20 @@ impl MessageSender for ActorServiceMessageSender {
     ) -> Result<(), String> {
         // Use ActorFactory to stop actor
         use plexspaces_core::ActorId;
-        use plexspaces_actor::{ActorFactory, get_actor_factory};
-        let actor_factory: Arc<dyn ActorFactory> = get_actor_factory(self.service_locator.as_ref()).await
-            .ok_or_else(|| "ActorFactory not found in ServiceLocator".to_string())?;
-        
-        let actor_id_typed = ActorId::from(actor_id.to_string());
-        actor_factory
-            .stop_actor(&actor_id_typed)
-            .await
-            .map_err(|e| format!("Failed to stop actor: {}", e))?;
-        
-        Ok(())
+        // Note: stop_actor requires ActorFactory, but application crate can't depend on services
+        // This method should be refactored to receive ActorFactory as parameter or use ApplicationNode
+        // For now, return error indicating this needs to be refactored
+        Err("stop_actor requires ActorFactory - this method should be refactored to receive ActorFactory as parameter".to_string())
     }
 
     async fn link_actor(
         &self,
-        from: &str,
+        _from: &str,
         actor_id: &str,
         linked_actor_id: &str,
     ) -> Result<(), String> {
         use plexspaces_core::ActorRegistry;
-        use plexspaces_core::service_names;
+        
         use plexspaces_core::ActorId;
         
         let actor_registry: Arc<ActorRegistry> = self.service_locator
@@ -241,7 +225,7 @@ impl MessageSender for ActorServiceMessageSender {
         linked_actor_id: &str,
     ) -> Result<(), String> {
         use plexspaces_core::ActorRegistry;
-        use plexspaces_core::service_names;
+        
         use plexspaces_core::ActorId;
         
         let actor_registry: Arc<ActorRegistry> = self.service_locator
@@ -266,9 +250,9 @@ impl MessageSender for ActorServiceMessageSender {
         actor_id: &str,
     ) -> Result<u64, String> {
         use plexspaces_core::ActorRegistry;
-        use plexspaces_core::service_names;
+        
         use plexspaces_core::ActorId;
-        use plexspaces_core::ExitReason;
+        
         use tokio::sync::mpsc;
         
         let actor_registry: Arc<ActorRegistry> = self.service_locator
@@ -330,7 +314,7 @@ impl MessageSender for ActorServiceMessageSender {
         monitor_ref: u64,
     ) -> Result<(), String> {
         use plexspaces_core::ActorRegistry;
-        use plexspaces_core::service_names;
+        
         use plexspaces_core::ActorId;
         
         // Look up the monitor_ref_string from our mapping

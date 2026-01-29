@@ -340,12 +340,16 @@ impl Service for ReplyWaiterRegistry {
     }
 }
 
+/// Errors that can occur when waiting for a reply
 #[derive(Debug, Error)]
 pub enum ReplyWaiterError {
+    /// Timed out waiting for a reply
     #[error("Timeout waiting for reply")]
     Timeout,
+    /// No reply was received (sender dropped)
     #[error("No reply received")]
     NoReply,
+    /// Reply was already set (duplicate reply)
     #[error("Reply already set")]
     AlreadySet,
 }

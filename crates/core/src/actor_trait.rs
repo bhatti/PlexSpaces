@@ -39,7 +39,6 @@
 //! ```
 
 use async_trait::async_trait;
-use crate::ActorId;
 use plexspaces_proto::common::v1::Message;
 
 /// MessageSender trait - interface for sending messages to actors

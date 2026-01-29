@@ -83,6 +83,7 @@ syntax = "proto3";
 
 package plexspaces.metrics.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
@@ -268,7 +269,7 @@ message ExportPrometheusResponse {
 
 message GetMetricsRequest {
   // Filter by metric name pattern (e.g., "plexspaces_actor_*")
-  string name_pattern = 1;
+  string name_pattern = 1 [(buf.validate.field).string.max_len = 512];
 
   // Filter by labels
   map<string, string> label_filter = 2;
@@ -280,7 +281,7 @@ message GetMetricsResponse {
 
 message ListMetricDefinitionsRequest {
   // Filter by name pattern
-  string name_pattern = 1;
+  string name_pattern = 1 [(buf.validate.field).string.max_len = 512];
 }
 
 message ListMetricDefinitionsResponse {
@@ -300,7 +301,7 @@ message GetActorMetricsRequest {
 // Request to get node metrics
 message GetNodeMetricsRequest {
   // Node ID (empty = local node)
-  string node_id = 1;
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
 }
 
 // ============================================================================

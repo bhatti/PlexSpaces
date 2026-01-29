@@ -207,7 +207,7 @@ use crate::resource::{ActorHealth, ResourceContract, ResourceProfile, ResourceUs
 
 // Import from external crates
 use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, ExitAction, ExitReason,
+    Actor as ActorTrait, ActorContext, ActorError, ActorId, ExitAction, ExitReason,
 };
 
 /// Parse ExitReason from string representation (used for EXIT messages)
@@ -243,7 +243,7 @@ use async_trait::async_trait;
 
 // Observability
 use metrics;
-use tracing;
+use tracing::{debug, info};
 
 /// Actor state - matches proto ActorState enum exactly
 ///
@@ -643,7 +643,7 @@ impl Actor {
             "actor_id" => self.id.clone()
         ).increment(1);
         
-        tracing::info!(actor_id = %self.id, "Actor created");
+        tracing::debug!(actor_id = %self.id, "Actor created");
 
         // Step 1: State → Activating
         *self.state.write().await = ActorState::Activating;
@@ -1643,9 +1643,23 @@ impl Actor {
             set_replay_handler_for_facet(&mut *facet, &self.behavior, &self.context).await;
         }
         
+        // For RegistryFacet, store tenant_id/namespace from actor context
+        // This allows facets to use API-provided tenant_id/namespace instead of defaults
+        // We'll pass them through the attach call
+        let tenant_id_opt = if facet.facet_type() == "registry" {
+            Some(self.context.tenant_id.clone())
+        } else {
+            None
+        };
+        let namespace_opt = if facet.facet_type() == "registry" {
+            Some(self.context.namespace.clone())
+        } else {
+            None
+        };
+        
         let mut facets = self.facets.write().await;
         facets
-            .attach(facet, &self.id)
+            .attach_with_tenant_context(facet, &self.id, tenant_id_opt, namespace_opt)
             .await
             .map_err(|e| ActorError::FacetError(e.to_string()))
     }
@@ -1743,13 +1757,13 @@ impl Actor {
         
         // OBSERVABILITY: Tracing span for activation
         let span = tracing::span!(
-            tracing::Level::INFO,
+            tracing::Level::DEBUG,
             "actor.activate",
             actor_id = %actor_id
         );
         let _guard = span.enter();
         
-        tracing::info!("Actor activating");
+        tracing::debug!("Actor activating");
         
         // 1. Set state to Activating
         *self.state.write().await = ActorState::Activating;
@@ -1862,7 +1876,7 @@ impl Actor {
     /// ## Returns
     /// Ok(()) if registration succeeds, ActorError otherwise
     async fn register_in_registry(&self) -> Result<(), ActorError> {
-        use plexspaces_core::{ActorRegistry, RequestContext, MessageSender};
+        use plexspaces_core::{RequestContext, MessageSender};
         use crate::ActorRef;
         use std::sync::Arc;
         
@@ -1876,6 +1890,7 @@ impl Actor {
             // Create ActorRef for registration
             let actor_ref = ActorRef::local(
                 self.id.clone(),
+                self.context.namespace.clone(),
                 self.mailbox.clone(),
                 self.context.service_locator.clone(),
             );
@@ -2031,7 +2046,12 @@ impl Actor {
         // Apply before-method facet interceptors
         let facets = facets.read().await;
         let method_name = message.message_type.clone();
-        let intercepted_args = facets
+        let facet_count = facets.get_facet_count();
+        if facet_count > 0 {
+            info!(actor_id = %actor_id_owned, method = %method_name, facet_count = facet_count, "🎯 Actor: Checking facets for interception");
+        }
+        use plexspaces_facet::BeforeInterceptOutcome;
+        let intercept_outcome = facets
             .intercept_before(method_name.as_str(), &message.payload)
             .await
             .map_err(|e| {
@@ -2044,92 +2064,121 @@ impl Actor {
                 tracing::error!(error = %e, "Facet interception error");
                 ActorError::FacetError(error_str)
             })?;
-
-        // Update message with intercepted args if changed
-        let mut message = message;
-        if intercepted_args != message.payload {
-            message.payload = intercepted_args;
-        }
-
-        // Process with behavior (Go-style: context first, then message)
-        // Note: ActorContext is now static - sender_id and correlation_id are in Message, not context
-        let mut behavior = behavior.write().await;
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "[PROCESS_MESSAGE] CALLING handle_message: depth={}, actor_id={}, sender={:?}, receiver={}",
-                depth, actor_id_owned, message.sender_id, message.receiver_id
-            );
-        }
-        let result = behavior.handle_message(context, message.clone()).await;
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "[PROCESS_MESSAGE] handle_message COMPLETED: depth={}, actor_id={}, result={:?}",
-                depth, actor_id_owned, result.is_ok()
-            );
-        }
-
-        // Decrement recursion depth
-        let _ = PROCESS_MESSAGE_DEPTH.with(|d| {
-            let current = d.get();
-            if current > 0 {
-                d.set(current - 1);
+        
+        // Handle interception outcome explicitly
+        match intercept_outcome {
+            BeforeInterceptOutcome::ShortCircuit(result) => {
+                info!(actor_id = %actor_id_owned, method = %method_name, "✅ Actor: Message intercepted by facet (not calling actor.handle_message)");
+                // For short-circuited messages, we need to send the facet's result as a reply
+                // Only send reply if there's a correlation_id (ask pattern) and sender_id
+                if !message.correlation_id.is_empty() && !message.sender_id.is_empty() {
+                    let mut reply_msg = Message::default();
+                    reply_msg.id = ulid::Ulid::new().to_string();
+                    reply_msg.payload = result;
+                    reply_msg.message_type = format!("{}_reply", method_name);
+                    reply_msg.sender_id = actor_id_owned.clone();
+                    reply_msg.receiver_id = message.sender_id.clone();
+                    reply_msg.correlation_id = message.correlation_id.clone();
+                    reply_msg.timestamp = Some(prost_types::Timestamp::from(std::time::SystemTime::now()));
+                    if let Err(e) = context.send_reply(
+                        Some(&message.correlation_id),
+                        &message.sender_id,
+                        actor_id_owned.clone(),
+                        reply_msg,
+                    ).await {
+                        tracing::error!(error = %e, "Failed to send facet reply");
+                    } else {
+                        info!(actor_id = %actor_id_owned, method = %method_name, "📤 Actor: Sent facet reply");
+                    }
+                }
+                return Ok(());
             }
-        });
+            BeforeInterceptOutcome::CallActor(args) => {
+                // Update message with intercepted args (may have been modified by ReplaceArgs)
+                let mut message = message;
+                message.payload = args;
 
-        // Apply after-method facet interceptors if successful
-        if result.is_ok() {
-            // TODO: Capture actual result and apply after interceptors
-            let _ = facets
-                .intercept_after(
-                    &method_name,
-                    &message.payload,
-                    &[], // TODO: Serialize result
-                )
-                .await;
-        }
+                // Process with behavior (Go-style: context first, then message)
+                // Note: ActorContext is now static - sender_id and correlation_id are in Message, not context
+                let mut behavior = behavior.write().await;
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[PROCESS_MESSAGE] CALLING handle_message: depth={}, actor_id={}, sender={:?}, receiver={}",
+                        depth, actor_id_owned, message.sender_id, message.receiver_id
+                    );
+                }
+                let result = behavior.handle_message(context, message.clone()).await;
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[PROCESS_MESSAGE] handle_message COMPLETED: depth={}, actor_id={}, result={:?}",
+                        depth, actor_id_owned, result.is_ok()
+                    );
+                }
+
+                // Decrement recursion depth
+                let _ = PROCESS_MESSAGE_DEPTH.with(|d| {
+                    let current = d.get();
+                    if current > 0 {
+                        d.set(current - 1);
+                    }
+                });
+
+                // Apply after-method facet interceptors if successful
+                if result.is_ok() {
+                    // TODO: Capture actual result and apply after interceptors
+                    let _ = facets
+                        .intercept_after(
+                            &method_name,
+                            &message.payload,
+                            &[], // TODO: Serialize result
+                        )
+                        .await;
+                }
 
                 // OBSERVABILITY: Track message processing result and latency
-        let duration = start.elapsed();
-        match &result {
-            Ok(_) => {
-                let message_type_owned2 = message_type.clone();
-                metrics::counter!("plexspaces_actor_messages_processed_total",
-                    "actor_id" => actor_id_owned.clone(),
-                    "message_type" => message_type_owned2.clone(),
-                    "status" => "success"
-                ).increment(1);
-                metrics::histogram!("plexspaces_actor_message_processing_duration_seconds",
-                    "actor_id" => actor_id_owned.clone(),
-                    "message_type" => message_type_owned2.clone()
-                ).record(duration.as_secs_f64());
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(duration_ms = duration.as_millis(), "Message processed successfully");
+                let duration = start.elapsed();
+                match &result {
+                    Ok(_) => {
+                        let message_type_owned2 = message_type.clone();
+                        metrics::counter!("plexspaces_actor_messages_processed_total",
+                            "actor_id" => actor_id_owned.clone(),
+                            "message_type" => message_type_owned2.clone(),
+                            "status" => "success"
+                        ).increment(1);
+                        metrics::histogram!("plexspaces_actor_message_processing_duration_seconds",
+                            "actor_id" => actor_id_owned.clone(),
+                            "message_type" => message_type_owned2.clone()
+                        ).record(duration.as_secs_f64());
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            tracing::debug!(duration_ms = duration.as_millis(), "Message processed successfully");
+                        }
+                    }
+                    Err(e) => {
+                        let message_type_owned3 = message_type.clone();
+                        let error_type = format!("{:?}", e);
+                        metrics::counter!("plexspaces_actor_messages_processed_total",
+                            "actor_id" => actor_id_owned.clone(),
+                            "message_type" => message_type_owned3.clone(),
+                            "status" => "error"
+                        ).increment(1);
+                        metrics::counter!("plexspaces_actor_message_processing_errors_total",
+                            "actor_id" => actor_id_owned.clone(),
+                            "message_type" => message_type_owned3.clone(),
+                            "error_type" => error_type
+                        ).increment(1);
+                        tracing::error!(error = %e, duration_ms = duration.as_millis(), "Message processing failed");
+                        
+                        // Note: set_error_message() is available but not called here because:
+                        // 1. process_message() is not a method (no self parameter)
+                        // 2. Error handling should be done at the actor level, not in process_message
+                        // 3. The error is already logged and tracked via metrics
+                        // TODO: Consider calling set_error_message() when actor transitions to FAILED state
+                    }
                 }
-            }
-            Err(e) => {
-                let message_type_owned3 = message_type.clone();
-                let error_type = format!("{:?}", e);
-                metrics::counter!("plexspaces_actor_messages_processed_total",
-                    "actor_id" => actor_id_owned.clone(),
-                    "message_type" => message_type_owned3.clone(),
-                    "status" => "error"
-                ).increment(1);
-                metrics::counter!("plexspaces_actor_message_processing_errors_total",
-                    "actor_id" => actor_id_owned.clone(),
-                    "message_type" => message_type_owned3.clone(),
-                    "error_type" => error_type
-                ).increment(1);
-                tracing::error!(error = %e, duration_ms = duration.as_millis(), "Message processing failed");
-                
-                // Note: set_error_message() is available but not called here because:
-                // 1. process_message() is not a method (no self parameter)
-                // 2. Error handling should be done at the actor level, not in process_message
-                // 3. The error is already logged and tracked via metrics
-                // TODO: Consider calling set_error_message() when actor transitions to FAILED state
+
+                result.map_err(|e| ActorError::BehaviorError(e.to_string()))
             }
         }
-
-        result.map_err(|e| ActorError::BehaviorError(e.to_string()))
     }
 }
 

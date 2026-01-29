@@ -110,8 +110,8 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         let mailbox = create_durable_mailbox("test-graceful").await;
         
         // Send some messages
-        mailbox.enqueue(create_test_message(b"msg1".to_vec())).await.unwrap();
-        mailbox.enqueue(create_test_message(b"msg2".to_vec())).await.unwrap();
+        mailbox.enqueue(create_test_message(b"msg1".to_vec()).into()).await.unwrap();
+        mailbox.enqueue(create_test_message(b"msg2".to_vec()).into()).await.unwrap();
         
         // Wait for processing
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -131,8 +131,8 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         let mailbox = create_durable_mailbox("test-observability").await;
         
         // Send messages
-        mailbox.enqueue(create_test_message(b"msg1".to_vec())).await.unwrap();
-        mailbox.enqueue(create_test_message(b"msg2".to_vec())).await.unwrap();
+        mailbox.enqueue(create_test_message(b"msg1".to_vec()).into()).await.unwrap();
+        mailbox.enqueue(create_test_message(b"msg2".to_vec()).into()).await.unwrap();
         
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         
@@ -271,8 +271,8 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
             facet.on_attach("recovery-actor", serde_json::json!({})).await.unwrap();
             
             // Send messages
-            mailbox.enqueue(create_test_message(b"recovery-msg1".to_vec())).await.unwrap();
-            mailbox.enqueue(create_test_message(b"recovery-msg2".to_vec())).await.unwrap();
+            mailbox.enqueue(create_test_message(b"recovery-msg1".to_vec()).into()).await.unwrap();
+            mailbox.enqueue(create_test_message(b"recovery-msg2".to_vec()).into()).await.unwrap();
             
             // Wait for processing
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -341,7 +341,7 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
             assert!(stats.is_durable);
             
             // Send new message
-            mailbox.enqueue(create_test_message(b"new-msg".to_vec())).await.unwrap();
+            mailbox.enqueue(create_test_message(b"new-msg".to_vec()).into()).await.unwrap();
             
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             

@@ -277,31 +277,45 @@ impl SqliteJournalStorage {
     /// # }
     /// ```
     pub async fn new(path: &str) -> JournalResult<Self> {
+        use tracing::{debug, error, info};
+        
         // SQLite connection string format for sqlx 0.7:
         // - ":memory:" for in-memory database
-        // - "sqlite://path" for file-based (but this has issues on macOS)
-        // - Try using SQLite file: URI format as fallback
-        let connection_string = if path == ":memory:" {
-            ":memory:".to_string() // Try without sqlite: prefix
-        } else if path.starts_with("sqlite:") || path.starts_with("file:") {
-            // Already has scheme
-            path.to_string()
-        } else {
-            // Use SQLite file: URI format
-            // For absolute paths: file:///absolute/path
-            // For relative paths: file:relative/path
-            if path.starts_with('/') {
-                format!("file://{}", path)
+        // - "sqlite:///absolute/path?mode=rwc" for file-based (creates if not exists)
+        let (connection_string, display_path) = if path == ":memory:" {
+            ("sqlite::memory:".to_string(), ":memory:".to_string())
+        } else if path.starts_with("sqlite:") {
+            // Already has sqlite: scheme, ensure mode=rwc is present
+            let url = if path.contains("mode=") {
+                path.to_string()
+            } else if path.contains('?') {
+                format!("{}&mode=rwc", path)
             } else {
-                format!("file:{}", path)
-            }
+                format!("{}?mode=rwc", path)
+            };
+            (url, path.to_string())
+        } else {
+            // Build proper sqlite:// URL
+            // For absolute paths: sqlite:///absolute/path?mode=rwc
+            // For relative paths: sqlite:relative/path?mode=rwc
+            let conn_str = if path.starts_with('/') {
+                format!("sqlite://{}?mode=rwc", path)
+            } else {
+                format!("sqlite:{}?mode=rwc", path)
+            };
+            (conn_str, path.to_string())
         };
+
+        debug!(db_path = %display_path, db_url = %connection_string, "Connecting to journal database");
 
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(5)
             .connect(&connection_string)
             .await
-            .map_err(|e| JournalError::Storage(e.to_string()))?;
+            .map_err(|e| {
+                error!(db_path = %display_path, error = %e, "Failed to connect to journal database");
+                JournalError::Storage(e.to_string())
+            })?;
 
         // Enable WAL mode for better concurrency
         sqlx::query("PRAGMA journal_mode=WAL")
@@ -309,11 +323,27 @@ impl SqliteJournalStorage {
             .await
             .map_err(|e| JournalError::Storage(e.to_string()))?;
 
+        // Get SQLite version for logging
+        let db_version = sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|_| "unknown".to_string());
+
         // Run migrations
         sqlx::migrate!("./migrations/sqlite")
             .run(&pool)
             .await
-            .map_err(|e| JournalError::Storage(format!("Migration failed: {}", e)))?;
+            .map_err(|e| {
+                error!(db_path = %display_path, error = %e, "Journal migration failed");
+                JournalError::Storage(format!("Migration failed: {}", e))
+            })?;
+
+        info!(
+            db_path = %display_path,
+            db_version = %format!("SQLite {}", db_version),
+            tables = "journal_entries, checkpoints, actor_events, reminders",
+            "Journal storage migration completed"
+        );
 
         Ok(Self {
             pool,
@@ -1373,6 +1403,8 @@ impl PostgresJournalStorage {
     /// # }
     /// ```
     pub async fn new(connection_string: &str) -> JournalResult<Self> {
+        use tracing::info;
+        
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(20)
             .connect(connection_string)
@@ -1384,6 +1416,20 @@ impl PostgresJournalStorage {
             .run(&pool)
             .await
             .map_err(|e| JournalError::Storage(format!("Migration failed: {}", e)))?;
+
+        // Mask credentials in connection string for logging
+        let display_url = connection_string
+            .split('@')
+            .last()
+            .unwrap_or("(hidden)")
+            .to_string();
+        
+        info!(
+            db_url = %format!("postgres://...@{}", display_url),
+            tables = "journal_entries, checkpoints, actor_events, reminders",
+            backend = "PostgreSQL",
+            "Journal storage initialized"
+        );
 
         Ok(Self {
             pool,

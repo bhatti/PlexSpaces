@@ -39,6 +39,7 @@ futures = "0.3"  # For stream handling
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 plexspaces-node = { path = "../node" }
+plexspaces-services = { path = "../services" }
 
 [lib]
 name = "plexspaces_application"

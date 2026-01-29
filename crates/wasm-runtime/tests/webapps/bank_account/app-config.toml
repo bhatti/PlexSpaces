@@ -1,0 +1,32 @@
+# Bank Account WASM Application Configuration
+# Used for durability and state persistence testing
+#
+# This example demonstrates:
+# - WASM actor with get-state/set-state WIT interface
+# - Checkpoint-based durability (Cloudflare Durable Objects pattern)
+# - State recovery via set-state() on restart
+
+version = "1.0.0"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 5
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "account-alice"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[[supervisor.children]]
+id = "account-bob"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[[supervisor.children]]
+id = "account-charlie"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5

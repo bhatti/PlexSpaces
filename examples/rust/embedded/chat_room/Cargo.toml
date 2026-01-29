@@ -1,0 +1,20 @@
+[package]
+name = "chat_room"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "chat_room"
+path = "src/main.rs"
+
+[dependencies]
+# PlexSpaces crates
+plexspaces-process-groups = { path = "../../../../crates/process-groups" }
+plexspaces-keyvalue = { path = "../../../../crates/keyvalue" }
+plexspaces-core = { path = "../../../../crates/core" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }

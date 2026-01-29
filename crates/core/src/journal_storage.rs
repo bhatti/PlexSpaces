@@ -35,7 +35,6 @@
 
 use async_trait::async_trait;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
-use std::sync::Arc;
 use std::time::SystemTime;
 
 // Re-export reminder types from proto (used by trait methods)

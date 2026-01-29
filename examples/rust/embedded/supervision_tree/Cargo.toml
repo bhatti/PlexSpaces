@@ -1,0 +1,27 @@
+[package]
+name = "supervision_tree"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "supervision_tree"
+path = "src/main.rs"
+
+[dependencies]
+# PlexSpaces crates
+plexspaces-actor = { path = "../../../../crates/actor" }
+plexspaces-behavior = { path = "../../../../crates/behavior" }
+plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-mailbox = { path = "../../../../crates/mailbox" }
+plexspaces-node = { path = "../../../../crates/node" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

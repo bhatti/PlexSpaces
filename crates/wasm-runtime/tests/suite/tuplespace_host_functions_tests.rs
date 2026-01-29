@@ -92,9 +92,10 @@ mod tests {
         // ASSERT: Should return NotImplemented error
         assert!(result.is_err());
         if let Err(e) = result {
-            assert_eq!(
-                e.code,
-                types::ErrorCode::NotImplemented
+            // actor-error is now a string (JSON), not a record
+            assert!(
+                e.contains("not-implemented") || e.contains("not implemented") || e.contains("NotImplemented"),
+                "Error should indicate not implemented, got: {}", e
             );
         }
     }

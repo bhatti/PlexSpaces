@@ -93,8 +93,10 @@ async fn test_spawn_actor_always_uses_local_node_id() {
     let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(FacetManager::new())));
     service_locator.register_service(virtual_actor_manager).await;
     service_locator.register_service(facet_manager).await;
-    let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory).await;
+    let actor_factory = ActorFactoryImpl::new_arc(service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>).await;
+    service_locator.register_service(actor_factory.clone()).await;
+    let factory_trait: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory.clone();
+    service_locator.register_actor_factory(factory_trait).await;
     
     let actor_service = ActorServiceImpl::new(service_locator, "local-node".to_string());
     
@@ -185,8 +187,10 @@ async fn test_spawn_actor_design_principle() {
     let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(FacetManager::new())));
     service_locator.register_service(virtual_actor_manager).await;
     service_locator.register_service(facet_manager).await;
-    let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory).await;
+    let actor_factory = ActorFactoryImpl::new_arc(service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>).await;
+    service_locator.register_service(actor_factory.clone()).await;
+    let factory_trait: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory.clone();
+    service_locator.register_actor_factory(factory_trait).await;
     
     let actor_service = ActorServiceImpl::new(service_locator, "node1".to_string());
     
@@ -227,8 +231,10 @@ async fn test_spawn_actor_with_callback() {
     
     // Register ActorFactory (required for spawn_actor)
     use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory).await;
+    let actor_factory = ActorFactoryImpl::new_arc(service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>).await;
+    service_locator.register_service(actor_factory.clone()).await;
+    let factory_trait: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory.clone();
+    service_locator.register_actor_factory(factory_trait).await;
     
     let actor_service = ActorServiceImpl::new(service_locator, "test-node".to_string());
     

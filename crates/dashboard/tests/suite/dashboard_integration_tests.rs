@@ -1039,7 +1039,7 @@ async fn test_dashboard_metrics_not_zero() {
 
 #[tokio::test]
 async fn test_actors_by_type_on_home_page() {
-    use plexspaces_actor::get_actor_factory;
+    use plexspaces_core::ActorFactory;
     use std::collections::HashMap;
     
     // ARRANGE: Create node and spawn actors with different types
@@ -1049,7 +1049,7 @@ async fn test_actors_by_type_on_home_page() {
     
     // Spawn actors with different types
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let actor_factory = get_actor_factory(service_locator.as_ref()).await
+    let actor_factory = service_locator.get_actor_factory().await
         .expect("ActorFactory should be available");
     
     // Spawn 3 Counter actors
@@ -1110,7 +1110,7 @@ async fn test_actors_by_type_on_home_page() {
 
 #[tokio::test]
 async fn test_actors_by_type_on_node_page() {
-    use plexspaces_actor::get_actor_factory;
+    use plexspaces_core::ActorFactory;
     use std::collections::HashMap;
     
     // ARRANGE: Create node and spawn actors
@@ -1120,7 +1120,7 @@ async fn test_actors_by_type_on_node_page() {
     
     // Spawn actors
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let actor_factory = get_actor_factory(service_locator.as_ref()).await
+    let actor_factory = service_locator.get_actor_factory().await
         .expect("ActorFactory should be available");
     
     // Spawn 2 Calculator actors

@@ -38,21 +38,24 @@
 //! ### Configuration Updates (Broadcast Pattern)
 //! ```rust,ignore
 //! use plexspaces_process_groups::*;
+//! use plexspaces_core::RequestContext;
+//!
+//! let ctx = RequestContext::new_without_auth("tenant-1".into(), "namespace".into());
 //!
 //! // All actors subscribe to "config-updates" group
-//! registry.join_group("config-updates", "tenant-1", "actor-123").await?;
+//! registry.join_group(&ctx, "config-updates", &actor_id, vec![]).await?;
 //!
 //! // Admin publishes new config
-//! registry.publish_to_group("config-updates", "tenant-1", message).await?;
+//! registry.publish_to_group(&ctx, "config-updates", None, message).await?;
 //! ```
 //!
 //! ### Event Notification (Pub/Sub Pattern)
 //! ```rust,ignore
 //! // Actors interested in user events join group
-//! registry.join_group("user-events", "tenant-1", "observer-actor").await?;
+//! registry.join_group(&ctx, "user-events", &actor_id, vec![]).await?;
 //!
 //! // When user action occurs, publish to group
-//! registry.publish_to_group("user-events", "tenant-1", event_msg).await?;
+//! registry.publish_to_group(&ctx, "user-events", None, event_msg).await?;
 //! ```
 //!
 //! ## Design Principles
@@ -198,22 +201,18 @@ impl ProcessGroupRegistry {
     /// - `StorageError`: Backend storage failure
     pub async fn create_group(
         &self,
+        ctx: &RequestContext,
         group_name: impl Into<String>,
-        tenant_id: impl Into<String>,
-        namespace: impl Into<String>,
     ) -> Result<ProcessGroup, ProcessGroupError> {
         let start = std::time::Instant::now();
         let group_name = group_name.into();
-        let tenant_id = tenant_id.into();
-        let namespace = namespace.into();
+        let tenant_id = ctx.tenant_id().to_string();
+        let namespace = ctx.namespace().to_string();
         let span = tracing::span!(tracing::Level::DEBUG, "process_group.create", group_name = %group_name, tenant_id = %tenant_id);
         let _guard = span.enter();
         trace!("Creating process group");
 
         let key = Self::group_key(&tenant_id, &group_name);
-
-        // Create RequestContext for tenant isolation
-        let ctx = RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
 
         // Check if group already exists
         if self.storage.get(&ctx, &key).await?.is_some() {
@@ -326,8 +325,8 @@ impl ProcessGroupRegistry {
     /// Join a process group
     ///
     /// ## Arguments
+    /// - `ctx`: RequestContext for tenant/namespace isolation
     /// - `group_name`: Group to join
-    /// - `tenant_id`: Tenant for isolation
     /// - `actor_id`: Actor to add to group
     /// - `topics`: Optional topics to subscribe to (empty = all topics)
     ///
@@ -342,22 +341,19 @@ impl ProcessGroupRegistry {
     /// - `StorageError`: Backend storage failure
     pub async fn join_group(
         &self,
+        ctx: &RequestContext,
         group_name: &str,
-        tenant_id: &str,
-        namespace: &str,
         actor_id: &ActorId,
         topics: Vec<String>,
     ) -> Result<(), ProcessGroupError> {
         let start = std::time::Instant::now();
+        let tenant_id = ctx.tenant_id();
         let _span = tracing::span!(tracing::Level::DEBUG, "process_group.join", group_name = %group_name, tenant_id = %tenant_id, actor_id = %actor_id, topics = ?topics);
         trace!("Joining process group");
 
-        // Create RequestContext for tenant isolation
-        let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
-
         // Verify group exists
         let group_key = Self::group_key(tenant_id, group_name);
-        if self.storage.get(&ctx, &group_key).await?.is_none() {
+        if self.storage.get(ctx, &group_key).await?.is_none() {
             metrics::counter!("plexspaces_process_groups_join_errors_total", "error" => "group_not_found").increment(1);
             warn!("Group not found: {}", group_name);
             return Err(ProcessGroupError::GroupNotFound(group_name.to_string()));
@@ -366,7 +362,7 @@ impl ProcessGroupRegistry {
         let membership_key = Self::membership_key(tenant_id, group_name, actor_id);
 
         // Get existing membership or create new
-        let mut membership = match self.storage.get(&ctx, &membership_key).await? {
+        let mut membership = match self.storage.get(ctx, &membership_key).await? {
             Some(bytes) => GroupMembership::decode(&bytes[..])
                 .map_err(|e| {
                     metrics::counter!("plexspaces_process_groups_join_errors_total", "error" => "deserialization").increment(1);
@@ -404,11 +400,11 @@ impl ProcessGroupRegistry {
 
         // Store updated membership
         let value = membership.encode_to_vec();
-        self.storage.put(&ctx, &membership_key, value).await?;
+        self.storage.put(ctx, &membership_key, value).await?;
 
         // Update group member_count (optimized: only if new member)
         if membership.join_count == 1 {
-            self.update_member_count_with_namespace(tenant_id, group_name, namespace).await?;
+            self.update_member_count_with_namespace(tenant_id, group_name, ctx.namespace()).await?;
         }
 
         let duration = start.elapsed();
@@ -761,35 +757,22 @@ impl ProcessGroupRegistry {
     ///
     /// ## Note
     /// - If context is admin/internal, searches across common namespaces
-    /// - Otherwise, uses the namespace from the context
+    /// Gets the namespace for a group.
+    /// 
+    /// For internal/admin contexts with empty namespace, returns empty namespace (no namespace filtering).
+    /// Otherwise, uses the namespace from the context.
     async fn get_group_namespace(
         &self,
         ctx: &RequestContext,
         group_name: &str,
     ) -> Result<String, ProcessGroupError> {
-        let tenant_id = ctx.tenant_id();
-        let group_key = Self::group_key(tenant_id, group_name);
-        
-        // If admin/internal, search across common namespaces
-        if ctx.is_admin() || ctx.is_internal() {
-            for ns in &["default", "test", "production", "staging", "dev", "system"] {
-                let search_ctx = RequestContext::new_without_auth(tenant_id.to_string(), ns.to_string());
-                if let Some(bytes) = self.storage.get(&search_ctx, &group_key).await? {
-                    if let Ok(group) = ProcessGroup::decode(&bytes[..]) {
-                        return Ok(group.namespace);
-                    }
-                }
-            }
-        } else {
-            // Use namespace from context
-            if let Some(bytes) = self.storage.get(ctx, &group_key).await? {
-                if let Ok(group) = ProcessGroup::decode(&bytes[..]) {
-                    return Ok(group.namespace);
-                }
-            }
+        // For internal/admin contexts with empty namespace, return empty namespace (no namespace filtering)
+        if ctx.should_skip_namespace_filter() {
+            return Ok(String::new());
         }
         
-        Err(ProcessGroupError::GroupNotFound(group_name.to_string()))
+        // Otherwise, use namespace from context (may be empty)
+        Ok(ctx.namespace().to_string())
     }
 
     async fn update_member_count_with_namespace(
@@ -866,7 +849,7 @@ mod tests {
         let registry = create_test_registry();
 
         let group = registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
 
@@ -884,12 +867,12 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
 
         let result = registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await;
         assert!(matches!(
             result,
@@ -903,7 +886,7 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         let ctx = test_ctx();
@@ -923,7 +906,7 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         let ctx = test_ctx();
@@ -943,11 +926,11 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
 
@@ -966,7 +949,7 @@ mod tests {
         let registry = create_test_registry();
 
         let result = registry
-            .join_group("nonexistent", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "nonexistent", &"actor-1".to_string(), vec![])
             .await;
         assert!(matches!(result, Err(ProcessGroupError::GroupNotFound(_))));
     }
@@ -977,21 +960,21 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
 
         // Join 3 times
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
 
@@ -1011,11 +994,11 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         let ctx = RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string());
@@ -1038,21 +1021,21 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
 
         // Join 3 times
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
 
@@ -1095,7 +1078,7 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
 
@@ -1115,19 +1098,19 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-3".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-3".to_string(), vec![])
             .await
             .unwrap();
 
@@ -1149,15 +1132,15 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
             .await
             .unwrap();
 
@@ -1176,15 +1159,15 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("group-1", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "group-1")
             .await
             .unwrap();
         registry
-            .create_group("group-2", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "group-2")
             .await
             .unwrap();
         registry
-            .create_group("group-3", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "group-3")
             .await
             .unwrap();
 
@@ -1201,15 +1184,15 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
             .await
             .unwrap();
 
@@ -1221,7 +1204,7 @@ mod tests {
 
         // Re-create group - should be empty
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         let members = registry
@@ -1237,17 +1220,17 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
 
         // Join actors
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
             .await
             .unwrap();
 
@@ -1279,19 +1262,19 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("test-group", TEST_TENANT, TEST_NAMESPACE, &"actor-3".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &"actor-3".to_string(), vec![])
             .await
             .unwrap();
 
@@ -1329,7 +1312,7 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
 
@@ -1350,31 +1333,31 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("events", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "events")
             .await
             .unwrap();
 
         // Actor 1 subscribes to "user.login" topic
         registry
-            .join_group("events", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec!["user.login".to_string()])
+            .join_group(&test_ctx(), "events", &"actor-1".to_string(), vec!["user.login".to_string()])
             .await
             .unwrap();
 
         // Actor 2 subscribes to "user.logout" topic
         registry
-            .join_group("events", TEST_TENANT, TEST_NAMESPACE, &"actor-2".to_string(), vec!["user.logout".to_string()])
+            .join_group(&test_ctx(), "events", &"actor-2".to_string(), vec!["user.logout".to_string()])
             .await
             .unwrap();
 
         // Actor 3 subscribes to both topics
         registry
-            .join_group("events", TEST_TENANT, TEST_NAMESPACE, &"actor-3".to_string(), vec!["user.login".to_string(), "user.logout".to_string()])
+            .join_group(&test_ctx(), "events", &"actor-3".to_string(), vec!["user.login".to_string(), "user.logout".to_string()])
             .await
             .unwrap();
 
         // Actor 4 subscribes to all topics (empty list)
         registry
-            .join_group("events", TEST_TENANT, TEST_NAMESPACE, &"actor-4".to_string(), vec![])
+            .join_group(&test_ctx(), "events", &"actor-4".to_string(), vec![])
             .await
             .unwrap();
 
@@ -1421,19 +1404,19 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("events", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "events")
             .await
             .unwrap();
 
         // Join with topic "user.login"
         registry
-            .join_group("events", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec!["user.login".to_string()])
+            .join_group(&test_ctx(), "events", &"actor-1".to_string(), vec!["user.login".to_string()])
             .await
             .unwrap();
 
         // Join again with topic "user.logout" - should merge topics
         registry
-            .join_group("events", TEST_TENANT, TEST_NAMESPACE, &"actor-1".to_string(), vec!["user.logout".to_string()])
+            .join_group(&test_ctx(), "events", &"actor-1".to_string(), vec!["user.logout".to_string()])
             .await
             .unwrap();
 
@@ -1460,14 +1443,14 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("large-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "large-group")
             .await
             .unwrap();
 
         // Add 100 actors
         for i in 0..100 {
             registry
-                .join_group("large-group", TEST_TENANT, TEST_NAMESPACE, &format!("actor-{}", i), vec![])
+                .join_group(&test_ctx(), "large-group", &format!("actor-{}", i), vec![])
                 .await
                 .unwrap();
         }
@@ -1494,14 +1477,14 @@ mod tests {
         let registry = create_test_registry();
 
         registry
-            .create_group("sequential-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "sequential-group")
             .await
             .unwrap();
 
         // Sequential joins (simulating concurrent behavior)
         for i in 0..10 {
             registry
-                .join_group("sequential-group", TEST_TENANT, TEST_NAMESPACE, &format!("actor-{}", i), vec![])
+                .join_group(&test_ctx(), "sequential-group", &format!("actor-{}", i), vec![])
                 .await
                 .unwrap();
         }
@@ -1534,30 +1517,30 @@ mod tests {
     #[tokio::test]
     async fn test_multi_tenant_isolation() {
         let registry = create_test_registry();
+        let ctx1 = RequestContext::new_without_auth("tenant-1".to_string(), TEST_NAMESPACE.to_string());
+        let ctx2 = RequestContext::new_without_auth("tenant-2".to_string(), TEST_NAMESPACE.to_string());
 
         // Create same group name in different tenants
         registry
-            .create_group("shared-group", "tenant-1", TEST_NAMESPACE)
+            .create_group(&ctx1, "shared-group")
             .await
             .unwrap();
         registry
-            .create_group("shared-group", "tenant-2", TEST_NAMESPACE)
+            .create_group(&ctx2, "shared-group")
             .await
             .unwrap();
 
         // Join different tenants (use same namespace as create)
         registry
-            .join_group("shared-group", "tenant-1", TEST_NAMESPACE, &"actor-1".to_string(), vec![])
+            .join_group(&ctx1, "shared-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
         registry
-            .join_group("shared-group", "tenant-2", TEST_NAMESPACE, &"actor-2".to_string(), vec![])
+            .join_group(&ctx2, "shared-group", &"actor-2".to_string(), vec![])
             .await
             .unwrap();
 
         // Verify isolation
-        let ctx1 = RequestContext::new_without_auth("tenant-1".to_string(), TEST_NAMESPACE.to_string());
-        let ctx2 = RequestContext::new_without_auth("tenant-2".to_string(), TEST_NAMESPACE.to_string());
         let members_1 = registry
             .get_members(&ctx1, "shared-group")
             .await
@@ -1580,19 +1563,19 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("topics", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "topics")
             .await
             .unwrap();
 
         // Actor with empty topics (receives all)
         registry
-            .join_group("topics", TEST_TENANT, TEST_NAMESPACE, &"actor-all".to_string(), vec![])
+            .join_group(&test_ctx(), "topics", &"actor-all".to_string(), vec![])
             .await
             .unwrap();
 
         // Actor with specific topic
         registry
-            .join_group("topics", TEST_TENANT, TEST_NAMESPACE, &"actor-specific".to_string(), vec!["topic1".to_string()])
+            .join_group(&test_ctx(), "topics", &"actor-specific".to_string(), vec!["topic1".to_string()])
             .await
             .unwrap();
 
@@ -1643,7 +1626,7 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("test-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
 
@@ -1661,14 +1644,14 @@ mod tests {
         use plexspaces_core::ActorId;
 
         registry
-            .create_group("count-test", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "count-test")
             .await
             .unwrap();
 
         // Join 3 actors
         for i in 1..=3 {
             registry
-                .join_group("count-test", TEST_TENANT, TEST_NAMESPACE, &format!("actor-{}", i), vec![])
+                .join_group(&test_ctx(), "count-test", &format!("actor-{}", i), vec![])
                 .await
                 .unwrap();
         }
@@ -1697,7 +1680,7 @@ mod tests {
         // Create multiple groups
         for i in 1..=5 {
             registry
-                .create_group(&format!("group-{}", i), TEST_TENANT, TEST_NAMESPACE)
+                .create_group(&ctx, &format!("group-{}", i))
                 .await
                 .unwrap();
         }
@@ -1716,7 +1699,7 @@ mod tests {
         let ctx = test_ctx();
 
         registry
-            .create_group("empty-group", TEST_TENANT, TEST_NAMESPACE)
+            .create_group(&test_ctx(), "empty-group")
             .await
             .unwrap();
 

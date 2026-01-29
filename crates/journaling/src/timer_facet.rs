@@ -41,7 +41,7 @@
 
 use async_trait::async_trait;
 use plexspaces_core::{ActorRef, ActorService};
-use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
+use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
 use serde_json::Value;
@@ -300,8 +300,8 @@ impl TimerFacet {
             #[cfg(feature = "locks")]
             let mut lock_held = if let (Some(ref lock_mgr), Some(node_id_val)) = (lock_manager.as_ref(), node_id.as_ref()) {
                 // Use actor_id as lock key since lock_key was removed from proto
-                // Use default tenant/namespace for timer locks (timers don't have access to actor context)
-                let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+                // Use empty tenant/namespace for timer locks (timers don't have access to actor context or ServiceLocator)
+                let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
                 // Calculate lease duration: for periodic timers, use 2x interval (min 1 second), for one-time use 60s
                 let lease_secs = if periodic {
                     let interval_secs = interval.as_secs() as u32;
@@ -336,7 +336,7 @@ impl TimerFacet {
             };
             
             #[cfg(not(feature = "locks"))]
-            let mut lock_held = true; // No locking support, always fire
+            let lock_held = true; // No locking support, always fire
             
             // Wait for due_time
             if !due_time.is_zero() {
@@ -356,7 +356,8 @@ impl TimerFacet {
                     // Renew lock for periodic timers (if locking is enabled)
                     #[cfg(feature = "locks")]
                     if let (Some(ref lock_mgr), Some(node_id_val), Some(ref lock)) = (lock_manager.as_ref(), node_id.as_ref(), current_lock.as_ref()) {
-                        let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+                        // Use empty tenant/namespace for timer locks (timers don't have access to actor context or ServiceLocator)
+                        let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
                         // Calculate lease duration: 2x interval (min 1 second for sub-second intervals)
                         let lease_secs = {
                             let interval_secs = interval.as_secs() as u32;
@@ -396,7 +397,8 @@ impl TimerFacet {
             // Release lock when timer task completes (if locking is enabled)
             #[cfg(feature = "locks")]
             if let (Some(ref lock_mgr), Some(node_id_val), Some(ref lock)) = (lock_manager.as_ref(), node_id.as_ref(), current_lock.as_ref()) {
-                let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+                // Use empty tenant/namespace for timer locks (timers don't have access to actor context or ServiceLocator)
+                let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
                 let _ = lock_mgr.release_lock(&ctx, ReleaseLockOptions {
                     lock_key: format!("timer:{}", actor_id_for_lock),
                     holder_id: node_id_val.clone(),
@@ -671,7 +673,7 @@ impl Facet for TimerFacet {
     }
     
     fn get_state(&self) -> Result<Value, FacetError> {
-        let timers = self.timers.read();
+        let _timers = self.timers.read();
         // TODO: Serialize timer state for persistence (if needed)
         Ok(Value::Null)
     }

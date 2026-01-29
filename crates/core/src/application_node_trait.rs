@@ -19,7 +19,6 @@
 //! ApplicationNode trait - minimal Node interface for Applications
 
 use async_trait::async_trait;
-use std::sync::Arc;
 
 /// Minimal Node interface needed by Applications
 ///

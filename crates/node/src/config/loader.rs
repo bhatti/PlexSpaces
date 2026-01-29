@@ -113,7 +113,7 @@ impl ConfigLoader {
         let yaml_release: ReleaseYaml = serde_yaml::from_str(&substituted)?;
 
         // Convert to proto ReleaseSpec
-        let mut spec = convert_yaml_to_proto(yaml_release)
+        let spec = convert_yaml_to_proto(yaml_release)
             .map_err(|e| ConfigLoaderError::EnvSubstitutionError(e))?;
 
         Ok(spec)
@@ -208,8 +208,12 @@ impl ConfigLoader {
             }
         }
 
-        // TODO: Add more overrides as needed
-        // This is a simplified implementation - in production, use a more generic approach
+        // WASM apps directory override (Tomcat-style auto-deploy)
+        if let Ok(wasm_apps_dir) = env::var("PLEXSPACES_WASM_APPS_DIR") {
+            if let Some(ref mut node) = spec.node {
+                node.wasm_apps_directory = wasm_apps_dir;
+            }
+        }
 
         Ok(())
     }

@@ -19,6 +19,7 @@ plexspaces-facet = { workspace = true }
 plexspaces-proto = { workspace = true }
 plexspaces-keyvalue = { workspace = true }
 plexspaces-tuplespace = { workspace = true }
+plexspaces-locks = { path = "../locks" }
 plexspaces-journaling = { path = "../journaling" }
 indexmap = { version = "2.0", features = ["serde"] }
 

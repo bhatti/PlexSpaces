@@ -147,7 +147,6 @@ use plexspaces_proto::object_registry::v1::{
 };
 use prost::Message; // For encode_to_vec() and decode()
 use std::sync::Arc;
-use async_trait::async_trait;
 
 /// Error types for ObjectRegistry operations
 #[derive(Debug, thiserror::Error)]
@@ -235,7 +234,7 @@ impl ObjectRegistryImpl {
     /// - `default:default:service:order-svc-instance-1`
     ///
     /// ## Note
-    /// Empty tenant_id or namespace are defaulted to "default" to avoid double slashes in paths
+    /// Empty tenant_id or namespace are used as-is (may be empty)
     fn make_key(
         tenant_id: &str,
         namespace: &str,
@@ -252,9 +251,10 @@ impl ObjectRegistryImpl {
             ObjectType::ObjectTypeNode => "node",
             _ => "unknown",
         };
-        // Default to "default" for empty tenant/namespace to avoid double slashes in paths
-        let tenant = if tenant_id.is_empty() { "default" } else { tenant_id };
-        let ns = if namespace.is_empty() { "default" } else { namespace };
+        // Use tenant_id and namespace as-is (may be empty)
+        // Empty values are valid and will be included in the key
+        let tenant = tenant_id;
+        let ns = namespace;
         format!("{}:{}:{}:{}", tenant, ns, type_str, object_id)
     }
 
@@ -340,7 +340,7 @@ impl ObjectRegistryImpl {
         });
         registration.updated_at = registration.created_at.clone();
 
-        // Generate key (make_key will default empty tenant/namespace to "default" for paths)
+        // Generate key (make_key uses tenant/namespace as-is, may be empty)
         let object_type = ObjectType::try_from(registration.object_type)
             .unwrap_or(ObjectType::ObjectTypeUnspecified);
         let full_key = Self::make_key(
@@ -359,14 +359,16 @@ impl ObjectRegistryImpl {
             full_key
         };
 
-        // Check if already registered (optional - remove if overwrite is desired)
-        if self.kv_store.get(ctx, &key).await?.is_some() {
-            return Err(ObjectRegistryError::ObjectAlreadyRegistered(
-                registration.object_id.clone(),
-            ));
-        }
+        // Upsert semantics: Allow re-registration of existing objects
+        //
+        // This supports persistent storage scenarios where a node may restart
+        // and re-register with the same ID. The caller explicitly wants to
+        // register this object, so we allow overwriting existing entries.
+        //
+        // TODO: Consider adding explicit upsert vs insert API for more control
+        // if strict "insert only" semantics are needed in certain scenarios.
 
-        // Serialize and store
+        // Serialize and store (upsert - overwrites if exists)
         let value = registration.encode_to_vec();
 
         self.kv_store.put(ctx, &key, value).await?;
@@ -871,7 +873,7 @@ mod tests {
         let registry = ObjectRegistryImpl::new(kv);
 
         // Note: discover() uses default:default prefix, so we need to register with default tenant/namespace
-        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        let ctx = RequestContext::new_without_auth(String::new(), String::new()); // Empty - use tenant_id/namespace from API request
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, reg1).await.unwrap();
 

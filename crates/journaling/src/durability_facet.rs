@@ -253,7 +253,7 @@ impl DurabilityFacet {
                 .get("checkpoint_timeout")
                 .and_then(|v| {
                     // Try to parse as Duration proto or as string
-                    if let Some(duration_str) = v.as_str() {
+                    if let Some(_duration_str) = v.as_str() {
                         // Parse duration string (e.g., "5m", "10s") - simplified for now
                         // In real implementation, would parse to prost_types::Duration
                         None // Skip for now - requires duration parsing
@@ -487,6 +487,29 @@ impl DurabilityFacet {
         // happens when we replay MessageReceived through the handler
         let replay_handler = self.replay_handler.read().await;
         if let Some(handler) = replay_handler.as_ref() {
+            // Count messages to replay
+            let messages_to_replay: Vec<_> = entries.iter()
+                .filter_map(|entry| {
+                    use plexspaces_proto::v1::journaling::journal_entry::Entry;
+                    if let Some(Entry::MessageReceived(ref msg)) = entry.entry {
+                        Some((entry.sequence, msg.message_type.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            
+            if !messages_to_replay.is_empty() {
+                tracing::info!(
+                    actor_id = %actor_id,
+                    message_count = messages_to_replay.len(),
+                    from_sequence = from_sequence,
+                    "🔄 REPLAY: Starting deterministic replay of {} messages",
+                    messages_to_replay.len()
+                );
+            }
+            
+            let mut replayed_count = 0;
             for entry in &entries {
                 use plexspaces_proto::v1::journaling::journal_entry::Entry;
                 if let Some(Entry::MessageReceived(ref msg_received)) = entry.entry {
@@ -508,12 +531,37 @@ impl DurabilityFacet {
                     let context = stored_context.as_ref().ok_or_else(|| {
                         JournalError::Replay("ActorContext not set - call set_replay_handler with context first".to_string())
                     })?;
+                    
+                    tracing::debug!(
+                        actor_id = %actor_id,
+                        sequence = entry.sequence,
+                        message_type = %msg_received.message_type,
+                        "Replaying message"
+                    );
+                    
                     handler.replay_message(message, context).await
                         .map_err(|e| JournalError::Replay(format!("Replay failed: {}", e)))?;
+                    replayed_count += 1;
                 }
             }
+            
+            if replayed_count > 0 {
+                tracing::info!(
+                    actor_id = %actor_id,
+                    messages_replayed = replayed_count,
+                    "✅ REPLAY COMPLETE: Successfully replayed {} messages",
+                    replayed_count
+                );
+            }
         } else {
-            tracing::warn!(actor_id = %actor_id, "No replay handler set - messages will not be replayed through actor handler");
+            if !entries.is_empty() {
+                tracing::warn!(
+                    actor_id = %actor_id,
+                    entries_count = entries.len(),
+                    "⚠️ No replay handler set - {} journal entries will not be replayed through actor handler (side effects cached only)",
+                    entries.len()
+                );
+            }
         }
 
         // Update message_sequence to highest sequence number from ALL entries
@@ -857,10 +905,7 @@ impl Facet for DurabilityFacet {
                     (checkpoint_seq, Some(checkpoint))
                 }
                 Err(JournalError::CheckpointNotFound(_)) => {
-                    // No checkpoint, replay from beginning
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(actor_id = %actor_id, "No checkpoint found, replaying from beginning");
-                    }
+                    // No checkpoint - will check if there are any journal entries to replay
                     (0, None)
                 }
                 Err(e) => {
@@ -906,7 +951,29 @@ impl Facet for DurabilityFacet {
             metrics::histogram!("plexspaces_journaling_replay_entries_count",
                 "actor_id" => actor_id.to_string()
             ).record(entries_count as f64);
-            tracing::info!(actor_id = %actor_id, from_sequence = from_sequence, entries_count = entries_count, duration_ms = duration.as_millis(), "Journal replayed");
+            
+            // Log appropriate message based on recovery scenario
+            if entries_count > 0 {
+                tracing::info!(
+                    actor_id = %actor_id,
+                    from_sequence = from_sequence,
+                    entries_replayed = entries_count,
+                    duration_ms = duration.as_millis(),
+                    "🔄 STATE RECOVERED: Replayed {} journal entries to restore actor state",
+                    entries_count
+                );
+            } else if from_sequence > 0 {
+                tracing::info!(
+                    actor_id = %actor_id,
+                    checkpoint_sequence = from_sequence - 1,
+                    "✅ STATE RECOVERED: Restored from checkpoint (no additional entries to replay)"
+                );
+            } else {
+                tracing::info!(
+                    actor_id = %actor_id,
+                    "🆕 FRESH START: No previous state found, starting with clean state"
+                );
+            }
 
             // Load promises from journal entries
             self.load_promises_from_journal(actor_id).await

@@ -30,13 +30,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use tonic::{Request, Response, Status};
 use prost_types::Timestamp;
 
-use plexspaces_core::{ServiceLocator as ServiceLocatorTrait, ServiceLocator, ActorRegistry, RequestContext, ActorId, FacetManagerServiceWrapper};
-use plexspaces_facet::FacetManager;
-use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_core::{RequestContext, ServiceLocator as ServiceLocatorTrait, ServiceLocator, ActorRegistry, ActorId};
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService,
     GetSummaryRequest, GetSummaryResponse,
@@ -46,7 +44,7 @@ use plexspaces_proto::dashboard::v1::{
     GetActorsRequest, GetActorsResponse,
     GetWorkflowsRequest, GetWorkflowsResponse,
     GetDependencyHealthRequest, GetDependencyHealthResponse,
-    ActorInfo, NodeSummaryMetrics, WorkflowInfo,
+    ActorInfo, NodeSummaryMetrics,
 };
 use plexspaces_proto::system::v1::DetailedHealthCheck;
 use plexspaces_proto::node::v1::{
@@ -120,6 +118,19 @@ impl DashboardServiceImpl {
             .and_then(|v| v.to_str().ok())
             .map(|s| s == "admin")
             .unwrap_or(true) // Default to admin if no auth (development mode)
+    }
+
+    /// Build request context for dashboard API (user path). Tenant may fall back to node config when empty;
+    /// namespace must come from user request and is never substituted with config. Never uses admin.
+    async fn request_context_for_dashboard(
+        &self,
+        tenant_id: Option<String>,
+        namespace: Option<String>,
+    ) -> RequestContext {
+        // Tenant comes from auth, not config - use empty string as default
+        let effective_tenant = tenant_id.unwrap_or_default();
+        let effective_namespace = namespace.unwrap_or_default(); // Must come from request; do not use config
+        RequestContext::new_without_auth(effective_tenant, effective_namespace)
     }
 
     /// Get default "since" timestamp (now - 24 hours)
@@ -368,9 +379,9 @@ impl DashboardServiceImpl {
         let name_parts: Vec<&str> = name_part.split('/').collect();
         
         if name_parts.len() == 2 {
-            (name_parts[0].to_string(), "default".to_string())
+            (name_parts[0].to_string(), String::new()) // Namespace from actor ID, empty tenant
         } else {
-            ("default".to_string(), "default".to_string())
+            (String::new(), String::new()) // Empty namespace and tenant
         }
     }
 
@@ -406,14 +417,14 @@ impl DashboardServiceImpl {
         (paginated_items, page_response)
     }
 
-    /// Query remote nodes via ObjectRegistry
+    /// Query remote nodes via ObjectRegistry. Uses request-scoped context (no admin).
     async fn query_remote_nodes(
         &self,
-        _tenant_id: Option<String>,
+        tenant_id: Option<String>,
         cluster_id: Option<String>,
     ) -> Result<Vec<ProtoNode>, Status> {
-        let ctx = self.service_locator.request_context_for_system_operations().await;
-        
+        let ctx = self.request_context_for_dashboard(tenant_id, None).await;
+
         // Use NodeRegistry (which internally uses ObjectRegistry with caching)
         let node_registry = self.service_locator.get_node_registry().await
             .ok_or_else(|| Status::internal("NodeRegistry not found in ServiceLocator"))?;
@@ -484,11 +495,11 @@ impl DashboardService for DashboardServiceImpl {
         // If nodes exist but have no cluster_name, count as "default" cluster
         // If no nodes exist, show 0 clusters
         let clusters: HashSet<String> = if total_nodes > 0 {
-            let mut cluster_set: HashSet<String> = all_nodes
+            let cluster_set: HashSet<String> = all_nodes
                 .iter()
                 .filter_map(|n| {
                     if n.cluster_name.is_empty() {
-                        Some("default".to_string()) // Use "default" for nodes without cluster_name
+                        None // Skip nodes without cluster_name (don't use "default")
                     } else {
                         Some(n.cluster_name.clone())
                     }
@@ -510,21 +521,14 @@ impl DashboardService for DashboardServiceImpl {
             // Collect unique tenant IDs from applications and actors
             let mut tenant_ids = HashSet::new();
             
-            // Always include "internal" and "default" tenants if node is running
-            if total_nodes > 0 {
-                tenant_ids.insert("internal".to_string());
-                tenant_ids.insert("default".to_string());
-            }
-            
             // Get from applications (if they have tenant metadata)
             let app_manager = self.service_locator.application_manager().await
                 .ok_or_else(|| Status::internal("ApplicationManager not available in ServiceLocator"))?;
             let app_names = app_manager.list_applications().await;
             for name in app_names {
-                if let Some(info) = app_manager.get_application_info(&name).await {
+                if let Some(_info) = app_manager.get_application_info(&name).await {
                     // Applications don't currently store tenant_id in ApplicationInfo
-                    // For now, use default tenant
-                    tenant_ids.insert("default".to_string());
+                    // Skip applications without tenant_id (don't add hardcoded "default")
                 }
             }
             
@@ -626,25 +630,31 @@ impl DashboardService for DashboardServiceImpl {
         &self,
         request: Request<GetNodeDashboardRequest>,
     ) -> Result<Response<GetNodeDashboardResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
-        
+
         if req.node_id.is_empty() {
             return Err(Status::invalid_argument("node_id is required"));
         }
+
+        let mut request_for_context = Request::new(());
+        *request_for_context.metadata_mut() = metadata;
+        let tenant_id = self.get_tenant_id_from_context(&request_for_context);
+        let ctx = self.request_context_for_dashboard(tenant_id, None).await;
 
         // Get local node ID from metrics
         let metrics_accessor = self.service_locator.get_node_metrics_accessor().await
             .ok_or_else(|| Status::internal("NodeMetricsAccessor not registered in ServiceLocator"))?;
         let local_metrics = metrics_accessor.get_metrics().await;
         let local_node_id = local_metrics.node_id;
-        
+
         // Get node information
         let node = if req.node_id == local_node_id {
             // Local node
             self.node_to_proto().await?
         } else {
-            // Remote node - query via NodeService
-            self.query_remote_node(&req.node_id).await?
+            // Remote node - query via NodeService (request-scoped context, no admin)
+            self.query_remote_node(&ctx, &req.node_id).await?
         };
 
         // Get node metrics from NodeMetricsAccessor
@@ -807,7 +817,7 @@ impl DashboardService for DashboardServiceImpl {
 
         // Get registered actor IDs
         let registered_ids = actor_registry.registered_actor_ids().read().await;
-        let actor_configs = actor_registry.actor_configs().read().await;
+        let _actor_configs = actor_registry.actor_configs().read().await;
 
         let mut actors = Vec::new();
         for actor_id in registered_ids.iter() {
@@ -996,10 +1006,9 @@ impl DashboardServiceImpl {
         }
     }
 
-    /// Query remote node via NodeRegistry (which internally uses ObjectRegistry with caching)
-    async fn query_remote_node(&self, node_id: &str) -> Result<ProtoNode, Status> {
-        let ctx = self.service_locator.request_context_for_system_operations().await;
-        
+    /// Query remote node via NodeRegistry (which internally uses ObjectRegistry with caching).
+    /// Uses request-scoped context (no admin).
+    async fn query_remote_node(&self, ctx: &RequestContext, node_id: &str) -> Result<ProtoNode, Status> {
         let node_registry = self.service_locator.get_node_registry().await
             .ok_or_else(|| Status::internal("NodeRegistry not found in ServiceLocator"))?;
         
@@ -1031,16 +1040,16 @@ impl DashboardServiceImpl {
         &self,
         node_id: &str,
         req: &GetApplicationsRequest,
-        tenant_id: Option<String>,
+        _tenant_id: Option<String>,
         _is_admin: bool,
     ) -> Result<Response<GetApplicationsResponse>, Status> {
         // Get node address from ObjectRegistry
         let object_registry = self.service_locator.get_object_registry().await
             .ok_or_else(|| Status::internal("ObjectRegistry not found in ServiceLocator"))?;
-        
-        // Use request_context_for_system_operations for internal lookups
-        let ctx = self.service_locator.request_context_for_system_operations().await;
-        
+
+        // Use request-scoped context (tenant from request or default; no admin)
+        let ctx = self.request_context_for_dashboard(_tenant_id.clone(), None).await;
+
         // Lookup node registration (nodes are registered with object_id = node_id using ObjectTypeNode)
         use plexspaces_proto::object_registry::v1::ObjectType;
         let registration = object_registry
@@ -1101,6 +1110,7 @@ mod tests {
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     use tonic::Request;
+    use chrono::{DateTime, Utc};
 
     // Tests disabled - dashboard no longer depends on node to break cyclic dependency
     // Tests can be re-enabled by making node a dev-dependency if needed
@@ -1328,7 +1338,8 @@ mod tests {
             .unwrap();
         
         // Should be approximately 24 hours ago
-        let diff = now - since_dt;
-        assert!(diff.num_hours() >= 23 && diff.num_hours() <= 25);
+        let diff = now.signed_duration_since(since_dt);
+        let hours = diff.num_hours();
+        assert!(hours >= 23 && hours <= 25);
     }
 }

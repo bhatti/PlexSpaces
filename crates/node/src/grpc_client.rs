@@ -181,7 +181,7 @@ impl RemoteActorClient {
     /// ```
     pub async fn spawn_actor(
         &mut self,
-        target_node_id: &str,
+        _target_node_id: &str,
         actor_type: &str,
         initial_state: Option<Vec<u8>>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
@@ -193,6 +193,7 @@ impl RemoteActorClient {
             initial_state: initial_state.unwrap_or_default(),
             config,
             labels,
+            facets: vec![], // No facets for basic spawn
         });
 
         let response = self

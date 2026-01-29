@@ -38,7 +38,8 @@ use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use futures::stream::BoxStream;
 
-// Re-export proto ObjectRegistration type as type alias
+/// Registration entry for objects in the ObjectRegistry.
+/// Re-exported from proto definitions.
 pub type ObjectRegistration = plexspaces_proto::object_registry::v1::ObjectRegistration;
 
 /// Trait for channel operations (queue and topic patterns)

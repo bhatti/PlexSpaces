@@ -37,7 +37,7 @@ use plexspaces_proto::firecracker::v1::{
     StopVmRequest, StopVmResponse, GetVmStateRequest, GetVmStateResponse,
     ListVmsRequest, ListVmsResponse, DeployApplicationRequest, DeployApplicationResponse,
     UndeployApplicationRequest, UndeployApplicationResponse,
-    VmInstance, FirecrackerError as ProtoFirecrackerError,
+    VmInstance,
 };
 
 #[cfg(feature = "firecracker")]
@@ -356,7 +356,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         
         // For now, we use ApplicationDeployment to create the deployment configuration
         // and store the association between VM and application
-        let deployment = ApplicationDeployment::new(&req.application_id)
+        let _deployment = ApplicationDeployment::new(&req.application_id)
             .with_vm_config(VmConfig {
                 vm_id: req.vm_id.clone(),
                 ..Default::default()

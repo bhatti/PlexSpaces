@@ -147,6 +147,10 @@ pub struct WasmApplication {
     spawned_actor_ids: Arc<RwLock<Vec<String>>>,
     /// Node reference for stopping actors
     node: Arc<RwLock<Option<Arc<dyn ApplicationNode>>>>,
+    /// Tenant ID from API request (for actor spawning)
+    tenant_id: Arc<RwLock<String>>,
+    /// Namespace from API request (for actor spawning)
+    namespace: Arc<RwLock<String>>,
 }
 
 impl WasmApplication {
@@ -176,7 +180,19 @@ impl WasmApplication {
             spec,
             spawned_actor_ids: Arc::new(RwLock::new(Vec::new())),
             node: Arc::new(RwLock::new(None)),
+            tenant_id: Arc::new(RwLock::new(String::new())),
+            namespace: Arc::new(RwLock::new(String::new())),
         }
+    }
+    
+    /// Set tenant_id and namespace from API request
+    /// 
+    /// ## Purpose
+    /// Called by ApplicationManager before start() to set tenant_id/namespace from API request.
+    /// These values are used when spawning actors instead of hardcoded defaults.
+    pub async fn set_tenant_namespace(&self, tenant_id: String, namespace: String) {
+        *self.tenant_id.write().await = tenant_id;
+        *self.namespace.write().await = namespace;
     }
 
     /// Get module hash
@@ -309,14 +325,26 @@ impl WasmApplication {
             for child in &current_spec.children {
                 match child.r#type() {
                     plexspaces_proto::application::v1::ChildType::ChildTypeWorker => {
+                        // Get tenant_id/namespace from stored values (set during registration)
+                        let tenant_id = self.tenant_id.read().await.clone();
+                        let namespace = self.namespace.read().await.clone();
+                        // Fallback to empty if not set (will use defaults from node config)
+                        let final_tenant_id = if tenant_id.is_empty() { String::new() } else { tenant_id };
+                        let final_namespace = if namespace.is_empty() { String::new() } else { namespace };
                         // Spawn worker actor
-                        let actor_id = Self::spawn_worker_actor_internal(node.clone(), child, &module_hash, self.runtime.clone()).await?;
+                        let actor_id = Self::spawn_worker_actor_internal(node.clone(), child, &module_hash, self.runtime.clone(), final_tenant_id, final_namespace).await?;
                         actor_ids.push(actor_id);
                     }
                     plexspaces_proto::application::v1::ChildType::ChildTypeSupervisor => {
+                        // Get tenant_id/namespace from stored values (set during registration)
+                        let tenant_id = self.tenant_id.read().await.clone();
+                        let namespace = self.namespace.read().await.clone();
+                        // Fallback to empty if not set (will use defaults from node config)
+                        let final_tenant_id = if tenant_id.is_empty() { String::new() } else { tenant_id };
+                        let final_namespace = if namespace.is_empty() { String::new() } else { namespace };
                         // In Erlang-style supervision, supervisors are also actors
                         // Spawn the supervisor actor first, then process its children
-                        let supervisor_actor_id = Self::spawn_worker_actor_internal(node.clone(), child, &module_hash, self.runtime.clone()).await?;
+                        let supervisor_actor_id = Self::spawn_worker_actor_internal(node.clone(), child, &module_hash, self.runtime.clone(), final_tenant_id, final_namespace).await?;
                         actor_ids.push(supervisor_actor_id);
                         
                         // Then add child supervisor to queue for processing its children
@@ -354,6 +382,8 @@ impl WasmApplication {
         child_spec: &plexspaces_proto::application::v1::ChildSpec,
         module_hash: &str,
         runtime: Arc<WasmRuntime>,
+        tenant_id: String,
+        namespace: String,
     ) -> Result<String, ApplicationError> {
         use plexspaces_core::Actor;
 
@@ -417,11 +447,43 @@ impl WasmApplication {
         // Get ObjectRegistry from service locator if available
         let object_registry: Option<Arc<dyn plexspaces_core::ObjectRegistry>> = service_locator.get_object_registry().await;
 
-        // Get JournalStorage - create default in-memory storage for WASM actors
-        // This allows durability functions to work even if no storage is configured
-        // In production, a proper storage backend (PostgreSQL, SQLite, etc.) should be configured
-        use plexspaces_journaling::{JournalStorage, MemoryJournalStorage};
-        let journal_storage: Option<Arc<dyn JournalStorage>> = Some(Arc::new(MemoryJournalStorage::new()));
+        // Get JournalStorage - use SQLite file-based storage for durability
+        //
+        // Database URL priority:
+        // 1. PLEXSPACES_DATABASE_URL env var (shared database for all components)
+        // 2. PLEXSPACES_JOURNAL_DB env var (journal-specific, for backward compat)
+        // 3. Default: /tmp/plexspaces-{node_id}.db (file-based for durability)
+        //
+        // For in-memory (testing only): set PLEXSPACES_DATABASE_URL=:memory:
+        use plexspaces_journaling::JournalStorage;
+        let journal_storage: Option<Arc<dyn JournalStorage>> = {
+            let journal_db_path = std::env::var("PLEXSPACES_DATABASE_URL")
+                .or_else(|_| std::env::var("PLEXSPACES_JOURNAL_DB"))
+                .unwrap_or_else(|_| {
+                    // Use node ID to support multiple nodes on same machine
+                    let node_id = node.id().replace(['@', '/', '\\', ':'], "-");
+                    format!("/tmp/plexspaces-{}.db", node_id)
+                });
+            
+            match plexspaces_journaling::SqliteJournalStorage::new(&journal_db_path).await {
+                Ok(storage) => {
+                    tracing::info!(
+                        db_path = %journal_db_path,
+                        node_id = %node.id(),
+                        "Journal storage initialized (SQLite)"
+                    );
+                    Some(Arc::new(storage) as Arc<dyn JournalStorage>)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        db_path = %journal_db_path,
+                        "Failed to create SQLite journal storage, falling back to in-memory (no durability)"
+                    );
+                    Some(Arc::new(plexspaces_journaling::MemoryJournalStorage::new()) as Arc<dyn JournalStorage>)
+                }
+            }
+        };
 
         // Get BlobService from service locator if available
         // BlobService is not available via trait methods, so we'll pass None for now
@@ -474,15 +536,15 @@ impl WasmApplication {
             ))?;
         
         // Use ActorBuilder to build and spawn the actor with custom behavior
-        // Use system context for WASM application actors (system-level, but not internal())
+        // Use tenant_id/namespace from API request (passed as parameters)
         use plexspaces_actor::ActorBuilder;
         use plexspaces_core::RequestContext;
-        // Use system tenant/namespace instead of internal() - internal() is for internal use only
-        let system_ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        // Use tenant_id/namespace from API request (not hardcoded "internal"/"system")
+        let ctx = RequestContext::new_without_auth(tenant_id, namespace);
         // spawn() will extract actor_type from behavior.behavior_type() which now returns Custom(actor_type)
         let _actor_ref = ActorBuilder::new(behavior)
             .with_id(actor_id.clone())
-            .spawn(&system_ctx, service_locator)
+            .spawn(&ctx, service_locator)
             .await
             .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to spawn actor: {}", e)))?;
 
@@ -622,9 +684,9 @@ impl WasmApplication {
                     "ServiceLocator not available from node".to_string()
                 ))?;
             
-            // Use trait helper to get ActorFactory as trait object
-            use plexspaces_actor::{ActorFactory, get_actor_factory};
-            let actor_factory: Arc<dyn ActorFactory> = get_actor_factory(service_locator.as_ref()).await
+            // Get ActorFactory from ApplicationNode (avoids circular dependency)
+            use plexspaces_actor::ActorFactory;
+            let actor_factory: Arc<dyn ActorFactory> = node.actor_factory().await
                 .ok_or_else(|| ApplicationError::ActorStopFailed(
                     actor_id.to_string(),
                     "ActorFactory not found in ServiceLocator".to_string()
@@ -718,6 +780,18 @@ impl Application for WasmApplication {
                 );
                 }
             }
+        }
+        
+        // Log tenant_id/namespace being used (from API request, set before start())
+        {
+            let tenant_id = self.tenant_id.read().await.clone();
+            let namespace = self.namespace.read().await.clone();
+            tracing::debug!(
+                application = %self.name,
+                tenant_id = %if tenant_id.is_empty() { "<empty>" } else { &tenant_id },
+                namespace = %if namespace.is_empty() { "<empty>" } else { &namespace },
+                "WASM application starting with tenant_id/namespace from API request"
+            );
         }
 
         // Store node reference for shutdown

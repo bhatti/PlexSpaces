@@ -20,7 +20,7 @@
 syntax = "proto3";
 
 package plexspaces.node.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node/node;plexspaces_node_v1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node;plexspaces_node_v1";
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";

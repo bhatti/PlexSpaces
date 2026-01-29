@@ -275,6 +275,69 @@ PlexSpaces provides comprehensive security features including:
 - **User API Authentication**: JWT-based authentication for user-facing APIs
 - **Tenant Isolation**: Mandatory tenant isolation for all operations
 - **Security Validation**: Automatic validation that secrets are not hardcoded in config files
+- **Auto-Generation**: Development certificates can be auto-generated (production should use proper key management)
+
+### Security Configuration
+
+#### Environment Variables for Secrets
+
+**CRITICAL**: All secrets must be provided via environment variables, never hardcoded in config files.
+
+| Variable | Description | Required When |
+|----------|-------------|---------------|
+| `PLEXSPACES_JWT_SECRET` | JWT secret for HS256 signing | JWT enabled (unless using JWKS) |
+| `PLEXSPACES_MTLS_CA_CERT` | Path to CA certificate file | mTLS enabled (unless auto-generating) |
+| `PLEXSPACES_MTLS_SERVER_CERT` | Path to server certificate file | mTLS enabled (unless auto-generating) |
+| `PLEXSPACES_MTLS_SERVER_KEY` | Path to server private key file | mTLS enabled (unless auto-generating) |
+| `PLEXSPACES_MTLS_CERT_DIR` | Directory for auto-generated certificates | mTLS auto-generation (default: `/app/certs`) |
+| `PLEXSPACES_DISABLE_AUTH` | Disable auth validation (testing only) | Never in production |
+
+#### JWT Configuration
+
+```bash
+# Set JWT secret (required for HS256)
+export PLEXSPACES_JWT_SECRET="your-secret-key-here"
+
+# Or use JWKS for RS256 (no secret needed)
+# Configure jwks_url in SecurityConfig
+```
+
+#### mTLS Configuration
+
+**Option 1: Provide Certificate Files**
+
+```bash
+# Set certificate paths via environment variables
+export PLEXSPACES_MTLS_CA_CERT="/path/to/ca.crt"
+export PLEXSPACES_MTLS_SERVER_CERT="/path/to/server.crt"
+export PLEXSPACES_MTLS_SERVER_KEY="/path/to/server.key"
+```
+
+**Option 2: Auto-Generation (Development Only)**
+
+```yaml
+# In release.yaml or node config
+runtime:
+  security:
+    mtls:
+      enable_mtls: true
+      auto_generate: true
+      cert_dir: "/app/certs"  # Optional, defaults to /app/certs
+```
+
+Auto-generated certificates are saved to `cert_dir`:
+- `ca.crt` - CA certificate
+- `ca.key` - CA private key
+- `server.crt` - Server certificate
+- `server.key` - Server private key
+
+**⚠️ Security Note**: Auto-generated certificates are for development/testing only. Production should use proper certificate management (cert-manager, Vault, AWS Certificate Manager, etc.).
+
+#### Validation Behavior
+
+- **If auth is enabled but keys are missing**: Node will fail to start with a fatal error
+- **If `PLEXSPACES_DISABLE_AUTH=1`**: Validation is skipped (testing only)
+- **If `disable_auth=true` in config**: Validation is skipped (testing only)
 
 **For detailed security configuration and best practices, see [Security Guide](security.md).**
 
@@ -291,6 +354,12 @@ PlexSpaces provides comprehensive security features including:
 | `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` (or `ddb` if `AWS_REGION` set) |
 | `PLEXSPACES_CHANNEL_BACKEND` | Channel backend | `inmemory` (or `sqs` if `AWS_REGION` set) |
 | `PLEXSPACES_CLUSTER_NAME` | Cluster name for UDP channels | - |
+| `PLEXSPACES_JWT_SECRET` | JWT secret for HS256 (required if JWT enabled) | - |
+| `PLEXSPACES_MTLS_CA_CERT` | Path to mTLS CA certificate | - |
+| `PLEXSPACES_MTLS_SERVER_CERT` | Path to mTLS server certificate | - |
+| `PLEXSPACES_MTLS_SERVER_KEY` | Path to mTLS server private key | - |
+| `PLEXSPACES_MTLS_CERT_DIR` | Directory for auto-generated certificates | `/app/certs` |
+| `PLEXSPACES_DISABLE_AUTH` | Disable auth validation (testing only) | - |
 | `AWS_REGION` | AWS region (enables AWS backends) | - |
 | `AWS_ACCESS_KEY_ID` | AWS access key (use IAM roles in production) | - |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key (use IAM roles in production) | - |
@@ -305,15 +374,15 @@ PlexSpaces exposes HTTP endpoints via gRPC-Gateway on the same port as gRPC (def
 **FaaS-Style Actor Invocation**:
 - `GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}?param1=value1` - Read operations (ask pattern)
 - `POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` - Update operations (tell pattern)
-- `GET /api/v1/actors/{namespace}/{actor_type}?param1=value1` - Read operations without tenant_id (defaults to "default")
-- `POST /api/v1/actors/{namespace}/{actor_type}` - Update operations without tenant_id (defaults to "default")
+- `GET /api/v1/actors/{namespace}/{actor_type}?param1=value1` - Read operations without tenant_id (uses default_tenant_id from node config)
+- `POST /api/v1/actors/{namespace}/{actor_type}` - Update operations without tenant_id (uses default_tenant_id from node config)
 
 **Example**:
 ```bash
 # Get counter value (with tenant_id and namespace)
 curl "http://localhost:8001/api/v1/actors/default/default/counter?action=get"
 
-# Get counter value (without tenant_id, defaults to "default")
+# Get counter value (without tenant_id, uses default_tenant_id from node config)
 curl "http://localhost:8001/api/v1/actors/default/counter?action=get"
 
 # Increment counter (with tenant_id and namespace)

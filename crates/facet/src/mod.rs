@@ -30,6 +30,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 /// Exit reason for actor termination (minimal definition for Facet trait)
 ///
@@ -268,6 +269,23 @@ pub enum InterceptResult {
     ShortCircuit(Vec<u8>),
 }
 
+/// Outcome of before-method interception
+///
+/// ## Purpose
+/// Clearly indicates what the caller should do after interception.
+/// This replaces the hacky `(Vec<u8>, bool)` tuple with explicit intent.
+///
+/// ## Design
+/// - `CallActor(args)`: Call the actor's handle_message with these args (may have been modified by ReplaceArgs)
+/// - `ShortCircuit(result)`: Don't call the actor, return this result directly
+#[derive(Debug, Clone)]
+pub enum BeforeInterceptOutcome {
+    /// Call the actor with these arguments (may have been modified by facets)
+    CallActor(Vec<u8>),
+    /// Don't call the actor, return this result directly (facet handled the message)
+    ShortCircuit(Vec<u8>),
+}
+
 /// How to handle errors
 #[derive(Debug)]
 pub enum ErrorHandling {
@@ -321,9 +339,13 @@ pub struct FacetContainer {
 /// Metadata about a facet attached to an actor
 #[derive(Clone, Debug)]
 pub struct FacetMetadata {
+    /// Type identifier of the facet (e.g., "durability", "timer")
     pub facet_type: String,
+    /// Priority for facet execution order (higher = earlier)
     pub priority: i32,
+    /// When the facet was attached
     pub attached_at: std::time::Instant,
+    /// Configuration for the facet
     pub config: Value,
 }
 
@@ -348,6 +370,18 @@ impl FacetContainer {
         mut facet: Box<dyn Facet>,
         actor_id: &str,
     ) -> Result<String, FacetError> {
+        self.attach_with_tenant_context(facet, actor_id, None, None).await
+    }
+
+    /// Attach a facet with tenant_id/namespace from API request
+    /// This allows facets (like RegistryFacet) to use API-provided tenant_id/namespace
+    pub async fn attach_with_tenant_context(
+        &mut self,
+        mut facet: Box<dyn Facet>,
+        actor_id: &str,
+        tenant_id: Option<String>,
+        namespace: Option<String>,
+    ) -> Result<String, FacetError> {
         let span = tracing::span!(tracing::Level::DEBUG, "facet.attach", facet_type = %facet.facet_type(), actor_id = %actor_id);
         let _enter = span.enter();
         
@@ -363,11 +397,26 @@ impl FacetContainer {
         }
 
         // Extract config and priority from facet
-        let config = facet.get_config();
+        let mut config = facet.get_config();
         let priority = facet.get_priority();
+        
+        // For RegistryFacet, merge tenant_id/namespace from API request if provided
+        // This allows RegistryFacet to use API-provided tenant_id/namespace instead of defaults
+        if facet_type == "registry" {
+            if let Some(config_obj) = config.as_object_mut() {
+                if let Some(tid) = tenant_id {
+                    config_obj.insert("_tenant_id".to_string(), serde_json::Value::String(tid));
+                }
+                if let Some(ns) = namespace {
+                    config_obj.insert("_namespace".to_string(), serde_json::Value::String(ns));
+                }
+            }
+        }
 
         // Call on_attach BEFORE storing metadata (so facet can initialize)
+        info!(actor_id = %actor_id, facet_type = %facet_type, "🔧 FacetContainer: Calling facet.on_attach");
         facet.on_attach(actor_id, config.clone()).await?;
+        info!(actor_id = %actor_id, facet_type = %facet_type, "✅ FacetContainer: Facet attached successfully");
 
         // Store metadata FIRST (before creating Arc, so we can use it for sorting)
         let facet_type_clone = facet_type.clone();
@@ -503,31 +552,45 @@ impl FacetContainer {
     }
 
     /// Execute before interceptors
-    pub async fn intercept_before(&self, method: &str, args: &[u8]) -> Result<Vec<u8>, FacetError> {
+    ///
+    /// ## Returns
+    /// `BeforeInterceptOutcome` enum that clearly indicates what the caller should do:
+    /// - `CallActor(args)`: Call the actor's handle_message with these args (may have been modified)
+    /// - `ShortCircuit(result)`: Don't call the actor, return this result directly
+    ///
+    /// ## Design
+    /// This method returns an explicit enum instead of a hacky `(Vec<u8>, bool)` tuple.
+    /// The enum clearly communicates intent and eliminates ambiguity about what should happen next.
+    pub async fn intercept_before(&self, method: &str, args: &[u8]) -> Result<BeforeInterceptOutcome, FacetError> {
         let span = tracing::span!(tracing::Level::TRACE, "facet.intercept_before", method = %method);
         let _enter = span.enter();
         
         metrics::counter!("plexspaces_facet_intercept_before_total", "method" => method.to_string()).increment(1);
         let start = std::time::Instant::now();
         
+        let facet_count = self.get_facet_count();
+        debug!(method = %method, facet_count = facet_count, "FacetContainer: Checking facets for interception");
+        
         let mut current_args = args.to_vec();
 
         for facet in &self.facets {
             let facet = facet.read().await;
+            let facet_type = facet.facet_type();
+            debug!(method = %method, facet_type = %facet_type, "FacetContainer: Checking facet");
             match facet.before_method(method, &current_args).await? {
-                InterceptResult::Continue => {}
+                InterceptResult::Continue => {
+                    debug!(method = %method, facet_type = %facet_type, "FacetContainer: Facet continued (no interception)");
+                }
                 InterceptResult::ReplaceArgs(new_args) => {
                     current_args = new_args;
-                    tracing::trace!(facet_type = %facet.facet_type(), "Facet replaced args");
+                    tracing::trace!(facet_type = %facet_type, "Facet replaced args");
                 }
                 InterceptResult::ShortCircuit(result) => {
                     let duration = start.elapsed();
                     metrics::histogram!("plexspaces_facet_intercept_before_duration_seconds", "method" => method.to_string()).record(duration.as_secs_f64());
-                    metrics::counter!("plexspaces_facet_intercept_shortcircuit_total", "method" => method.to_string(), "facet_type" => facet.facet_type().to_string()).increment(1);
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(facet_type = %facet.facet_type(), "Facet short-circuited");
-                    }
-                    return Ok(result);
+                    metrics::counter!("plexspaces_facet_intercept_shortcircuit_total", "method" => method.to_string(), "facet_type" => facet_type.to_string()).increment(1);
+                    info!(method = %method, facet_type = %facet_type, duration_ms = duration.as_millis(), "🎯 FacetContainer: Facet short-circuited message");
+                    return Ok(BeforeInterceptOutcome::ShortCircuit(result));
                 }
                 _ => {}
             }
@@ -535,8 +598,10 @@ impl FacetContainer {
 
         let duration = start.elapsed();
         metrics::histogram!("plexspaces_facet_intercept_before_duration_seconds", "method" => method.to_string()).record(duration.as_secs_f64());
+        let facet_count = self.get_facet_count();
+        debug!(method = %method, facet_count = facet_count, duration_ms = duration.as_millis(), "FacetContainer: No facet intercepted, passing to actor");
         
-        Ok(current_args)
+        Ok(BeforeInterceptOutcome::CallActor(current_args))
     }
 
     /// Execute after interceptors
@@ -574,6 +639,11 @@ impl FacetContainer {
     }
 
     /// List attached facets
+    /// Get the number of facets attached
+    pub fn get_facet_count(&self) -> usize {
+        self.facets.len()
+    }
+
     pub fn list_facets(&self) -> Vec<String> {
         self.metadata.keys().cloned().collect()
     }
@@ -854,12 +924,12 @@ impl Facet for LoggingFacet {
 
     async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
         // Use stored config, ignore parameter (config is set in constructor)
-        println!("Logging facet attached to actor {}", actor_id);
+        tracing::debug!(actor_id = %actor_id, "Logging facet attached to actor");
         Ok(())
     }
 
     async fn on_detach(&mut self, actor_id: &str) -> Result<(), FacetError> {
-        println!("Logging facet detached from actor {}", actor_id);
+        tracing::debug!(actor_id = %actor_id, "Logging facet detached from actor");
         Ok(())
     }
 
@@ -868,11 +938,11 @@ impl Facet for LoggingFacet {
         method: &str,
         args: &[u8],
     ) -> Result<InterceptResult, FacetError> {
-        println!(
-            "[{}] Calling method: {} with {} bytes",
-            self.level,
-            method,
-            args.len()
+        tracing::debug!(
+            level = %self.level,
+            method = %method,
+            args_bytes = args.len(),
+            "Calling method"
         );
         Ok(InterceptResult::Continue)
     }
@@ -883,11 +953,11 @@ impl Facet for LoggingFacet {
         _args: &[u8],
         _result: &[u8],
     ) -> Result<InterceptResult, FacetError> {
-        println!(
-            "[{}] Method {} returned {} bytes",
-            self.level,
-            method,
-            _result.len()
+        tracing::debug!(
+            level = %self.level,
+            method = %method,
+            result_bytes = _result.len(),
+            "Method returned"
         );
         Ok(InterceptResult::Continue)
     }
@@ -963,7 +1033,7 @@ impl Facet for CachingFacet {
 
         // Check cache
         if let Some(cached) = self.cache.get(&key) {
-            println!("Cache hit for {}", method);
+            tracing::trace!(method = %method, "Cache hit");
             return Ok(InterceptResult::ShortCircuit(cached.clone()));
         }
 
@@ -1047,9 +1117,12 @@ impl Facet for MetricsFacet {
             } else {
                 0
             };
-            println!(
-                "Method {}: {} calls, avg {}ms, {} errors",
-                method, metrics.count, avg_time, metrics.errors
+            tracing::debug!(
+                method = %method,
+                calls = metrics.count,
+                avg_ms = avg_time,
+                errors = metrics.errors,
+                "Method metrics on detach"
             );
         }
         Ok(())
@@ -1071,13 +1144,13 @@ impl Facet for MetricsFacet {
         _result: &[u8],
     ) -> Result<InterceptResult, FacetError> {
         // Update metrics (would need mutable self)
-        println!("Recording metrics for {}", method);
+        tracing::trace!(method = %method, "Recording metrics");
         Ok(InterceptResult::Continue)
     }
 
     async fn on_error(&self, method: &str, _error: &str) -> Result<ErrorHandling, FacetError> {
         // Increment error count
-        println!("Error in method {}", method);
+        tracing::debug!(method = %method, "Error in method");
         Ok(ErrorHandling::Propagate)
     }
     
@@ -1114,11 +1187,18 @@ mod tests {
 
         // Test interception
         let args = b"test args";
-        let result = container
+        let outcome = container
             .intercept_before("test_method", args)
             .await
             .unwrap();
-        assert_eq!(result, args);
+        match outcome {
+            BeforeInterceptOutcome::CallActor(result) => {
+                assert_eq!(result, args, "Should return original args when no facets intercept");
+            }
+            BeforeInterceptOutcome::ShortCircuit(_) => {
+                panic!("Should not be short-circuited when no facets intercept");
+            }
+        }
     }
 
     #[tokio::test]

@@ -3,6 +3,8 @@
 //
 // Tests for VM Health Monitoring
 
+use plexspaces_common::skip_if_unavailable;
+use plexspaces_common::test_helpers::firecracker_available;
 use plexspaces_firecracker::health::{HealthStatus, VmHealthMonitor};
 use plexspaces_firecracker::{FirecrackerVm, VmConfig};
 use std::sync::Arc;
@@ -49,8 +51,8 @@ async fn test_health_check_healthy_vm() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Firecracker binary
 async fn test_health_check_running_vm() {
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
     // Test: Health check on running VM should return Healthy
     // This test requires Firecracker binary
     let config = VmConfig {

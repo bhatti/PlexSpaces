@@ -125,7 +125,7 @@ pub async fn deploy(
 
     // Load application config if provided
     let app_config = if let Some(config_path) = config_file {
-        let config_str = fs::read_to_string(config_path)
+        let _config_str = fs::read_to_string(config_path)
             .with_context(|| format!("Failed to read config file: {}", config_path))?;
         
         // TODO: Parse TOML/JSON to ApplicationSpec

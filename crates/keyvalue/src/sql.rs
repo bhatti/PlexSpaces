@@ -130,9 +130,21 @@ impl SqliteKVStore {
     /// # }
     /// ```
     pub async fn new(path: &str) -> KVResult<Self> {
+        // Build proper SQLite URL:
+        // - ":memory:" -> "sqlite::memory:"
+        // - "/absolute/path" -> "sqlite:///absolute/path?mode=rwc" (file URI, create if not exists)
+        // - "relative/path" -> "sqlite:relative/path?mode=rwc"
+        let url = if path == ":memory:" {
+            "sqlite::memory:".to_string()
+        } else if path.starts_with('/') {
+            format!("sqlite://{}?mode=rwc", path)  // sqlite:// + /path = sqlite:///path
+        } else {
+            format!("sqlite:{}?mode=rwc", path)  // mode=rwc creates file if not exists
+        };
+        
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&format!("sqlite:{}", path))
+            .connect(&url)
             .await?;
 
         // Run migrations
@@ -161,6 +173,14 @@ impl SqliteKVStore {
         sqlx::query("PRAGMA mmap_size=268435456")
             .execute(&pool)
             .await?;
+
+        tracing::info!(
+            db_path = %path,
+            db_url = %url,
+            table = "kv_store",
+            backend = "SQLite",
+            "KeyValue storage initialized"
+        );
 
         Ok(Self {
             pool,
@@ -215,15 +235,27 @@ impl KeyValueStore for SqliteKVStore {
     async fn get(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Vec<u8>>> {
         let now = Self::now_timestamp();
 
-        let result = sqlx::query(
-            "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let result = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(result.map(|row| row.get::<Vec<u8>, _>("value")))
     }
@@ -290,15 +322,27 @@ impl KeyValueStore for SqliteKVStore {
     async fn exists(&self, ctx: &RequestContext, key: &str) -> KVResult<bool> {
         let now = Self::now_timestamp();
 
-        let result = sqlx::query(
-            "SELECT 1 FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let result = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT 1 FROM kv_store WHERE tenant_id = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT 1 FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(result.is_some())
     }
@@ -307,8 +351,8 @@ impl KeyValueStore for SqliteKVStore {
         let now = Self::now_timestamp();
         let pattern = format!("{}%", prefix);
 
-        // Filter by namespace only if it's non-empty
-        let rows = if ctx.namespace().is_empty() {
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let rows = if ctx.should_skip_namespace_filter() {
             sqlx::query(
                 "SELECT key FROM kv_store WHERE tenant_id = ? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?)",
             )
@@ -444,15 +488,27 @@ impl KeyValueStore for SqliteKVStore {
     async fn get_ttl(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Duration>> {
         let now = Self::now_timestamp();
 
-        let result = sqlx::query(
-            "SELECT expires_at FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)"
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let result = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT expires_at FROM kv_store WHERE tenant_id = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT expires_at FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(result.and_then(|row| {
             row.get::<Option<i64>, _>("expires_at")
@@ -470,17 +526,29 @@ impl KeyValueStore for SqliteKVStore {
         let mut tx = self.pool.begin().await?;
         let now = Self::now_timestamp();
 
-        // Check current value
-        let current = sqlx::query(
-            "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&mut *tx)
-        .await?
-        .map(|row| row.get::<Vec<u8>, _>("value"));
+        // Check current value - for admin/internal contexts with empty namespace, skip namespace filter
+        let current = if (ctx.is_admin() || ctx.is_internal()) && ctx.namespace().is_empty() {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Vec<u8>, _>("value"))
+        } else {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Vec<u8>, _>("value"))
+        };
 
         let matches = match (&current, &expected) {
             (None, None) => true,
@@ -529,20 +597,35 @@ impl KeyValueStore for SqliteKVStore {
         let mut tx = self.pool.begin().await?;
         let now = Self::now_timestamp();
 
-        // Get current value
-        let current = sqlx::query(
-            "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&mut *tx)
-        .await?
-        .map(|row| row.get::<Vec<u8>, _>("value"))
-        .map(|v| Self::decode_i64(&v))
-        .transpose()?
-        .unwrap_or(0);
+        // Get current value - for admin/internal contexts with empty namespace, skip namespace filter
+        let current = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Vec<u8>, _>("value"))
+            .map(|v| Self::decode_i64(&v))
+            .transpose()?
+            .unwrap_or(0)
+        } else {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Vec<u8>, _>("value"))
+            .map(|v| Self::decode_i64(&v))
+            .transpose()?
+            .unwrap_or(0)
+        };
 
         let new_value = current + delta;
         let encoded = Self::encode_i64(new_value);
@@ -582,7 +665,7 @@ impl KeyValueStore for SqliteKVStore {
         self.increment(ctx, key, -delta).await
     }
 
-    async fn watch(&self, ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch(&self, _ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: key.to_string(),
@@ -627,15 +710,27 @@ impl KeyValueStore for SqliteKVStore {
         let now = Self::now_timestamp();
         let pattern = format!("{}%", prefix);
 
-        let row = sqlx::query(
-            "SELECT COUNT(*) as count FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?)"
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(pattern)
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let row = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT COUNT(*) as count FROM kv_store WHERE tenant_id = ? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(pattern)
+            .bind(now)
+            .fetch_one(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT COUNT(*) as count FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(pattern)
+            .bind(now)
+            .fetch_one(&self.pool)
+            .await?
+        };
 
         Ok(row.get::<i64, _>("count") as usize)
     }
@@ -643,14 +738,25 @@ impl KeyValueStore for SqliteKVStore {
     async fn get_stats(&self, ctx: &RequestContext) -> KVResult<KVStats> {
         let now = Self::now_timestamp();
 
-        let row = sqlx::query(
-            "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE tenant_id = ? AND namespace = ? AND (expires_at IS NULL OR expires_at > ?)"
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let row = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE tenant_id = ? AND (expires_at IS NULL OR expires_at > ?)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(now)
+            .fetch_one(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE tenant_id = ? AND namespace = ? AND (expires_at IS NULL OR expires_at > ?)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(now)
+            .fetch_one(&self.pool)
+            .await?
+        };
 
         Ok(KVStats {
             total_keys: row.get::<i64, _>("count") as usize,
@@ -708,6 +814,21 @@ impl PostgreSQLKVStore {
             .await
             .map_err(|e| KVError::BackendError(format!("Migration failed: {}", e)))?;
 
+        // Mask credentials in connection string for logging
+        let display_url = connection_string
+            .split('@')
+            .last()
+            .unwrap_or("(hidden)")
+            .to_string();
+        
+        tracing::info!(
+            db_url = %format!("postgres://...@{}", display_url),
+            table = "kv_store",
+            backend = "PostgreSQL",
+            pool_size = pool_size,
+            "KeyValue storage initialized"
+        );
+
         Ok(Self {
             pool,
             watches: Arc::new(RwLock::new(Vec::new())),
@@ -757,15 +878,27 @@ impl KeyValueStore for PostgreSQLKVStore {
     async fn get(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Vec<u8>>> {
         let now = Self::now_timestamp();
 
-        let result = sqlx::query(
-            "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let result = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(result.map(|row| row.get::<Vec<u8>, _>("value")))
     }
@@ -830,15 +963,27 @@ impl KeyValueStore for PostgreSQLKVStore {
     async fn exists(&self, ctx: &RequestContext, key: &str) -> KVResult<bool> {
         let now = Self::now_timestamp();
 
-        let result = sqlx::query(
-            "SELECT 1 FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let result = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT 1 FROM kv_store WHERE tenant_id = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT 1 FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(result.is_some())
     }
@@ -847,8 +992,8 @@ impl KeyValueStore for PostgreSQLKVStore {
         let now = Self::now_timestamp();
         let pattern = format!("{}%", prefix);
 
-        // Filter by namespace only if it's non-empty
-        let rows = if ctx.namespace().is_empty() {
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let rows = if ctx.should_skip_namespace_filter() {
             sqlx::query(
                 "SELECT key FROM kv_store WHERE tenant_id = $1 AND key LIKE $2 AND (expires_at IS NULL OR expires_at > $3)"
             )
@@ -982,15 +1127,27 @@ impl KeyValueStore for PostgreSQLKVStore {
     async fn get_ttl(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Duration>> {
         let now = Self::now_timestamp();
 
-        let result = sqlx::query(
-            "SELECT expires_at FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)"
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let result = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT expires_at FROM kv_store WHERE tenant_id = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT expires_at FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(result.and_then(|row| {
             row.get::<Option<i64>, _>("expires_at")
@@ -1008,16 +1165,29 @@ impl KeyValueStore for PostgreSQLKVStore {
         let mut tx = self.pool.begin().await?;
         let now = Self::now_timestamp();
 
-        let current = sqlx::query(
-            "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&mut *tx)
-        .await?
-        .map(|row| row.get::<Vec<u8>, _>("value"));
+        // Check current value - for admin/internal contexts with empty namespace, skip namespace filter
+        let current = if (ctx.is_admin() || ctx.is_internal()) && ctx.namespace().is_empty() {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Vec<u8>, _>("value"))
+        } else {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Vec<u8>, _>("value"))
+        };
 
         let matches = match (&current, &expected) {
             (None, None) => true,
@@ -1066,19 +1236,35 @@ impl KeyValueStore for PostgreSQLKVStore {
         let mut tx = self.pool.begin().await?;
         let now = Self::now_timestamp();
 
-        let current = sqlx::query(
-            "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(key)
-        .bind(now)
-        .fetch_optional(&mut *tx)
-        .await?
-        .map(|row| row.get::<Vec<u8>, _>("value"))
-        .map(|v| Self::decode_i64(&v))
-        .transpose()?
-        .unwrap_or(0);
+        // Get current value - for admin/internal contexts with empty namespace, skip namespace filter
+        let current = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Vec<u8>, _>("value"))
+            .map(|v| Self::decode_i64(&v))
+            .transpose()?
+            .unwrap_or(0)
+        } else {
+            sqlx::query(
+                "SELECT value FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key = $3 AND (expires_at IS NULL OR expires_at > $4)",
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(key)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(|row| row.get::<Vec<u8>, _>("value"))
+            .map(|v| Self::decode_i64(&v))
+            .transpose()?
+            .unwrap_or(0)
+        };
 
         let new_value = current + delta;
         let encoded = Self::encode_i64(new_value);
@@ -1118,7 +1304,7 @@ impl KeyValueStore for PostgreSQLKVStore {
         self.increment(ctx, key, -delta).await
     }
 
-    async fn watch(&self, ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch(&self, _ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: key.to_string(),
@@ -1163,15 +1349,27 @@ impl KeyValueStore for PostgreSQLKVStore {
         let now = Self::now_timestamp();
         let pattern = format!("{}%", prefix);
 
-        let row = sqlx::query(
-            "SELECT COUNT(*) as count FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key LIKE $3 AND (expires_at IS NULL OR expires_at > $4)"
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(pattern)
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let row = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT COUNT(*) as count FROM kv_store WHERE tenant_id = $1 AND key LIKE $2 AND (expires_at IS NULL OR expires_at > $3)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(pattern)
+            .bind(now)
+            .fetch_one(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT COUNT(*) as count FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key LIKE $3 AND (expires_at IS NULL OR expires_at > $4)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(pattern)
+            .bind(now)
+            .fetch_one(&self.pool)
+            .await?
+        };
 
         Ok(row.get::<i64, _>("count") as usize)
     }
@@ -1179,14 +1377,25 @@ impl KeyValueStore for PostgreSQLKVStore {
     async fn get_stats(&self, ctx: &RequestContext) -> KVResult<KVStats> {
         let now = Self::now_timestamp();
 
-        let row = sqlx::query(
-            "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND (expires_at IS NULL OR expires_at > $3)"
-        )
-        .bind(ctx.tenant_id())
-        .bind(ctx.namespace())
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await?;
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let row = if ctx.should_skip_namespace_filter() {
+            sqlx::query(
+                "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE tenant_id = $1 AND (expires_at IS NULL OR expires_at > $2)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(now)
+            .fetch_one(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT COUNT(*) as count, SUM(LENGTH(key) + LENGTH(value)) as size FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND (expires_at IS NULL OR expires_at > $3)"
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(now)
+            .fetch_one(&self.pool)
+            .await?
+        };
 
         Ok(KVStats {
             total_keys: row.get::<i64, _>("count") as usize,
@@ -1362,5 +1571,94 @@ mod tests {
         let stats = kv.get_stats(&ctx).await.unwrap();
         assert_eq!(stats.total_keys, 2);
         assert_eq!(stats.backend_type, "SQLite");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_admin_internal_empty_namespace_lookup() {
+        let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        
+        // Create data in different namespaces
+        let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
+        let ctx2 = RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string());
+        
+        kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
+        kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
+        
+        // Admin context with empty namespace should see both
+        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        assert!(admin_ctx.should_skip_namespace_filter(), "Admin context should skip namespace filter");
+        let value = kv.get(&admin_ctx, "key1").await.unwrap();
+        assert!(value.is_some(), "Admin should find key across namespaces");
+        
+        // Internal context with empty namespace should see both
+        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        assert!(internal_ctx.should_skip_namespace_filter(), "Internal context should skip namespace filter");
+        let value = kv.get(&internal_ctx, "key1").await.unwrap();
+        assert!(value.is_some(), "Internal should find key across namespaces");
+        
+        // List should return keys from all namespaces
+        let keys = kv.list(&admin_ctx, "").await.unwrap();
+        assert!(keys.len() >= 1, "Admin list should return keys from all namespaces");
+        
+        // Stats should count all namespaces
+        let stats = kv.get_stats(&admin_ctx).await.unwrap();
+        assert!(stats.total_keys >= 2, "Admin stats should count all namespaces");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_admin_internal_empty_namespace_exists() {
+        let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        
+        let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
+        kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
+        
+        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        assert!(kv.exists(&admin_ctx, "key1").await.unwrap(), "Admin should find key across namespaces");
+        
+        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        assert!(kv.exists(&internal_ctx, "key1").await.unwrap(), "Internal should find key across namespaces");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_admin_internal_empty_namespace_get_ttl() {
+        let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        
+        let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
+        kv.put_with_ttl(&ctx1, "key1", b"value1".to_vec(), Duration::from_secs(60)).await.unwrap();
+        
+        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        let ttl = kv.get_ttl(&admin_ctx, "key1").await.unwrap();
+        assert!(ttl.is_some(), "Admin should get TTL across namespaces");
+        
+        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        let ttl = kv.get_ttl(&internal_ctx, "key1").await.unwrap();
+        assert!(ttl.is_some(), "Internal should get TTL across namespaces");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_admin_internal_empty_namespace_count_prefix() {
+        let kv = SqliteKVStore::new(":memory:").await.unwrap();
+        
+        let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
+        let ctx2 = RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string());
+        
+        kv.put(&ctx1, "prefix:key1", b"value1".to_vec()).await.unwrap();
+        kv.put(&ctx2, "prefix:key2", b"value2".to_vec()).await.unwrap();
+        
+        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        let count = kv.count_prefix(&admin_ctx, "prefix:").await.unwrap();
+        assert!(count >= 2, "Admin count_prefix should count across all namespaces");
+        
+        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
+            .with_admin(true);
+        let count = kv.count_prefix(&internal_ctx, "prefix:").await.unwrap();
+        assert!(count >= 2, "Internal count_prefix should count across all namespaces");
     }
 }

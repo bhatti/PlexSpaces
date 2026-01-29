@@ -176,9 +176,10 @@ message GetRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // Get response
@@ -197,12 +198,13 @@ message PutRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
+
   // Value to store
   bytes value = 2 [(google.api.field_behavior) = REQUIRED];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 3;
 }
 
 // Put response
@@ -218,9 +220,10 @@ message DeleteRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // Delete response
@@ -236,9 +239,10 @@ message ExistsRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // Exists response
@@ -254,9 +258,10 @@ message ListRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string.max_len = 1024
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // List response
@@ -272,9 +277,10 @@ message MultiGetRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).repeated = {min_items: 1, max_items: 1000, items: {string: {min_len: 1, max_len: 1024}}}
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // MultiGet response
@@ -302,9 +308,10 @@ message MultiPutRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).repeated = {min_items: 1, max_items: 1000}
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // Key-value pair
@@ -332,18 +339,19 @@ message PutWithTtlRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
+
   // Value to store
   bytes value = 2 [(google.api.field_behavior) = REQUIRED];
-  
+
   // Time-to-live
   google.protobuf.Duration ttl = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 2592000}}  // 1s to 30 days
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 4;
 }
 
 // PutWithTtl response
@@ -359,15 +367,16 @@ message RefreshTtlRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
+
   // New TTL
   google.protobuf.Duration ttl = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 2592000}}  // 1s to 30 days
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 3;
 }
 
 // RefreshTtl response
@@ -383,9 +392,10 @@ message GetTtlRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // GetTtl response
@@ -404,15 +414,16 @@ message CasRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
+
   // Expected value (None means key must not exist)
   bytes expected_value = 2;  // Empty bytes = None
-  
+
   // New value
   bytes new_value = 3 [(google.api.field_behavior) = REQUIRED];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 4;
 }
 
 // Cas response
@@ -428,12 +439,13 @@ message IncrementRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
+
   // Delta to add
   int64 delta = 2;
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 3;
 }
 
 // Increment response
@@ -449,12 +461,13 @@ message DecrementRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 1024}
   ];
-  
+
   // Delta to subtract
   int64 delta = 2;
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 3;
 }
 
 // Decrement response
@@ -470,9 +483,10 @@ message ClearPrefixRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string.max_len = 1024
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // ClearPrefix response
@@ -488,9 +502,10 @@ message CountPrefixRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string.max_len = 1024
   ];
-  
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 2;
 }
 
 // CountPrefix response
@@ -501,8 +516,9 @@ message CountPrefixResponse {
 
 // GetStats request
 message GetStatsRequest {
-  // Request context (contains tenant_id, namespace, user_id)
-  plexspaces.common.v1.RequestContext context = 1 [(google.api.field_behavior) = REQUIRED];
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 1;
 }
 
 // GetStats response

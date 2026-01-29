@@ -26,10 +26,16 @@
 
 pub mod request_context;
 pub mod aws_config;
+pub mod security_validator;
+pub mod release_config;
+pub mod release_parser;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 
-pub use request_context::{RequestContext, RequestContextError};
+pub use request_context::{RequestContext, RequestContextError, AUTH_REQUIRED_HINT};
 pub use aws_config::{AWSConfig, DynamoDBConfig, SQSConfig, S3Config, DLQConfig};
+pub use security_validator::{validate_security_config, SecurityValidationError};
+pub use release_config::create_default_release_config;
+pub use release_parser::{Release, ReleaseError};
 

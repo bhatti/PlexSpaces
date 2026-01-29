@@ -152,7 +152,7 @@ where
 }
 
 /// Global discovery cache (shared across all discovery operations)
-/// Cache key format: "{object_type}:{category}:{tenant_id}:{namespace}" (e.g., "node:internal:system", "application:myapp:internal:system")
+/// Cache key format: "{object_type}:{category}:{tenant_id}:{namespace}" (e.g., "node:cluster:tenant1:prod", "application:myapp:tenant1:default")
 type CacheKey = String;
 static DISCOVERY_CACHE: once_cell::sync::Lazy<Arc<RwLock<DiscoveryCache<CacheKey, Vec<ObjectRegistration>>>>> =
     once_cell::sync::Lazy::new(|| {
@@ -285,12 +285,12 @@ pub async fn register_application<T: ObjectRegistryTrait + ?Sized>(
 /// ## Returns
 /// Result indicating success or failure
 pub async fn unregister_application(
-    object_registry: &Arc<dyn ObjectRegistryTrait>,
+    _object_registry: &Arc<dyn ObjectRegistryTrait>,
     ctx: &RequestContext,
     app_name: &str,
     node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let object_id = format!("{}@{}", app_name, node_id);
+    let _object_id = format!("{}@{}", app_name, node_id);
     // Use lookup_full to get the registration, then we'd need to call unregister
     // For now, this is a placeholder - unregister would need to be added to the trait
     // Invalidate all application cache entries for this tenant/namespace to prevent stale data
@@ -509,9 +509,9 @@ pub async fn discover_workflow_nodes<T: ObjectRegistryTrait + ?Sized>(
 /// ## Returns
 /// Result indicating success or failure
 pub async fn heartbeat_node(
-    object_registry: &Arc<dyn ObjectRegistryTrait>,
-    ctx: &RequestContext,
-    node_id: &str,
+    _object_registry: &Arc<dyn ObjectRegistryTrait>,
+    _ctx: &RequestContext,
+    _node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Heartbeat is not in the trait - this would need to be added
     // For now, return Ok(())

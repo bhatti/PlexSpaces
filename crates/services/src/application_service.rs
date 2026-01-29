@@ -37,16 +37,66 @@
 use plexspaces_core::{ServiceLocator, ApplicationManager as ApplicationManagerTrait, object_registry_helpers};
 use plexspaces_proto::v1::application::ApplicationState as CoreApplicationState;
 use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService, ApplicationSpec,
+    application_service_server::ApplicationService,
     DeployApplicationRequest, DeployApplicationResponse, GetApplicationStatusRequest,
     GetApplicationStatusResponse, ListApplicationsRequest, ListApplicationsResponse,
-    UndeployApplicationRequest, UndeployApplicationResponse, ApplicationInfo, ApplicationMetrics,
-    ApplicationStatus, ApplicationRuntimeState, Application,
+    UndeployApplicationRequest, UndeployApplicationResponse,
+    ApplicationStatus, ApplicationRuntimeState, ApplicationSpec, ShutdownStrategy,
+    ApplicationType, SupervisorSpec, SupervisionStrategy, ChildSpec, ChildType, RestartPolicy,
 };
-use plexspaces_wasm_runtime::{WasmRuntime, WasmDeploymentService};
+use plexspaces_wasm_runtime::WasmDeploymentService;
 use std::sync::Arc;
 use std::time::Duration;
 use tonic::{Request, Response, Status};
+
+/// Create a default ApplicationSpec with a single worker actor supervisor tree.
+///
+/// This ensures consistent behavior between HTTP and gRPC deployment paths.
+/// When no ApplicationSpec is provided, we create a minimal spec with:
+/// - Application type: ACTIVE
+/// - One-for-one supervision strategy
+/// - Single worker actor with the application name as ID
+///
+/// ## Arguments
+/// * `name` - Application/actor name
+/// * `version` - Application version
+///
+/// ## Returns
+/// ApplicationSpec with default supervisor tree
+pub fn create_default_application_spec(name: &str, version: &str) -> ApplicationSpec {
+    let default_supervisor = SupervisorSpec {
+        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+        max_restarts: 5,
+        max_restart_window: None,
+        children: vec![
+            ChildSpec {
+                id: name.to_string(), // Use application name as actor ID
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: std::collections::HashMap::new(),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: None,
+                supervisor: None,
+                facets: vec![],
+            }
+        ],
+    };
+    
+    ApplicationSpec {
+        name: name.to_string(),
+        version: version.to_string(),
+        description: format!("WASM application: {}", name),
+        r#type: ApplicationType::ApplicationTypeActive.into(),
+        dependencies: vec![],
+        env: std::collections::HashMap::new(),
+        supervisor: Some(default_supervisor),
+        // Deployment configuration (merged from ApplicationConfig)
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(prost_types::Duration { seconds: 60, nanos: 0 }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        metadata: None,
+    }
+}
 
 /// Application service implementation
 #[derive(Clone)]
@@ -92,6 +142,21 @@ impl ApplicationService for ApplicationServiceImpl {
         &self,
         request: Request<DeployApplicationRequest>,
     ) -> Result<Response<DeployApplicationResponse>, Status> {
+        // Extract RequestContext from gRPC request - tenant_id/namespace come from API request
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &service_locator_trait,
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
+        // Extract tenant_id and namespace from RequestContext (from API request)
+        let tenant_id = ctx.tenant_id().to_string();
+        let namespace = ctx.namespace().to_string();
+        
         let req = request.into_inner();
         
         // OBSERVABILITY: Record metrics and log deployment attempt
@@ -104,7 +169,6 @@ impl ApplicationService for ApplicationServiceImpl {
             version = %req.version,
             has_wasm_module = req.wasm_module.is_some(),
             has_config = req.config.is_some(),
-            has_release_config = req.release_config.is_some(),
             "Deploying application"
         );
 
@@ -136,33 +200,45 @@ impl ApplicationService for ApplicationServiceImpl {
                 .map_err(|e| Status::internal(format!("Failed to deploy WASM module: {}", e)))?;
 
             // Create WASM application
-            let app_name = req.name.clone();
+            // Use application_id as the app name for consistent lookup in undeploy
+            // The display name is stored in config
+            let app_name = req.application_id.clone();
             let app_version = req.version.clone();
             
-            // Merge release config if provided
-            let mut merged_config = req.config.clone().unwrap_or_default();
-            if let Some(ref release_config) = req.release_config {
-                merge_release_config(&mut merged_config, release_config);
+            // Get or create ApplicationSpec with default supervisor tree
+            // This ensures consistent behavior with HTTP deployment path
+            let mut merged_config = req.config.clone().unwrap_or_else(|| {
+                // No config provided - create default spec with supervisor tree
+                // This ensures at least one actor is spawned for every deployed application
+                tracing::info!(
+                    application_id = %req.application_id,
+                    application_name = %req.name,
+                    "No ApplicationSpec provided - creating default with supervisor tree"
+                );
+                create_default_application_spec(&req.name, &req.version)
+            });
+            
+            // If config was provided but has no supervisor, add default supervisor
+            // This handles the case where client passes minimal config without supervisor
+            if merged_config.supervisor.is_none() {
+                tracing::info!(
+                    application_id = %req.application_id,
+                    application_name = %req.name,
+                    "ApplicationSpec has no supervisor - adding default supervisor tree"
+                );
+                let default_spec = create_default_application_spec(&req.name, &req.version);
+                merged_config.supervisor = default_spec.supervisor;
             }
             
-            // Get namespace and tenant_id from NodeConfig defaults
-            // This ensures proper tenant isolation instead of using RequestContext::internal()
-            let (namespace, tenant_id) = {
-                if let Some(node_config) = self.service_locator.get_node_config().await {
-                    (
-                        if node_config.default_namespace.is_empty() { "default".to_string() } else { node_config.default_namespace },
-                        if node_config.default_tenant_id.is_empty() { "default".to_string() } else { node_config.default_tenant_id },
-                    )
-                } else {
-                    // Fallback for tests or when NodeConfig is not set
-                    ("default".to_string(), "default".to_string())
-                }
-            };
+            // Tenant comes from auth, not config - use provided value or empty string
+            // Namespace: must come from user request explicitly; never fall back to config.
+            let final_tenant_id = tenant_id.clone();
+            let final_namespace = namespace.clone(); // Must come from request; do not substitute with config
             
             // Clone values for observability logging before moving them
             let module_hash_for_log = module_hash.clone();
-            let namespace_for_log = namespace.clone();
-            let tenant_id_for_log = tenant_id.clone();
+            let namespace_for_log = final_namespace.clone();
+            let tenant_id_for_log = final_tenant_id.clone();
             
             // Create WasmApplication from application crate
             use plexspaces_application::wasm_application::WasmApplication;
@@ -176,24 +252,26 @@ impl ApplicationService for ApplicationServiceImpl {
                 wasm_runtime_for_app,
                 Some(merged_config),
             );
+            // Set tenant_id/namespace from API request before boxing
+            wasm_app.set_tenant_namespace(final_tenant_id.clone(), final_namespace.clone()).await;
             let app: Box<dyn plexspaces_application::Application> = Box::new(wasm_app);
 
             // Register with ApplicationManager
-            tracing::info!(
+            tracing::debug!(
                 application_id = %req.application_id,
                 application_name = %app_name,
                 "Registering WASM application with ApplicationManager"
             );
             
             // Clone namespace/tenant_id for object-registry registration
-            let namespace_for_registry = namespace.clone();
-            let tenant_id_for_registry = tenant_id.clone();
+            let namespace_for_registry = final_namespace.clone();
+            let tenant_id_for_registry = final_tenant_id.clone();
             
             // Get ApplicationManager from ServiceLocator
             let application_manager = self.get_application_manager().await?;
             
             // Register application with namespace/tenant metadata
-            application_manager.register_with_metadata(app, namespace, tenant_id).await
+            application_manager.register_with_metadata(app, final_namespace.clone(), final_tenant_id.clone()).await
                 .map_err(|e| {
                     tracing::error!(
                         application_id = %req.application_id,
@@ -275,15 +353,11 @@ impl ApplicationService for ApplicationServiceImpl {
             Status::invalid_argument("config is required (WASM deployment not yet implemented)")
         })?;
 
-        // Handle release config if provided
-        let mut merged_config = config.clone();
-        if let Some(ref release_config) = req.release_config {
-            // TODO: Handle release_spec storage in ServiceLocator or ApplicationManager
-            // For now, we'll just merge the config
-            merge_release_config(&mut merged_config, release_config);
-        }
+        // release_config field has been removed from DeployApplicationRequest
+        // Use the application's config directly
+        let merged_config = config.clone();
 
-        // Create Application instance from merged config
+        // Create Application instance from config
         let app_name = req.name.clone();
         use plexspaces_application::application_impl::SpecApplication;
         let spec_app = SpecApplication::new(merged_config);
@@ -314,18 +388,8 @@ impl ApplicationService for ApplicationServiceImpl {
         // Register application with object-registry using proper tenant/namespace
         if let Some(object_registry) = self.service_locator.get_object_registry().await {
             use plexspaces_core::RequestContext;
-            // Get namespace and tenant_id from NodeConfig defaults
-            let (namespace, tenant_id) = {
-                if let Some(node_config) = self.service_locator.get_node_config().await {
-                    (
-                        if node_config.default_namespace.is_empty() { "default".to_string() } else { node_config.default_namespace },
-                        if node_config.default_tenant_id.is_empty() { "default".to_string() } else { node_config.default_tenant_id },
-                    )
-                } else {
-                    // Fallback for tests or when NodeConfig is not set
-                    ("default".to_string(), "default".to_string())
-                }
-            };
+            // Tenant comes from auth, not config - use empty strings
+            let (namespace, tenant_id) = (String::new(), String::new());
             
             // Get node_id and listen_addr from NodeConfig
             let (node_id, listen_addr) = {
@@ -549,27 +613,7 @@ impl ApplicationService for ApplicationServiceImpl {
     }
 }
 
-/// Merge release configuration into application configuration
-///
-/// ## Purpose
-/// Merges release-level settings (environment variables, runtime config, etc.)
-/// into application configuration. Release config takes precedence.
-///
-/// ## Merge Strategy
-/// - Environment variables: Release env overrides application env
-/// - Other settings: Application config takes precedence (release config is node-level)
-fn merge_release_config(
-    app_config: &mut plexspaces_proto::application::v1::ApplicationSpec,
-    release_config: &plexspaces_proto::node::v1::ReleaseSpec,
-) {
-    // Merge environment variables
-    // Release env overrides application env
-    for (key, value) in &release_config.env {
-        app_config.env.insert(key.clone(), value.clone());
-    }
-
-    // Note: Other release config fields (node, runtime, shutdown) are node-level
-    // and don't need to be merged into application config. They are applied
-    // at the node level when the node starts.
-}
+// NOTE: merge_release_config function has been removed.
+// The release_config field was removed from DeployApplicationRequest.
+// Release configuration is now applied at node level, not per-deployment.
 

@@ -28,7 +28,6 @@ authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 # PlexSpaces crates
 plexspaces-proto = { path = "../proto" }
 plexspaces-common = { path = "../common" }
-plexspaces-core = { path = "../core" }
 
 # Async runtime
 tokio = { version = "1.44", features = ["sync", "time", "macros", "rt-multi-thread"] }

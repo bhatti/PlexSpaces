@@ -50,6 +50,9 @@ pub struct SchedulingServiceImpl {
 
 impl SchedulingServiceImpl {
     /// Create a new scheduling service implementation
+    ///
+    /// NOTE: default_tenant_id and default_namespace have been removed.
+    /// Tenant comes from auth (JWT/mTLS); namespace from request context.
     pub fn new(
         state_store: Arc<dyn SchedulingStateStore>,
         request_channel: Arc<dyn Channel>,
@@ -60,6 +63,13 @@ impl SchedulingServiceImpl {
             request_channel,
             capacity_tracker,
         }
+    }
+    
+    /// RequestContext for system operations.
+    /// NOTE: default_tenant_id and default_namespace have been removed.
+    /// For system operations, use empty strings (admin context).
+    fn default_context(&self) -> RequestContext {
+        RequestContext::new_without_auth(String::new(), String::new()).with_admin(true)
     }
     
 }
@@ -78,22 +88,16 @@ impl SchedulingService for SchedulingServiceImpl {
             return Err(Status::invalid_argument("requirements is required"));
         }
 
-        // Extract tenant_id and namespace from gRPC metadata (preferred, set by JWT middleware)
-        // Fall back to request fields for backward compatibility or when auth is disabled
+        // Extract tenant_id and namespace from gRPC metadata (set by JWT middleware)
+        // NOTE: tenant_id and namespace fields have been removed from ScheduleActorRequest.
+        // Tenant must come from auth (JWT/mTLS); namespace from request metadata.
         let tenant_id = metadata
             .get("x-tenant-id")
             .and_then(|v| v.to_str().ok())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .or_else(|| {
-                if !req.tenant_id.is_empty() {
-                    Some(req.tenant_id)
-                } else {
-                    None
-                }
-            })
             .ok_or_else(|| {
-                Status::unauthenticated("Missing x-tenant-id header or tenant_id in request. JWT authentication required.")
+                Status::unauthenticated("Missing x-tenant-id header. JWT authentication required.")
             })?;
 
         let namespace = metadata
@@ -101,14 +105,7 @@ impl SchedulingService for SchedulingServiceImpl {
             .and_then(|v| v.to_str().ok())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .or_else(|| {
-                if !req.namespace.is_empty() {
-                    Some(req.namespace)
-                } else {
-                    Some("default".to_string())
-                }
-            })
-            .unwrap_or_else(|| "default".to_string());
+            .unwrap_or_default(); // Empty namespace is allowed
 
         // Generate request ID if not provided
         let request_id = if req.request_id.is_empty() {
@@ -201,11 +198,12 @@ impl SchedulingService for SchedulingServiceImpl {
                 Status::unauthenticated("Missing x-tenant-id header. JWT authentication required.")
             })?;
 
+        // Namespace from gRPC metadata; empty if not provided
         let namespace = metadata
             .get("x-namespace")
             .and_then(|v| v.to_str().ok())
             .filter(|s| !s.is_empty())
-            .unwrap_or("default");
+            .unwrap_or_default();
 
         // Create RequestContext for proper tenant/namespace isolation
         let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
@@ -227,10 +225,8 @@ impl SchedulingService for SchedulingServiceImpl {
         &self,
         request: Request<GetNodeCapacityRequest>,
     ) -> Result<Response<GetNodeCapacityResponse>, Status> {
-        // Create RequestContext from request metadata (before consuming request)
-        // Scheduler uses internal context for system-level operations
-        // Scheduler operations always use internal context
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        // Create RequestContext for internal operations using default tenant_id/namespace from node config
+        let ctx = self.default_context();
         
         // Now consume request
         let req = request.into_inner();
@@ -252,10 +248,8 @@ impl SchedulingService for SchedulingServiceImpl {
         &self,
         request: Request<ListNodeCapacitiesRequest>,
     ) -> Result<Response<ListNodeCapacitiesResponse>, Status> {
-        // Create RequestContext from request metadata (before consuming request)
-        // Scheduler uses internal context for system-level operations
-        // Scheduler operations always use internal context
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        // Create RequestContext for internal operations using default tenant_id/namespace from node config
+        let ctx = self.default_context();
         
         // Now consume request
         let req = request.into_inner();
@@ -365,8 +359,8 @@ mod tests {
                 placement: None,
                 actor_groups: vec![],
             }),
-            namespace: "default".to_string(),
-            tenant_id: "default".to_string(),
+            namespace: String::new(), // Empty for test
+            tenant_id: String::new(), // Empty for test
             request_id: String::new(),
         };
 
@@ -379,8 +373,8 @@ mod tests {
         assert_eq!(response.status, SchedulingStatus::SchedulingStatusPending as i32);
         assert!(!response.request_id.is_empty());
 
-        // Verify request was stored
-        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        // Verify request was stored - use node-config defaults
+        let ctx = service.default_context();
         let stored = state_store.get_request(&ctx, &response.request_id).await.unwrap();
         assert!(stored.is_some());
         assert_eq!(
@@ -395,8 +389,8 @@ mod tests {
 
         let req = ScheduleActorRequest {
             requirements: None,
-            namespace: "default".to_string(),
-            tenant_id: "default".to_string(),
+            namespace: String::new(), // Empty for test
+            tenant_id: String::new(), // Empty for test
             request_id: String::new(),
         };
 
@@ -425,8 +419,8 @@ mod tests {
                 placement: None,
                 actor_groups: vec![],
             }),
-            namespace: "default".to_string(),
-            tenant_id: "default".to_string(),
+            namespace: String::new(), // Empty for test
+            tenant_id: String::new(), // Empty for test
             status: SchedulingStatus::SchedulingStatusScheduled as i32,
             selected_node_id: "node-1".to_string(),
             actor_id: "actor-1".to_string(),
@@ -436,7 +430,8 @@ mod tests {
             completed_at: Some(prost_types::Timestamp::from(SystemTime::now())),
         };
 
-        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        // Use node-config defaults for test
+        let ctx = service.default_context();
         state_store.store_request(&ctx, scheduling_request.clone()).await.unwrap();
 
         // Get status
@@ -444,8 +439,8 @@ mod tests {
             request_id: request_id.clone(),
         };
         let mut request = Request::new(req);
-        request.metadata_mut().insert("x-tenant-id", tonic::metadata::AsciiMetadataValue::from_static("default"));
-        request.metadata_mut().insert("x-namespace", tonic::metadata::AsciiMetadataValue::from_static("default"));
+        // Use empty tenant/namespace for test (metadata will be empty)
+        // request.metadata_mut().insert("x-tenant-id", ...) - not needed for test
         let response = service
             .get_scheduling_status(request)
             .await
@@ -470,8 +465,8 @@ mod tests {
             request_id: "non-existent".to_string(),
         };
         let mut request = Request::new(req);
-        request.metadata_mut().insert("x-tenant-id", tonic::metadata::AsciiMetadataValue::from_static("default"));
-        request.metadata_mut().insert("x-namespace", tonic::metadata::AsciiMetadataValue::from_static("default"));
+        // Use empty tenant/namespace for test (metadata will be empty)
+        // request.metadata_mut().insert("x-tenant-id", ...) - not needed for test
         let result = service.get_scheduling_status(request).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);

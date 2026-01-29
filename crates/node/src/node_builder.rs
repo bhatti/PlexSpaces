@@ -147,6 +147,25 @@ impl NodeBuilder {
         self.config.clustering_enabled = enabled;
         self
     }
+    
+    /// Set the cluster name for cluster isolation
+    ///
+    /// ## Purpose
+    /// Sets the cluster name which is used as namespace for node registration.
+    /// Nodes in the same cluster can see each other, nodes in different clusters are isolated.
+    ///
+    /// ## Arguments
+    /// * `cluster_name` - Cluster name (used as namespace for ObjectRegistry)
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let builder = NodeBuilder::new("my-node")
+    ///     .with_cluster_name("production-cluster");
+    /// ```
+    pub fn with_cluster_name(mut self, cluster_name: impl Into<String>) -> Self {
+        self.config.cluster_name = cluster_name.into();
+        self
+    }
 
     /// Add metadata to the node configuration
     ///
@@ -167,20 +186,48 @@ impl NodeBuilder {
     /// Configure node to use in-memory backends (for testing)
     ///
     /// ## Purpose
-    /// Sets metadata indicating that in-memory backends should be used.
-    /// This is useful for testing and development.
+    /// Configures the node to use in-memory backends for all storage services.
+    /// This is the proper way to configure tests - no environment variables needed.
     ///
-    /// ## Note
-    /// Actual backend configuration is done via ConfigBootstrap and environment variables.
-    /// This method sets metadata that can be used by configuration loaders.
+    /// ## How it works
+    /// Sets `RuntimeConfig.shared_database.connection_string = "sqlite::memory:"`
+    /// which triggers in-memory backend selection in service initialization.
     ///
     /// ## Example
     /// ```rust,ignore
     /// let node = NodeBuilder::new("test-node")
     ///     .with_in_memory_backends()
-    ///     .build();
+    ///     .build()
+    ///     .await;
     /// ```
     pub fn with_in_memory_backends(mut self) -> Self {
+        use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
+        use plexspaces_proto::storage::v1::SharedRelationalDbConfig;
+        
+        // Create or update release_spec with in-memory database configuration
+        let release_spec = self.release_spec.take().unwrap_or_else(|| ReleaseSpec {
+            name: "test".to_string(),
+            version: "0.0.0".to_string(),
+            ..Default::default()
+        });
+        
+        // Create RuntimeConfig with in-memory database
+        let runtime = RuntimeConfig {
+            shared_database: Some(SharedRelationalDbConfig {
+                connection_string: "sqlite::memory:".to_string(),
+                pool_size: 1,
+                auto_migrate: true,
+                ..Default::default()
+            }),
+            ..release_spec.runtime.unwrap_or_default()
+        };
+        
+        self.release_spec = Some(ReleaseSpec {
+            runtime: Some(runtime),
+            ..release_spec
+        });
+        
+        // Also set metadata for components that read it directly
         self.config.metadata.insert("backend.channel".to_string(), "in-memory".to_string());
         self.config.metadata.insert("backend.tuplespace".to_string(), "in-memory".to_string());
         self.config.metadata.insert("backend.journaling".to_string(), "in-memory".to_string());
@@ -311,7 +358,7 @@ impl NodeBuilder {
         use plexspaces_actor::register_state_fetcher_callback;
         register_state_fetcher_callback();
         
-        let mut node = Node::new(self.node_id, self.config);
+        let node = Node::new(self.node_id, self.config);
         
         // Set release_spec if provided
         if let Some(release_spec) = self.release_spec {

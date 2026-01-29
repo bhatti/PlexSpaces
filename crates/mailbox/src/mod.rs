@@ -55,7 +55,7 @@ use rand::Rng;
 use std::collections::{BinaryHeap, VecDeque};
 use std::cmp::Ordering;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, Notify, RwLock};
 use ulid::Ulid;
 use plexspaces_channel::{Channel, ChannelError, create_channel};
@@ -232,6 +232,26 @@ impl Message {
         }
     }
 
+    /// Create a message from a JSON-serializable value
+    ///
+    /// ## Purpose
+    /// Convenience method that serializes a value to JSON and creates a Message.
+    /// Use `.with_message_type()` to set the message type (always explicit).
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// #[derive(Serialize)]
+    /// enum CounterMsg { Increment { amount: i64 } }
+    ///
+    /// let msg = Message::json(&CounterMsg::Increment { amount: 1 })?
+    ///     .with_message_type("increment")
+    ///     .with_sender("sender@node");
+    /// ```
+    pub fn json<T: serde::Serialize>(value: &T) -> Result<Self, serde_json::Error> {
+        let payload = serde_json::to_vec(value)?;
+        Ok(Self::new(payload))
+    }
+
     /// Create a system message
     pub fn system(payload: Vec<u8>) -> Self {
         Self::new(payload).with_priority(MessagePriority::System)
@@ -349,20 +369,20 @@ impl Message {
     // }
 
     /// Set correlation ID for request-reply
-    pub fn with_correlation_id(mut self, id: String) -> Self {
-        self.correlation_id = Some(id);
+    pub fn with_correlation_id(mut self, id: impl Into<String>) -> Self {
+        self.correlation_id = Some(id.into());
         self
     }
 
     /// Set idempotency key for message deduplication
-    pub fn with_idempotency_key(mut self, key: String) -> Self {
-        self.idempotency_key = Some(key);
+    pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
+        self.idempotency_key = Some(key.into());
         self
     }
 
     /// Set reply-to address
-    pub fn with_reply_to(mut self, address: String) -> Self {
-        self.reply_to = Some(address);
+    pub fn with_reply_to(mut self, address: impl Into<String>) -> Self {
+        self.reply_to = Some(address.into());
         self
     }
 
@@ -373,20 +393,20 @@ impl Message {
     }
 
     /// Add metadata
-    pub fn with_metadata(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value);
+    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
         self
     }
 
     /// Set sender ID for request-reply patterns
-    pub fn with_sender(mut self, sender_id: String) -> Self {
-        self.sender = Some(sender_id);
+    pub fn with_sender(mut self, sender_id: impl Into<String>) -> Self {
+        self.sender = Some(sender_id.into());
         self
     }
 
     /// Set message type for routing
-    pub fn with_message_type(mut self, message_type: String) -> Self {
-        self.message_type = message_type;
+    pub fn with_message_type(mut self, message_type: impl Into<String>) -> Self {
+        self.message_type = message_type.into();
         self
     }
 
@@ -464,8 +484,17 @@ impl Message {
             payload: proto_msg.payload.clone(),
             metadata: proto_msg.headers.clone(),
             priority,
-            correlation_id: proto_msg.headers.get("correlation_id").cloned(),
-            reply_to: proto_msg.headers.get("reply_to").cloned(),
+            // Use proto field directly, fallback to header for backward compatibility
+            correlation_id: if !proto_msg.correlation_id.is_empty() {
+                Some(proto_msg.correlation_id.clone())
+            } else {
+                proto_msg.headers.get("correlation_id").cloned()
+            },
+            reply_to: if !proto_msg.reply_to.is_empty() {
+                Some(proto_msg.reply_to.clone())
+            } else {
+                proto_msg.headers.get("reply_to").cloned()
+            },
             sender: if proto_msg.sender_id.is_empty() {
                 None
             } else {
@@ -822,6 +851,17 @@ impl From<ProtoMessage> for Message {
     }
 }
 
+/// Convert mailbox Message to proto Message
+///
+/// ## Purpose
+/// Allows ActorRef::tell() to accept mailbox Message directly via Into<ProtoMessage>.
+/// This eliminates the need to call .to_proto() manually.
+impl From<Message> for ProtoMessage {
+    fn from(msg: Message) -> Self {
+        msg.to_proto()
+    }
+}
+
 // Helper functions for MailboxConfig (cannot add methods to proto-generated types)
 pub fn mailbox_config_default() -> MailboxConfig {
     let mut config = MailboxConfig::default();
@@ -996,7 +1036,7 @@ impl Mailbox {
         let channel_backend_value = channel_backend as i32;
         
         // Helper to check if backend is in-memory (needed for shutdown logic)
-        let is_in_memory_clone = is_in_memory;
+        let _is_in_memory_clone = is_in_memory;
 
         // Create channel config from mailbox config
         let mut channel_config = config.channel_config.clone().unwrap_or_else(|| {
@@ -1089,7 +1129,7 @@ impl Mailbox {
             loop {
                 // Process any existing messages first, then wait for new ones
                 // This ensures we don't miss messages that arrive before we start waiting
-                let mut queue_guard = internal_queue.read().await;
+                let queue_guard = internal_queue.read().await;
                 let has_messages = match &*queue_guard {
                     MessageStorage::Queue(queue) => !queue.is_empty(),
                     MessageStorage::Priority(heap) => !heap.is_empty(),
@@ -1174,7 +1214,7 @@ impl Mailbox {
             loop {
                 // Process any existing messages first, then wait for new ones
                 // This ensures we don't miss messages that arrive before we start waiting
-                let mut queue_guard = internal_queue.read().await;
+                let queue_guard = internal_queue.read().await;
                 let has_messages = match &*queue_guard {
                     MessageStorage::Queue(queue) => !queue.is_empty(),
                     MessageStorage::Priority(heap) => !heap.is_empty(),

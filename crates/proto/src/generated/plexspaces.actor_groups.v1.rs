@@ -132,6 +132,13 @@ pub struct ScatterGatherStats {
     #[prost(message, optional, tag="5")]
     pub avg_latency: ::core::option::Option<::prost_types::Duration>,
 }
+// DataParallelConfig, PartitionStrategy, and RebalancePolicy are defined in actor_runtime.proto
+// See plexspaces.actor.v1.DataParallelConfig
+// See plexspaces.actor.v1.PartitionStrategy
+// See plexspaces.actor.v1.RebalancePolicy
+
+// Note: ActorGroupService gRPC service removed - message types retained for future implementation
+
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateGroupRequest {
@@ -357,5 +364,4 @@ impl AggregationStrategy {
         }
     }
 }
-include!("plexspaces.actor_groups.v1.tonic.rs");
 // @@protoc_insertion_point(module)

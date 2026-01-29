@@ -77,7 +77,7 @@ impl CounterActor {
 impl Actor for CounterActor {
     async fn handle_message(
         &mut self,
-        ctx: &ActorContext,
+        _ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         match msg.message_type.as_str() {
@@ -98,7 +98,7 @@ impl Actor for CounterActor {
                 }
             }
             "get" => {
-                let count = *self.count.lock().unwrap();
+                let _count = *self.count.lock().unwrap();
                 // Send reply using ActorService if sender is available
                 // Note: ActorService is accessed via ServiceLocator, but we can't easily get it in core
                 // due to circular dependencies. For now, reply sending is disabled in patterns.
@@ -230,7 +230,7 @@ impl CoordinatorActor {
 impl Actor for CoordinatorActor {
     async fn handle_message(
         &mut self,
-        ctx: &ActorContext,
+        _ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         match msg.message_type.as_str() {

@@ -100,10 +100,10 @@ use tracing::{debug, error, instrument, warn};
 ///     Some("http://localhost:8000".to_string()), // For local testing
 /// ).await?;
 ///
-/// let ctx = RequestContext::new_without_auth("tenant1".to_string(), "default".to_string());
+/// let ctx = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
 /// let request = SchedulingRequest {
 ///     request_id: "req-1".to_string(),
-///     namespace: "default".to_string(),
+///     namespace: "ns1".to_string(),
 ///     tenant_id: "tenant1".to_string(),
 ///     status: 0,
 ///     selected_node_id: String::new(),
@@ -356,18 +356,8 @@ impl DynamoDBSchedulingStateStore {
     }
 
     /// Create composite partition key from tenant_id, namespace, and request_id.
-    /// Format: "{tenant_id}#{namespace}#{request_id}"
+    /// Format: "{tenant_id}#{namespace}#{request_id}" (empty tenant_id/namespace allowed, no hardcoded defaults).
     fn composite_key(tenant_id: &str, namespace: &str, request_id: &str) -> String {
-        let tenant_id = if tenant_id.is_empty() {
-            "default"
-        } else {
-            tenant_id
-        };
-        let namespace = if namespace.is_empty() {
-            "default"
-        } else {
-            namespace
-        };
         format!("{}#{}#{}", tenant_id, namespace, request_id)
     }
 
@@ -475,22 +465,12 @@ impl DynamoDBSchedulingStateStore {
     }
 
     /// Convert SchedulingRequest to DynamoDB item.
+    /// Uses request tenant_id/namespace as-is (empty allowed, no hardcoded defaults).
     fn request_to_item(
         &self,
         request: &SchedulingRequest,
     ) -> Result<HashMap<String, AttributeValue>, Box<dyn Error + Send + Sync>> {
-        let tenant_id = if request.tenant_id.is_empty() {
-            "default"
-        } else {
-            &request.tenant_id
-        };
-        let namespace = if request.namespace.is_empty() {
-            "default"
-        } else {
-            &request.namespace
-        };
-
-        let pk = Self::composite_key(tenant_id, namespace, &request.request_id);
+        let pk = Self::composite_key(&request.tenant_id, &request.namespace, &request.request_id);
 
         // Encode requirements to base64
         let requirements_json = if let Some(ref req) = request.requirements {
@@ -524,8 +504,8 @@ impl DynamoDBSchedulingStateStore {
         item.insert("request_id".to_string(), AttributeValue::S(request.request_id.clone()));
         item.insert("status".to_string(), AttributeValue::S(status_str.to_string()));
         item.insert("requirements_json".to_string(), AttributeValue::S(requirements_json));
-        item.insert("namespace".to_string(), AttributeValue::S(namespace.to_string()));
-        item.insert("tenant_id".to_string(), AttributeValue::S(tenant_id.to_string()));
+        item.insert("namespace".to_string(), AttributeValue::S(request.namespace.clone()));
+        item.insert("tenant_id".to_string(), AttributeValue::S(request.tenant_id.clone()));
         item.insert(
             "selected_node_id".to_string(),
             AttributeValue::S(request.selected_node_id.clone()),
@@ -823,20 +803,27 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
 
         // Query GSI for PENDING status, filtered by tenant/namespace
         // Note: GSI has status as PK and created_at as SK, so we need to filter by tenant/namespace
-        // We'll use a filter expression for tenant/namespace
-        match self
+        // For admin/internal contexts with empty namespace, skip namespace filter
+        let mut query = self
             .client
             .query()
             .table_name(&self.table_name)
             .index_name("status_created_index")
             .key_condition_expression("status = :status")
-            .filter_expression("tenant_id = :tenant_id AND namespace = :namespace")
             .expression_attribute_values(":status", AttributeValue::S("PENDING".to_string()))
             .expression_attribute_values(":tenant_id", AttributeValue::S(ctx.tenant_id().to_string()))
-            .expression_attribute_values(":namespace", AttributeValue::S(ctx.namespace().to_string()))
-            .scan_index_forward(true) // Sort by created_at ascending
-            .send()
-            .await
+            .scan_index_forward(true); // Sort by created_at ascending
+        
+        // Add namespace filter only if not admin/internal with empty namespace
+        if !ctx.should_skip_namespace_filter() {
+            query = query
+                .filter_expression("tenant_id = :tenant_id AND namespace = :namespace")
+                .expression_attribute_values(":namespace", AttributeValue::S(ctx.namespace().to_string()));
+        } else {
+            query = query.filter_expression("tenant_id = :tenant_id");
+        }
+        
+        match query.send().await
         {
             Ok(result) => {
                 let duration = start_time.elapsed();
@@ -850,14 +837,21 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
                 for item in result.items() {
                     match Self::item_to_request(&item) {
                         Ok(request) => {
-                            // Double-check tenant/namespace match (defense in depth)
-                            if request.tenant_id == ctx.tenant_id()
-                                && request.namespace == ctx.namespace()
-                            {
-                                requests.push(request);
+                            // Double-check tenant match (defense in depth)
+                            // For admin/internal with empty namespace, skip namespace check
+                            if request.tenant_id == ctx.tenant_id() {
+                                if ctx.should_skip_namespace_filter() {
+                                    requests.push(request);
+                                } else if request.namespace == ctx.namespace() {
+                                    requests.push(request);
+                                } else {
+                                    warn!(
+                                        "Request namespace mismatch - skipping (security check)"
+                                    );
+                                }
                             } else {
                                 warn!(
-                                    "Request tenant/namespace mismatch - skipping (security check)"
+                                    "Request tenant mismatch - skipping (security check)"
                                 );
                             }
                         }

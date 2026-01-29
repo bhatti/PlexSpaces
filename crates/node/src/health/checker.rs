@@ -34,7 +34,7 @@
 //! - Checks are async to support network calls
 //! - Errors indicate unhealthy dependencies
 
-use plexspaces_proto::system::v1::{DependencyCheck, DependencyCircuitBreakerInfo, HealthStatus};
+use plexspaces_proto::system::v1::{DependencyCheck, HealthStatus};
 use prost_types::{Duration, Timestamp};
 use std::time::SystemTime;
 use thiserror::Error;

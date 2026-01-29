@@ -33,7 +33,7 @@
 
 use crate::{AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions, RenewLockOptions};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use plexspaces_common::RequestContext;
 use std::collections::HashMap;
 use tracing::instrument;
@@ -114,6 +114,13 @@ impl SqliteLockManager {
         .await
         .map_err(|e| LockError::BackendError(format!("failed to create index: {e}")))?;
 
+        tracing::info!(
+            db_url = %database_url,
+            table = "locks",
+            backend = "SQLite",
+            "Locks storage initialized"
+        );
+
         Ok(Self { pool })
     }
 
@@ -140,7 +147,7 @@ impl SqliteLockManager {
         }
 
         // Convert epoch seconds to SystemTime, then to Timestamp
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use std::time::SystemTime;
         let expires_system_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(expires_at as u64);
         let last_hb_system_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(last_heartbeat as u64);
         
@@ -162,8 +169,9 @@ impl SqliteLockManager {
 impl LockManager for SqliteLockManager {
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
     async fn acquire_lock(&self, ctx: &RequestContext, options: AcquireLockOptions) -> LockResult<Lock> {
-        let tenant_id = if ctx.tenant_id().is_empty() { "default" } else { ctx.tenant_id() };
-        let namespace = if ctx.namespace().is_empty() { "default" } else { ctx.namespace() };
+        // Use tenant_id and namespace as-is (may be empty)
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         
         let mut conn = self
             .pool
@@ -308,8 +316,9 @@ impl LockManager for SqliteLockManager {
 
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
     async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions) -> LockResult<Lock> {
-        let tenant_id = if ctx.tenant_id().is_empty() { "default" } else { ctx.tenant_id() };
-        let namespace = if ctx.namespace().is_empty() { "default" } else { ctx.namespace() };
+        // Use tenant_id and namespace as-is (may be empty)
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         
         let mut conn = self
             .pool
@@ -344,7 +353,7 @@ impl LockManager for SqliteLockManager {
 
         let holder_id: String = row.get("holder_id");
         let version: String = row.get("version");
-        let lease_duration_secs_row: i64 = row.get("lease_duration_secs");
+        let _lease_duration_secs_row: i64 = row.get("lease_duration_secs");
         let _last_heartbeat: i64 = row.get("last_heartbeat");
         let locked_flag: i64 = row.get("locked");
         let metadata_json: Option<String> = row.get("metadata");
@@ -412,8 +421,9 @@ impl LockManager for SqliteLockManager {
 
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
     async fn release_lock(&self, ctx: &RequestContext, options: ReleaseLockOptions) -> LockResult<()> {
-        let tenant_id = if ctx.tenant_id().is_empty() { "default" } else { ctx.tenant_id() };
-        let namespace = if ctx.namespace().is_empty() { "default" } else { ctx.namespace() };
+        // Use tenant_id and namespace as-is (may be empty)
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         
         let mut conn = self
             .pool
@@ -485,8 +495,9 @@ impl LockManager for SqliteLockManager {
 
     #[instrument(skip(self, ctx), fields(lock_key = %lock_key, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
     async fn get_lock(&self, ctx: &RequestContext, lock_key: &str) -> LockResult<Option<Lock>> {
-        let tenant_id = if ctx.tenant_id().is_empty() { "default" } else { ctx.tenant_id() };
-        let namespace = if ctx.namespace().is_empty() { "default" } else { ctx.namespace() };
+        // Use tenant_id and namespace as-is (may be empty)
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         
         let row = sqlx::query(
             r#"SELECT lock_key, holder_id, version, expires_at, lease_duration_secs,

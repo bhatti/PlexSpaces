@@ -19,10 +19,29 @@ cargo run --bin plexspaces -- --help
 #### Start Node
 
 ```bash
-plexspaces node start \
+# Start with defaults
+plexspaces start
+
+# Start with custom node ID and address
+plexspaces start --node-id node1 --listen-addr 0.0.0.0:8000
+
+# Start with release configuration file
+plexspaces start \
   --node-id node1 \
-  --address 0.0.0.0:9000 \
-  --config config/default.yaml
+  --listen-addr 0.0.0.0:8000 \
+  --release-config release.yaml
+
+# You can use any file name or path:
+plexspaces start --release-config /path/to/my-config.yaml
+plexspaces start --release-config ./configs/production.yaml
+plexspaces start --release-config release.yaml
+
+# Options:
+#   --node-id: Node ID (default: "node-1")
+#   --listen-addr: Listen address (default: "0.0.0.0:8000")
+#   --release-config <FILE>: Path to release config file (YAML format)
+#                           Can be relative or absolute path
+#                           If not provided, default config is created automatically
 ```
 
 #### Stop Node
@@ -185,40 +204,139 @@ plexspaces tuplespace read \
 plexspaces tuplespace list --space default
 ```
 
+### Security Operations
+
+#### Generate mTLS Certificates
+
+Generate CA and server certificates for mTLS node-to-node authentication:
+
+```bash
+# Generate certificates with defaults (saves to ./certs)
+plexspaces generate-mtls
+
+# Generate with custom output directory
+plexspaces generate-mtls --output /path/to/certs
+
+# Generate with custom common names
+plexspaces generate-mtls \
+  --ca-common-name "My Company CA" \
+  --server-common-name "my-node.example.com" \
+  --validity-days 365
+
+# Options:
+#   --output, -o: Output directory (default: ./certs)
+#   --ca-common-name: CA certificate common name (default: "PlexSpaces CA")
+#   --server-common-name: Server certificate common name (default: "PlexSpaces Server")
+#   --validity-days: Validity in days for server certificate (default: 90)
+```
+
+This generates:
+- `ca.crt` - CA certificate (valid 1 year)
+- `ca.key` - CA private key
+- `server.crt` - Server certificate (signed by CA, valid 90 days by default)
+- `server.key` - Server private key
+
+**Usage:**
+```bash
+# Set environment variables to use generated certificates
+export PLEXSPACES_MTLS_CA_CERT="./certs/ca.crt"
+export PLEXSPACES_MTLS_SERVER_CERT="./certs/server.crt"
+export PLEXSPACES_MTLS_SERVER_KEY="./certs/server.key"
+
+# Or configure in release.yaml (see generate-release-config)
+```
+
+#### Generate Default Release Configuration
+
+Generate a default release configuration file that can be customized:
+
+```bash
+# Generate with defaults (saves to release.yaml)
+plexspaces generate-release-config
+
+# Generate with custom values
+plexspaces generate-release-config \
+  --output my-release.yaml \
+  --release-name "production-cluster" \
+  --release-version "2.0.0" \
+  --node-id "prod-node-1" \
+  --listen-addr "0.0.0.0:8000"
+
+# Options:
+#   --output, -o: Output file path (default: release.yaml)
+#   --release-name: Release name (default: "plexspaces-cluster")
+#   --release-version: Release version (default: "1.0.0")
+#   --node-id: Node ID (default: "node-1")
+#   --listen-addr: Listen address (default: "0.0.0.0:8000")
+```
+
+The generated file includes:
+- Node configuration (ID, listen address, clustering)
+- Runtime configuration (gRPC, health checks)
+- Security configuration (JWT, mTLS with auto-generation enabled)
+- Shutdown configuration
+
+**Usage:**
+```bash
+# Generate default config
+plexspaces generate-release-config
+
+# Customize the generated release.yaml file
+vim release.yaml
+
+# Start node with custom config
+plexspaces start --node-id node1 --release-config release.yaml
+```
+
 ### System Operations
 
 #### Health Check
 
 ```bash
-plexspaces health --node-id node1
+plexspaces status --node localhost:8000
 ```
 
-#### Metrics
+#### Start Node
 
 ```bash
-plexspaces metrics --node-id node1
-```
+# Start with defaults
+plexspaces start
 
-#### Logs
+# Start with custom node ID and address
+plexspaces start --node-id my-node --listen-addr 0.0.0.0:8000
 
-```bash
-plexspaces logs --node-id node1 --follow
+# Start with release configuration
+plexspaces start \
+  --node-id my-node \
+  --listen-addr 0.0.0.0:8000 \
+  --release-config release.yaml
+
+# Options:
+#   --node-id: Node ID (default: "node-1")
+#   --listen-addr: Listen address (default: "0.0.0.0:8000")
+#   --release-config: Path to release config file (YAML)
 ```
 
 ## Configuration
 
 ### Global Flags
 
-- `--config`: Path to configuration file
 - `--node-id`: Target node ID
-- `--verbose`: Enable verbose output
+- `--release-config`: Path to release configuration file (YAML)
+- `--verbose`: Enable verbose output (via RUST_LOG env var)
 - `--quiet`: Suppress non-error output
 
 ### Environment Variables
 
 - `PLEXSPACES_NODE_ID`: Default node ID
-- `PLEXSPACES_CONFIG`: Default config file path
-- `PLEXSPACES_LOG_LEVEL`: Log level (debug, info, warn, error)
+- `PLEXSPACES_LISTEN_ADDR`: Default listen address
+- `PLEXSPACES_JWT_SECRET`: JWT secret for authentication (required if JWT enabled)
+- `PLEXSPACES_MTLS_CA_CERT`: Path to mTLS CA certificate
+- `PLEXSPACES_MTLS_SERVER_CERT`: Path to mTLS server certificate
+- `PLEXSPACES_MTLS_SERVER_KEY`: Path to mTLS server private key
+- `PLEXSPACES_MTLS_CERT_DIR`: Directory for auto-generated certificates (default: `/app/certs`)
+- `PLEXSPACES_DISABLE_AUTH`: Disable auth validation (testing only, never in production)
+- `PLEXSPACES_LOG_LEVEL` or `RUST_LOG`: Log level (debug, info, warn, error)
 
 ## Examples
 

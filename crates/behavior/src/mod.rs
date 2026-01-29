@@ -28,7 +28,6 @@ use async_trait::async_trait;
 // Import from plexspaces-core crate
 use plexspaces_core::{Actor, BehaviorError, BehaviorType};
 use plexspaces_proto::common::v1::Message;
-use std::sync::Arc;
 
 // Re-export ExecutionContext from workflow module
 pub use crate::workflow::ExecutionContext;
@@ -252,7 +251,7 @@ pub trait GenServer: Actor {
                 
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
-                let sender_id = msg.sender_id.clone();
+                let _sender_id = msg.sender_id.clone();
                 let correlation_id = msg.correlation_id.clone();
                 
                 // Call handle_request with Message (handler will use ActorService::send() to send reply)

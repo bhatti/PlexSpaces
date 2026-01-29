@@ -26,8 +26,8 @@
 //! # Start NATS
 //! docker-compose up -d nats
 //!
-//! # Run tests manually (integration tests are skipped by default)
-//! cargo test --features nats-backend --test nats_integration_test -- --ignored
+//! # Run tests (tests will automatically skip if NATS is not available)
+//! cargo test --features nats-backend -p plexspaces-channel
 //! ```
 //!
 //! ## Test Coverage
@@ -43,16 +43,11 @@
 
 use futures::StreamExt;
 use plexspaces_channel::*;
+use plexspaces_common::skip_if_unavailable;
+use plexspaces_common::test_helpers::nats_available;
 use plexspaces_proto::channel::v1::*;
 use plexspaces_proto::common::v1::Message;
 use std::time::Duration;
-
-// Helper to check if NATS is available
-async fn is_nats_available() -> bool {
-    async_nats::connect("nats://localhost:4222")
-        .await
-        .is_ok()
-}
 
 // Helper to create test config
 fn create_test_config(name: &str) -> ChannelConfig {
@@ -91,12 +86,8 @@ fn create_queue_config(name: &str) -> ChannelConfig {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_send_and_receive_single_message() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("send_receive");
     let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
@@ -135,12 +126,8 @@ async fn test_nats_send_and_receive_single_message() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_send_and_receive_multiple_messages() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("send_receive_multi");
     let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
@@ -183,12 +170,8 @@ async fn test_nats_send_and_receive_multiple_messages() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_try_receive_non_blocking() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("try_receive");
     let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
@@ -229,12 +212,8 @@ async fn test_nats_try_receive_non_blocking() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_publish_subscribe() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("pubsub");
     let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
@@ -265,12 +244,8 @@ async fn test_nats_publish_subscribe() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_queue_group_load_balancing() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_queue_config("queue_group");
     let channel1 = NatsChannel::new(config.clone()).await.expect("Failed to create channel 1");
@@ -329,12 +304,8 @@ async fn test_nats_queue_group_load_balancing() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_ack_nack() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("ack_nack");
     let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
@@ -374,12 +345,8 @@ async fn test_nats_ack_nack() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_get_stats() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("stats");
     let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
@@ -430,12 +397,8 @@ async fn test_nats_get_stats() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_channel_close() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("close");
     let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
@@ -458,12 +421,8 @@ async fn test_nats_channel_close() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_channel_creation_with_defaults() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     // Test with minimal config (should use defaults)
     let config = ChannelConfig {
@@ -488,12 +447,8 @@ async fn test_nats_channel_creation_with_defaults() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires NATS server, run manually
 async fn test_nats_channel_creation_with_queue_group() {
-    if !is_nats_available().await {
-        eprintln!("Skipping test: NATS not available");
-        return;
-    }
+    skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = ChannelConfig {
         name: "queue_test".to_string(),

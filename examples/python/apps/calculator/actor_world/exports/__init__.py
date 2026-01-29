@@ -1,0 +1,46 @@
+from typing import TypeVar, Generic, Union, Optional, Protocol, Tuple, List, Any, Self
+from enum import Flag, Enum, auto
+from dataclasses import dataclass
+from abc import abstractmethod
+import weakref
+
+from ..types import Result, Ok, Err, Some
+
+
+class Actor(Protocol):
+
+    @abstractmethod
+    def init(self, config_json: str) -> str:
+        """
+        Initialize with JSON config
+        Returns empty string on success, or error message on failure
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
+        """
+        Handle message
+        from-actor: sender ID
+        msg-type: message type (e.g., "call", "cast", "get_state")
+        payload-json: JSON message content
+        Returns: JSON response, or "ERROR:message" on failure
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_state(self) -> str:
+        """
+        Get state as JSON
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_state(self, state_json: str) -> str:
+        """
+        Set state from JSON
+        Returns empty string on success, or error message
+        """
+        raise NotImplementedError
+
+

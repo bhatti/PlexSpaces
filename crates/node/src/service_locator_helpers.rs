@@ -19,14 +19,24 @@
 //! ServiceLocator helper functions for tests and examples
 
 use std::sync::Arc;
-use plexspaces_core::{ServiceLocator, ServiceLocatorInitialization};
+use plexspaces_core::ServiceLocator;
 
 /// Create a ServiceLocator with all default services registered
+/// Create default ServiceLocator with all essential services initialized
+///
+/// ## Returns
+/// `Arc<ServiceLocatorImpl>` - the concrete type for accessing inherent methods like `get_actor_factory()`
+///
+/// ## Design
+/// Returns concrete type instead of trait object because:
+/// - ServiceLocatorImpl is the only production implementation
+/// - Services that need ActorFactory require ServiceLocatorImpl directly
+/// - This is production-grade and type-safe
 pub async fn create_default_service_locator(
     node_id: Option<String>,
     node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
     release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
-) -> Arc<dyn plexspaces_core::ServiceLocator> {
+) -> Arc<plexspaces_services::ServiceLocatorImpl> {
     use plexspaces_services::ServiceLocatorImpl;
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
     use plexspaces_core::service_names;
@@ -34,16 +44,12 @@ pub async fn create_default_service_locator(
     let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
     let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = service_locator_impl.clone();
     
-    // Initialize services using ServiceLocatorInitialization trait
-    let service_locator_init: &dyn ServiceLocatorInitialization = service_locator_impl.as_ref() as &dyn ServiceLocatorInitialization;
-    service_locator_init.initialize_services(node_id, node_config, release_config).await;
+    // Initialize services using ServiceLocator trait
+    // ServiceLocator now creates all default services including facet factories, ActorFactoryImpl, ActorServiceImpl, and TupleSpaceProvider
+    service_locator_impl.initialize_services(node_id, node_config, release_config).await;
     
-    // Register ActorFactoryImpl after core services are initialized
-    // Design: initialize_services() creates all services it can (including WASM runtime)
-    // ActorFactoryImpl requires ServiceLocator, so it must be registered here after ServiceLocator is created
-    // This avoids circular dependency: services crate can't depend on actor crate (actor depends on services)
-    let actor_factory_impl = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator_impl.register_service_by_name(service_names::ACTOR_FACTORY_IMPL, actor_factory_impl).await;
+    // Note: ActorFactoryImpl, facet factories, ActorServiceImpl, and TupleSpaceProvider are now
+    // created automatically by ServiceLocator::initialize_services() since services crate depends on actor crate.
     
-    service_locator
+    service_locator_impl
 }

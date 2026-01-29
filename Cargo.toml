@@ -15,7 +15,7 @@ members = [
     "crates/behavior",
     "crates/actor",
     "crates/node",
-    "crates/supervisor",
+    # "crates/supervisor" - merged into plexspaces-actor
     "crates/grpc-middleware",
     "crates/wasm-runtime",
     "crates/firecracker",
@@ -51,7 +51,7 @@ default-members = [
     "crates/behavior",
     "crates/actor",
     "crates/node",
-    "crates/supervisor",
+    # "crates/supervisor" - merged into plexspaces-actor
     "crates/grpc-middleware",
     "crates/workflow",
     "crates/process-groups",
@@ -110,6 +110,7 @@ plexspaces-actor = { path = "crates/actor" }
 # plexspaces-supervisor merged into plexspaces-actor
 plexspaces-node = { path = "crates/node" }
 plexspaces-keyvalue = { path = "crates/keyvalue" }
+plexspaces-common = { path = "crates/common" }
 
 # Async runtime
 tokio = { workspace = true }

@@ -7,9 +7,10 @@ pub struct GetRequest {
     /// Key to get
     #[prost(string, tag="1")]
     pub key: ::prost::alloc::string::String,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Get response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -32,9 +33,10 @@ pub struct PutRequest {
     /// Value to store
     #[prost(bytes="vec", tag="2")]
     pub value: ::prost::alloc::vec::Vec<u8>,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="3")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Put response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -51,9 +53,10 @@ pub struct DeleteRequest {
     /// Key to delete
     #[prost(string, tag="1")]
     pub key: ::prost::alloc::string::String,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Delete response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -70,9 +73,10 @@ pub struct ExistsRequest {
     /// Key to check
     #[prost(string, tag="1")]
     pub key: ::prost::alloc::string::String,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Exists response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -89,9 +93,10 @@ pub struct ListRequest {
     /// Prefix to list keys with
     #[prost(string, tag="1")]
     pub prefix: ::prost::alloc::string::String,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// List response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -108,9 +113,10 @@ pub struct MultiGetRequest {
     /// Keys to get
     #[prost(string, repeated, tag="1")]
     pub keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// MultiGet response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -141,9 +147,10 @@ pub struct MultiPutRequest {
     /// Key-value pairs to put
     #[prost(message, repeated, tag="1")]
     pub pairs: ::prost::alloc::vec::Vec<KeyValuePair>,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Key-value pair
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -177,9 +184,10 @@ pub struct PutWithTtlRequest {
     /// Time-to-live
     #[prost(message, optional, tag="3")]
     pub ttl: ::core::option::Option<::prost_types::Duration>,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="4")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="4")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// PutWithTtl response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -199,9 +207,10 @@ pub struct RefreshTtlRequest {
     /// New TTL
     #[prost(message, optional, tag="2")]
     pub ttl: ::core::option::Option<::prost_types::Duration>,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="3")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// RefreshTtl response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -218,9 +227,10 @@ pub struct GetTtlRequest {
     /// Key to check
     #[prost(string, tag="1")]
     pub key: ::prost::alloc::string::String,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// GetTtl response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -248,9 +258,10 @@ pub struct CasRequest {
     /// New value
     #[prost(bytes="vec", tag="3")]
     pub new_value: ::prost::alloc::vec::Vec<u8>,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="4")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="4")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Cas response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -270,9 +281,10 @@ pub struct IncrementRequest {
     /// Delta to add
     #[prost(int64, tag="2")]
     pub delta: i64,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="3")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Increment response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -292,9 +304,10 @@ pub struct DecrementRequest {
     /// Delta to subtract
     #[prost(int64, tag="2")]
     pub delta: i64,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="3")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Decrement response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -311,9 +324,10 @@ pub struct ClearPrefixRequest {
     /// Prefix to clear
     #[prost(string, tag="1")]
     pub prefix: ::prost::alloc::string::String,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// ClearPrefix response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -330,9 +344,10 @@ pub struct CountPrefixRequest {
     /// Prefix to count
     #[prost(string, tag="1")]
     pub prefix: ::prost::alloc::string::String,
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="2")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// CountPrefix response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -346,9 +361,10 @@ pub struct CountPrefixResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetStatsRequest {
-    /// Request context (contains tenant_id, namespace, user_id)
-    #[prost(message, optional, tag="1")]
-    pub context: ::core::option::Option<super::super::common::v1::RequestContext>,
+    /// Namespace for tenant isolation (optional; empty string = default).
+    /// Tenant-id comes from auth (JWT/mTLS), not from this request.
+    #[prost(string, tag="1")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// GetStats response
 #[allow(clippy::derive_partial_eq_without_eq)]

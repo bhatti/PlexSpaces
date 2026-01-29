@@ -16,6 +16,7 @@ use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_actor::{ActorBuilder, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorRegistry, ServiceLocator as ServiceLocatorTrait, ReplyWaiterRegistry, Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, FacetManager, VirtualActorManager, RequestContext};
+use plexspaces_services::ServiceLocatorImpl;
 use plexspaces_node::create_default_service_locator;
 use plexspaces_mailbox::Message;
 use plexspaces_keyvalue::InMemoryKVStore;
@@ -191,15 +192,14 @@ async fn create_test_registry_with_actors(
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
     service_locator.register_service(actor_registry.clone()).await;
+    // ActorFactory is already registered by create_default_service_locator
     
-    // Register NodeConfig with default tenant/namespace to match test actors
+    // Register NodeConfig
     use plexspaces_proto::node::v1::NodeConfig;
     let node_config = NodeConfig {
         id: "test-node".to_string(),
         listen_addr: String::new(),
         cluster_seed_nodes: vec![],
-        default_tenant_id: tenant_id.to_string(),
-        default_namespace: "default".to_string(),
         cluster_name: String::new(),
         grpc_connection_pool_size: 2,
         max_connections: 100,
@@ -208,6 +208,7 @@ async fn create_test_registry_with_actors(
         metadata: std::collections::HashMap::new(),
         node_registry: None,
         grpc_address: String::new(),
+        wasm_apps_directory: String::new(),
     };
     service_locator.register_node_config(node_config).await;
     
@@ -256,7 +257,7 @@ async fn create_test_registry_with_actors(
 // Helper to create test ActorService
 async fn create_test_actor_service(
     _actor_registry: Arc<ActorRegistry>,
-    service_locator: Arc<dyn ServiceLocatorTrait>,
+    service_locator: Arc<ServiceLocatorImpl>,
     node_id: String,
 ) -> ActorServiceImpl {
     let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());

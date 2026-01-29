@@ -435,7 +435,7 @@ mod tests {
         async fn register_actor_registry(&self, _registry: Arc<plexspaces_core::ActorRegistry>) {}
         async fn virtual_actor_manager(&self) -> Option<Arc<plexspaces_core::VirtualActorManager>> { None }
         async fn reply_waiter_registry(&self) -> Option<Arc<plexspaces_core::ReplyWaiterRegistry>> { None }
-        async fn get_actor_factory(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> { None }
+        // Note: ActorFactory methods are not part of ServiceLocator trait (to avoid circular dependency)
         
         // Core services
         async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>> { None }
@@ -479,9 +479,9 @@ mod tests {
         async fn get_behavior_registry(&self) -> Option<Arc<plexspaces_core::behavior_factory::BehaviorRegistry>> { None }
         async fn register_behavior_registry(&self, _: Arc<plexspaces_core::behavior_factory::BehaviorRegistry>) {}
         
-        // System context
+        // System context - use empty strings (this is a test stub)
         async fn request_context_for_system_operations(&self) -> plexspaces_core::RequestContext {
-            plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string())
+            plexspaces_core::RequestContext::new_without_auth(String::new(), String::new())
         }
         
         // gRPC connection manager
@@ -494,6 +494,19 @@ mod tests {
         // WASM runtime
         async fn get_wasm_runtime(&self) -> Option<Arc<dyn plexspaces_core::WasmRuntimeTrait>> { None }
         async fn register_wasm_runtime(&self, _: Arc<dyn plexspaces_core::WasmRuntimeTrait>) {}
+        
+        // Security config
+        async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig> { None }
+        async fn register_security_config(&self, _: plexspaces_proto::node::v1::SecurityConfig) {}
+        async fn is_auth_disabled(&self) -> bool { false }
+        
+        // Blob service
+        async fn get_blob_service(&self) -> Option<Arc<dyn plexspaces_core::BlobServiceTrait>> { None }
+        async fn register_blob_service(&self, _: Arc<dyn plexspaces_core::BlobServiceTrait>) {}
+        
+        // Node registry
+        async fn get_node_registry(&self) -> Option<Arc<dyn plexspaces_core::NodeRegistryTrait>> { None }
+        async fn register_node_registry(&self, _: Arc<dyn plexspaces_core::NodeRegistryTrait>) {}
         
         // Process group service
         async fn get_process_group_service(&self) -> Option<Arc<dyn ProcessGroupService>> {

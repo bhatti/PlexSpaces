@@ -840,6 +840,143 @@ let workflow_facet = Box::new(WorkflowFacet::new(
 ));
 ```
 
+### Capability Facets (Message Interception Pattern)
+
+Capability facets (LockFacet, ProcessGroupFacet, RegistryFacet) use **message interception** to provide capabilities to actors. They intercept messages with specific types and handle them using real backend services from ServiceLocator.
+
+#### LockFacet
+
+Distributed lock coordination for task queues, resource coordination, and leader election.
+
+**Message Types Intercepted**:
+- `"acquire_lock"`: Acquire lock with lease duration
+- `"release_lock"`: Release lock (requires version)
+- `"renew_lock"`: Renew lock lease (heartbeat)
+- `"try_acquire_lock"`: Non-blocking lock attempt
+- `"get_lock"`: Get current lock state
+
+**Backend**: Uses LockManager from ServiceLocator (configured via node-config/runtimeconfig, not hardcoded)
+- MemoryLockManager (testing)
+- SQLiteLockManager (production)
+- DynamoDBLockManager (distributed)
+- RedisLockManager (distributed)
+
+**Use Cases**:
+- Distributed task queues (ensure only one worker processes each job)
+- Resource coordination (prevent concurrent access)
+- Leader election (elect a master node)
+
+**Example**:
+```toml
+# app-config.toml
+[[supervisor.children.facets]]
+type = "locks"
+priority = 50
+config = {}
+```
+
+```rust
+// Actor sends message - facet intercepts it
+let msg = Message::json(&json!({
+    "lock_key": "job:job-123",
+    "holder_id": "worker-1",
+    "lease_duration_secs": 300
+}))
+.with_message_type("acquire_lock");
+
+let reply = actor_ref.ask(msg.to_proto(), Duration::from_secs(5)).await?;
+// LockFacet handled the operation, actor's handle() was never called
+```
+
+**See Also**: [Task Queue Example](../../examples/python/apps/task-queue/) - Complete distributed task queue implementation
+
+#### ProcessGroupFacet
+
+Distributed pub/sub and group messaging (Erlang pg2-style).
+
+**Message Types Intercepted**:
+- `"create_group"`: Create a new process group
+- `"join_group"`: Join a process group (with optional topics)
+- `"leave_group"`: Leave a process group
+- `"get_members"`: Get all members (cluster-wide)
+- `"get_local_members"`: Get local members only
+- `"list_groups"`: List all groups
+- `"publish_to_group"`: Publish message to group members
+
+**Backend**: Uses ProcessGroupService from ServiceLocator (configured via node-config/runtimeconfig)
+
+**Use Cases**:
+- Pub/sub messaging (chat rooms, notifications)
+- Actor clustering (group actors for coordination)
+- Broadcast messaging (send to all group members)
+
+**Example**:
+```toml
+# app-config.toml
+[[supervisor.children.facets]]
+type = "process_groups"
+priority = 50
+config = {}
+```
+
+```rust
+// Actor sends message - facet intercepts it
+let msg = Message::json(&json!({
+    "group_name": "chat-room-1",
+    "actor_id": "user-123",
+    "topics": ["general", "announcements"]
+}))
+.with_message_type("join_group");
+
+let reply = actor_ref.ask(msg.to_proto(), Duration::from_secs(5)).await?;
+// ProcessGroupFacet handled the operation
+```
+
+#### RegistryFacet
+
+Service discovery and object registration.
+
+**Message Types Intercepted**:
+- `"register_object"`: Register an object in the registry
+- `"unregister_object"`: Unregister an object
+- `"lookup_object"`: Lookup an object by ID
+- `"discover_objects"`: Discover objects with filters
+
+**Backend**: Uses ObjectRegistry from ServiceLocator (configured via node-config/runtimeconfig)
+
+**Use Cases**:
+- Service discovery (find services by type)
+- Actor discovery (find actors by type)
+- Object registration (register services, actors, tuplespaces)
+
+**Example**:
+```toml
+# app-config.toml
+[[supervisor.children.facets]]
+type = "registry"
+priority = 50
+config = {}
+```
+
+```rust
+// Actor sends message - facet intercepts it
+let msg = Message::json(&json!({
+    "object_id": "payment-service",
+    "object_type": "Service",
+    "grpc_address": "http://payment-service:50051"
+}))
+.with_message_type("register_object");
+
+let reply = actor_ref.ask(msg.to_proto(), Duration::from_secs(5)).await?;
+// RegistryFacet handled the operation
+```
+
+**Design Pattern**:
+- Facets intercept messages in `before_method()` hook
+- Return `InterceptResult::ShortCircuit(data)` to handle operation
+- Actor's `handle()` method is never called for intercepted messages
+- Works for both Rust and WASM actors (they all send messages)
+
 ---
 
 ## Linking and Monitoring
@@ -1365,7 +1502,8 @@ graph LR
 - **900-999**: Logging/Tracing facets (capture all events)
 - **800-899**: Metrics facets (collect performance data)
 - **100-500**: Business logic facets (domain-specific processing)
-- **1-99**: Persistence facets (run last, commit after business logic)
+- **50-99**: Capability facets (LockFacet, ProcessGroupFacet, RegistryFacet - message interception)
+- **1-49**: Persistence facets (run last, commit after business logic)
 
 ### Facet Interceptor Chain
 

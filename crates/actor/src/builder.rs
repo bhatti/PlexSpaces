@@ -401,7 +401,7 @@ impl ActorBuilder {
         let max_cpu_percent = (cpu_cores * 100.0) as f32;
         
         // Create ResourceContract
-        let resource_contract = ResourceContract {
+        let _resource_contract = ResourceContract {
             max_cpu_percent,
             max_memory_bytes: memory_bytes,
             max_io_ops_per_sec: None,
@@ -651,7 +651,7 @@ impl ActorBuilder {
         }
 
         // Attach facets after building
-        for mut facet in self.facets {
+        for facet in self.facets {
             actor.attach_facet(facet).await
                 .map_err(|e| {
                     std::io::Error::new(
@@ -702,37 +702,78 @@ impl ActorBuilder {
         };
         
         // Build the actor (facets are attached during build)
-        let actor = self.build().await?;
+        let mut actor = self.build().await?;
         
         // Extract actor ID and mailbox before spawning (needed for ActorRef creation)
         let actor_id = actor.id().clone();
         let mailbox = actor.mailbox().clone();
         
-        // Get ActorFactory from ServiceLocator as trait object to avoid TypeId mismatch
-        // Using trait objects (Arc<dyn ActorFactory>) instead of concrete types (Arc<ActorFactoryImpl>)
-        // avoids TypeId issues when the same type is accessed through different import paths.
-        // Trait objects have stable TypeIds regardless of import paths.
-        use crate::get_actor_factory;
+        // Get required services from ServiceLocator
+        let registry = service_locator.actor_registry().await
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator. Ensure Node::start() has been called.".to_string())?;
+        let facet_manager_wrapper = service_locator.get_facet_manager().await
+            .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
+        let facet_manager = facet_manager_wrapper.inner_clone();
         
-        let actor_factory: Arc<dyn crate::ActorFactory> = get_actor_factory(service_locator.as_ref()).await
-            .ok_or_else(|| {
-                format!("ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.")
-            })?;
+        // Get local node ID for actor ID normalization
+        let local_node_id = registry.local_node_id();
         
-        // Use spawn_built_actor since the actor is already built
-        // This avoids recreating the actor that was just built
-        let _message_sender = actor_factory.spawn_built_actor(
-            ctx,
-            Arc::new(actor),
-            Some(actor_type),
-        ).await
-            .map_err(|e| format!("Failed to spawn actor via ActorFactory: {}", e))?;
+        // Normalize actor ID to include node ID
+        let actor_id = if actor_id.contains('@') {
+            actor_id
+        } else {
+            format!("{}@{}", actor_id, local_node_id)
+        };
         
-        // Create ActorRef from the actor ID and mailbox
-        // Note: spawn_built_actor returns MessageSender, but we need ActorRef for compatibility
-        // We create ActorRef using the mailbox we extracted before spawning
+        // Create ActorContext with proper node ID
+        let actor_context = plexspaces_core::ActorContext::new(
+            local_node_id.to_string(),
+            ctx.tenant_id().to_string(),
+            ctx.namespace().to_string(),
+            service_locator.clone(),
+            actor.context().config.clone(),
+        );
+        actor = actor.set_context(std::sync::Arc::new(actor_context));
+        
+        // Update metrics
+        metrics::gauge!("plexspaces_node_active_actors",
+            "node_id" => local_node_id.to_string()
+        ).increment(1.0);
+        
+        metrics::counter!("plexspaces_node_actors_spawned_total",
+            "node_id" => local_node_id.to_string(),
+            "namespace" => ctx.namespace().to_string()
+        ).increment(1);
+        
+        // Store facets
+        let facets_clone = actor.facets().clone();
+        facet_manager.store_facets(&actor_id, facets_clone).await;
+        
+        // Create ActorRef (implements MessageSender)
         use crate::ActorRef;
-        Ok(ActorRef::local(actor_id, mailbox, service_locator))
+        let actor_ref: std::sync::Arc<dyn plexspaces_core::MessageSender> = std::sync::Arc::new(ActorRef::local(
+            actor_id.clone(),
+            ctx.namespace().to_string(),
+            mailbox.clone(),
+            service_locator.clone(),
+        ));
+        
+        // Start actor (calls init() internally, then registers in ActorRegistry)
+        let _join_handle = actor.start().await
+            .map_err(|e| format!("Failed to start actor: {}", e))?;
+        
+        // Register actor in registry
+        registry.register_actor(
+            ctx,
+            actor_id.clone(),
+            actor_ref.clone(),
+            Some(actor_type),
+            actor.context().config.clone(),
+            Some(std::sync::Arc::new(actor) as std::sync::Arc<dyn std::any::Any + Send + Sync>),
+        ).await;
+        
+        // Return ActorRef
+        Ok(ActorRef::local(actor_id, ctx.namespace().to_string(), mailbox, service_locator))
     }
 }
 
@@ -1028,15 +1069,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_builder_spawn_error_when_actor_factory_not_found() {
+    async fn test_builder_spawn_error_when_services_not_registered() {
         use plexspaces_services::ServiceLocatorImpl;
         use std::sync::Arc;
 
-        // Create an empty ServiceLocator without ActorFactory
-        // This tests the error case when ActorFactory is not registered
+        // Create an empty ServiceLocator without required services
+        // This tests the error case when ActorRegistry is not registered
         let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
 
-        // Attempt to spawn actor - should fail because ActorFactory is not registered
+        // Attempt to spawn actor - should fail because ActorRegistry is not registered
         use plexspaces_core::RequestContext;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let result = ActorBuilder::new(Box::new(TestBehavior))
@@ -1045,10 +1086,11 @@ mod tests {
             .spawn(&ctx, service_locator.clone())
             .await;
 
-        assert!(result.is_err(), "Should fail when ActorFactory is not in ServiceLocator");
+        assert!(result.is_err(), "Should fail when required services are not in ServiceLocator");
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("ActorFactory not found"), 
-                "Error message should mention ActorFactory not found, got: {}", error_msg);
+        // Builder directly uses ActorRegistry, so that's the error we get
+        assert!(error_msg.contains("ActorRegistry not found"), 
+                "Error message should mention ActorRegistry not found, got: {}", error_msg);
     }
 
     #[tokio::test]

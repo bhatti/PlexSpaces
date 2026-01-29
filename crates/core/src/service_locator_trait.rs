@@ -27,7 +27,6 @@
 //! - Services implements the trait
 //! - ActorContext uses the trait
 
-use std::any::Any;
 use std::sync::Arc;
 use async_trait::async_trait;
 
@@ -38,10 +37,11 @@ use crate::monitoring::{NodeMetricsAccessor, NodeConnectionInfo};
 use crate::RequestContext;
 use crate::JournalStorage;
 use crate::KeyValueStore;
-use crate::LockManager;
+// LockManager is in plexspaces-locks crate
 use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 use crate::behavior_factory::BehaviorRegistry;
 use crate::grpc_connection_manager::GrpcConnectionManager;
+use crate::ActorFactory;
 
 /// Trait for service registration and retrieval
 ///
@@ -60,6 +60,10 @@ use crate::grpc_connection_manager::GrpcConnectionManager;
 /// - Use `get_actor_service()` instead of `get_service::<ActorService>()`
 ///
 /// The generic methods are intended for use with concrete `ServiceLocatorImpl` only.
+///
+/// ## Note on ActorFactory
+/// ActorFactory trait is defined in `plexspaces-core` crate to avoid circular dependencies.
+/// Use `get_actor_factory()` and `register_actor_factory()` methods on ServiceLocator directly.
 #[async_trait]
 pub trait ServiceLocator: Send + Sync {
     // ============================================================================
@@ -100,9 +104,6 @@ pub trait ServiceLocator: Send + Sync {
     /// Get ReplyWaiterRegistry
     async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>>;
     
-    /// Get ActorFactory (returns Arc<dyn Any> for type erasure)
-    async fn get_actor_factory(&self) -> Option<Arc<dyn Any + Send + Sync>>;
-    
     /// Get ActorService
     async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>>;
     
@@ -133,6 +134,12 @@ pub trait ServiceLocator: Send + Sync {
     /// Register JournalStorage
     async fn register_journal_storage(&self, service: Arc<dyn JournalStorage + Send + Sync>);
     
+    /// Get LockManager
+    async fn get_lock_manager(&self) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>>;
+    
+    /// Register LockManager
+    async fn register_lock_manager(&self, service: Arc<dyn plexspaces_locks::LockManager + Send + Sync>);
+    
     /// Get NodeMetricsAccessor
     async fn get_node_metrics_accessor(&self) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>;
     
@@ -151,6 +158,52 @@ pub trait ServiceLocator: Send + Sync {
     /// Register FacetRegistry
     async fn register_facet_registry(&self, service: Arc<FacetRegistryServiceWrapper>);
     
+    /// Get ActorFactory
+    ///
+    /// ## Purpose
+    /// Retrieves ActorFactory for spawning actors. ActorFactory trait is defined in core crate.
+    ///
+    /// ## Returns
+    /// `Some(Arc<dyn ActorFactory>)` if registered, `None` otherwise
+    async fn get_actor_factory(&self) -> Option<Arc<dyn ActorFactory>>;
+    
+    /// Register ActorFactory
+    ///
+    /// ## Purpose
+    /// Registers ActorFactory for actor spawning. ActorFactory trait is defined in core crate.
+    ///
+    /// ## Arguments
+    /// * `factory` - ActorFactory to register (as `Arc<dyn ActorFactory>`)
+    async fn register_actor_factory(&self, factory: Arc<dyn ActorFactory>);
+    
+    /// Initialize default services in this ServiceLocator
+    ///
+    /// ## Purpose
+    /// Populates the ServiceLocator with all default services needed for a node.
+    /// This is the centralized initialization logic that can be called from
+    /// `create_default_service_locator` or `Node::initialize_services`.
+    ///
+    /// ## Idempotent
+    /// Safe to call multiple times - checks if services are already initialized and returns early.
+    ///
+    /// ## Arguments
+    /// * `node_id` - Node ID for services (defaults to "test-node" if None)
+    /// * `node_config` - Optional NodeConfig (if None, will be created from release_config.node or defaults)
+    /// * `release_config` - Optional ReleaseSpec (if provided, node_config will be extracted from release_config.node)
+    ///
+    /// ## Note
+    /// This method creates all default services including:
+    /// - ActorFactoryImpl and facet factories (LockFacetFactory, RegistryFacetFactory, ProcessGroupFacetFactory)
+    /// - ActorServiceImpl
+    /// - TupleSpaceProvider
+    /// Services crate depends on actor crate, so it can create these directly without closures.
+    async fn initialize_services(
+        &self,
+        node_id: Option<String>,
+        node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
+        release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
+    );
+    
     /// Get node config
     async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig>;
     
@@ -165,8 +218,8 @@ pub trait ServiceLocator: Send + Sync {
     
     /// Check if authentication is disabled
     /// 
-    /// Returns true if disable_auth=true AND allow_disable_auth=true in SecurityConfig.
-    /// Returns false (auth enabled) if SecurityConfig is not set or conditions not met.
+    /// Returns true if disable_auth=true in SecurityConfig or PLEXSPACES_DISABLE_AUTH env var is set.
+    /// Returns false (auth enabled) if SecurityConfig is not set or disable_auth=false.
     async fn is_auth_disabled(&self) -> bool;
     
     /// Get NodeConnectionInfo accessor
@@ -222,20 +275,18 @@ pub trait ServiceLocator: Send + Sync {
     /// * `registry` - BehaviorRegistry to register
     async fn register_behavior_registry(&self, registry: Arc<BehaviorRegistry>);
     
-    /// Create RequestContext for internal/system operations using NodeConfig defaults
+    /// Create RequestContext for operations that have no request (e.g. node registration, heartbeat).
     ///
     /// ## Purpose
-    /// Creates a RequestContext for internal operations using default tenant_id and namespace
-    /// from NodeConfig. This ensures system operations use configured defaults rather than
-    /// hardcoded values.
-    ///
-    /// ## Note
-    /// This should only be used for internal purposes like object registry lookups,
-    /// not for main application methods that should use RequestContext from gRPC requests.
+    /// Tenant/namespace from node config default_tenant_id/default_namespace if available, else blank.
+    /// Use for system operations only; API handlers must use context from request (JWT/headers/mTLS).
     ///
     /// ## Returns
     /// RequestContext with defaults from NodeConfig, or empty strings if NodeConfig not available
     async fn request_context_for_system_operations(&self) -> RequestContext;
+
+    /// Same as request_context_for_system_operations but with explicit namespace (e.g. cluster_name).
+    async fn request_context_for_system_operations_with_namespace(&self, namespace: String) -> RequestContext;
     
     /// Get GrpcConnectionManager
     ///
@@ -269,7 +320,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ActorServiceClient ready to use, or error if node not found or connection failed
     ///
     /// ## Note
-    /// Uses request_context_for_system_operations for internal ObjectRegistry lookups.
+    /// Uses request_context_for_system_operations for ObjectRegistry lookups (no request context).
     async fn get_actor_service_client(
         &self,
         node_id: &str,
@@ -425,7 +476,7 @@ pub trait WasmRuntimeTrait: Send + Sync {
         tuplespace_provider: Option<std::sync::Arc<dyn TupleSpaceProvider>>,
         keyvalue_store: Option<std::sync::Arc<dyn KeyValueStore>>,
         process_group_registry: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
-        lock_manager: Option<std::sync::Arc<dyn LockManager>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_locks::LockManager>>,
         object_registry: Option<std::sync::Arc<dyn ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn JournalStorage>>,
         blob_service: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
@@ -603,30 +654,4 @@ pub trait NodeRegistryTrait: Send + Sync {
     async fn cache_stats(&self) -> (usize, usize, std::time::Duration); // (cache_size, hits, ttl)
 }
 
-/// Trait for ServiceLocator initialization
-///
-/// ## Purpose
-/// Provides a method to initialize all default services in a ServiceLocator.
-/// This is the centralized initialization logic that can be called from
-/// `create_default_service_locator` or `Node::initialize_services`.
-#[async_trait]
-pub trait ServiceLocatorInitialization: ServiceLocator {
-    /// Initialize default services in this ServiceLocator
-    ///
-    /// ## Purpose
-    /// Populates the ServiceLocator with all default services needed for a node.
-    /// This is the centralized initialization logic that can be called from
-    /// `create_default_service_locator` or `Node::initialize_services`.
-    ///
-    /// ## Arguments
-    /// * `node_id` - Node ID for services (defaults to "test-node" if None)
-    /// * `node_config` - Optional NodeConfig (if None, will be created from release_config.node or defaults)
-    /// * `release_config` - Optional ReleaseSpec (if provided, node_config will be extracted from release_config.node)
-    async fn initialize_services(
-        &self,
-        node_id: Option<String>,
-        node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
-        release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
-    );
-}
 

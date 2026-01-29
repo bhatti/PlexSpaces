@@ -254,12 +254,14 @@ impl RedisTupleSpace {
 mod tests {
     use super::*;
     use crate::{PatternField, TupleField};
+    use plexspaces_common::skip_if_unavailable;
+    use plexspaces_common::test_helpers::redis_available;
 
     /// Note: These tests require Redis running on localhost:6379
-    /// Skip if Redis is not available
+    /// Tests automatically skip if Redis is not available
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_write_and_read() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let space = RedisTupleSpace::new("redis://127.0.0.1:6379", "test-write-read")
             .await
             .expect("Failed to connect to Redis");
@@ -288,8 +290,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_pattern_matching() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let space = RedisTupleSpace::new("redis://127.0.0.1:6379", "test-pattern")
             .await
             .expect("Failed to connect to Redis");

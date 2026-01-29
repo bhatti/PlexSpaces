@@ -157,11 +157,12 @@ impl DynamoDBKVStore {
         )
         .record(duration.as_secs_f64());
 
-        debug!(
-            table_name = %table_name,
+        tracing::info!(
+            table = %table_name,
             region = %region,
+            backend = "DynamoDB",
             duration_ms = duration.as_millis(),
-            "DynamoDB KeyValue store initialized"
+            "KeyValue storage initialized"
         );
 
         Ok(Self {
@@ -401,33 +402,25 @@ impl DynamoDBKVStore {
     /// Create composite partition key from tenant_id, namespace, and key.
     /// Format: "{tenant_id}#{namespace}#{key}"
     fn composite_key(ctx: &RequestContext, key: &str) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
+        let tenant_id = ctx.tenant_id();
+        // For admin/internal contexts with empty namespace, skip namespace in key
+        if ctx.should_skip_namespace_filter() {
+            format!("{}#{}", tenant_id, key)
         } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-        format!("{}#{}#{}", tenant_id, namespace, key)
+            format!("{}#{}#{}", tenant_id, ctx.namespace(), key)
+        }
     }
 
     /// Create tenant_namespace key for GSI.
     /// Format: "{tenant_id}#{namespace}"
     fn tenant_namespace_key(ctx: &RequestContext) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
+        let tenant_id = ctx.tenant_id();
+        // For admin/internal contexts with empty namespace, use just tenant_id
+        if ctx.should_skip_namespace_filter() {
+            tenant_id.to_string()
         } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-        format!("{}#{}", tenant_id, namespace)
+            format!("{}#{}", tenant_id, ctx.namespace())
+        }
     }
 
     /// Extract prefix from key (everything before last colon or empty string).
@@ -489,16 +482,9 @@ impl DynamoDBKVStore {
         value: &[u8],
         expires_at_secs: Option<i64>,
     ) -> HashMap<String, AttributeValue> {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
-        } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
+        // Use tenant_id and namespace as-is (may be empty)
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
 
         let pk = Self::composite_key(ctx, key);
         let tenant_namespace = Self::tenant_namespace_key(ctx);

@@ -41,12 +41,12 @@
 //! ### Basic Application Implementation
 //! ```rust
 //! use plexspaces_core::application::{Application, ApplicationNode, ApplicationError};
-//! use plexspaces_proto::v1::application::{ApplicationConfig, HealthStatus};
+//! use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus};
 //! use async_trait::async_trait;
 //! use std::sync::Arc;
 //!
 //! pub struct MyApplication {
-//!     config: ApplicationConfig,
+//!     config: ApplicationSpec,
 //! }
 //!
 //! #[async_trait]
@@ -78,7 +78,7 @@ use prost_types;
 
 // Re-export proto types for convenience
 pub use plexspaces_proto::v1::application::{
-    ApplicationConfig, ApplicationState, ApplicationStatistics, HealthStatus, ShutdownStrategy,
+    ApplicationSpec, ApplicationState, ApplicationStatistics, HealthStatus, ShutdownStrategy,
 };
 
 /// Application trait for implementing business logic layers
@@ -100,7 +100,7 @@ pub use plexspaces_proto::v1::application::{
 /// - Applications can be tested with mock `ApplicationNode` implementations
 ///
 /// ## Configuration
-/// Application configuration is loaded from TOML and parsed into `ApplicationConfig` proto message.
+/// Application configuration is loaded from TOML and parsed into `ApplicationSpec` proto message.
 #[async_trait]
 pub trait Application: Send + Sync {
     /// Application name (must match TOML [[applications]].name)
@@ -153,7 +153,7 @@ pub trait Application: Send + Sync {
     /// 5. Disconnect from external services
     ///
     /// ## Timeout
-    /// Applications have `shutdown_timeout` from `ApplicationConfig` to complete.
+    /// Applications have `shutdown_timeout` from `ApplicationSpec` to complete.
     /// If exceeded, node may force kill the application.
     async fn stop(&mut self) -> Result<(), ApplicationError>;
 
@@ -205,12 +205,25 @@ pub trait ApplicationNode: Send + Sync {
     /// Get ServiceLocator (optional - only Node implements this)
     ///
     /// ## Purpose
-    /// Allows applications to access ServiceLocator for ActorFactory.
+    /// Allows applications to access ServiceLocator for other services.
     /// Node implementations return Some(service_locator), mocks return None.
     ///
     /// ## Returns
     /// Some(ServiceLocator) if available, None otherwise
     fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        None
+    }
+    
+    /// Get ActorFactory (optional - only Node implements this)
+    ///
+    /// ## Purpose
+    /// Allows applications to access ActorFactory for spawning actors.
+    /// This method is provided to avoid circular dependencies (application can't depend on services).
+    /// Node implementations return Some(actor_factory), mocks return None.
+    ///
+    /// ## Returns
+    /// Some(ActorFactory) if available, None otherwise
+    async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
         None
     }
 }

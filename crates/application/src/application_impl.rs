@@ -34,8 +34,6 @@ use crate::{Application, ApplicationError, ApplicationNode};
 use plexspaces_proto::v1::application::HealthStatus;
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
 use plexspaces_actor::{Supervisor, SupervisionStrategy};
-use plexspaces_core::{ActorId, ExitReason};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Duration;
@@ -205,16 +203,16 @@ impl SpecApplication {
             let actor_id = format!("{}@{}", child.id, node.id());
             
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
-            // Use ActorFactory::spawn_actor() which supports facets directly
+            // Use ActorFactory::spawn_actor() which supports facets directly.
+            // No request here: tenant/namespace come from auth, not config
             use plexspaces_core::RequestContext;
-            use plexspaces_actor::get_actor_factory;
-            let ctx = RequestContext::new_without_auth("internal".to_string(), self.spec.name.clone());
+            let ctx = RequestContext::new_without_auth(String::new(), self.spec.name.clone());
             
-            // Get ActorFactory from ServiceLocator
-            let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = get_actor_factory(service_locator.as_ref()).await
+            // Get ActorFactory from ApplicationNode (avoids circular dependency - application can't depend on services)
+            let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = node.actor_factory().await
                 .ok_or_else(|| {
                     ApplicationError::StartupFailed(
-                        "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string()
+                        "ActorFactory not available from node. Ensure Node::start() has been called.".to_string()
                     )
                 })?;
             
@@ -222,19 +220,21 @@ impl SpecApplication {
             // Use FacetRegistry to create facets from proto configurations
             let facets: Vec<Box<dyn plexspaces_facet::Facet>> = if !child.facets.is_empty() {
                 // Get FacetRegistry from ServiceLocator
-                use plexspaces_core::service_names;
+                
                 if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                     let facet_registry = facet_registry_wrapper.inner_clone();
                     // Use facet_helpers to create facets from proto
                     use plexspaces_actor::create_facets_from_proto;
                     let facets = create_facets_from_proto(&child.facets, &facet_registry).await;
                     
-                    debug!(
+                    info!(
                         application = %self.spec.name,
                         child_id = %child.id,
                         facet_count = child.facets.len(),
                         created_count = facets.len(),
-                        "Created facets from ChildSpec for actor"
+                        "📦 Application: Created {} facets from ChildSpec for actor {}",
+                        facets.len(),
+                        child.id
                     );
                     
                     facets
@@ -614,12 +614,11 @@ impl Application for SpecApplication {
             
             let mut errors = Vec::new();
             {
-                use plexspaces_actor::get_actor_factory;
-
-                let actor_factory = get_actor_factory(service_locator.as_ref()).await
+                // Get ActorFactory from ApplicationNode (avoids circular dependency)
+                let actor_factory = node.actor_factory().await
                     .ok_or_else(|| ApplicationError::ActorStopFailed(
                         "unknown".to_string(),
-                        "ActorFactory not found in ServiceLocator".to_string()
+                        "ActorFactory not available from node".to_string()
                     ))?;
                 
                 for actor_id in actor_ids.iter().rev() {
@@ -825,8 +824,7 @@ impl SpecApplication {
         
         // Create root supervisor
         let supervisor_id = format!("{}@{}", self.spec.name, node.id());
-        let (mut supervisor, _event_rx) = Supervisor::new(supervisor_id.clone(), strategy);
-        supervisor = supervisor.with_service_locator(service_locator.clone());
+        let (mut supervisor, _event_rx) = Supervisor::new(supervisor_id.clone(), strategy, service_locator.clone());
         
         // Note: Node reference for linking would be added here if ApplicationNode exposed Node
         // For now, links will be established when children are added via Supervisor::add_child()
@@ -922,12 +920,21 @@ mod tests {
         async fn new(id: impl Into<String>) -> Self {
             use plexspaces_node::create_default_service_locator;
             let id_str = id.into();
+            let service_locator = create_default_service_locator(Some(id_str.clone()), None, None).await;
+            
+            // Register ActorFactory for tests (required by SpecApplication::initialize_supervisor_tree)
+            use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
+            let sl_trait: Arc<dyn plexspaces_core::ServiceLocator> = service_locator.clone();
+            let actor_factory_impl = ActorFactoryImpl::new_arc(sl_trait).await;
+            let factory: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory_impl.clone();
+            service_locator.register_actor_factory(factory).await;
+            
             Self {
                 id: id_str.clone(),
                 addr: "0.0.0.0:8000".to_string(),
                 spawned_actors: Arc::new(RwLock::new(Vec::new())),
                 stopped_actors: Arc::new(RwLock::new(Vec::new())),
-                service_locator: create_default_service_locator(Some(id_str), None, None).await,
+                service_locator,
             }
         }
 

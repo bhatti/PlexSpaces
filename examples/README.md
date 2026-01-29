@@ -1,252 +1,110 @@
 # PlexSpaces Examples
 
-This directory contains examples organized by complexity to help you learn PlexSpaces progressively.
+## Structure
+
+```
+examples/
+├── rust/
+│   ├── embedded/           # 50 Rust embedded examples
+│   └── apps/               # 2 Rust WASM actors
+├── python/
+│   └── apps/               # 10 Python WASM actors
+├── typescript/
+│   └── apps/               # 1 TypeScript WASM actor
+├── go/
+│   └── apps/               # (empty - TODO)
+├── native_references/      # Reference code from other frameworks
+└── README.md
+```
+
+## Summary
+
+| Language | Embedded | Apps | Total |
+|----------|----------|------|-------|
+| Rust | 50 | 2 | 52 |
+| Python | - | 10 | 10 |
+| TypeScript | - | 1 | 1 |
+| Go | - | 0 | 0 |
+| **Total** | **50** | **13** | **63** |
 
 ---
 
-## Learning Path
+## Rust Embedded Examples (50)
 
-### 🟢 Beginner - Simple Examples
+### Core Patterns
+| Example | Description |
+|---------|-------------|
+| `actor_groups_sharding` | Data-parallel scaling via sharding |
+| `supervision_tree` | Erlang/OTP-style fault tolerance |
+| `durable_actor` | Journaling and deterministic replay |
+| `timers` | In-memory non-durable timers |
+| `reminders` | Durable persistent reminders |
+| `process_groups_pubsub` | Pub/Sub coordination |
+| `config_updates` | Distributed configuration |
+| `faas_actor` | HTTP invocation of actors |
 
-Start here to learn the basics:
+### Scientific Computing
+| Example | Description |
+|---------|-------------|
+| `heat_diffusion` | 2D stencil computation |
+| `matrix_multiply` | Parallel matrix multiplication |
+| `matrix_vector_mpi` | MPI-style collective primitives |
+| `byzantine` | PBFT consensus |
+| `nbody` | Gravitational simulation |
+| `nbody_wasm` | N-Body with WASM actors |
 
-1. **Timers Example** (`simple/timers_example/`)
-   - Learn how to use timers in actors
-   - Basic scheduled tasks
+### Domain Applications
+| Example | Description |
+|---------|-------------|
+| `genomics_pipeline` | DNA sequence analysis |
+| `genomic_workflow_pipeline` | Multi-sample processing |
+| `finance_risk` | Monte Carlo risk analysis |
+| `order_processing` | Workflow orchestration |
+| `timeseries_forecasting` | ML prediction pipeline |
+| `entity_recognition` | NER with streaming |
 
-2. **Durable Actor Example** (`simple/durable_actor_example/`)
-   - Learn durability and journaling
-   - Actor state persistence
+### WASM & Polyglot
+| Example | Description |
+|---------|-------------|
+| `wasm_showcase` | Full WASM capability demo |
+| `wasm_calculator` | Python WASM calculator actors |
+| `polyglot_wasm_deployment` | Multi-language WASM actors |
+| `firecracker_multi_tenant` | VM isolation |
 
-3. **Actor Groups (Sharding)** (`simple/actor_groups_sharding/`)
-   - Learn actor groups for horizontal scaling
-   - Hash-based routing
-
-4. **WASM Calculator** (`simple/wasm_calculator/`)
-   - Learn WASM actor deployment
-   - Polyglot actors (Python)
-
-5. **Firecracker Multi-Tenant** (`simple/firecracker_multi_tenant/`)
-   - Learn Firecracker VM isolation
-   - Application-level isolation
-
----
-
-### 🟡 Intermediate - Multi-Actor Coordination
-
-Learn coordination patterns:
-
-1. **Matrix Multiply** (`intermediate/matrix_multiply/`)
-   - Multi-actor computation
-   - Task distribution
-
-2. **Matrix Vector MPI** (`intermediate/matrix_vector_mpi/`)
-   - MPI-style coordination
-   - Scatter-gather patterns
-
-3. **Heat Diffusion** (`intermediate/heat_diffusion/`)
-   - Multi-actor simulation
-   - Region-based coordination
-
----
-
-### 🔴 Advanced - Distributed Systems
-
-Learn advanced distributed patterns:
-
-1. **Byzantine Generals** (`advanced/byzantine/`)
-   - Byzantine fault tolerance
-   - Consensus algorithms
-
-2. **N-Body Simulation** (`advanced/nbody/`)
-   - Complex simulation
-   - Multi-actor physics
-
-3. **N-Body WASM** (`advanced/nbody-wasm/`)
-   - WASM-based simulation
-   - Performance optimization
+### Migration Guides (26)
+All `migrating_*` examples show how to migrate from other frameworks.
 
 ---
 
-### 🏢 Domain Examples
+## Running Examples
 
-Real-world applications:
-
-1. **Order Processing** (`domains/order-processing/`)
-   - E-commerce order processing
-   - Workflow orchestration
-
-2. **Genomics Pipeline** (`domains/genomics-pipeline/`)
-   - Scientific computing
-   - Data processing pipelines
-
-3. **Finance Risk** (`domains/finance-risk/`)
-   - Financial risk analysis
-   - Complex workflows
-
-4. **AI Workloads** (`domains/ai-workloads/`)
-   - Machine learning workloads
-   - Entity recognition
-
----
-
-## Quick Start
-
-### Run a Simple Example
-
+### Rust Embedded
 ```bash
-cd examples/simple/timers_example
+cd rust/embedded/<example>
 cargo run
 ```
 
-### Run an Intermediate Example
-
+### Python Apps
 ```bash
-cd examples/intermediate/matrix_multiply
-cargo run
+cd python/apps/<app>
+componentize-py <actor>.py -o <app>.wasm
+plexspaces deploy <app>.wasm --tenant my-tenant
 ```
 
-### Run a Domain Example
-
+### TypeScript Apps
 ```bash
-cd domains/order-processing
-cargo run
+cd typescript/apps/<app>
+jco compile <actor>.ts -o <app>.wasm
+plexspaces deploy <app>.wasm --tenant my-tenant
 ```
 
 ---
 
-## Example Structure
+## TODOs
 
-Each example includes:
+- [ ] Add Go apps (counter, calculator)
+- [ ] Add more TypeScript apps
+- [ ] Review and verify each example compiles/runs
+- [ ] Consolidate similar migration examples
 
-- **README.md** - Documentation and instructions
-- **src/** - Source code
-- **scripts/** - Helper scripts
-- **tests/** - Integration tests (if applicable)
-
----
-
-## Prerequisites
-
-- Rust 1.70+
-- Cargo
-- For WASM examples: `wasm-pack` (optional)
-- For Firecracker examples: Firecracker binary
-- For multi-node examples: Redis or PostgreSQL (optional)
-
----
-
-## Getting Help
-
-- See [Getting Started Guide](../docs/getting-started.md) for basics
-- See [Architecture Guide](../docs/architecture.md) for concepts
-- See [Detailed Design](../docs/detailed-design.md) for component details
-- See [Use Cases](../docs/use-cases.md) for real-world applications
-- See individual example READMEs for specific instructions
-
----
-
-## Contributing
-
-When adding new examples:
-
-1. Place in appropriate complexity directory
-2. Add README.md with:
-   - Purpose
-   - Prerequisites
-   - Running instructions
-   - Key concepts
-3. Update this README.md
-4. Add tests if applicable
-
----
-
-## Comparison Examples
-
-See [`comparison/`](./comparison/) for side-by-side comparisons with other frameworks:
-
-- **Erlang/OTP** - GenServer with supervision
-- **Orleans** - Virtual actors with timers/reminders
-- **Temporal** - Durable workflows
-- **Ray** - Distributed ML workloads
-- And more...
-
-Each comparison includes native framework code, PlexSpaces implementation, benchmarks, and metrics.
-
----
-
-## Testing
-
-### Test Levels
-
-PlexSpaces examples support three levels of testing:
-
-1. **Unit Tests** - Fast tests with small datasets (~10-20ms)
-2. **Integration Tests** - Multi-node coordination with moderate datasets
-3. **E2E Tests** - Production-realistic tests with large datasets
-
-### Running Tests
-
-```bash
-# Run all tests for an example
-cd examples/intermediate/heat_diffusion
-cargo test
-
-# Run specific test level
-cargo test --test basic_test
-cargo test --test distributed_test
-cargo test --test e2e_test
-```
-
-### Multi-Node Testing
-
-Many examples support multi-node testing via:
-- **Local processes** - Multiple processes on same machine
-- **Docker Compose** - Containerized multi-node clusters
-- **Kubernetes** - Production-like deployments
-
-See individual example READMEs for multi-node setup instructions.
-
----
-
-## Example Status
-
-### ✅ Complete Examples
-
-- All simple examples (timers, durable actors, WASM calculator, etc.)
-- All intermediate examples (matrix multiply, heat diffusion, etc.)
-- All advanced examples (Byzantine generals, N-body simulation)
-- All domain examples (order processing, genomics pipeline, finance risk, AI workloads)
-
-### 🔧 Configuration
-
-Examples support multiple backends:
-- **InMemory** - Fast, single-process only
-- **SQLite** - File-based, multi-process support
-- **Redis** - Network-based, multi-node support
-- **PostgreSQL** - Production-ready, multi-node support
-
-Configuration via:
-- Environment variables (`PLEXSPACES_TUPLESPACE_BACKEND`, etc.)
-- Config files (`config/*.toml`)
-- Programmatic configuration
-
----
-
-## Contributing
-
-When adding new examples:
-
-1. Place in appropriate complexity directory
-2. Add README.md with:
-   - Purpose
-   - Prerequisites
-   - Running instructions
-   - Key concepts
-3. Update this README.md
-4. Add tests if applicable
-5. Add scripts for validation and benchmarking
-
----
-
-**Happy Learning!** 🚀
+See [CHECKLIST.md](CHECKLIST.md) for detailed tracking.

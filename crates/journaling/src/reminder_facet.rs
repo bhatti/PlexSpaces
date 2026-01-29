@@ -45,7 +45,7 @@
 use crate::storage::{JournalStorage, ReminderRegistration, ReminderState};
 use async_trait::async_trait;
 use plexspaces_core::{ActorId, ActorRef, ActorService};
-use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
+use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
 use serde_json::Value;
@@ -204,7 +204,7 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
         &self,
         registration: ReminderRegistration,
     ) -> Result<String, ReminderError> {
-        let actor_id = self.actor_id.read().await
+        let _actor_id = self.actor_id.read().await
             .clone()
             .ok_or_else(|| ReminderError::NotAttached)?;
         

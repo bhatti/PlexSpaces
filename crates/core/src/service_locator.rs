@@ -33,40 +33,30 @@ use crate::RequestContext;
 /// and creates a RequestContext using shared validation from RequestContext::from_auth.
 ///
 /// ## Sources (in order of precedence):
-/// 1. `x-tenant-id` header (from JWT middleware)
+/// 1. `x-tenant-id` header (set by auth middleware from JWT/mTLS only - never trust client-sent value)
 /// 2. `x-namespace` header (from request, can be empty)
 /// 3. `x-user-id` header (from JWT middleware, optional)
-/// 4. `x-admin` header (from JWT middleware, optional, indicates admin privileges)
+/// 4. `x-admin` header (from JWT middleware, optional)
 /// 5. `tenant_id` in request labels (fallback, only if auth disabled)
 /// 6. Default values from NodeConfig in ServiceLocator (if auth disabled)
 ///
 /// ## Arguments
-/// * `metadata` - gRPC request metadata
+/// * `metadata` - gRPC request metadata (x-tenant-id must be set by auth middleware from JWT/mTLS)
 /// * `labels` - Request labels (for fallback)
-/// * `service_locator` - ServiceLocator to get NodeConfig
+/// * `service_locator` - ServiceLocator to get NodeConfig and auth_enabled from SecurityConfig
 ///
 /// ## Returns
-/// RequestContext or error if validation fails (validation happens in RequestContext::from_auth)
+/// RequestContext or error if validation fails (e.g. auth enabled but missing tenant_id)
 pub async fn request_context_from_grpc_request(
     metadata: &tonic::metadata::MetadataMap,
     labels: &std::collections::HashMap<String, String>,
     service_locator: &Arc<dyn ServiceLocatorTrait>,
 ) -> Result<RequestContext, plexspaces_common::RequestContextError> {
-    // Get NodeConfig from ServiceLocator
-    let node_config = service_locator.get_node_config().await;
+    // Auth enabled comes from SecurityConfig (disable_auth), not from header presence
+    let auth_enabled = !service_locator.is_auth_disabled().await;
     
-    // Get auth_enabled from SecurityConfig (check runtime config)
-    // For now, infer from x-tenant-id header presence, but should come from SecurityConfig.disable_auth
-    let auth_enabled = metadata.get("x-tenant-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .is_some();
-    
-    // Get defaults from NodeConfig
-    let default_tenant_id = node_config.as_ref()
-        .map(|c| c.default_tenant_id.clone());
-    let default_namespace = node_config.as_ref()
-        .map(|c| c.default_namespace.clone());
+    // NOTE: default_tenant_id and default_namespace have been removed from NodeConfig.
+    // Tenant comes from auth (JWT/mTLS); namespace from application/actor or request.
     
     // Extract tenant_id - RequestContext::from_auth will validate based on auth_enabled
     let tenant_id_from_header = metadata.get("x-tenant-id")
@@ -96,14 +86,15 @@ pub async fn request_context_from_grpc_request(
     
     // Use shared validation from RequestContext::from_auth
     // This validates tenant_id if auth_enabled, otherwise allows empty tenant_id
+    // No defaults from NodeConfig - tenant/namespace must come from request
     RequestContext::from_auth(
         tenant_id_from_header.or(tenant_id_from_labels),
         namespace_from_header.or(namespace_from_labels),
         user_id,
         admin,
         auth_enabled,
-        default_tenant_id,
-        default_namespace,
+        None, // No default tenant - must come from request/auth
+        None, // No default namespace - must come from request
     )
 }
 

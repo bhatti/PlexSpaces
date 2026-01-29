@@ -26,7 +26,6 @@ use plexspaces_proto::object_registry::v1::{
     ObjectRegistration, ObjectType, HealthStatus,
 };
 use prost_types::Timestamp;
-use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Register a node in object-registry
@@ -134,10 +133,10 @@ pub async fn register_application(
 /// ## Returns
 /// Result indicating success or failure
 pub async fn unregister_application(
-    object_registry: &dyn plexspaces_core::ObjectRegistry,
-    ctx: &RequestContext,
-    app_name: &str,
-    node_id: &str,
+    _object_registry: &dyn plexspaces_core::ObjectRegistry,
+    _ctx: &RequestContext,
+    _app_name: &str,
+    _node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // unregister is not in the trait, so we need to use the concrete type
     // For now, we'll just return Ok since unregister is not critical
@@ -264,24 +263,8 @@ pub async fn heartbeat_node(
     ctx: &RequestContext,
     node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Since heartbeat() is not in the ObjectRegistry trait, we need to use the concrete type
-    // For now, simulate heartbeat by updating the registration timestamp
+    // Use heartbeat method which updates timestamps without re-registering
     use plexspaces_proto::object_registry::v1::ObjectType;
-    let registration_opt = object_registry.lookup_full(ctx, ObjectType::ObjectTypeNode, node_id).await?;
-    if let Some(mut registration) = registration_opt {
-        // Update timestamp to simulate heartbeat
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default();
-        let timestamp = Timestamp {
-            seconds: now.as_secs() as i64,
-            nanos: now.subsec_nanos() as i32,
-        };
-        registration.last_heartbeat = Some(timestamp.clone());
-        registration.updated_at = Some(timestamp);
-        object_registry.register(ctx, registration).await
-        .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
-    }
-    Ok(())
+    object_registry.heartbeat(ctx, ObjectType::ObjectTypeNode, node_id).await
 }
 

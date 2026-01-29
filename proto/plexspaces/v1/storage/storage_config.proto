@@ -42,7 +42,7 @@ import "google/protobuf/duration.proto";
 import "buf/validate/validate.proto";
 import "google/api/field_behavior.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/storage/storage_config;plexspaces_storage_v1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/storage;plexspaces_storage_v1";
 option java_package = "com.bhatti.plexspaces.storage.v1";
 option java_multiple_files = true;
 

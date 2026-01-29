@@ -206,6 +206,7 @@ async fn test_activate_virtual_actor_success() {
         let ctx = plexspaces_core::RequestContext::new_without_auth("test".to_string(), "test".to_string());
         let actor_ref = plexspaces_actor::ActorRef::local(
             actor_id.clone(),
+            "test".to_string(),
             actor.mailbox().clone(),
             service_locator.clone(),
         );
@@ -271,6 +272,7 @@ async fn test_activate_virtual_actor_already_active() {
     use plexspaces_core::MessageSender;
     let actor_ref = ActorRef::local(
         "test-actor@test-node".to_string(),
+        "test".to_string(),
         actor.mailbox().clone(),
         service_locator.clone(),
     );
@@ -456,7 +458,7 @@ async fn test_spawn_built_actor_virtual_eager() {
     actor.attach_facet(virtual_facet).await.unwrap();
     
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_built_actor(&ctx, Arc::new(actor), Some("test".to_string())).await;
+    let result = factory.spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string())).await;
     assert!(result.is_ok(), "Spawn virtual actor with eager activation should succeed");
     
     // Wait a bit for actor to start
@@ -490,7 +492,7 @@ async fn test_spawn_built_actor_virtual_lazy() {
     actor.attach_facet(virtual_facet).await.unwrap();
     
     let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = factory.spawn_built_actor(&ctx, Arc::new(actor), Some("test".to_string())).await;
+    let result = factory.spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string())).await;
     assert!(result.is_ok(), "Spawn virtual actor with lazy activation should succeed");
 }
 
@@ -521,7 +523,7 @@ async fn test_spawn_built_actor_virtual_prewarm() {
     actor.attach_facet(virtual_facet).await.unwrap();
     
     let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = factory.spawn_built_actor(&ctx, Arc::new(actor), Some("test".to_string())).await;
+    let result = factory.spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string())).await;
     assert!(result.is_ok(), "Spawn virtual actor with prewarm activation should succeed");
 }
 
@@ -555,9 +557,10 @@ async fn test_spawn_built_actor_multiple_references() {
 
 #[tokio::test]
 async fn test_spawn_built_actor_service_not_found() {
-    // Create empty service locator (no ActorRegistry)
-    use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(None, None, None).await;
+    // Create empty service locator WITHOUT initializing services (no ActorRegistry)
+    // This tests error handling when ActorRegistry is not registered
+    use plexspaces_services::ServiceLocatorImpl;
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
     
     // Use spawn_actor - should fail when ActorRegistry not found

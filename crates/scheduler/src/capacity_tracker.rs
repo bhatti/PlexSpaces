@@ -103,8 +103,7 @@ impl CapacityTracker {
         min_available_resources: Option<&ResourceSpec>,
     ) -> CapacityTrackerResult<HashMap<String, NodeCapacity>> {
         // Discover all nodes (registered as services)
-        // For capacity tracking, use internal context to see all nodes
-        // Use the provided context (which should be RequestContext::new_without_auth("internal".to_string(), "system".to_string()) for tests)
+        // For capacity tracking, use the provided context (tenant/namespace from node config or empty for tests)
         let nodes = self
             .registry
             .discover(
@@ -279,8 +278,8 @@ mod tests {
             object_name: node_id.to_string(),
             object_type: ObjectType::ObjectTypeNode as i32,
             version: "1.0.0".to_string(),
-            tenant_id: "internal".to_string(),
-            namespace: "system".to_string(),
+            tenant_id: String::new(),
+            namespace: String::new(),
             node_id: node_id.to_string(),
             grpc_address: format!("http://{}:8000", node_id),
             object_category: "node".to_string(),
@@ -372,7 +371,7 @@ mod tests {
 
         let labels = HashMap::new();
         let registration = create_test_registration("node-1", metrics, labels);
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
         registry.register(&ctx, registration).await.unwrap();
 
         let tracker = CapacityTracker::new(registry);
@@ -389,7 +388,7 @@ mod tests {
         let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
         let registry: Arc<dyn ObjectRegistry> = registry_impl;
         let tracker = CapacityTracker::new(registry);
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
 
         let capacity = tracker.get_node_capacity(&ctx, "nonexistent").await.unwrap();
         assert!(capacity.is_none());
@@ -413,7 +412,7 @@ mod tests {
         let mut labels1 = HashMap::new();
         labels1.insert("zone".to_string(), "us-west".to_string());
         let registration1 = create_test_registration("node-1", metrics1, labels1);
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
         registry.register(&ctx, registration1).await.unwrap();
 
         let mut metrics2 = HashMap::new();
@@ -452,7 +451,7 @@ mod tests {
         let mut metrics1 = HashMap::new();
         metrics1.insert("total_cpu_cores".to_string(), 4.0);
         metrics1.insert("total_memory_mb".to_string(), 8192.0);
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
         let mut labels1 = HashMap::new();
         labels1.insert("zone".to_string(), "us-west".to_string());
         let registration1 = create_test_registration("node-1", metrics1, labels1);
@@ -477,7 +476,7 @@ mod tests {
         // Filter by zone=us-west
         let mut filter_labels = HashMap::new();
         filter_labels.insert("zone".to_string(), "us-west".to_string());
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
         let capacities = tracker
             .list_node_capacities(&ctx, Some(&filter_labels), None)
             .await
@@ -502,7 +501,7 @@ mod tests {
         metrics1.insert("allocated_cpu_cores".to_string(), 3.0);
         metrics1.insert("allocated_memory_mb".to_string(), 7000.0);
         // Available: 1 CPU, ~1GB memory
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
         let registration1 = create_test_registration("node-1", metrics1, HashMap::new());
         registry.register(&ctx, registration1).await.unwrap();
 
@@ -533,7 +532,7 @@ mod tests {
         };
 
         let capacities = tracker
-            .list_node_capacities(&RequestContext::new_without_auth("internal".to_string(), "system".to_string()), None, Some(&min_resources))
+            .list_node_capacities(&RequestContext::new_without_auth(String::new(), String::new()), None, Some(&min_resources))
             .await
             .unwrap();
 

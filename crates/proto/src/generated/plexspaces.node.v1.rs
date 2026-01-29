@@ -36,8 +36,9 @@ pub struct ReleaseSpec {
     #[prost(string, repeated, tag="6")]
     pub system_applications: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// User applications (business logic)
+    /// NOTE: ApplicationConfig has been merged into ApplicationSpec
     #[prost(message, repeated, tag="7")]
-    pub applications: ::prost::alloc::vec::Vec<ApplicationConfig>,
+    pub applications: ::prost::alloc::vec::Vec<super::super::application::v1::ApplicationSpec>,
     /// Environment variables for all applications
     #[prost(map="string, string", tag="8")]
     pub env: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
@@ -63,19 +64,6 @@ pub struct NodeConfig {
     /// e.g., \["node1.cluster.local:8000", "node2.cluster.local:8000"\]
     #[prost(string, repeated, tag="3")]
     pub cluster_seed_nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// Default tenant ID for this node
-    ///
-    /// Used when auth is disabled or when creating actors from embedded applications.
-    /// If not set and auth is disabled, will use "default".
-    /// If auth is enabled and tenant_id is not provided, will error.
-    #[prost(string, tag="4")]
-    pub default_tenant_id: ::prost::alloc::string::String,
-    /// Default namespace for this node
-    ///
-    /// Used when namespace is not specified in requests.
-    /// Defaults to "default" if not set.
-    #[prost(string, tag="5")]
-    pub default_namespace: ::prost::alloc::string::String,
     /// Cluster name for grouping nodes that share UDP/ZeroMQ channels
     ///
     /// Nodes with the same cluster_name can communicate via UDP multicast
@@ -116,6 +104,18 @@ pub struct NodeConfig {
     /// Example: "<http://node1.example.com:8000">
     #[prost(string, tag="21")]
     pub grpc_address: ::prost::alloc::string::String,
+    // ==================== WASM AUTO-DEPLOY CONFIGURATION ====================
+
+    /// Directory containing WASM applications to auto-deploy on startup
+    ///
+    /// Structure: wasm_apps/<app-name>/app.wasm (required) + app-config.toml (optional)
+    /// Each subdirectory is deployed as a separate application.
+    /// If empty, no auto-deploy happens (default behavior).
+    ///
+    /// Environment variable: PLEXSPACES_WASM_APPS_DIR (takes precedence over config)
+    /// Example: "./wasm_apps" or "/opt/plexspaces/apps"
+    #[prost(string, tag="22")]
+    pub wasm_apps_directory: ::prost::alloc::string::String,
 }
 /// Node registry configuration
 ///
@@ -459,16 +459,12 @@ pub struct SecurityConfig {
     /// Keys are service-scoped (not user-scoped).
     #[prost(message, repeated, tag="4")]
     pub api_keys: ::prost::alloc::vec::Vec<super::super::security::v1::ApiKey>,
-    /// Allow disabling auth for local testing (default: false)
+    /// Disable authentication (default: false)
     ///
-    /// Security: Only set to true in development/test environments.
-    /// Production should always have auth enabled.
+    /// Security: Only for integration tests and local development.
+    /// Can be enabled via PLEXSPACES_DISABLE_AUTH env variable or this config.
+    /// Never use in production - always keep auth enabled.
     #[prost(bool, tag="5")]
-    pub allow_disable_auth: bool,
-    /// Disable authentication (only if allow_disable_auth = true)
-    ///
-    /// Security: Only for integration tests. Never use in production.
-    #[prost(bool, tag="6")]
     pub disable_auth: bool,
 }
 /// Application configuration (in release)

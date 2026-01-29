@@ -395,7 +395,7 @@ impl VirtualActorManager {
     /// The facet must be downcast by the caller.
     pub async fn mark_activated(&self, actor_id: &ActorId) -> Result<(), VirtualActorError> {
         let facet_arc = self.get_facet(actor_id).await?;
-        let mut facet_guard = facet_arc.write().await;
+        let _facet_guard = facet_arc.write().await;
         
         // Try to downcast to VirtualActorFacet and call mark_activated
         // We can't import VirtualActorFacet here due to circular dependency,

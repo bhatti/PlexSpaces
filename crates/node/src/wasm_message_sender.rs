@@ -82,29 +82,25 @@ impl MessageSender for ActorServiceMessageSender {
             // Remote actor
             ActorRef::remote(
                 to.to_string(),
+                String::new(), // TODO: get namespace from context
                 node,
                 self.service_locator.clone(),
             )
         } else {
             // Local actor - look up routing to determine if local or remote
             use plexspaces_core::service_names;
+            // User path (WASM invocation): default tenant/namespace from config, never admin (tenant isolation)
             use plexspaces_core::RequestContext;
-            let ctx = if let Some(node_config) = self.service_locator.get_node_config().await {
-                RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                    .with_admin(true)
-                    .with_internal(true)
-            } else {
-                RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true)
-                    .with_internal(true)
-            };
-            
+            // Tenant comes from auth, not config - use empty string for WASM calls
+            let ctx = RequestContext::new_without_auth(String::new(), String::new());
+
             if let Some(registry) = self.service_locator.actor_registry().await {
                 let actor_id = ActorId::from(to.to_string());
                 if let Some(routing) = registry.lookup_routing(&ctx, &actor_id).await.ok().flatten() {
                     // Create ActorRef based on routing info
                     ActorRef::remote(
                         to.to_string(),
+                        ctx.namespace.clone(), // Use namespace from context
                         routing.node_id,
                         self.service_locator.clone(),
                     )
@@ -115,6 +111,7 @@ impl MessageSender for ActorServiceMessageSender {
                 // No registry available, create remote ActorRef (will fail if actor doesn't exist)
                 ActorRef::remote(
                     to.to_string(),
+                    String::new(), // TODO: get namespace from context
                     "local".to_string(), // Default to local
                     self.service_locator.clone(),
                 )
@@ -148,18 +145,11 @@ impl MessageSender for ActorServiceMessageSender {
         durable: bool,
     ) -> Result<String, String> {
         // Use ActorService to spawn actor
-        // Use NodeConfig defaults for system operations
+        // WASM spawn path: default tenant/namespace from config, never admin (tenant isolation)
         use plexspaces_core::RequestContext;
-        let ctx = if let Some(node_config) = self.service_locator.get_node_config().await {
-            RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                .with_admin(true)
-                .with_internal(true)
-        } else {
-            RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true)
-                .with_internal(true)
-        };
-        
+        // Tenant comes from auth, not config - use empty string for WASM spawn
+        let _ctx = RequestContext::new_without_auth(String::new(), String::new());
+
         let labels_map: std::collections::HashMap<String, String> = labels.into_iter().collect();
         
         // For now, use module_ref as actor_type
@@ -187,8 +177,8 @@ impl MessageSender for ActorServiceMessageSender {
     ) -> Result<(), String> {
         // Use ActorFactory to stop actor
         use plexspaces_core::ActorId;
-        use plexspaces_actor::{ActorFactory, get_actor_factory};
-        let actor_factory: Arc<dyn ActorFactory> = get_actor_factory(self.service_locator.as_ref()).await
+        use plexspaces_core::ActorFactory;
+        let actor_factory: Arc<dyn ActorFactory> = self.service_locator.get_actor_factory().await
             .ok_or_else(|| "ActorFactory not found in ServiceLocator".to_string())?;
         
         let actor_id_typed = ActorId::from(actor_id.to_string());

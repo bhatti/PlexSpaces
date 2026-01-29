@@ -1,0 +1,9 @@
+# Byzantine Generals Configuration
+# Loaded via ConfigBootstrap
+
+# Total number of generals (minimum 4)
+general_count = 4
+
+# Number of Byzantine (faulty) generals
+# Must be < general_count/3 for consensus to work
+fault_count = 1

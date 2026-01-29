@@ -31,7 +31,7 @@
 use crate::{ApplicationController, ApplicationError};
 use crate::{Application, ApplicationNode};
 use plexspaces_proto::application::v1::ApplicationStatus;
-use plexspaces_proto::node::v1::ApplicationConfig;
+use plexspaces_proto::application::v1::ApplicationSpec;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -169,7 +169,7 @@ async fn test_dependency_chain_startup() {
 
     // C has no dependencies
     let app_c = Box::new(MockApp::new("app-c", startup_order.clone(), shutdown_order.clone()));
-    let config_c = ApplicationConfig {
+    let config_c = ApplicationSpec {
         name: "app-c".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-c.toml".to_string(),
@@ -183,7 +183,7 @@ async fn test_dependency_chain_startup() {
 
     // B depends on C
     let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
-    let config_b = ApplicationConfig {
+    let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-b.toml".to_string(),
@@ -197,7 +197,7 @@ async fn test_dependency_chain_startup() {
 
     // A depends on B
     let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
-    let config_a = ApplicationConfig {
+    let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-a.toml".to_string(),
@@ -236,7 +236,7 @@ async fn test_multiple_dependencies_startup() {
 
     // B and C have no dependencies
     let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
-    let config_b = ApplicationConfig {
+    let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-b.toml".to_string(),
@@ -249,7 +249,7 @@ async fn test_multiple_dependencies_startup() {
     controller.load(app_b, config_b).await.unwrap();
 
     let app_c = Box::new(MockApp::new("app-c", startup_order.clone(), shutdown_order.clone()));
-    let config_c = ApplicationConfig {
+    let config_c = ApplicationSpec {
         name: "app-c".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-c.toml".to_string(),
@@ -263,7 +263,7 @@ async fn test_multiple_dependencies_startup() {
 
     // A depends on both B and C
     let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
-    let config_a = ApplicationConfig {
+    let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-a.toml".to_string(),
@@ -303,7 +303,7 @@ async fn test_missing_dependency() {
 
     // A depends on non-existent B
     let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
-    let config_a = ApplicationConfig {
+    let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-a.toml".to_string(),
@@ -339,7 +339,7 @@ async fn test_circular_dependency() {
 
     // A depends on B
     let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
-    let config_a = ApplicationConfig {
+    let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-a.toml".to_string(),
@@ -353,7 +353,7 @@ async fn test_circular_dependency() {
 
     // B depends on A (circular!)
     let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
-    let config_b = ApplicationConfig {
+    let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-b.toml".to_string(),
@@ -390,7 +390,7 @@ async fn test_rollback_on_dependency_failure() {
     // B fails to start
     let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone())
         .with_start_failure());
-    let config_b = ApplicationConfig {
+    let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-b.toml".to_string(),
@@ -404,7 +404,7 @@ async fn test_rollback_on_dependency_failure() {
 
     // A depends on B
     let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
-    let config_a = ApplicationConfig {
+    let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-a.toml".to_string(),
@@ -442,7 +442,7 @@ async fn test_reverse_dependency_shutdown() {
 
     // B has no dependencies
     let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
-    let config_b = ApplicationConfig {
+    let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-b.toml".to_string(),
@@ -456,7 +456,7 @@ async fn test_reverse_dependency_shutdown() {
 
     // A depends on B
     let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
-    let config_a = ApplicationConfig {
+    let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-a.toml".to_string(),
@@ -501,7 +501,7 @@ async fn test_no_dependencies() {
     controller.set_node(mock_node).await;
 
     let app = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
-    let config = ApplicationConfig {
+    let config = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-a.toml".to_string(),
@@ -533,7 +533,7 @@ async fn test_already_running_dependency() {
 
     // Start B first
     let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
-    let config_b = ApplicationConfig {
+    let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-b.toml".to_string(),
@@ -548,7 +548,7 @@ async fn test_already_running_dependency() {
 
     // A depends on B
     let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
-    let config_a = ApplicationConfig {
+    let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
         config_path: "app-a.toml".to_string(),

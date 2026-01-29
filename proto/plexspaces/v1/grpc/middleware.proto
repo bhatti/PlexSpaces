@@ -305,6 +305,12 @@ message JwtClaims {
 
   // Custom claims (extensible)
   map<string, string> custom_claims = 8;
+
+  // Groups (for group-based access)
+  repeated string groups = 9;
+
+  // Admin flag (elevated privileges; bypass namespace filtering when empty namespace)
+  bool is_admin = 10;
 }
 
 // Authentication middleware configuration

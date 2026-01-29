@@ -77,16 +77,28 @@ use plexspaces_proto::common::v1::Message;
 pub struct VirtualActorWrapper {
     /// Actor ID
     actor_id: ActorId,
-    /// ServiceLocator for accessing VirtualActorManager and ActorFactory
+    /// ServiceLocator for accessing VirtualActorManager
     service_locator: Arc<dyn ServiceLocatorTrait>,
+    /// ActorFactory for activating virtual actors
+    actor_factory: Arc<dyn ActorFactory>,
 }
 
 impl VirtualActorWrapper {
     /// Create a new VirtualActorWrapper
-    pub fn new(actor_id: ActorId, service_locator: Arc<dyn ServiceLocatorTrait>) -> Self {
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID
+    /// * `service_locator` - ServiceLocator for accessing VirtualActorManager
+    /// * `actor_factory` - ActorFactory for activating virtual actors
+    pub fn new(
+        actor_id: ActorId,
+        service_locator: Arc<dyn ServiceLocatorTrait>,
+        actor_factory: Arc<dyn ActorFactory>,
+    ) -> Self {
         Self {
             actor_id,
             service_locator,
+            actor_factory,
         }
     }
 }
@@ -141,7 +153,7 @@ impl MessageSender for VirtualActorWrapper {
             
             // Check if activation is already in progress and try to start activation
             // This uses the is_activating flag internally to prevent concurrent activations
-            use std::any::Any;
+            
             use plexspaces_journaling::VirtualActorFacet;
             let activation_started = if let Some(virtual_facet) = facet_guard.as_ref().downcast_ref::<VirtualActorFacet>() {
                 // Try to start activation (returns false if already activating)
@@ -181,9 +193,7 @@ impl MessageSender for VirtualActorWrapper {
             
             // Activate the virtual actor using ActorFactory
             // This is synchronous - it awaits actor.start() which registers the actor
-            use crate::{ActorFactory, get_actor_factory};
-            let factory: Arc<dyn ActorFactory> = get_actor_factory(self.service_locator.as_ref()).await
-                .ok_or_else(|| "ActorFactory not registered in ServiceLocator".to_string())?;
+            // ActorFactory is stored in VirtualActorWrapper to avoid circular dependency issues
             
             // Activate (synchronous - completes when actor is registered and message loop is running)
             // mark_activated() in activate_virtual_actor will clear the is_activating flag
@@ -193,7 +203,7 @@ impl MessageSender for VirtualActorWrapper {
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!("[VIRTUAL_ACTOR_WRAPPER] Calling activate_virtual_actor (SYNC): actor_id={}", self.actor_id);
             }
-            factory.activate_virtual_actor(&self.actor_id).await
+            self.actor_factory.activate_virtual_actor(&self.actor_id).await
                 .map_err(|e| {
                     tracing::warn!("[VIRTUAL_ACTOR_WRAPPER] Failed to activate virtual actor: actor_id={}, error={}", self.actor_id, e);
                     format!("Failed to activate virtual actor: {}", e)

@@ -49,6 +49,10 @@ pub struct KeyValueFacet {
     config: KeyValueConfig,
     /// Metrics
     metrics: Arc<RwLock<KeyValueMetrics>>,
+    /// Tenant ID from API request (stored when facet is attached to actor, empty if not set)
+    tenant_id: std::sync::Mutex<String>,
+    /// Namespace from API request (stored when facet is attached to actor, empty if not set)
+    namespace: std::sync::Mutex<String>,
 }
 
 /// Default priority for KeyValueFacet
@@ -164,6 +168,8 @@ impl KeyValueFacet {
                     }))),
                     config: KeyValueConfig::default(),
                     metrics: Arc::new(RwLock::new(KeyValueMetrics::default())),
+                    tenant_id: std::sync::Mutex::new(String::new()),
+                    namespace: std::sync::Mutex::new(String::new()),
                 }
             })
     }
@@ -197,6 +203,8 @@ impl KeyValueFacet {
             store: Arc::new(RwLock::new(store)),
             config,
             metrics: Arc::new(RwLock::new(KeyValueMetrics::default())),
+            tenant_id: std::sync::Mutex::new(String::new()),
+            namespace: std::sync::Mutex::new(String::new()),
         })
     }
     
@@ -207,7 +215,19 @@ impl KeyValueFacet {
     }
 
     /// Handle KV operations
+    /// 
+    /// Uses tenant_id/namespace stored when facet was attached (from API request).
+    /// Falls back to empty strings if not set (which will use defaults from node config).
     async fn handle_kv_operation(&self, method: &str, args: &[u8]) -> Result<Vec<u8>, FacetError> {
+        // Get tenant_id/namespace from stored values (set during facet attachment from API request)
+        let tenant_id = self.tenant_id.lock().unwrap().clone();
+        let namespace = self.namespace.lock().unwrap().clone();
+        // Use empty strings if not set (will use defaults from node config in RequestContext)
+        let ctx = plexspaces_common::RequestContext::new_without_auth(
+            if tenant_id.is_empty() { String::new() } else { tenant_id },
+            if namespace.is_empty() { String::new() } else { namespace }
+        );
+        
         match method {
             "kv_get" => {
                 let key: String = serde_json::from_slice(args)
@@ -217,7 +237,6 @@ impl KeyValueFacet {
                 metrics.gets += 1;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 match store.get(&ctx, &key).await {
                     Ok(Some(value)) => {
                         metrics.hits += 1;
@@ -244,7 +263,6 @@ impl KeyValueFacet {
                 self.metrics.write().await.sets += 1;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 store
                     .set(&ctx, &args.key, args.value, args.ttl.or(self.config.default_ttl))
                     .await
@@ -259,7 +277,6 @@ impl KeyValueFacet {
                 self.metrics.write().await.deletes += 1;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 let deleted = store
                     .delete(&ctx, &key)
                     .await
@@ -272,7 +289,6 @@ impl KeyValueFacet {
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 let exists = store
                     .exists(&ctx, &key)
                     .await
@@ -285,7 +301,6 @@ impl KeyValueFacet {
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
                 let store = self.store.read().await;
-                let ctx = plexspaces_common::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
                 let keys = store
                     .list_keys(&ctx, &prefix)
                     .await
@@ -312,26 +327,42 @@ impl Facet for KeyValueFacet {
         self
     }
 
-    async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
-        // Use stored config, ignore parameter (config is set in constructor)
-        println!("KeyValue capability attached to actor: {}", actor_id);
+    async fn on_attach(&mut self, actor_id: &str, config: Value) -> Result<(), FacetError> {
+        // Extract tenant_id/namespace from config if available (passed from actor context)
+        // These come from the API request (HTTP/gRPC), not ServiceLocator defaults
+        if let Some(config_obj) = config.as_object() {
+            if let Some(tenant_id_val) = config_obj.get("_tenant_id") {
+                if let Some(tenant_id) = tenant_id_val.as_str() {
+                    *self.tenant_id.lock().unwrap() = tenant_id.to_string();
+                    tracing::debug!(actor_id = %actor_id, tenant_id = %tenant_id, "KeyValueFacet: Stored tenant_id from API request");
+                }
+            }
+            if let Some(namespace_val) = config_obj.get("_namespace") {
+                if let Some(namespace) = namespace_val.as_str() {
+                    *self.namespace.lock().unwrap() = namespace.to_string();
+                    tracing::debug!(actor_id = %actor_id, namespace = %namespace, "KeyValueFacet: Stored namespace from API request");
+                }
+            }
+        }
+        tracing::debug!(actor_id = %actor_id, "KeyValue capability attached to actor");
         Ok(())
     }
 
     async fn on_detach(&mut self, actor_id: &str) -> Result<(), FacetError> {
         // Log metrics before detaching
         let metrics = self.metrics.read().await;
-        println!(
-            "KeyValue metrics for {}: gets={}, sets={}, deletes={}, hit_rate={:.2}%",
-            actor_id,
-            metrics.gets,
-            metrics.sets,
-            metrics.deletes,
-            if metrics.gets > 0 {
-                (metrics.hits as f64 / metrics.gets as f64) * 100.0
-            } else {
-                0.0
-            }
+        let hit_rate = if metrics.gets > 0 {
+            (metrics.hits as f64 / metrics.gets as f64) * 100.0
+        } else {
+            0.0
+        };
+        tracing::debug!(
+            actor_id = %actor_id,
+            gets = metrics.gets,
+            sets = metrics.sets,
+            deletes = metrics.deletes,
+            hit_rate = %format!("{:.2}%", hit_rate),
+            "KeyValue metrics on detach"
         );
         Ok(())
     }

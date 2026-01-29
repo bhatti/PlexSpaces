@@ -40,8 +40,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::{Actor, ActorRef};
-use plexspaces_core::ActorError;
+use crate::Actor;
+use plexspaces_core::{ActorError, ActorRef};
 use plexspaces_proto::supervision::v1::{ChildSpec as ProtoChildSpec, ChildType as ProtoChildType, RestartStrategy as ProtoRestartStrategy};
 use prost_types;
 
@@ -220,6 +220,47 @@ impl ChildSpec {
             facets: Vec::new(),
             start_fn,
         }
+    }
+
+    /// Create a new ChildSpec for a worker using a synchronous factory
+    ///
+    /// ## Purpose
+    /// Convenience constructor that wraps a sync factory in an async one.
+    /// This is useful for tests and simple cases where async is not needed.
+    ///
+    /// ## Arguments
+    /// * `child_id` - Unique identifier within supervisor
+    /// * `actor_id` - Actor ID to supervise
+    /// * `sync_factory` - Synchronous factory function that creates an Actor
+    /// * `actor_ref` - ActorRef for the actor
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let spec = ChildSpec::worker_sync(
+    ///     "worker1".to_string(),
+    ///     "worker1@node1".to_string(),
+    ///     Arc::new(|| {
+    ///         let actor = Actor::new(...);
+    ///         Ok(actor)
+    ///     }),
+    ///     actor_ref,
+    /// );
+    /// ```
+    pub fn worker_sync(
+        child_id: String,
+        actor_id: String,
+        sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync>,
+        actor_ref: ActorRef,
+    ) -> Self {
+        let start_fn: StartFn = Arc::new(move || {
+            let factory = sync_factory.clone();
+            let actor_ref = actor_ref.clone();
+            Box::pin(async move {
+                let actor = factory()?;
+                Ok(StartedChild::Worker { actor, actor_ref })
+            })
+        });
+        Self::worker(child_id, actor_id, start_fn)
     }
 
     /// Create a new ChildSpec for a supervisor

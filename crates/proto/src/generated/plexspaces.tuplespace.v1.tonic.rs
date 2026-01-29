@@ -1,16 +1,16 @@
 // @generated
 /// Generated client implementations.
-pub mod tuple_plex_space_service_client {
+pub mod tuple_space_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    /** TuplePlexSpace service
+    /** TupleSpace service
 */
     #[derive(Debug, Clone)]
-    pub struct TuplePlexSpaceServiceClient<T> {
+    pub struct TupleSpaceServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl TuplePlexSpaceServiceClient<tonic::transport::Channel> {
+    impl TupleSpaceServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -21,7 +21,7 @@ pub mod tuple_plex_space_service_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> TuplePlexSpaceServiceClient<T>
+    impl<T> TupleSpaceServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::BoxBody>,
         T::Error: Into<StdError>,
@@ -39,7 +39,7 @@ pub mod tuple_plex_space_service_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> TuplePlexSpaceServiceClient<InterceptedService<T, F>>
+        ) -> TupleSpaceServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -53,7 +53,7 @@ pub mod tuple_plex_space_service_client {
                 http::Request<tonic::body::BoxBody>,
             >>::Error: Into<StdError> + Send + Sync,
         {
-            TuplePlexSpaceServiceClient::new(InterceptedService::new(inner, interceptor))
+            TupleSpaceServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -101,13 +101,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Write",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Write",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "Write",
                     ),
                 );
@@ -130,15 +130,12 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Read",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Read",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
-                        "Read",
-                    ),
+                    GrpcMethod::new("plexspaces.tuplespace.v1.TupleSpaceService", "Read"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -159,15 +156,12 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Take",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Take",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
-                        "Take",
-                    ),
+                    GrpcMethod::new("plexspaces.tuplespace.v1.TupleSpaceService", "Take"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -188,13 +182,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Count",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Count",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "Count",
                     ),
                 );
@@ -217,13 +211,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Exists",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Exists",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "Exists",
                     ),
                 );
@@ -249,13 +243,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Subscribe",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Subscribe",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "Subscribe",
                     ),
                 );
@@ -281,13 +275,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Unsubscribe",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Unsubscribe",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "Unsubscribe",
                     ),
                 );
@@ -313,13 +307,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/BeginTransaction",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/BeginTransaction",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "BeginTransaction",
                     ),
                 );
@@ -345,13 +339,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/CommitTransaction",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/CommitTransaction",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "CommitTransaction",
                     ),
                 );
@@ -377,13 +371,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/AbortTransaction",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/AbortTransaction",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "AbortTransaction",
                     ),
                 );
@@ -409,13 +403,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Clear",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Clear",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "Clear",
                     ),
                 );
@@ -441,13 +435,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/RenewLease",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/RenewLease",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "RenewLease",
                     ),
                 );
@@ -507,13 +501,13 @@ pub mod tuple_plex_space_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/GetStats",
+                "/plexspaces.tuplespace.v1.TupleSpaceService/GetStats",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+                        "plexspaces.tuplespace.v1.TupleSpaceService",
                         "GetStats",
                     ),
                 );
@@ -522,12 +516,12 @@ pub mod tuple_plex_space_service_client {
     }
 }
 /// Generated server implementations.
-pub mod tuple_plex_space_service_server {
+pub mod tuple_space_service_server {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with TuplePlexSpaceServiceServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with TupleSpaceServiceServer.
     #[async_trait]
-    pub trait TuplePlexSpaceService: Send + Sync + 'static {
+    pub trait TupleSpaceService: Send + Sync + 'static {
         async fn write(
             &self,
             request: tonic::Request<super::WriteRequest>,
@@ -663,10 +657,10 @@ pub mod tuple_plex_space_service_server {
             tonic::Status,
         >;
     }
-    /** TuplePlexSpace service
+    /** TupleSpace service
 */
     #[derive(Debug)]
-    pub struct TuplePlexSpaceServiceServer<T: TuplePlexSpaceService> {
+    pub struct TupleSpaceServiceServer<T: TupleSpaceService> {
         inner: _Inner<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
@@ -674,7 +668,7 @@ pub mod tuple_plex_space_service_server {
         max_encoding_message_size: Option<usize>,
     }
     struct _Inner<T>(Arc<T>);
-    impl<T: TuplePlexSpaceService> TuplePlexSpaceServiceServer<T> {
+    impl<T: TupleSpaceService> TupleSpaceServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -726,10 +720,9 @@ pub mod tuple_plex_space_service_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>>
-    for TuplePlexSpaceServiceServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for TupleSpaceServiceServer<T>
     where
-        T: TuplePlexSpaceService,
+        T: TupleSpaceService,
         B: Body + Send + 'static,
         B::Error: Into<StdError> + Send + 'static,
     {
@@ -745,11 +738,11 @@ pub mod tuple_plex_space_service_server {
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Write" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Write" => {
                     #[allow(non_camel_case_types)]
-                    struct WriteSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct WriteSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::WriteRequest> for WriteSvc<T> {
                         type Response = super::WriteResponse;
                         type Future = BoxFuture<
@@ -762,7 +755,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::write(&inner, request).await
+                                <T as TupleSpaceService>::write(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -790,11 +783,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Read" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Read" => {
                     #[allow(non_camel_case_types)]
-                    struct ReadSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct ReadSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::ReadRequest> for ReadSvc<T> {
                         type Response = super::ReadResponse;
                         type Future = BoxFuture<
@@ -807,7 +800,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::read(&inner, request).await
+                                <T as TupleSpaceService>::read(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -835,11 +828,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Take" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Take" => {
                     #[allow(non_camel_case_types)]
-                    struct TakeSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct TakeSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::ReadRequest> for TakeSvc<T> {
                         type Response = super::ReadResponse;
                         type Future = BoxFuture<
@@ -852,7 +845,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::take(&inner, request).await
+                                <T as TupleSpaceService>::take(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -880,11 +873,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Count" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Count" => {
                     #[allow(non_camel_case_types)]
-                    struct CountSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct CountSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::CountRequest> for CountSvc<T> {
                         type Response = super::CountResponse;
                         type Future = BoxFuture<
@@ -897,7 +890,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::count(&inner, request).await
+                                <T as TupleSpaceService>::count(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -925,11 +918,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Exists" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Exists" => {
                     #[allow(non_camel_case_types)]
-                    struct ExistsSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct ExistsSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::ExistsRequest>
                     for ExistsSvc<T> {
                         type Response = super::ExistsResponse;
@@ -943,7 +936,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::exists(&inner, request).await
+                                <T as TupleSpaceService>::exists(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -971,11 +964,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Subscribe" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Subscribe" => {
                     #[allow(non_camel_case_types)]
-                    struct SubscribeSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct SubscribeSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::SubscribeRequest>
                     for SubscribeSvc<T> {
                         type Response = super::SubscribeResponse;
@@ -989,8 +982,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::subscribe(&inner, request)
-                                    .await
+                                <T as TupleSpaceService>::subscribe(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1018,11 +1010,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Unsubscribe" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Unsubscribe" => {
                     #[allow(non_camel_case_types)]
-                    struct UnsubscribeSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct UnsubscribeSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::UnsubscribeRequest>
                     for UnsubscribeSvc<T> {
                         type Response = super::super::super::common::v1::Empty;
@@ -1036,8 +1028,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::unsubscribe(&inner, request)
-                                    .await
+                                <T as TupleSpaceService>::unsubscribe(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1065,11 +1056,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/BeginTransaction" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/BeginTransaction" => {
                     #[allow(non_camel_case_types)]
-                    struct BeginTransactionSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct BeginTransactionSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::BeginTransactionRequest>
                     for BeginTransactionSvc<T> {
                         type Response = super::BeginTransactionResponse;
@@ -1083,10 +1074,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::begin_transaction(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as TupleSpaceService>::begin_transaction(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -1115,11 +1103,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/CommitTransaction" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/CommitTransaction" => {
                     #[allow(non_camel_case_types)]
-                    struct CommitTransactionSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct CommitTransactionSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::CommitTransactionRequest>
                     for CommitTransactionSvc<T> {
                         type Response = super::CommitTransactionResponse;
@@ -1133,7 +1121,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::commit_transaction(
+                                <T as TupleSpaceService>::commit_transaction(
                                         &inner,
                                         request,
                                     )
@@ -1165,11 +1153,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/AbortTransaction" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/AbortTransaction" => {
                     #[allow(non_camel_case_types)]
-                    struct AbortTransactionSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct AbortTransactionSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::AbortTransactionRequest>
                     for AbortTransactionSvc<T> {
                         type Response = super::AbortTransactionResponse;
@@ -1183,10 +1171,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::abort_transaction(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as TupleSpaceService>::abort_transaction(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -1215,11 +1200,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/Clear" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/Clear" => {
                     #[allow(non_camel_case_types)]
-                    struct ClearSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct ClearSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::super::super::common::v1::Empty>
                     for ClearSvc<T> {
                         type Response = super::super::super::common::v1::Empty;
@@ -1235,7 +1220,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::clear(&inner, request).await
+                                <T as TupleSpaceService>::clear(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1263,11 +1248,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/RenewLease" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/RenewLease" => {
                     #[allow(non_camel_case_types)]
-                    struct RenewLeaseSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct RenewLeaseSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::RenewLeaseRequest>
                     for RenewLeaseSvc<T> {
                         type Response = super::RenewLeaseResponse;
@@ -1281,8 +1266,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::renew_lease(&inner, request)
-                                    .await
+                                <T as TupleSpaceService>::renew_lease(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1310,11 +1294,11 @@ pub mod tuple_plex_space_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.tuplespace.v1.TuplePlexSpaceService/GetStats" => {
+                "/plexspaces.tuplespace.v1.TupleSpaceService/GetStats" => {
                     #[allow(non_camel_case_types)]
-                    struct GetStatsSvc<T: TuplePlexSpaceService>(pub Arc<T>);
+                    struct GetStatsSvc<T: TupleSpaceService>(pub Arc<T>);
                     impl<
-                        T: TuplePlexSpaceService,
+                        T: TupleSpaceService,
                     > tonic::server::UnaryService<super::super::super::common::v1::Empty>
                     for GetStatsSvc<T> {
                         type Response = super::GetStatsResponse;
@@ -1330,8 +1314,7 @@ pub mod tuple_plex_space_service_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as TuplePlexSpaceService>::get_stats(&inner, request)
-                                    .await
+                                <T as TupleSpaceService>::get_stats(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1374,7 +1357,7 @@ pub mod tuple_plex_space_service_server {
             }
         }
     }
-    impl<T: TuplePlexSpaceService> Clone for TuplePlexSpaceServiceServer<T> {
+    impl<T: TupleSpaceService> Clone for TupleSpaceServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -1386,7 +1369,7 @@ pub mod tuple_plex_space_service_server {
             }
         }
     }
-    impl<T: TuplePlexSpaceService> Clone for _Inner<T> {
+    impl<T: TupleSpaceService> Clone for _Inner<T> {
         fn clone(&self) -> Self {
             Self(Arc::clone(&self.0))
         }
@@ -1396,8 +1379,8 @@ pub mod tuple_plex_space_service_server {
             write!(f, "{:?}", self.0)
         }
     }
-    impl<T: TuplePlexSpaceService> tonic::server::NamedService
-    for TuplePlexSpaceServiceServer<T> {
-        const NAME: &'static str = "plexspaces.tuplespace.v1.TuplePlexSpaceService";
+    impl<T: TupleSpaceService> tonic::server::NamedService
+    for TupleSpaceServiceServer<T> {
+        const NAME: &'static str = "plexspaces.tuplespace.v1.TupleSpaceService";
     }
 }

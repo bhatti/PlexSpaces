@@ -263,9 +263,8 @@
 //! - Sending is lock-free (tokio::mpsc channel)
 //! - No shared mutable state (immutable after creation)
 
-use chrono;
 use plexspaces_core::{ActorId, ReplyWaiter, MessageSender};
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -275,14 +274,12 @@ use ulid::Ulid;
 use async_trait::async_trait;
 
 use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
-use plexspaces_core::{GrpcConnectionManager, ServiceType};
 
 // Import proto types for gRPC communication
 use plexspaces_proto::actor::v1::{
     actor_service_client::ActorServiceClient, SendMessageRequest,
 };
 // Message alias removed - using Message directly
-use prost_types::Timestamp;
 
 /// Error types for ActorRef operations
 #[derive(Debug, Clone, thiserror::Error)]
@@ -330,6 +327,19 @@ pub struct ActorRef {
     /// Actor identifier
     id: ActorId,
 
+    /// Namespace for this actor (source of truth for namespace in RequestContext).
+    ///
+    /// ## Purpose
+    /// Stores the namespace for tenant sub-isolation. The namespace comes from:
+    /// - Application deployment (actor inherits app's namespace)
+    /// - Direct actor creation (namespace specified in CreateActorRequest)
+    ///
+    /// ## Multi-tenancy Design
+    /// - **Tenant-id**: Comes from auth (JWT/mTLS), stored externally. Without auth, can be empty.
+    /// - **Namespace**: Stored here. Source of truth is application (if deployed) or actor creation.
+    /// - **RequestContext**: get_default_request_context() uses tenant_id from caller + namespace from here.
+    namespace: String,
+
     /// Location-specific implementation (local vs remote)
     inner: ActorRefInner,
     
@@ -375,6 +385,7 @@ impl ActorRef {
     ///
     /// ## Arguments
     /// - `id`: Actor unique identifier
+    /// - `namespace`: Namespace for tenant sub-isolation (from application or actor creation)
     /// - `mailbox`: Mailbox for message delivery
     /// - `service_locator`: ServiceLocator for service access (required for both local and remote)
     ///
@@ -382,7 +393,7 @@ impl ActorRef {
     /// ```ignore
     /// let mailbox = Arc::new(Mailbox::new(MailboxConfig::default()));
     /// let service_locator = node.service_locator();
-    /// let actor_ref = ActorRef::local("my-actor", mailbox, service_locator);
+    /// let actor_ref = ActorRef::local("my-actor", "production", mailbox, service_locator);
     /// ```
     ///
     /// ## Design Notes
@@ -391,13 +402,19 @@ impl ActorRef {
     /// - Creating remote ActorRefs from within actor behavior
     /// - Accessing metrics/observability services
     /// - Future features (circuit breakers, retry policies, etc.)
+    ///
+    /// ## Multi-tenancy Design
+    /// - **namespace**: Stored in ActorRef. Source of truth is application (if deployed) or actor creation.
+    /// - **tenant_id**: NOT stored in ActorRef. Comes from auth (JWT/mTLS) at request time.
     pub fn local(
         id: impl Into<ActorId>,
+        namespace: impl Into<String>,
         mailbox: Arc<Mailbox>,
         service_locator: Arc<dyn ServiceLocatorTrait>,
     ) -> Self {
         Self {
             id: id.into(),
+            namespace: namespace.into(),
             inner: ActorRefInner::Local {
                 mailbox,
                 service_locator,
@@ -411,6 +428,7 @@ impl ActorRef {
     ///
     /// ## Arguments
     /// - `id`: Actor unique identifier (format: "actor_name@node_id")
+    /// - `namespace`: Namespace for tenant sub-isolation (from application or actor creation)
     /// - `node_id`: Node ID where the actor is located (used to lookup address via ServiceLocator)
     /// - `service_locator`: ServiceLocator for gRPC client caching and service access
     ///
@@ -419,6 +437,7 @@ impl ActorRef {
     /// let service_locator = node.service_locator();
     /// let actor_ref = ActorRef::remote(
     ///     "payment-service@node-2",
+    ///     "production",
     ///     "node-2",
     ///     service_locator,
     /// );
@@ -428,13 +447,19 @@ impl ActorRef {
     /// ## Design Notes
     /// Uses ServiceLocator to get cached gRPC client (one client per node, shared across all ActorRefs).
     /// This is more scalable than creating a client per ActorRef.
+    ///
+    /// ## Multi-tenancy Design
+    /// - **namespace**: Stored in ActorRef. Source of truth is application (if deployed) or actor creation.
+    /// - **tenant_id**: NOT stored in ActorRef. Comes from auth (JWT/mTLS) at request time.
     pub fn remote(
         id: impl Into<ActorId>,
+        namespace: impl Into<String>,
         node_id: impl Into<String>,
         service_locator: Arc<dyn ServiceLocatorTrait>,
     ) -> Self {
         Self {
             id: id.into(),
+            namespace: namespace.into(),
             inner: ActorRefInner::Remote {
                 node_id: node_id.into(),
                 service_locator,
@@ -530,38 +555,66 @@ impl ActorRef {
         }
     }
     
-    /// Get default RequestContext using tenant/namespace from NodeConfig
+    /// Get namespace for this actor
+    ///
+    /// ## Purpose
+    /// Returns the namespace stored in this ActorRef. The namespace is the source of truth
+    /// for tenant sub-isolation in multi-tenancy scenarios.
+    ///
+    /// ## Multi-tenancy Design
+    /// - **namespace**: Stored in ActorRef. Source of truth is application (if deployed) or actor creation.
+    /// - **tenant_id**: NOT stored in ActorRef. Comes from auth (JWT/mTLS) at request time.
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+    
+    /// Create RequestContext with tenant_id from caller and namespace from this ActorRef.
     /// 
     /// ## Purpose
-    /// Creates a RequestContext using default tenant/namespace from ServiceLocator's NodeConfig.
-    /// Used when ActorRef methods are called from user code without a RequestContext.
+    /// Creates a RequestContext combining:
+    /// - **tenant_id**: From caller (auth source - JWT/mTLS). Without auth, can be empty.
+    /// - **namespace**: From this ActorRef (source of truth is application/actor).
     /// 
+    /// ## Arguments
+    /// - `tenant_id`: Tenant identifier from auth (JWT/mTLS). Empty if auth is disabled.
+    ///
     /// ## Returns
-    /// RequestContext with default tenant/namespace, or "default"/"default" as fallback
-    async fn get_default_request_context(&self) -> Result<plexspaces_core::RequestContext, ActorRefError> {
+    /// RequestContext with caller's tenant_id and this actor's namespace.
+    ///
+    /// ## Multi-tenancy Design
+    /// This method enforces the correct pattern for multi-tenancy:
+    /// - Tenant isolation comes from auth (external to ActorRef)
+    /// - Namespace isolation comes from ActorRef (stored at creation)
+    pub fn get_request_context(&self, tenant_id: impl Into<String>) -> plexspaces_core::RequestContext {
         use plexspaces_core::RequestContext;
-        match &self.inner {
-            ActorRefInner::Local { service_locator, .. } |
-            ActorRefInner::Remote { service_locator, .. } => {
-                // Get default tenant/namespace from NodeConfig if available
-                if let Some(node_config) = service_locator.get_node_config().await {
-                    let tenant_id = if node_config.default_tenant_id.is_empty() {
-                        "default".to_string()
-                    } else {
-                        node_config.default_tenant_id.clone()
-                    };
-                    let namespace = if node_config.default_namespace.is_empty() {
-                        "default".to_string()
-                    } else {
-                        node_config.default_namespace.clone()
-                    };
-                    Ok(RequestContext::new_without_auth(tenant_id, namespace))
-                } else {
-                    // Fallback for tests or when NodeConfig is not set
-                    Ok(RequestContext::new_without_auth("default".to_string(), "default".to_string()))
-                }
-            }
-        }
+        RequestContext::new_without_auth(tenant_id.into(), self.namespace.clone())
+    }
+    
+    /// Get default RequestContext with tenant_id from caller and namespace from this ActorRef.
+    /// 
+    /// ## Purpose
+    /// Creates a RequestContext combining:
+    /// - **tenant_id**: From caller (auth source - JWT/mTLS). Pass empty string if auth disabled.
+    /// - **namespace**: From this ActorRef (source of truth is application/actor).
+    /// 
+    /// ## Arguments
+    /// - `tenant_id`: Tenant identifier from auth (JWT/mTLS). Can be empty if auth is disabled.
+    ///
+    /// ## Returns
+    /// RequestContext with caller's tenant_id and this actor's namespace.
+    ///
+    /// ## Multi-tenancy Design
+    /// This method enforces the correct pattern for multi-tenancy:
+    /// - Tenant isolation comes from auth (external call, propagated here)
+    /// - Namespace isolation comes from ActorRef (stored at creation)
+    ///
+    /// ## When to Use
+    /// - Always pass tenant_id from the external call/auth when available
+    /// - For internal operations where auth is disabled, pass empty string
+    async fn get_default_request_context(&self, tenant_id: impl Into<String>) -> Result<plexspaces_core::RequestContext, ActorRefError> {
+        use plexspaces_core::RequestContext;
+        // Tenant comes from caller (auth), namespace from this ActorRef
+        Ok(RequestContext::new_without_auth(tenant_id.into(), self.namespace.clone()))
     }
     
     
@@ -629,12 +682,16 @@ impl ActorRef {
     /// ```rust,ignore
     /// // Send message (works for local and remote)
     /// actor_ref.tell(message).await?;
+    ///
+    /// // Also accepts mailbox Message directly (no .to_proto() needed)
+    /// let msg = plexspaces_mailbox::Message::json(&data)?.with_message_type("foo");
+    /// actor_ref.tell(msg).await?;
     /// ```
     pub async fn tell(
         &self,
-        message: Message,
+        message: impl Into<Message>,
     ) -> Result<(), ActorRefError> {
-        self.tell_impl(message).await
+        self.tell_impl(message.into()).await
     }
 
     /// Internal implementation of tell() - used by both inherent method and MessageSender trait
@@ -643,7 +700,7 @@ impl ActorRef {
         message: Message,
     ) -> Result<(), ActorRefError> {
         use plexspaces_core::monitoring;
-        use std::time::Duration;
+        
         use std::thread_local;
 
         // RECURSION DETECTION: Track call depth to detect infinite loops
@@ -757,7 +814,7 @@ impl ActorRef {
         // This handles the case where lookup_actor_ref() creates an ActorRef from a lazy virtual actor's mailbox
         // but the actor isn't active yet. We need to trigger activation via VirtualActorWrapper.
         // CRITICAL: This check MUST happen BEFORE sending to mailbox to ensure lazy activation works
-        use plexspaces_core::VirtualActorManager;
+        
         if let Some(manager) = self.service_locator().virtual_actor_manager().await {
             let is_virtual = manager.is_virtual(&actor_id).await;
             let is_active = manager.is_active(&actor_id).await;
@@ -768,7 +825,7 @@ impl ActorRef {
             if is_virtual && !is_active {
                 // Lazy virtual actor that isn't active - use VirtualActorWrapper to trigger activation
                 // Get VirtualActorWrapper from registry (it should be there for lazy virtual actors)
-                use plexspaces_core::ActorRegistry;
+                
                 if let Some(registry) = self.service_locator().actor_registry().await {
                     if let Some(virtual_wrapper) = registry.lookup_actor(&actor_id).await {
                         // VirtualActorWrapper will handle activation and message delivery
@@ -858,7 +915,7 @@ impl ActorRef {
                 // Note: For local actors, having a mailbox implies the actor was created, but we still
                 // validate registration to ensure the actor hasn't been unregistered since creation.
                 // Remote actors don't need this check - they're validated via gRPC.
-                use plexspaces_core::ActorRegistry;
+                
                 if let Some(registry) = service_locator.actor_registry().await {
                     if registry.lookup_actor(&actor_id).await.is_none() {
                         tracing::warn!("[TELL] Local actor not registered: actor_id={}", actor_id);
@@ -875,7 +932,7 @@ impl ActorRef {
                 // (Reply routing to temporary sender is handled above before this match)
                 let msg_sender = message.sender_id.clone();
                 let msg_receiver = message.receiver_id.clone();
-                let msg_correlation_id = message.correlation_id.clone();
+                let _msg_correlation_id = message.correlation_id.clone();
                 // Convert proto Message to mailbox Message for mailbox storage
                 let mailbox_msg = plexspaces_mailbox::Message::from_proto(&message);
                 let send_result = mailbox.send(mailbox_msg).await
@@ -1015,7 +1072,7 @@ impl ActorRef {
     async fn get_local_node_id(&self) -> Option<String> {
         match &self.inner {
             ActorRefInner::Local { service_locator, .. } | ActorRefInner::Remote { service_locator, .. } => {
-                use plexspaces_core::ActorRegistry;
+                
                 if let Some(registry) = service_locator.actor_registry().await {
                     Some(registry.local_node_id().to_string())
                 } else {
@@ -1041,7 +1098,7 @@ impl ActorRef {
     /// Currently only supports local actors. Remote actors will return error.
     /// Note: Mailbox doesn't have a non-blocking send, so this will always return an error
     /// for now. Consider using `tell()` with ActorContext instead.
-    pub fn try_tell(&self, message: Message) -> Result<(), ActorRefError> {
+    pub fn try_tell(&self, _message: Message) -> Result<(), ActorRefError> {
         match &self.inner {
             ActorRefInner::Local { mailbox: _, .. } => {
                 // Mailbox doesn't have try_send - would need to be added to Mailbox API
@@ -1268,17 +1325,18 @@ impl ActorRef {
                 );
                 let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
                     temp_sender_id.clone(),
+                    String::new(), // Temporary sender namespace (internal)
                     dummy_mailbox,
                     self.service_locator().clone(),
                 ));
                 
                 // Register temporary sender ActorRef in ActorRegistry (so it can be looked up)
                 if let Some(registry) = self.service_locator().actor_registry().await {
-                    // Create default RequestContext for temporary sender registration
-                    // Temporary senders are always local, so use default tenant/namespace
+                    // Create RequestContext for temporary sender registration
+                    // Temporary senders are always local, so use empty tenant/namespace
                     let ctx = plexspaces_core::RequestContext::new_without_auth(
-                        "default".to_string(), // Default tenant
-                        "default".to_string(), // Default namespace
+                        String::new(), // Empty tenant
+                        String::new(), // Empty namespace
                     );
                     registry.register_temporary_sender(
                         &ctx,
@@ -1374,8 +1432,8 @@ impl ActorRef {
                         target_actor_id, actor_id
                     );
                     }
-                    use plexspaces_core::ActorRegistry;
-                    use std::sync::Arc;
+                    
+                    
                     // Try to get MessageSender from registry (for activated actors and lazy virtual actors)
                     // If found, send message directly and skip the rest of the logic
                     // IMPORTANT: message.sender_id and message.correlation_id are already set above (lines 1197, 1127)
@@ -1433,14 +1491,15 @@ impl ActorRef {
                             if tracing::enabled!(tracing::Level::DEBUG) {
                                 tracing::debug!("🔵 [ASK] Actor not found in registry, trying routing lookup: target={}", target_actor_id);
                             }
-                            // Use default tenant/namespace from ServiceLocator (not internal())
-                            let ctx = self.get_default_request_context().await?;
+                            // Build RequestContext: empty tenant when no auth, namespace from this ActorRef
+                            let ctx = self.get_default_request_context("").await?;
                             if let Ok(Some(routing)) = registry.lookup_routing(&ctx, &target_actor_id).await {
                                 if tracing::enabled!(tracing::Level::DEBUG) {
                                     tracing::debug!("🔵 [ASK] Found routing for actor: target={}, node={}", target_actor_id, routing.node_id);
                                 }
                                 ActorRef::remote(
                                     target_actor_id.clone(),
+                                    String::new(), // TODO: get namespace from routing
                                     routing.node_id,
                                     self.service_locator().clone(),
                                 )
@@ -1475,6 +1534,7 @@ impl ActorRef {
                             };
                             ActorRef::remote(
                                 target_actor_id.clone(),
+                                String::new(), // TODO: get namespace from context
                                 node_id,
                                 self.service_locator().clone(),
                             )
@@ -1606,7 +1666,7 @@ impl ActorRef {
                             if is_target_local {
                                 // Target is local - use Local path logic: create temporary sender, send via tell(), wait for reply
                                 // This reuses the same pattern as the Local path but from Remote ActorRef context
-                                use plexspaces_core::ActorRegistry;
+                                
                                 if let Some(registry) = service_locator.actor_registry().await {
                                     if let Some(local_actor_sender) = registry.lookup_actor(&target_actor_id).await {
                                         // Generate correlation_id
@@ -1640,14 +1700,13 @@ impl ActorRef {
                                         );
                                         let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
                                             temp_sender_id.clone(),
+                                            String::new(), // Temporary sender namespace (internal)
                                             dummy_mailbox,
                                             service_locator.clone(),
                                         ));
                                         
-                                        let ctx = plexspaces_core::RequestContext::new_without_auth(
-                                            "default".to_string(),
-                                            "default".to_string(),
-                                        );
+                                        // Tenant comes from auth, not config
+                                        let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
                                         registry.register_temporary_sender(
                                             &ctx,
                                             temp_sender_id.clone(),
@@ -1738,16 +1797,15 @@ impl ActorRef {
                             );
                             let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
                                 temp_sender_id.clone(),
+                                String::new(), // Temporary sender namespace (internal)
                                 dummy_mailbox,
                                 service_locator.clone(),
                             ));
                             
                             // Register temporary sender ActorRef in ActorRegistry
                             if let Some(registry) = service_locator.actor_registry().await {
-                                let ctx = plexspaces_core::RequestContext::new_without_auth(
-                                    "default".to_string(),
-                                    "default".to_string(),
-                                );
+                                // Tenant comes from auth, not config
+                                let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
                                 registry.register_temporary_sender(
                                     &ctx,
                                     temp_sender_id.clone(),
@@ -2025,7 +2083,7 @@ mod tests {
     async fn test_create_local_actor_ref() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor", mailbox, service_locator.clone());
+        let actor_ref = ActorRef::local("test-actor", "test", mailbox, service_locator.clone());
 
         assert_eq!(actor_ref.id(), "test-actor");
         assert!(actor_ref.is_local());
@@ -2038,7 +2096,7 @@ mod tests {
     async fn test_create_remote_actor_ref() {
         use plexspaces_node::create_default_service_locator;
         let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-        let actor_ref = ActorRef::remote("remote-actor@node1", "node1", service_locator);
+        let actor_ref = ActorRef::remote("remote-actor@node1", "test", "node1", service_locator);
 
         assert_eq!(actor_ref.id(), "remote-actor@node1");
         assert!(!actor_ref.is_local());
@@ -2051,20 +2109,14 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", mailbox.clone(), service_locator.clone());
+        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox.clone(), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
-            let ctx = if let Some(node_config) = service_locator.get_node_config().await {
-                RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                    .with_admin(true)
-                    .with_internal(true)
-            } else {
-                RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true)
-                    .with_internal(true)
-            };
+            // Tenant comes from auth, not config
+            let ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
             registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None).await;
         }
@@ -2131,7 +2183,7 @@ impl MockActorService {
     async fn test_try_tell_not_supported() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor", "test", mailbox, service_locator);
 
         let msg = create_test_message(b"data".to_vec());
         let result = actor_ref.try_tell(msg);
@@ -2145,7 +2197,7 @@ impl MockActorService {
     async fn test_try_tell_not_supported_terminated() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor", "test", mailbox, service_locator);
 
         let message = create_test_message(b"hello".to_vec());
         let result = actor_ref.try_tell(message);
@@ -2160,20 +2212,14 @@ impl MockActorService {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref1 = ActorRef::local("test-actor@node1", mailbox.clone(), service_locator.clone());
+        let actor_ref1 = ActorRef::local("test-actor@node1", "test", mailbox.clone(), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
-            let ctx = if let Some(node_config) = service_locator.get_node_config().await {
-                RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                    .with_admin(true)
-                    .with_internal(true)
-            } else {
-                RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true)
-                    .with_internal(true)
-            };
+            // Tenant comes from auth, not config
+            let ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref1.clone());
             registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None).await;
         }
@@ -2206,9 +2252,9 @@ impl MockActorService {
         let mailbox2 = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
 
-        let ref1 = ActorRef::local("actor-1", mailbox1.clone(), service_locator.clone());
-        let ref2 = ActorRef::local("actor-1", mailbox1.clone(), service_locator.clone());
-        let ref3 = ActorRef::local("actor-2", mailbox2.clone(), service_locator.clone());
+        let ref1 = ActorRef::local("actor-1", "test", mailbox1.clone(), service_locator.clone());
+        let ref2 = ActorRef::local("actor-1", "test", mailbox1.clone(), service_locator.clone());
+        let ref3 = ActorRef::local("actor-2", "test", mailbox2.clone(), service_locator.clone());
 
         assert_eq!(ref1, ref2); // Same ID and location
         assert_ne!(ref1, ref3); // Different ID
@@ -2219,7 +2265,7 @@ impl MockActorService {
     async fn test_debug_formatting() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor", "test", mailbox, service_locator);
 
         let debug_str = format!("{:?}", actor_ref);
         assert!(debug_str.contains("test-actor"));
@@ -2252,9 +2298,10 @@ impl MockActorService {
         assert_eq!(proto_msg.receiver_id, "receiver-actor");
         assert_eq!(proto_msg.message_type, "call");
         assert_eq!(proto_msg.payload, b"test payload");
-        // Priority is converted to legacy value (High = 50) in to_proto()
-        assert_eq!(proto_msg.priority, 50); // Legacy High value
-        assert!(proto_msg.timestamp.is_some());
+        // Priority is the proto enum value (High = 4)
+        assert_eq!(proto_msg.priority, MessagePriority::High as i32);
+        // Timestamp is preserved as-is (None if not set in source message)
+        assert_eq!(proto_msg.timestamp, message.timestamp);
         assert_eq!(proto_msg.headers.get("key1").unwrap(), "value1");
         assert_eq!(proto_msg.headers.get("key2").unwrap(), "value2");
     }
@@ -2268,12 +2315,12 @@ impl MockActorService {
         let proto_msg = ActorRef::to_proto_message(&message, &receiver_id).unwrap();
 
         assert_eq!(proto_msg.id, message.id);
-        assert_eq!(proto_msg.sender_id, ""); // None becomes empty string
+        assert_eq!(proto_msg.sender_id, ""); // Empty by default
         assert_eq!(proto_msg.receiver_id, "receiver");
         assert_eq!(proto_msg.payload, b"minimal");
-        assert!(proto_msg.timestamp.is_some());
-        // TTL is None by default for messages without TTL
-        assert!(proto_msg.ttl.is_none());
+        // Timestamp and TTL are preserved as-is (None if not set)
+        assert_eq!(proto_msg.timestamp, message.timestamp);
+        assert_eq!(proto_msg.ttl, message.ttl);
     }
 
     // ============================================================================
@@ -2286,20 +2333,14 @@ impl MockActorService {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("target-actor@node1", mailbox.clone(), service_locator.clone());
+        let actor_ref = ActorRef::local("target-actor@node1", "test", mailbox.clone(), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
-            let ctx = if let Some(node_config) = service_locator.get_node_config().await {
-                RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                    .with_admin(true)
-                    .with_internal(true)
-            } else {
-                RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true)
-                    .with_internal(true)
-            };
+            // Tenant comes from auth, not config
+            let ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
             registry.register_actor(&ctx, "target-actor@node1".to_string(), sender, None, None, None).await;
         }
@@ -2340,6 +2381,7 @@ impl MockActorService {
         // Use actor crate's ActorRef for remote actors
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
+            "test".to_string(),
             "node2".to_string(),
             service_locator,
         );
@@ -2393,20 +2435,14 @@ impl MockActorService {
         // Create a local ActorRef that will receive the reply
         let target_mailbox_arc = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let target_ref = ActorRef::local("target@node1".to_string(), Arc::clone(&target_mailbox_arc), service_locator.clone());
+        let target_ref = ActorRef::local("target@node1".to_string(), "test".to_string(), Arc::clone(&target_mailbox_arc), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
-            let ctx = if let Some(node_config) = service_locator.get_node_config().await {
-                RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                    .with_admin(true)
-                    .with_internal(true)
-            } else {
-                RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true)
-                    .with_internal(true)
-            };
+            // Tenant comes from auth, not config
+            let ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(target_ref.clone());
             registry.register_actor(&ctx, "target@node1".to_string(), sender, None, None, None).await;
         }
@@ -2433,7 +2469,7 @@ impl MockActorService {
         // Full ask() pattern with replies is tested in integration tests (ask_pattern_tests.rs)
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1".to_string(), mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1".to_string(), "test".to_string(), mailbox, service_locator);
 
         // Use unified ask() API - sends to self and waits for reply
         let request = create_test_message(b"request".to_vec());
@@ -2476,6 +2512,7 @@ impl MockActorService {
         let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
+            "test".to_string(),
             "node2".to_string(),
             service_locator,
         );
@@ -2498,7 +2535,7 @@ impl MockActorService {
         let service_locator = create_test_service_locator().await;
         // ActorRef manages its own reply_waiters via ReplyWaiterRegistry
 
-        let actor_ref = ActorRef::local("target-actor@node1", mailbox, service_locator);
+        let actor_ref = ActorRef::local("target-actor@node1", "test", mailbox, service_locator);
         let request = create_test_message(b"request".to_vec());
         let result = actor_ref
             .ask(request, Duration::from_millis(10))
@@ -2529,7 +2566,7 @@ impl MockActorService {
         let service_locator = create_test_service_locator().await;
         // ActorRef manages its own reply_waiters via ReplyWaiterRegistry
 
-        let actor_ref = ActorRef::local("target-actor@node1", mailbox, service_locator);
+        let actor_ref = ActorRef::local("target-actor@node1", "test", mailbox, service_locator);
         // Send request but no one will reply (simulates terminated actor)
         let request = create_test_message(b"request".to_vec());
         let result = actor_ref
@@ -2575,20 +2612,14 @@ impl MockActorService {
         let mailbox1 = create_test_mailbox().await;
         let mailbox1_clone = mailbox1.clone();
         let service_locator = create_test_service_locator().await;
-        let actor_ref1 = ActorRef::local("actor@node1", mailbox1.clone(), service_locator.clone());
+        let actor_ref1 = ActorRef::local("actor@node1", "test", mailbox1.clone(), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
-            let ctx = if let Some(node_config) = service_locator.get_node_config().await {
-                RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                    .with_admin(true)
-                    .with_internal(true)
-            } else {
-                RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true)
-                    .with_internal(true)
-            };
+            // Tenant comes from auth, not config
+            let ctx = RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref1.clone());
             registry.register_actor(&ctx, "actor@node1".to_string(), sender, None, None, None).await;
         }
@@ -2618,7 +2649,7 @@ impl MockActorService {
         // For unit tests, we verify local behavior
         let mailbox2 = create_test_mailbox().await;
         let mailbox2_clone = Arc::clone(&mailbox2);
-        let actor_ref2 = ActorRef::local("actor@node1", mailbox2, service_locator);
+        let actor_ref2 = ActorRef::local("actor@node1", "test", mailbox2, service_locator);
         actor_ref2.tell(create_test_message(b"remote".to_vec())).await.unwrap();
         assert!(mailbox2_clone.dequeue().await.is_some());
     }
@@ -2647,7 +2678,7 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_basic() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
 
         // Create a ReplyWaiter and register it
         let correlation_id = "corr-123".to_string();
@@ -2688,7 +2719,7 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_unknown_correlation_id() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
 
         // Try to notify with unknown correlation_id
         let reply = create_test_message(b"reply".to_vec());
@@ -2701,7 +2732,7 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_multiple_correlation_ids() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
 
         // Register multiple waiters
         let corr_id1 = "corr-1".to_string();
@@ -2761,7 +2792,7 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_concurrent() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
 
         // Register multiple waiters
         let mut handles: Vec<(tokio::task::JoinHandle<bool>, String)> = Vec::new();
@@ -2803,7 +2834,7 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_timeout() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
 
         // Register a waiter
         let correlation_id = "corr-timeout".to_string();

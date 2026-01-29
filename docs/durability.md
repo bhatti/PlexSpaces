@@ -696,6 +696,143 @@ Always test:
 
 ---
 
+## WASM Actor Durability (Cloudflare Durable Objects Pattern)
+
+WASM actors use a different durability pattern than Rust actors. Instead of the DurabilityFacet with journaling and replay, WASM actors use **checkpoint-based durability** inspired by [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/).
+
+### Why a Different Pattern?
+
+The DurabilityFacet pattern (journaling + replay) doesn't work with WASM actors because:
+
+1. **Replay requires initialized actors**: DurabilityFacet's `on_attach()` replays messages through a `ReplayHandler`
+2. **WASM actors aren't ready**: During facet attach, WASM actors aren't fully initialized yet
+3. **Result**: Attaching DurabilityFacet to WASM actors causes "Replay failed: WASM handle_message failed"
+
+### The Cloudflare Durable Objects Pattern
+
+Instead, WASM actors use **explicit state snapshots** via the WIT interface:
+
+```wit
+interface actor {
+    // ... other functions ...
+    get-state: func() -> string;
+    set-state: func(state-json: string) -> string;
+}
+```
+
+**How it works:**
+
+1. **Actor manages state**: The WASM actor maintains its own state internally
+2. **Framework calls `get-state()`**: Periodically or on shutdown, framework gets state snapshot
+3. **State is persisted**: Framework stores state in checkpoint storage (SQLite/Postgres)
+4. **On restart, `set-state()` is called**: Framework restores state from checkpoint
+
+### Architecture
+
+```mermaid
+sequenceDiagram
+    participant Framework
+    participant WASM Actor
+    participant Checkpoint Storage
+
+    Note over Framework,Checkpoint Storage: Normal Operation
+    Framework->>WASM Actor: handle() messages
+    WASM Actor->>WASM Actor: Update internal state
+    Framework->>WASM Actor: get-state()
+    WASM Actor-->>Framework: {"balance": 800, "transactions": [...]}
+    Framework->>Checkpoint Storage: Store checkpoint
+
+    Note over Framework,Checkpoint Storage: Restart Recovery
+    Framework->>Checkpoint Storage: Load latest checkpoint
+    Checkpoint Storage-->>Framework: {"balance": 800, "transactions": [...]}
+    Framework->>WASM Actor: set-state(state_json)
+    WASM Actor->>WASM Actor: Restore internal state
+    Note over WASM Actor: ✅ State Recovered
+```
+
+### Comparison: Rust vs WASM Durability
+
+| Aspect | Rust Actors (DurabilityFacet) | WASM Actors (Checkpoint) |
+|--------|------------------------------|--------------------------|
+| **Pattern** | Event Sourcing + Replay | State Snapshots |
+| **State Recovery** | Replay messages through handler | Load snapshot, call `set-state()` |
+| **Side Effects** | Cached during replay | Actor must handle idempotency |
+| **Audit Trail** | Full message history | Snapshot only (no history) |
+| **Complexity** | Higher (replay logic) | Lower (simple snapshots) |
+| **Best For** | Audit requirements, complex workflows | Simple state, high performance |
+
+### Implementation in Python WASM
+
+```python
+import json
+
+class BankAccount:
+    def __init__(self):
+        self.balance = 0
+        self.transactions = []
+    
+    def get_state(self) -> str:
+        """Called by framework to get state for checkpointing."""
+        return json.dumps({
+            "balance": self.balance,
+            "transactions": self.transactions
+        })
+    
+    def set_state(self, state_json: str) -> str:
+        """Called by framework to restore state on restart."""
+        state = json.loads(state_json)
+        self.balance = state.get("balance", 0)
+        self.transactions = state.get("transactions", [])
+        return ""  # Empty string = success
+    
+    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
+        """Process banking operations."""
+        request = json.loads(payload_json)
+        operation = request.get("operation")
+        
+        if operation == "deposit":
+            amount = request.get("amount", 0)
+            self.balance += amount
+            self.transactions.append({"type": "deposit", "amount": amount})
+            return json.dumps({"balance": self.balance})
+        # ... other operations
+```
+
+### Metrics
+
+WASM state persistence operations are fully instrumented:
+
+| Metric | Description |
+|--------|-------------|
+| `plexspaces_wasm_get_state_total` | Total get-state() calls |
+| `plexspaces_wasm_get_state_success_total` | Successful get-state() calls |
+| `plexspaces_wasm_get_state_errors_total` | Failed get-state() calls |
+| `plexspaces_wasm_get_state_duration_seconds` | Duration of get-state() calls |
+| `plexspaces_wasm_set_state_total` | Total set-state() calls |
+| `plexspaces_wasm_set_state_success_total` | Successful state restorations |
+| `plexspaces_wasm_set_state_errors_total` | Failed set-state() calls |
+| `plexspaces_wasm_set_state_duration_seconds` | Duration of set-state() calls |
+| `plexspaces_wasm_state_size_bytes` | Size of state returned |
+
+### WASM Durability Examples
+
+See [`examples/python/apps/bank_account`](../../examples/python/apps/bank_account/) for a complete example demonstrating:
+
+- State management with `get-state()`/`set-state()`
+- Transaction tracking
+- Balance operations (deposit, withdraw)
+- Test scripts for durability verification
+
+### Best Practices for WASM Durability
+
+1. **Keep state serializable**: Use JSON-compatible data structures
+2. **Keep state small**: Checkpoint performance depends on state size
+3. **Handle partial state**: `set-state()` should handle missing fields gracefully
+4. **Idempotent operations**: Design message handlers to be idempotent when possible
+5. **Log state transitions**: Add logging to track state changes for debugging
+
+---
+
 ## Examples
 
 See [`examples/simple/durable_actor_example`](../../examples/simple/durable_actor_example/) for complete working examples demonstrating:

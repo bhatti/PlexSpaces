@@ -55,7 +55,8 @@ pub mod service_locator_helpers;
 pub use actor_factory::ActorFactory;
 pub use actor_factory_impl::ActorFactoryImpl;
 pub use virtual_actor_wrapper::VirtualActorWrapper;
-pub use service_locator_helpers::get_actor_factory;
+// Helper functions for ActorFactory are in plexspaces-services crate to avoid circular dependencies
+// pub use service_locator_helpers::get_actor_factory; // Moved to plexspaces-services
 
 // Re-export register_state_fetcher_callback for tests
 pub use r#mod::register_state_fetcher_callback;
@@ -71,13 +72,20 @@ pub use test_service_locator::TestServiceLocatorStub;
 pub mod supervisor;
 pub use supervisor::*;
 
+// Proto-based supervisor builder (moved from application crate)
+pub mod supervisor_builder_proto;
+pub use supervisor_builder_proto::ProtoSupervisorBuilder;
+
 // Child specification module
 pub mod child_spec;
 pub use child_spec::{ChildSpec, StartedChild, StartFn, ShutdownSpec};
 
 // Facet helpers module
 pub mod facet_helpers;
-pub use facet_helpers::{create_facet_from_proto, create_facets_from_proto};
+pub use facet_helpers::{
+    create_facet_from_proto, create_facets_from_proto,
+    LockFacetFactory, RegistryFacetFactory, ProcessGroupFacetFactory,
+};
 
 // Re-export SupervisorStats from proto (for public API)
 pub use plexspaces_proto::supervision::v1::SupervisorStats;

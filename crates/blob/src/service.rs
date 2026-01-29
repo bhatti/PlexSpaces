@@ -157,6 +157,22 @@ impl BlobService {
             _ => return Err(BlobError::ConfigError(format!("Unsupported backend: {}", config.backend))),
         };
 
+        // Log blob service configuration
+        let endpoint_display = if config.endpoint.is_empty() {
+            "(default)".to_string()
+        } else {
+            config.endpoint.clone()
+        };
+        
+        tracing::info!(
+            backend = %config.backend,
+            bucket = %config.bucket,
+            endpoint = %endpoint_display,
+            prefix = %prefix,
+            use_ssl = config.use_ssl,
+            "Blob storage initialized"
+        );
+
         let mut config_with_prefix = config;
         config_with_prefix.prefix = prefix;
         

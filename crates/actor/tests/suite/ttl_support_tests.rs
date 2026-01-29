@@ -118,7 +118,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     let mailbox = Arc::new(Mailbox::new(mailbox_config, "test@node1".to_string()).await.unwrap());
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let actor_ref = ActorRef::local("test@node1".to_string(), Arc::clone(&mailbox), service_locator.clone());
+    let actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), Arc::clone(&mailbox), service_locator.clone());
     
     // Register actor before calling tell()
     use plexspaces_core::{ActorRegistry, RequestContext};

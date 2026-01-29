@@ -36,6 +36,7 @@ mod application;
 #[cfg(feature = "firecracker")]
 mod firecracker;
 mod node;
+mod security;
 
 #[derive(Parser)]
 #[command(name = "plexspaces")]
@@ -50,23 +51,23 @@ enum Commands {
     /// Deploy an application (like AWS Lambda deploy)
     Deploy {
         /// Node address (e.g., localhost:8000)
-        #[arg(short, long, default_value = "localhost:8000")]
+        #[arg(long, default_value = "localhost:8000")]
         node: String,
         
         /// Application ID
-        #[arg(short, long)]
+        #[arg(short = 'i', long)]
         app_id: String,
         
         /// Application name
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         name: String,
         
         /// Application version
-        #[arg(short, long, default_value = "1.0.0")]
+        #[arg(short = 'v', long, default_value = "1.0.0")]
         version: String,
         
         /// WASM file path (for WASM applications)
-        #[arg(short, long)]
+        #[arg(short = 'w', long)]
         wasm: Option<String>,
         
         /// WASM module file path (alias for --wasm)
@@ -74,34 +75,34 @@ enum Commands {
         wasm_module: Option<String>,
         
         /// Application config file (TOML/JSON)
-        #[arg(short, long)]
+        #[arg(short = 'c', long)]
         config: Option<String>,
         
         /// Release config file (TOML, optional)
-        #[arg(short, long)]
+        #[arg(short = 'r', long)]
         release_config: Option<String>,
     },
     
     /// Deploy an actor (legacy, use Deploy for applications)
     DeployActor {
         /// Node address (e.g., localhost:8000)
-        #[arg(short, long, default_value = "localhost:8000")]
+        #[arg(long, default_value = "localhost:8000")]
         node: String,
         
         /// Actor name
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         name: String,
         
         /// WASM file path (for WASM actors)
-        #[arg(short, long)]
+        #[arg(short = 'w', long)]
         wasm: Option<String>,
         
         /// Actor type (wasm, rust, js, go, python)
-        #[arg(short, long, default_value = "wasm")]
+        #[arg(short = 't', long, default_value = "wasm")]
         r#type: String,
         
         /// Initial state (JSON)
-        #[arg(short, long)]
+        #[arg(short = 's', long)]
         state: Option<String>,
     },
     
@@ -159,6 +160,84 @@ enum Commands {
         /// Listen address for gRPC server
         #[arg(long, default_value = "0.0.0.0:8000")]
         listen_addr: String,
+        
+        /// Release config file path (YAML format)
+        /// If not provided, a default configuration will be created automatically
+        #[arg(long, value_name = "FILE")]
+        release_config: Option<String>,
+    },
+    
+    /// Generate mTLS certificates for node-to-node authentication
+    GenerateMtls {
+        /// Output directory for certificates (default: ./certs)
+        #[arg(short, long, default_value = "./certs")]
+        output: String,
+        
+        /// CA common name (default: "PlexSpaces CA")
+        #[arg(long, default_value = "PlexSpaces CA")]
+        ca_common_name: String,
+        
+        /// Server common name (default: "PlexSpaces Server")
+        #[arg(long, default_value = "PlexSpaces Server")]
+        server_common_name: String,
+        
+        /// Validity in days for server certificate (default: 90)
+        #[arg(long, default_value = "90")]
+        validity_days: u32,
+    },
+    
+    /// Generate default release configuration file
+    GenerateReleaseConfig {
+        /// Output file path (default: release.yaml)
+        #[arg(short, long, default_value = "release.yaml")]
+        output: String,
+        
+        /// Release name (default: "plexspaces-cluster")
+        #[arg(long, default_value = "plexspaces-cluster")]
+        release_name: String,
+        
+        /// Release version (default: "1.0.0")
+        #[arg(long, default_value = "1.0.0")]
+        release_version: String,
+        
+        /// Node ID (default: "node-1")
+        #[arg(long, default_value = "node-1")]
+        node_id: String,
+        
+        /// Listen address (default: "0.0.0.0:8000")
+        #[arg(long, default_value = "0.0.0.0:8000")]
+        listen_addr: String,
+    },
+    
+    /// Create a JWT token for API authentication (tenant_id, roles, groups, is_admin)
+    JwtCreate {
+        /// Tenant ID (required for multi-tenancy)
+        #[arg(long)]
+        tenant_id: String,
+        
+        /// Subject / user ID (default: "cli-user")
+        #[arg(long, default_value = "cli-user")]
+        sub: String,
+        
+        /// Comma-separated roles (e.g. admin,user)
+        #[arg(long, value_delimiter = ',')]
+        roles: Vec<String>,
+        
+        /// Comma-separated groups (e.g. team-a,team-b)
+        #[arg(long, value_delimiter = ',')]
+        groups: Vec<String>,
+        
+        /// Set is_admin claim to true
+        #[arg(long)]
+        is_admin: bool,
+        
+        /// Token validity in hours (default: 24)
+        #[arg(long, default_value = "24")]
+        exp_hours: u32,
+        
+        /// JWT secret (default: PLEXSPACES_JWT_SECRET env var)
+        #[arg(long, env = "PLEXSPACES_JWT_SECRET")]
+        secret: Option<String>,
     },
 }
 
@@ -199,8 +278,28 @@ async fn main() -> Result<()> {
         Commands::Status { node } => {
             node::status(&node).await
         }
-        Commands::Start { node_id, listen_addr } => {
-            node::start(&node_id, &listen_addr).await
+        Commands::Start { node_id, listen_addr, release_config } => {
+            node::start(&node_id, &listen_addr, release_config.as_deref()).await
+        }
+        Commands::GenerateMtls { output, ca_common_name, server_common_name, validity_days } => {
+            security::generate_mtls_certificates(
+                Some(std::path::PathBuf::from(output)),
+                Some(ca_common_name),
+                Some(server_common_name),
+                Some(validity_days),
+            ).await
+        }
+        Commands::GenerateReleaseConfig { output, release_name, release_version, node_id, listen_addr } => {
+            security::generate_release_config(
+                Some(std::path::PathBuf::from(output)),
+                Some(release_name),
+                Some(release_version),
+                Some(node_id),
+                Some(listen_addr),
+            ).await
+        }
+        Commands::JwtCreate { tenant_id, sub, roles, groups, is_admin, exp_hours, secret } => {
+            security::create_jwt_token(tenant_id, sub, roles, groups, is_admin, exp_hours, secret).await
         }
     }
 }

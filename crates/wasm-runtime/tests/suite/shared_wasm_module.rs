@@ -15,17 +15,25 @@ use tokio::time::timeout;
 
 /// Get the calculator WASM file path
 /// Tries multiple locations:
-/// 1. tests/fixtures/calculator_actor.wasm (preferred, checked into git)
-/// 2. ../../examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm (fallback)
+/// 1. tests/webapps/calculator/app.wasm (preferred, auto-deploy convention)
+/// 2. tests/fixtures/calculator_actor.wasm (legacy, for backwards compatibility)
+/// 3. ../../examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm (fallback)
 pub fn get_calculator_wasm_path() -> PathBuf {
-    // First try: test fixtures (preferred)
+    // First try: webapps directory (auto-deploy convention)
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests/webapps/calculator/app.wasm");
+    if path.exists() {
+        return path;
+    }
+    
+    // Second try: test fixtures (legacy)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/fixtures/calculator_actor.wasm");
     if path.exists() {
         return path;
     }
     
-    // Second try: examples directory (fallback)
+    // Third try: examples directory (fallback)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.pop(); // crates/wasm-runtime
     path.pop(); // crates
@@ -34,6 +42,13 @@ pub fn get_calculator_wasm_path() -> PathBuf {
     path.push("wasm_calculator");
     path.push("wasm-modules");
     path.push("calculator_actor.wasm");
+    path
+}
+
+/// Get the webapps directory path for auto-deploy testing
+pub fn get_webapps_path() -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests/webapps");
     path
 }
 

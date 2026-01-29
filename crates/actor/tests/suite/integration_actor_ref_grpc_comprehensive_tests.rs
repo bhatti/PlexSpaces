@@ -125,6 +125,7 @@ async fn test_remote_actor_ref_node_not_found() {
     // Create remote ActorRef for node that doesn't exist
     let actor_ref = ActorRef::remote(
         "test-actor@unknown-node",
+        "default",
         "unknown-node",
         service_locator,
     );
@@ -169,6 +170,7 @@ async fn test_remote_actor_ref_connection_failure() {
     // Create remote ActorRef
     let actor_ref = ActorRef::remote(
         "test-actor@remote-node",
+        "default",
         "remote-node",
         service_locator,
     );
@@ -215,6 +217,7 @@ async fn test_remote_actor_ref_ask_timeout() {
     // Create remote ActorRef
     let actor_ref = ActorRef::remote(
         "test-actor@remote-node",
+        "default",
         "remote-node",
         service_locator,
     );
@@ -257,11 +260,13 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
     // Create multiple ActorRefs to same node
     let actor_ref1 = ActorRef::remote(
         "actor1@remote-node",
+        "default",
         "remote-node",
         service_locator.clone(),
     );
     let actor_ref2 = ActorRef::remote(
         "actor2@remote-node",
+        "default",
         "remote-node",
         service_locator.clone(),
     );

@@ -313,7 +313,19 @@ where
                         use plexspaces_services::actor_service::ActorServiceImpl;
                         let actor_service = ActorServiceImpl::new(service_locator.clone(), node_id.clone());
                         use tonic::Request as TonicRequest;
-                        let grpc_req = TonicRequest::new(invoke_req);
+                        use tonic::metadata::MetadataValue;
+                        
+                        // Put tenant_id and namespace in gRPC metadata so RequestContext can be created
+                        let mut grpc_req = TonicRequest::new(invoke_req);
+                        grpc_req.metadata_mut().insert(
+                            "x-tenant-id",
+                            MetadataValue::try_from(tenant_id.as_str()).unwrap_or_else(|_| MetadataValue::from_static("")),
+                        );
+                        if !namespace.is_empty() {
+                            if let Ok(ns_value) = MetadataValue::try_from(namespace.as_str()) {
+                                grpc_req.metadata_mut().insert("x-namespace", ns_value);
+                            }
+                        }
                         
                         match actor_service.invoke_actor(grpc_req).await {
                             Ok(grpc_resp) => {

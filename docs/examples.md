@@ -80,6 +80,12 @@ PlexSpaces includes comprehensive examples organized by core functionality and c
 - `examples/simple/process_groups_pubsub/` - Actor clustering and group messaging
 - `examples/simple/actor_groups_sharding/` - Hash-based routing and load distribution
 
+**Distributed Locks (Task Queue)**:
+- `examples/python/apps/task-queue/` - Distributed task queue with LockFacet
+  - **Features**: Job submission, worker claiming, lock renewal (heartbeat), fault tolerance
+  - **Use Cases**: Background job processing, scheduled tasks, distributed data processing
+  - **See**: [Task Queue Example](../examples/python/apps/task-queue/) for complete implementation
+
 **Registry (Service Discovery)**:
 - `examples/wasm_showcase/` - Service registration and discovery
 - `examples/node_discovery.rs` - Node discovery and registration

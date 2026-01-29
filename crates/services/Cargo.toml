@@ -18,6 +18,7 @@ plexspaces-tuplespace = { path = "../tuplespace" }
 plexspaces-channel = { workspace = true }
 plexspaces-common = { path = "../common" }
 plexspaces-keyvalue = { workspace = true }
+plexspaces-locks = { workspace = true, features = ["memory-backend", "sqlite-backend"] }
 plexspaces-object-registry = { workspace = true }
 plexspaces-process-groups = { workspace = true }
 plexspaces-facet = { workspace = true }
@@ -64,8 +65,15 @@ serde = { workspace = true }
 serde_json = "1.0"
 rand = "0.8"
 
+# System calls for forceful exit
+libc = "0.2"
+
+# Certificate generation for mTLS (moved to common crate)
+# rcgen is now in common crate
+
 [dev-dependencies]
 tokio-test = "0.4"
+plexspaces-behavior = { path = "../behavior" }
 plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 jsonwebtoken = "9.0"
 reqwest = { version = "0.11", features = ["json"] }
@@ -73,10 +81,37 @@ tempfile = "3.8"
 plexspaces-node = { path = "../node" }
 
 [features]
-default = []
+default = ["memory-backend", "sqlite-backend"]
+memory-backend = ["plexspaces-locks/memory-backend"]
+sqlite-backend = ["plexspaces-locks/sqlite-backend"]
 firecracker = ["plexspaces-firecracker"]
 
 [lib]
 name = "plexspaces_services"
 path = "src/lib.rs"
 
+# Binary used by integration_tests (auth_tests, invoke_actor_grpc_tests) to spawn nodes
+[[bin]]
+name = "node_runner"
+path = "tests/actor_service/integration/node_runner.rs"
+
+# Test binaries under tests/actor_service/ (not auto-discovered by Cargo)
+[[test]]
+name = "integration_tests"
+path = "tests/actor_service/integration_tests.rs"
+
+[[test]]
+name = "actor_service_spawn_tests"
+path = "tests/actor_service/actor_service_spawn_tests.rs"
+
+[[test]]
+name = "invoke_actor_tests"
+path = "tests/actor_service/invoke_actor_tests.rs"
+
+[[test]]
+name = "get_or_activate_actor_tests"
+path = "tests/actor_service/get_or_activate_actor_tests.rs"
+
+[[test]]
+name = "spawn_with_facets_tests"
+path = "tests/actor_service/spawn_with_facets_tests.rs"

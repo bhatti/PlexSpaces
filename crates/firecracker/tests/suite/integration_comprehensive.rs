@@ -3,6 +3,8 @@
 //
 // Comprehensive integration tests for Firecracker with 95%+ coverage
 
+use plexspaces_common::skip_if_unavailable;
+use plexspaces_common::test_helpers::firecracker_available;
 use plexspaces_firecracker::{
     ApplicationDeployment, FirecrackerVm, VmConfig, VmRegistry, VmState,
     health::{HealthStatus, VmHealthMonitor},
@@ -13,15 +15,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-
-/// Check if Firecracker prerequisites are available
-fn check_prerequisites() -> bool {
-    Path::new("/usr/bin/firecracker").exists()
-        || std::process::Command::new("firecracker")
-            .arg("--version")
-            .output()
-            .is_ok()
-}
 
 // ============================================================================
 // VM Lifecycle Tests
@@ -93,12 +86,8 @@ async fn test_vm_operations_invalid_state() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Firecracker binary
 async fn test_vm_full_lifecycle() {
-    if !check_prerequisites() {
-        eprintln!("Skipping: Firecracker not available");
-        return;
-    }
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
 
     let vm_id = ulid::Ulid::new().to_string();
     let config = VmConfig {
@@ -155,12 +144,8 @@ async fn test_application_deployment_requires_config() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Firecracker
 async fn test_application_deployment_full() {
-    if !check_prerequisites() {
-        eprintln!("Skipping: Firecracker not available");
-        return;
-    }
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
 
     let vm_id = ulid::Ulid::new().to_string();
     let config = VmConfig {
@@ -272,12 +257,8 @@ async fn test_multiple_vm_creation() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires Firecracker binary
 async fn test_health_monitor_with_running_vm() {
-    if !check_prerequisites() {
-        eprintln!("Skipping: Firecracker not available");
-        return;
-    }
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
 
     let vm_id = ulid::Ulid::new().to_string();
     let config = VmConfig {
@@ -317,12 +298,8 @@ async fn test_health_monitor_with_running_vm() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Firecracker binary
 async fn test_health_monitor_detects_failure() {
-    if !check_prerequisites() {
-        eprintln!("Skipping: Firecracker not available");
-        return;
-    }
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
 
     let vm_id = ulid::Ulid::new().to_string();
     let config = VmConfig {
@@ -371,12 +348,8 @@ async fn test_health_monitor_detects_failure() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires Firecracker binary
 async fn test_supervisor_with_running_vm() {
-    if !check_prerequisites() {
-        eprintln!("Skipping: Firecracker not available");
-        return;
-    }
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
 
     let vm_id = ulid::Ulid::new().to_string();
     let config = VmConfig {
@@ -420,12 +393,8 @@ async fn test_supervisor_with_running_vm() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Firecracker binary
 async fn test_supervisor_restart_on_failure() {
-    if !check_prerequisites() {
-        eprintln!("Skipping: Firecracker not available");
-        return;
-    }
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
 
     let vm_id = ulid::Ulid::new().to_string();
     let config = VmConfig {
@@ -474,12 +443,8 @@ async fn test_supervisor_restart_on_failure() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Firecracker binary
 async fn test_supervisor_multiple_vms() {
-    if !check_prerequisites() {
-        eprintln!("Skipping: Firecracker not available");
-        return;
-    }
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
 
     let vm1_id = ulid::Ulid::new().to_string();
     let vm2_id = ulid::Ulid::new().to_string();

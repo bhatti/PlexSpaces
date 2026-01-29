@@ -103,10 +103,6 @@ impl ServiceConnectionPool {
 pub struct GrpcConnectionManager {
     /// Connection pools: (service_type, node_id) -> ServiceConnectionPool
     pools: Arc<RwLock<HashMap<(ServiceType, String), ServiceConnectionPool>>>,
-    /// Default tenant ID for internal operations
-    default_tenant_id: String,
-    /// Default namespace for internal operations
-    default_namespace: String,
     /// Connection pool size (from NodeConfig, default: 2)
     pool_size: usize,
 }
@@ -115,18 +111,13 @@ impl GrpcConnectionManager {
     /// Create a new connection manager
     ///
     /// ## Arguments
-    /// * `default_tenant_id` - Default tenant ID for internal operations
-    /// * `default_namespace` - Default namespace for internal operations
     /// * `pool_size` - Connection pool size per service (default: 2)
-    pub fn new(
-        default_tenant_id: String,
-        default_namespace: String,
-        pool_size: Option<u32>,
-    ) -> Self {
+    ///
+    /// NOTE: default_tenant_id and default_namespace have been removed.
+    /// Tenant comes from auth (JWT/mTLS); namespace from application/actor.
+    pub fn new(pool_size: Option<u32>) -> Self {
         Self {
             pools: Arc::new(RwLock::new(HashMap::new())),
-            default_tenant_id,
-            default_namespace,
             pool_size: pool_size.unwrap_or(2) as usize,
         }
     }
@@ -242,16 +233,6 @@ impl GrpcConnectionManager {
         if let Some(pool) = pools.get_mut(&key) {
             pool.return_connection(channel);
         }
-    }
-
-    /// Get default tenant ID
-    pub fn default_tenant_id(&self) -> &str {
-        &self.default_tenant_id
-    }
-
-    /// Get default namespace
-    pub fn default_namespace(&self) -> &str {
-        &self.default_namespace
     }
 
     /// Shutdown all connection pools

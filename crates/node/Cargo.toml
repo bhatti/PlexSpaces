@@ -27,6 +27,7 @@ plexspaces-application = { path = "../application" }
 plexspaces-services = { path = "../services" }
 plexspaces-scheduler = { workspace = true, features = ["memory-backend"] }
 plexspaces-locks = { workspace = true }
+plexspaces-common = { path = "../common" }
 plexspaces-wasm-runtime = { workspace = true }
 plexspaces-blob = { path = "../blob", features = ["sql-backend", "server", "presigned-urls"] }
 plexspaces-firecracker = { workspace = true, optional = true }
@@ -71,6 +72,7 @@ base64 = "0.22"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 clap = { version = "4.4", features = ["derive"] }
 anyhow = "1.0"
+jsonwebtoken = "9.3"
 
 [features]
 default = ["dashboard", "firecracker"]
@@ -82,6 +84,7 @@ tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
 plexspaces-behavior = { workspace = true }
 plexspaces-persistence = { workspace = true }
+plexspaces-common = { path = "../common", features = ["test-helpers"] }
 futures = { workspace = true }
 tempfile = "3.10"
 wat = "1.0"
@@ -90,3 +93,8 @@ wat = "1.0"
 name = "plexspaces_node"
 path = "src/lib.rs"
 
+# Explicit name to avoid collision with plexspaces-services integration_tests
+# (so "cargo test --test integration_tests -- auth_tests" runs only services' tests)
+[[test]]
+name = "node_integration_tests"
+path = "tests/integration_tests.rs"

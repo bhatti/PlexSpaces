@@ -47,10 +47,6 @@ pub struct SchedulingRequest {
     /// Request details (imported from actor_runtime.proto)
     #[prost(message, optional, tag="2")]
     pub requirements: ::core::option::Option<super::super::actor::v1::ActorResourceRequirements>,
-    #[prost(string, tag="3")]
-    pub namespace: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
-    pub tenant_id: ::prost::alloc::string::String,
     /// Status
     #[prost(enumeration="SchedulingStatus", tag="5")]
     pub status: i32,
@@ -70,6 +66,16 @@ pub struct SchedulingRequest {
     pub scheduled_at: ::core::option::Option<::prost_types::Timestamp>,
     #[prost(message, optional, tag="11")]
     pub completed_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Tenant ID for storage isolation (set from gRPC metadata/auth when request is created)
+    /// NOTE: This is NOT an API input field - tenant comes from auth (JWT/mTLS).
+    /// Stored here for tracking, isolation, and state store operations.
+    #[prost(string, tag="12")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Namespace for storage isolation (set from gRPC metadata when request is created)
+    /// NOTE: This is NOT an API input field - namespace comes from request metadata.
+    /// Stored here for tracking, isolation, and state store operations.
+    #[prost(string, tag="13")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Request to schedule an actor
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -78,12 +84,6 @@ pub struct ScheduleActorRequest {
     /// Actor resource requirements (imported from actor_runtime.proto)
     #[prost(message, optional, tag="1")]
     pub requirements: ::core::option::Option<super::super::actor::v1::ActorResourceRequirements>,
-    /// Namespace (optional)
-    #[prost(string, tag="2")]
-    pub namespace: ::prost::alloc::string::String,
-    /// Tenant ID (optional)
-    #[prost(string, tag="3")]
-    pub tenant_id: ::prost::alloc::string::String,
     /// Optional: Client-provided request ID (for idempotency)
     /// If not provided, server generates one
     #[prost(string, tag="4")]

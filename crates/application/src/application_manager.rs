@@ -131,7 +131,8 @@ impl ApplicationManagerImpl {
     /// * `Ok(())` - Application registered successfully
     /// * `Err(ApplicationError)` - Application with same name already registered
     pub async fn register(&self, app: Box<dyn Application>) -> Result<(), ApplicationError> {
-        self.register_with_metadata(app, "default".to_string(), "internal".to_string()).await
+        // Use empty tenant_id/namespace - should come from API request via register_with_metadata
+        self.register_with_metadata(app, String::new(), String::new()).await
     }
     
     /// Register an application with namespace and tenant_id
@@ -151,7 +152,7 @@ impl ApplicationManagerImpl {
         tenant_id: String,
     ) -> Result<(), ApplicationError> {
         let name = app.name().to_string();
-        let version = app.version().to_string();
+        let _version = app.version().to_string();
         let mut apps = self.applications.write().await;
 
         if apps.contains_key(&name) {
@@ -165,6 +166,10 @@ impl ApplicationManagerImpl {
             tracing::info!("Registering application: {}", name);
         }
 
+        // Store tenant_id/namespace in WasmApplication if it's a WasmApplication
+        // This allows actors to use API-provided tenant_id/namespace instead of defaults
+        // We'll set it in start() instead since we can't mutate here
+        
         apps.insert(
             name.clone(),
             ApplicationInstance {
@@ -183,7 +188,7 @@ impl ApplicationManagerImpl {
 
         // Register application with object-registry
         if let Some(node_context) = self.node_context.read().await.as_ref() {
-            if let Some(service_locator) = node_context.service_locator() {
+            if let Some(_service_locator) = node_context.service_locator() {
                 // Note: We can't use concrete ObjectRegistry type here due to circular dependency.
                 // Unregistration will be handled by the node crate's object_registry_helpers.
                 // This is a placeholder - the actual unregistration happens in the node crate.
@@ -247,6 +252,20 @@ impl ApplicationManagerImpl {
         );
         }
 
+        // Get tenant_id/namespace from ApplicationInstance (stored during registration)
+        let tenant_id = instance.tenant_id.clone();
+        let namespace = instance.namespace.clone();
+        
+        // Note: WasmApplication tenant_id/namespace are set when created in ApplicationService::deploy_application()
+        // before boxing, so no need to set them here.
+        
+        tracing::debug!(
+            application = %name,
+            tenant_id = %if tenant_id.is_empty() { "<empty>" } else { &tenant_id },
+            namespace = %if namespace.is_empty() { "<empty>" } else { &namespace },
+            "Using tenant_id/namespace from registration for actor spawning"
+        );
+        
         // Get node context (must be set before calling start)
         let node_context = {
             let ctx = self.node_context.read().await;
@@ -257,6 +276,8 @@ impl ApplicationManagerImpl {
         if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             application = %name,
+            tenant_id = %tenant_id,
+            namespace = %namespace,
             "Calling application.start() method"
         );
         }
@@ -814,7 +835,7 @@ impl ApplicationManagerImpl {
         });
 
         // Calculate uptime if running
-        let uptime_seconds = if let Some(started_at) = instance.started_at {
+        let _uptime_seconds = if let Some(started_at) = instance.started_at {
             started_at.elapsed().as_secs()
         } else {
             0

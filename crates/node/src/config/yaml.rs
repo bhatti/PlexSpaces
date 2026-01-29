@@ -18,7 +18,7 @@ pub struct ReleaseYaml {
     #[serde(default)]
     pub system_applications: Vec<String>,
     #[serde(default)]
-    pub applications: Vec<ApplicationConfigYaml>,
+    pub applications: Vec<ApplicationSpecYaml>,
     #[serde(default)]
     pub env: HashMap<String, String>,
     #[serde(default)]
@@ -32,6 +32,11 @@ pub struct NodeConfigYaml {
     pub listen_addr: String,
     #[serde(default)]
     pub cluster_seed_nodes: Vec<String>,
+    /// Directory containing WASM applications to auto-deploy on startup.
+    /// Each subdirectory should contain app.wasm (required) and optionally app-config.toml.
+    /// If empty, no auto-deploy happens (default behavior).
+    #[serde(default)]
+    pub wasm_apps_directory: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +134,8 @@ pub struct MtlsConfigYaml {
     #[serde(default)]
     pub auto_generate_certs: bool,
     #[serde(default)]
+    pub cert_dir: String,
+    #[serde(default)]
     pub disable_auth_for_testing: bool,
 }
 
@@ -172,7 +179,7 @@ pub struct AuthzConfigYaml {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ApplicationConfigYaml {
+pub struct ApplicationSpecYaml {
     pub name: String,
     pub version: String,
     #[serde(default)]

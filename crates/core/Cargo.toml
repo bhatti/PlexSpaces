@@ -15,6 +15,7 @@ plexspaces-common = { path = "../common" }
 plexspaces-proto = { workspace = true }
 plexspaces-tuplespace = { workspace = true }
 plexspaces-facet = { workspace = true }
+plexspaces-locks = { path = "../locks" }
 
 # Service adapters (optional feature to avoid circular dependencies)
 # Note: supervisor and journaling are optional to avoid circular dependencies

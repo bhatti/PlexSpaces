@@ -70,7 +70,6 @@ use plexspaces_proto::system::v1::{
     ShutdownPhase, ShutdownPhaseStatus, ShutdownSignal, ShutdownStatus,
 };
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
@@ -463,6 +462,7 @@ pub trait ShutdownTarget: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     struct MockNode {
         fail_phase: Option<ShutdownPhase>,

@@ -28,7 +28,7 @@
 //! - Supports different restart strategies (Always, Backoff, MaxRetries, Never)
 
 use crate::error::{FirecrackerError, FirecrackerResult};
-use crate::health::{HealthStatus, VmHealthMonitor};
+use crate::health::VmHealthMonitor;
 use crate::vm::{FirecrackerVm, VmState};
 use std::collections::HashMap;
 use std::sync::Arc;

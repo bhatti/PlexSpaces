@@ -155,11 +155,12 @@ impl DynamoDBLockManager {
             "backend" => "dynamodb"
         ).record(duration.as_secs_f64());
 
-        debug!(
-            table_name = %table_name,
+        tracing::info!(
+            table = %table_name,
             region = %region,
+            backend = "DynamoDB",
             duration_ms = duration.as_millis(),
-            "DynamoDB lock manager initialized"
+            "Locks storage initialized"
         );
 
         Ok(Self {
@@ -409,16 +410,9 @@ impl DynamoDBLockManager {
     /// Create composite partition key from tenant_id, namespace, and lock_key.
     /// Format: "{tenant_id}#{namespace}#{lock_key}"
     fn composite_key(ctx: &RequestContext, lock_key: &str) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
-        } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
+        // Use tenant_id and namespace as-is (may be empty)
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         format!("{}#{}#{}", tenant_id, namespace, lock_key)
     }
 
@@ -509,16 +503,9 @@ impl DynamoDBLockManager {
         expires_at_secs: i64,
         last_heartbeat_secs: i64,
     ) -> HashMap<String, AttributeValue> {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
-        } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
+        // Use tenant_id and namespace as-is (may be empty)
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
 
         let pk = Self::composite_key(ctx, &lock.lock_key);
         let namespace_expires = Self::namespace_expires_key(namespace, expires_at_secs);

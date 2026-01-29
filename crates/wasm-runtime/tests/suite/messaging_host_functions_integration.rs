@@ -210,7 +210,11 @@ mod tests {
         // ASSERT
         assert!(result.is_err(), "demonitor should return error for non-existent monitor_ref");
         let error = result.unwrap_err();
-        assert_eq!(error.code, actor_types::ErrorCode::ActorNotFound);
+        // actor-error is now a string (JSON), not a record
+        assert!(
+            error.contains("actor-not-found") || error.contains("not found"),
+            "Error should indicate actor not found, got: {}", error
+        );
     }
 
     #[tokio::test]
@@ -227,8 +231,15 @@ mod tests {
         // ASSERT
         assert!(result.is_err(), "link should fail when message sender not configured");
         let error = result.unwrap_err();
-        assert_eq!(error.code, actor_types::ErrorCode::Internal);
-        assert!(error.message.contains("not configured"));
+        // actor-error is now a string (JSON), not a record
+        assert!(
+            error.contains("internal") || error.contains("Internal"),
+            "Error should indicate internal error, got: {}", error
+        );
+        assert!(
+            error.contains("not configured"),
+            "Error should mention not configured, got: {}", error
+        );
     }
 }
 

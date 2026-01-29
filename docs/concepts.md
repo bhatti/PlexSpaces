@@ -126,11 +126,29 @@ impl GenServerBehavior for Counter {
 **Facets** add dynamic capabilities to actors at runtime. They follow the "Static for core, Dynamic for extensions" principle:
 
 - **Infrastructure Facets**: VirtualActorFacet, DurabilityFacet, MobilityFacet
-- **Capability Facets**: HttpClientFacet, KeyValueFacet, BlobStorageFacet
+- **Capability Facets**: 
+  - **LockFacet**: Distributed lock coordination (task queues, resource coordination)
+  - **ProcessGroupFacet**: Distributed pub/sub and group messaging (Erlang pg2-style)
+  - **RegistryFacet**: Service discovery and object registration
+  - **HttpClientFacet**: HTTP client capabilities
+  - **KeyValueFacet**: Key-value store operations
+  - **BlobStorageFacet**: Blob storage operations
 - **Timer/Reminder Facets**: TimerFacet, ReminderFacet
 - **Observability Facets**: MetricsFacet, TracingFacet, LoggingFacet
 - **Security Facets**: AuthenticationFacet, AuthorizationFacet
 - **Event Facets**: EventEmitterFacet
+
+### Capability Facets (Message Interception Pattern)
+
+Capability facets (LockFacet, ProcessGroupFacet, RegistryFacet) use **message interception** to provide capabilities:
+
+1. **Facet attached** to actor via `app-config.toml` or programmatically
+2. **Facet intercepts** messages with specific types (e.g., `"acquire_lock"`, `"join_group"`, `"register_object"`)
+3. **Facet handles** the operation using real backend services from ServiceLocator
+4. **Actor's handle()** method is never called for intercepted messages
+5. **Backend configured** via node-config/runtimeconfig (not hardcoded)
+
+This pattern works for both Rust and WASM actors - they all send messages, and facets handle them uniformly.
 
 ### Example
 
@@ -465,7 +483,7 @@ Actors are isolated - one actor's failure doesn't affect others.
 # Get counter value (with tenant_id and namespace)
 curl "http://localhost:8080/api/v1/actors/default/default/counter?action=get"
 
-# Get counter value (without tenant_id, defaults to "default")
+# Get counter value (without tenant_id, uses default_tenant_id from node config)
 curl "http://localhost:8080/api/v1/actors/default/counter?action=get"
 ```
 
@@ -631,14 +649,27 @@ if actor_id.node_id == current_node_id {
 
 ### Multi-Tenancy
 
-- **Path Parameter**: `tenant_id` in URL path
-- **JWT Authentication**: When enabled, `tenant_id` extracted from JWT claims
-- **Access Control**: JWT `tenant_id` must match requested `tenant_id`
-- **Default Tenant**: If no auth provided or not in path, defaults to "default"
-- **Default Namespace**: If not in path, defaults to "default"
-- **Path Formats**:
-  - `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` - Full path with tenant_id
-  - `/api/v1/actors/{namespace}/{actor_type}` - Path without tenant_id (defaults to "default")
+PlexSpaces implements **two-level isolation** for multi-tenancy:
+
+**Tenant-id (Primary isolation)**:
+- **Source of Truth**: JWT token (HTTP) or mTLS certificate (gRPC)
+- **Purpose**: Tenant-level data isolation
+- **When empty**: Only allowed when auth is disabled (`PLEXSPACES_DISABLE_AUTH=1`)
+
+**Namespace (Sub-tenant isolation)**:
+- **Source of Truth**: Application (when actor is deployed as part of app) or Actor creation request
+- **Purpose**: Allows tenants to create isolated environments (e.g., "prod", "staging")
+- **Storage**: Stored in `ActorRef.namespace` and `Actor.namespace`
+- **When empty**: Represents default namespace within tenant
+
+**RequestContext**:
+- Carries both `tenant_id` and `namespace` through the call chain
+- `tenant_id` from auth, `namespace` from application/actor
+- All repository/service methods require RequestContext
+
+**Path Formats**:
+- `/api/v1/actors/{namespace}/{actor_type}` - Tenant from JWT auth
+- JWT's `tenant_id` claim is the source of truth for tenant isolation
 
 ### Example
 
@@ -648,8 +679,8 @@ actor_registry.register_actor(
     actor_id.clone(),
     sender,
     Some("counter".to_string()),  // actor_type
-    Some("default".to_string()),   // tenant_id (defaults to "default" if None)
-    Some("default".to_string()),   // namespace (defaults to "default" if None)
+    Some("tenant-1".to_string()),  // tenant_id (from RequestContext or node config)
+    Some("ns-1".to_string()),     // namespace (from RequestContext or node config, can be empty)
 ).await;
 
 // Actor can access URI path and method

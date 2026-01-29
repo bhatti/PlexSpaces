@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Actor Factory - for spawning and activating actors
+//! Actor Factory trait - for spawning and activating actors
 //!
 //! ## Purpose
 //! Provides a trait for spawning actors without depending on Node directly.
@@ -24,102 +24,17 @@
 //! without tight coupling to Node.
 //!
 //! ## Design
-//! ActorFactory implementations should use ServiceLocator to access ActorRegistry
-//! and other services needed for spawning actors.
+//! - Trait defined in actor crate (can return ActorRef directly, no circular dependency)
+//! - Implementation (ActorFactoryImpl) lives in this crate
+//! - ServiceLocator stores `Arc<dyn ActorFactory>` directly
+//!
+//! ## Note on spawn_built_actor
+//! The `spawn_built_actor` method is NOT part of this trait because it requires
+//! the concrete Actor type. Instead, it's available as a
+//! method on `ActorFactoryImpl` directly. Use `get_actor_factory_impl()` helper
+//! if you need to call `spawn_built_actor`.
 
-use async_trait::async_trait;
-use std::sync::Arc;
-use std::collections::HashMap;
-use plexspaces_core::{ActorId, Service};
+// ActorFactory trait moved to plexspaces-core crate
+// Re-export for backward compatibility
+pub use plexspaces_core::ActorFactory;
 
-/// Trait for spawning and activating actors
-///
-/// ## Purpose
-/// Allows components like VirtualActorManager and ActorService to spawn actors without
-/// depending on Node directly. ActorFactory implementations should use ServiceLocator
-/// to access ActorRegistry and other services needed for spawning.
-#[async_trait]
-pub trait ActorFactory: Send + Sync {
-    /// Activate a virtual actor (start it if not already started)
-    ///
-    /// ## Arguments
-    /// * `actor_id` - The actor ID to activate
-    ///
-    /// ## Returns
-    /// Ok(()) if activation successful, error otherwise
-    async fn activate_virtual_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    
-    /// Spawn a new actor locally
-    ///
-    /// ## Purpose
-    /// Creates and starts a new actor on the local node. The actor will be registered
-    /// in ActorRegistry automatically.
-    ///
-    /// ## Arguments
-    /// * `ctx` - RequestContext for tenant isolation (first parameter)
-    /// * `actor_id` - Actor ID (format: "actor_name@node_id")
-    /// * `actor_type` - Type of actor to spawn (used by BehaviorFactory if available)
-    /// * `initial_state` - Initial state bytes (passed to BehaviorFactory if available)
-    /// * `config` - Optional actor configuration
-    /// * `labels` - Optional labels for the actor
-    ///
-    /// ## Returns
-    /// ActorRef for the spawned actor (as MessageSender trait object for flexibility)
-    ///
-    /// ## Note
-    /// ActorFactory implementations should use ActorRegistry to register the actor
-    /// after spawning. The ActorRef should be created from the actor's mailbox.
-    /// Returns MessageSender to allow different implementations to return different types.
-    async fn spawn_actor(
-        &self,
-        ctx: &plexspaces_core::RequestContext,
-        actor_id: &ActorId,
-        actor_type: &str,
-        initial_state: Vec<u8>,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-        labels: HashMap<String, String>,
-        facets: Vec<Box<dyn plexspaces_facet::Facet>>,
-    ) -> Result<Arc<dyn plexspaces_core::MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
-    
-    /// Spawn a pre-built actor
-    ///
-    /// ## Purpose
-    /// Spawns an actor that has already been built (e.g., by ActorBuilder).
-    ///
-    /// ## Arguments
-    /// * `ctx` - RequestContext for tenant isolation (first parameter)
-    /// * `actor` - The pre-built actor to spawn
-    /// * `actor_type` - Optional actor type
-    ///
-    /// ## Returns
-    /// MessageSender for the spawned actor
-    ///
-    /// ## Note
-    /// This method is used by ActorBuilder when the actor has already been
-    /// constructed. The actor should already have its ID, context, etc. set.
-    async fn spawn_built_actor(
-        &self,
-        ctx: &plexspaces_core::RequestContext,
-        actor: Arc<crate::Actor>,
-        actor_type: Option<String>,
-    ) -> Result<Arc<dyn plexspaces_core::MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
-    
-    /// Stop an actor
-    ///
-    /// ## Purpose
-    /// Stops and unregisters an actor from the ActorRegistry.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor ID to stop
-    ///
-    /// ## Returns
-    /// Ok(()) on success, error otherwise
-    ///
-    /// ## Note
-    /// This method unregisters the actor from ActorRegistry and performs cleanup.
-    /// The actor will be garbage collected after unregistration.
-    async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-}
-
-// Note: ActorFactory implementations should implement Service trait separately
-// This allows them to be registered in ServiceLocator

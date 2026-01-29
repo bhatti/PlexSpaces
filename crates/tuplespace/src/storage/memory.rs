@@ -117,6 +117,7 @@ impl MemoryStorage {
     pub fn new(config: MemoryStorageConfig) -> Self {
         // Check cleanup interval before moving config
         let cleanup_interval = config.cleanup_interval_ms;
+        let initial_capacity = config.initial_capacity;
 
         let storage = MemoryStorage {
             tuples: Arc::new(RwLock::new(HashMap::with_capacity(
@@ -139,6 +140,13 @@ impl MemoryStorage {
         if cleanup_interval > 0 {
             storage.start_cleanup_task();
         }
+
+        tracing::info!(
+            initial_capacity = initial_capacity,
+            cleanup_interval_ms = cleanup_interval,
+            backend = "InMemory",
+            "TupleSpace storage initialized (non-persistent)"
+        );
 
         storage
     }

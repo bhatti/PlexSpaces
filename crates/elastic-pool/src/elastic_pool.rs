@@ -799,7 +799,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Temporarily disabled - needs proper async cleanup"]
     async fn test_create_pool() {
         let config = create_test_config();
         let pool = ElasticPool::new(config).await.unwrap();
@@ -810,7 +809,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Temporarily disabled - needs proper async cleanup"]
     async fn test_checkout_checkin() {
         let config = create_test_config();
         let pool = ElasticPool::new(config).await.unwrap();
@@ -832,7 +830,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Temporarily disabled - needs proper async cleanup"]
     async fn test_scale_to() {
         let config = create_test_config();
         let pool = ElasticPool::new(config).await.unwrap();
@@ -849,7 +846,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Temporarily disabled - needs proper async cleanup"]
     async fn test_pause_resume_scaling() {
         let config = create_test_config();
         let pool = ElasticPool::new(config).await.unwrap();
@@ -864,7 +860,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Temporarily disabled - needs proper async cleanup"]
     async fn test_drain_pool() {
         let config = create_test_config();
         let pool = ElasticPool::new(config).await.unwrap();

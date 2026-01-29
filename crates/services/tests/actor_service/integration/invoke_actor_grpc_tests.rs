@@ -7,10 +7,9 @@
 //! Most unit tests for InvokeActor are in `invoke_actor_tests.rs` which use simulated nodes.
 //!
 //! To run:
-//!   cargo test --test integration_tests invoke_actor_grpc -- --ignored --test-threads=1
+//!   cargo test --test integration_tests invoke_actor_grpc -- --test-threads=1
 //!
-//! Note: Tests are marked #[ignore] because they spawn processes and are slower.
-//! Use --test-threads=1 to avoid port conflicts.
+//! Note: Use --test-threads=1 to avoid port conflicts when tests spawn processes.
 
 use super::TestHarness;
 use plexspaces_proto::actor::v1::InvokeActorRequest;
@@ -28,7 +27,6 @@ use tonic::Request;
 /// 2. Invoke actor via gRPC InvokeActor with GET method (ask pattern)
 /// 3. Verify counter returns initial value (0)
 #[tokio::test]
-#[ignore] // Run with: cargo test --test integration_tests invoke_actor_grpc -- --ignored
 async fn test_invoke_actor_get_counter_real_grpc() {
     // ARRANGE: Spawn node with counter actor
     let mut harness = TestHarness::new();
@@ -94,7 +92,6 @@ async fn test_invoke_actor_get_counter_real_grpc() {
 /// 2. Invoke actor via gRPC InvokeActor with POST method (tell pattern)
 /// 3. Verify message sent successfully
 #[tokio::test]
-#[ignore] // Run with: cargo test --test integration_tests invoke_actor_grpc -- --ignored
 async fn test_invoke_actor_post_counter_real_grpc() {
     // ARRANGE: Spawn node with counter actor
     let mut harness = TestHarness::new();

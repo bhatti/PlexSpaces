@@ -46,7 +46,7 @@ async fn test_spawn_actor_basic() {
     node.initialize_services().await.unwrap();
 
     // Create gRPC service
-    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
 
     // Create SpawnActorRequest (target node is implicit from gRPC endpoint)
     let request = Request::new(SpawnActorRequest {
@@ -55,6 +55,7 @@ async fn test_spawn_actor_basic() {
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
+        facets: vec![],
     });
 
     // Spawn actor via gRPC
@@ -81,7 +82,7 @@ async fn test_spawn_actor_basic() {
 #[tokio::test]
 async fn test_spawn_remote_actor_missing_target_node() {
     let node = Arc::new(create_test_node("test-node", 9502));
-    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
 
     // Missing actor_type (should fail)
     let request = Request::new(SpawnActorRequest {
@@ -90,6 +91,7 @@ async fn test_spawn_remote_actor_missing_target_node() {
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
+        facets: vec![],
     });
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
@@ -104,7 +106,7 @@ async fn test_spawn_remote_actor_missing_target_node() {
 #[tokio::test]
 async fn test_spawn_remote_actor_missing_actor_type() {
     let node = Arc::new(create_test_node("test-node", 9503));
-    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
 
     // Missing actor_type
     let request = Request::new(SpawnActorRequest {
@@ -113,6 +115,7 @@ async fn test_spawn_remote_actor_missing_actor_type() {
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
+        facets: vec![],
     });
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
@@ -128,7 +131,7 @@ async fn test_spawn_remote_actor_missing_actor_type() {
 async fn test_spawn_remote_actor_wrong_node() {
     let node = Arc::new(create_test_node("node1", 9504));
     node.initialize_services().await.unwrap();
-    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
 
     // gRPC spawn_actor always spawns on the node receiving the request
     // The test for "wrong node" doesn't make sense anymore since target is implicit
@@ -139,6 +142,7 @@ async fn test_spawn_remote_actor_wrong_node() {
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
+        facets: vec![],
     });
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
@@ -151,7 +155,7 @@ async fn test_spawn_remote_actor_wrong_node() {
 async fn test_spawn_multiple_remote_actors() {
     let node = Arc::new(create_test_node("test-node", 9505));
     node.initialize_services().await.unwrap();
-    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string());
+    let service = plexspaces_services::actor_service::ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
 
     // Spawn 3 actors
     for i in 0..3 {
@@ -161,6 +165,7 @@ async fn test_spawn_multiple_remote_actors() {
             initial_state: vec![],
             config: None,
             labels: std::collections::HashMap::new(),
+            facets: vec![],
         });
 
         let response = ActorServiceTrait::spawn_actor(&service, request).await;
@@ -175,7 +180,6 @@ async fn test_spawn_multiple_remote_actors() {
 }
 
 #[tokio::test]
-#[ignore] // Ignored by default - requires running gRPC servers
 async fn test_spawn_remote_actor_via_grpc() {
     // Start node with gRPC server
     let node = Arc::new(create_test_node("node1", 9601));
@@ -260,10 +264,11 @@ async fn test_node_route_local_message() {
     mailbox_config.capacity = 1000;
     let mailbox = Arc::new(Mailbox::new(mailbox_config, "test-actor@node1".to_string()).await.unwrap());
     let service_locator = node.service_locator().clone();
-    let actor_ref = ActorRef::local("test-actor@node1".to_string(), mailbox.clone(), service_locator.clone());
+    let actor_ref = ActorRef::local("test-actor@node1".to_string(), "".to_string(), mailbox.clone(), service_locator.clone());
 
     let wrapper = Arc::new(ActorRef::local(
         "test-actor@node1".to_string(),
+        "".to_string(), // test namespace
         mailbox.clone(),
         service_locator.clone(),
     ));
@@ -293,10 +298,11 @@ async fn test_node_route_remote_message() {
     mailbox_config2.capacity = 1000;
     let mailbox2 = Arc::new(Mailbox::new(mailbox_config2, "remote-actor@node2".to_string()).await.unwrap());
     let service_locator2 = node2.service_locator().clone();
-    let actor_ref2 = ActorRef::local("remote-actor@node2".to_string(), mailbox2.clone(), service_locator2.clone());
+    let actor_ref2 = ActorRef::local("remote-actor@node2".to_string(), "".to_string(), mailbox2.clone(), service_locator2.clone());
     
     let wrapper2 = Arc::new(ActorRef::local(
         "remote-actor@node2".to_string(),
+        "".to_string(), // test namespace
         mailbox2.clone(),
         service_locator2.clone(),
     ));
@@ -331,7 +337,7 @@ async fn test_node_route_remote_message() {
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     let service_locator1 = node1.service_locator().clone();
-    let remote_actor_ref = ActorRef::remote("remote-actor@node2".to_string(), "node2".to_string(), service_locator1);
+    let remote_actor_ref = ActorRef::remote("remote-actor@node2".to_string(), "".to_string(), "node2".to_string(), service_locator1);
     let message = create_routing_test_message(vec![4, 5, 6]);
     let result = remote_actor_ref.tell(message).await;
 
@@ -371,10 +377,11 @@ async fn test_connection_pooling() {
     mailbox_config2.capacity = 1000;
     let mailbox2 = Arc::new(Mailbox::new(mailbox_config2, "pooled-actor@node2".to_string()).await.unwrap());
     let service_locator2 = node2.service_locator().clone();
-    let actor_ref2 = ActorRef::local("pooled-actor@node2".to_string(), mailbox2.clone(), service_locator2.clone());
+    let actor_ref2 = ActorRef::local("pooled-actor@node2".to_string(), "".to_string(), mailbox2.clone(), service_locator2.clone());
     
     let wrapper_pooled = Arc::new(ActorRef::local(
         "pooled-actor@node2".to_string(),
+        "".to_string(), // test namespace
         mailbox2.clone(),
         service_locator2.clone(),
     ));
@@ -409,7 +416,7 @@ async fn test_connection_pooling() {
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     let service_locator1 = node1.service_locator().clone();
-    let remote_actor_ref = ActorRef::remote("pooled-actor@node2".to_string(), "node2".to_string(), service_locator1);
+    let remote_actor_ref = ActorRef::remote("pooled-actor@node2".to_string(), "".to_string(), "node2".to_string(), service_locator1);
 
     for i in 0..5 {
         let message = create_routing_test_message(vec![i]);

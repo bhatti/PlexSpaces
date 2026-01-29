@@ -6,9 +6,34 @@
 //! Manages lifecycle of multiple ActorService nodes running in separate processes.
 
 use plexspaces_proto::ActorServiceClient;
+use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
 use tonic::transport::Channel;
+
+/// Locate node_runner binary (next to test binary in target/debug or target/debug/deps).
+fn find_node_runner_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Current exe is e.g. target/debug/deps/integration_tests-<hash> or target/debug/integration_tests-<hash>
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("current_exe failed: {}", e))?;
+    let target_debug = current_exe
+        .parent()
+        .and_then(|p| if p.file_name().and_then(|n| n.to_str()) == Some("deps") { p.parent() } else { Some(p) })
+        .ok_or("cannot get target/debug from current exe")?;
+    let exe_name = format!("node_runner{}", std::env::consts::EXE_SUFFIX);
+    let candidate = target_debug.join(&exe_name);
+    if candidate.exists() {
+        return Ok(candidate);
+    }
+    // Fallback: workspace root relative (e.g. cwd when running from repo root)
+    for rel in ["target/debug", "../../target/debug"] {
+        let p = std::path::Path::new(rel).join(&exe_name);
+        if p.exists() {
+            return Ok(p.canonicalize().unwrap_or_else(|_| p));
+        }
+    }
+    Err("node_runner binary not found. Run 'cargo build --bin node_runner -p plexspaces-services' first (or 'make build' with binaries).".into())
+}
 
 /// Test harness that manages multiple node processes
 pub struct TestHarness {
@@ -48,21 +73,13 @@ impl TestHarness {
 
         println!("Spawning node {} on port {}...", node_id, port);
 
-        // Find node_runner binary (tests run from workspace root)
-        let binary_path = if std::path::Path::new("target/debug/node_runner").exists() {
-            "target/debug/node_runner"
-        } else if std::path::Path::new("../../target/debug/node_runner").exists() {
-            "../../target/debug/node_runner"
-        } else {
-            return Err(
-                "node_runner binary not found. Run 'cargo build --bin node_runner' first".into(),
-            );
-        };
+        // Find node_runner binary: same target/debug as this test binary (workspace or package target)
+        let binary_path = find_node_runner_binary()?;
 
-        println!("Using node_runner at: {}", binary_path);
+        println!("Using node_runner at: {}", binary_path.display());
 
         // Spawn node_runner binary
-        let process = Command::new(binary_path)
+        let process = Command::new(&binary_path)
             .arg(node_id)
             .arg(port.to_string())
             .spawn()
@@ -132,7 +149,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // Run manually: cargo test --test integration -- --ignored
     async fn test_harness_spawn_and_shutdown() {
         let mut harness = TestHarness::new();
 

@@ -205,13 +205,15 @@ impl SpecApplication {
             let actor_id = format!("{}@{}", child.id, node.id());
             
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
-            // Use ActorFactory::spawn_actor() which supports facets directly
-            use plexspaces_core::RequestContext;
-            use plexspaces_actor::get_actor_factory;
-            let ctx = RequestContext::new_without_auth("internal".to_string(), self.spec.name.clone());
+            // Use ActorFactory::spawn_actor() which supports facets directly.
+            // Tenant/namespace: from node config default if available, else blank (no "internal").
+            use plexspaces_core::{RequestContext, ActorFactory};
+            // Tenant comes from auth, not config - use app name as namespace
+            let (tenant_id, namespace) = (String::new(), self.spec.name.clone());
+            let ctx = RequestContext::new_without_auth(tenant_id, namespace);
             
             // Get ActorFactory from ServiceLocator
-            let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = get_actor_factory(service_locator.as_ref()).await
+            let actor_factory: Arc<dyn ActorFactory> = service_locator.get_actor_factory().await
                 .ok_or_else(|| {
                     ApplicationError::StartupFailed(
                         "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string()
@@ -614,9 +616,9 @@ impl Application for SpecApplication {
             
             let mut errors = Vec::new();
             {
-                use plexspaces_actor::get_actor_factory;
+                use plexspaces_core::ActorFactory;
 
-                let actor_factory = get_actor_factory(service_locator.as_ref()).await
+                let actor_factory = service_locator.get_actor_factory().await
                     .ok_or_else(|| ApplicationError::ActorStopFailed(
                         "unknown".to_string(),
                         "ActorFactory not found in ServiceLocator".to_string()
@@ -825,8 +827,7 @@ impl SpecApplication {
         
         // Create root supervisor
         let supervisor_id = format!("{}@{}", self.spec.name, node.id());
-        let (mut supervisor, _event_rx) = Supervisor::new(supervisor_id.clone(), strategy);
-        supervisor = supervisor.with_service_locator(service_locator.clone());
+        let (mut supervisor, _event_rx) = Supervisor::new(supervisor_id.clone(), strategy, service_locator.clone());
         
         // Note: Node reference for linking would be added here if ApplicationNode exposed Node
         // For now, links will be established when children are added via Supervisor::add_child()

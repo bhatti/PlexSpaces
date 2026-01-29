@@ -1,0 +1,27 @@
+# Task Queue Application Configuration
+# 
+# Demonstrates distributed task queue coordination using LockFacet.
+# The LockFacet intercepts lock operation messages and uses the real LockManager
+# backend (configured via node-config/runtimeconfig, not hardcoded).
+#
+# Use case: Distributed job processing, ensuring only one worker processes each job.
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Task queue coordinator actor
+# Facets are defined as an array of inline tables inside each child (matching proto ChildSpec.facets)
+[[supervisor.children]]
+id = "task-queue"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+# Attach LockFacet to the actor
+# LockFacet intercepts messages with types: "acquire_lock", "release_lock", "renew_lock", "try_acquire_lock", "get_lock"
+# Workers use these to claim jobs, renew locks (heartbeat), and release locks when done
+facets = [
+  { type = "locks", priority = 50, config = {} }
+]

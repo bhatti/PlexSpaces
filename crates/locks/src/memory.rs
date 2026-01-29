@@ -19,7 +19,6 @@
 //! In-memory lock manager implementation (for testing).
 
 use crate::{AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions, RenewLockOptions};
-use plexspaces_core::LockManager as CoreLockManager;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use plexspaces_proto::prost_types::Timestamp;
@@ -47,6 +46,11 @@ pub struct MemoryLockManager {
 impl MemoryLockManager {
     /// Create a new in-memory lock manager.
     pub fn new() -> Self {
+        tracing::info!(
+            backend = "InMemory",
+            "Locks storage initialized (non-persistent)"
+        );
+        
         Self {
             locks: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -55,9 +59,9 @@ impl MemoryLockManager {
     /// Create composite key from tenant_id, namespace, and lock_key for isolation.
     /// Format: "{tenant_id}#{namespace}#{lock_key}"
     fn scoped_key(ctx: &RequestContext, lock_key: &str) -> String {
-        let tenant_id = if ctx.tenant_id.is_empty() { "default" } else { ctx.tenant_id() };
-        let namespace = if ctx.namespace.is_empty() { "default" } else { ctx.namespace() };
-        format!("{}#{}#{}", tenant_id, namespace, lock_key)
+        // Use tenant_id and namespace as-is (may be empty)
+        // Empty values are valid and will be included in the key
+        format!("{}#{}#{}", ctx.tenant_id(), ctx.namespace(), lock_key)
     }
 }
 
@@ -315,7 +319,7 @@ mod tests {
     async fn test_release_lock() {
         let manager = MemoryLockManager::new();
         let ctx = test_ctx();
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -331,7 +335,7 @@ mod tests {
             delete_lock: true,
         }).await.unwrap();
 
-        let result: Option<plexspaces_core::Lock> = LockManager::get_lock(&manager, &ctx, "test-lock").await.unwrap();
+        let result: Option<Lock> = LockManager::get_lock(&manager, &ctx, "test-lock").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -339,7 +343,7 @@ mod tests {
     async fn test_acquire_lock_same_holder() {
         let manager = MemoryLockManager::new();
         let ctx = test_ctx();
-        let lock1: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock1: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -349,7 +353,7 @@ mod tests {
         }).await.unwrap();
 
         // Same holder acquiring again should return existing lock
-        let lock2: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock2: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -366,7 +370,7 @@ mod tests {
     async fn test_renew_lock_version_mismatch() {
         let manager = MemoryLockManager::new();
         let ctx = test_ctx();
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -391,7 +395,7 @@ mod tests {
     async fn test_renew_lock_wrong_holder() {
         let manager = MemoryLockManager::new();
         let ctx = test_ctx();
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -433,7 +437,7 @@ mod tests {
     async fn test_release_lock_version_mismatch() {
         let manager = MemoryLockManager::new();
         let ctx = test_ctx();
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -457,7 +461,7 @@ mod tests {
     async fn test_release_lock_wrong_holder() {
         let manager = MemoryLockManager::new();
         let ctx = test_ctx();
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -497,7 +501,7 @@ mod tests {
     async fn test_release_lock_without_delete() {
         let manager = MemoryLockManager::new();
         let ctx = test_ctx();
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -515,7 +519,7 @@ mod tests {
         }).await.unwrap();
 
         // Lock should still exist but be unlocked
-        let result: Option<plexspaces_core::Lock> = LockManager::get_lock(&manager, &ctx, "test-lock").await.unwrap();
+        let result: Option<Lock> = LockManager::get_lock(&manager, &ctx, "test-lock").await.unwrap();
         assert!(result.is_some());
         let released_lock = result.unwrap();
         assert!(!released_lock.locked);
@@ -527,11 +531,11 @@ mod tests {
 
         let ctx = test_ctx();
         // Get non-existent lock
-        let result: Option<plexspaces_core::Lock> = LockManager::get_lock(&manager, &ctx, "non-existent").await.unwrap();
+        let result: Option<Lock> = LockManager::get_lock(&manager, &ctx, "non-existent").await.unwrap();
         assert!(result.is_none());
 
         // Acquire lock
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -541,7 +545,7 @@ mod tests {
         }).await.unwrap();
 
         // Get existing lock
-        let result: Option<plexspaces_core::Lock> = LockManager::get_lock(&manager, &ctx, "test-lock").await.unwrap();
+        let result: Option<Lock> = LockManager::get_lock(&manager, &ctx, "test-lock").await.unwrap();
         assert!(result.is_some());
         let retrieved = result.unwrap();
         assert_eq!(retrieved.lock_key, lock.lock_key);
@@ -555,7 +559,7 @@ mod tests {
 
         let ctx = test_ctx();
         // Acquire lock with very short duration
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 1, // 1 second
@@ -568,7 +572,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         // Different holder should be able to acquire expired lock
-        let new_lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let new_lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-2".to_string(),
             lease_duration_secs: 30,
@@ -587,7 +591,7 @@ mod tests {
 
         let ctx = test_ctx();
         // Acquire lock with very short duration
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 1, // 1 second
@@ -619,7 +623,7 @@ mod tests {
         metadata.insert("key1".to_string(), "value1".to_string());
         metadata.insert("key2".to_string(), "value2".to_string());
 
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -651,7 +655,7 @@ mod tests {
         let mut metadata = std::collections::HashMap::new();
         metadata.insert("key1".to_string(), "value1".to_string());
 
-        let lock: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "test-lock".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -716,7 +720,7 @@ mod tests {
 
         let ctx = test_ctx();
         // Acquire multiple different locks
-        let lock1: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock1: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "lock-1".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -725,7 +729,7 @@ mod tests {
             metadata: Default::default(),
         }).await.unwrap();
 
-        let lock2: plexspaces_core::Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
+        let lock2: Lock = LockManager::acquire_lock(&manager, &ctx, AcquireLockOptions {
             lock_key: "lock-2".to_string(),
             holder_id: "node-1".to_string(),
             lease_duration_secs: 30,
@@ -748,50 +752,3 @@ mod tests {
     }
 }
 
-// Implement core trait for compatibility
-#[async_trait]
-impl CoreLockManager for MemoryLockManager {
-    async fn acquire_lock(&self, ctx: &RequestContext, options: AcquireLockOptions) -> plexspaces_core::LockResult<Lock> {
-        <Self as LockManager>::acquire_lock(self, ctx, options).await.map_err(|e| match e {
-            crate::LockError::LockAlreadyHeld(holder) => plexspaces_core::LockError::LockAlreadyHeld(holder),
-            crate::LockError::VersionMismatch { expected, actual } => plexspaces_core::LockError::VersionMismatch { expected, actual },
-            crate::LockError::LockNotFound(key) => plexspaces_core::LockError::LockNotFound(key),
-            crate::LockError::LockExpired(key) => plexspaces_core::LockError::LockExpired(key),
-            crate::LockError::BackendError(msg) => plexspaces_core::LockError::BackendError(msg),
-            _ => plexspaces_core::LockError::BackendError(e.to_string()),
-        })
-    }
-
-    async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions) -> plexspaces_core::LockResult<Lock> {
-        <Self as LockManager>::renew_lock(self, ctx, options).await.map_err(|e| match e {
-            crate::LockError::LockAlreadyHeld(holder) => plexspaces_core::LockError::LockAlreadyHeld(holder),
-            crate::LockError::VersionMismatch { expected, actual } => plexspaces_core::LockError::VersionMismatch { expected, actual },
-            crate::LockError::LockNotFound(key) => plexspaces_core::LockError::LockNotFound(key),
-            crate::LockError::LockExpired(key) => plexspaces_core::LockError::LockExpired(key),
-            crate::LockError::BackendError(msg) => plexspaces_core::LockError::BackendError(msg),
-            _ => plexspaces_core::LockError::BackendError(e.to_string()),
-        })
-    }
-
-    async fn release_lock(&self, ctx: &RequestContext, options: ReleaseLockOptions) -> plexspaces_core::LockResult<()> {
-        <Self as LockManager>::release_lock(self, ctx, options).await.map_err(|e| match e {
-            crate::LockError::LockAlreadyHeld(holder) => plexspaces_core::LockError::LockAlreadyHeld(holder),
-            crate::LockError::VersionMismatch { expected, actual } => plexspaces_core::LockError::VersionMismatch { expected, actual },
-            crate::LockError::LockNotFound(key) => plexspaces_core::LockError::LockNotFound(key),
-            crate::LockError::LockExpired(key) => plexspaces_core::LockError::LockExpired(key),
-            crate::LockError::BackendError(msg) => plexspaces_core::LockError::BackendError(msg),
-            _ => plexspaces_core::LockError::BackendError(e.to_string()),
-        })
-    }
-
-    async fn get_lock(&self, ctx: &RequestContext, lock_key: &str) -> plexspaces_core::LockResult<Option<Lock>> {
-        <Self as LockManager>::get_lock(self, ctx, lock_key).await.map_err(|e| match e {
-            crate::LockError::LockAlreadyHeld(holder) => plexspaces_core::LockError::LockAlreadyHeld(holder),
-            crate::LockError::VersionMismatch { expected, actual } => plexspaces_core::LockError::VersionMismatch { expected, actual },
-            crate::LockError::LockNotFound(key) => plexspaces_core::LockError::LockNotFound(key),
-            crate::LockError::LockExpired(key) => plexspaces_core::LockError::LockExpired(key),
-            crate::LockError::BackendError(msg) => plexspaces_core::LockError::BackendError(msg),
-            _ => plexspaces_core::LockError::BackendError(e.to_string()),
-        })
-    }
-}

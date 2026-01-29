@@ -5,9 +5,10 @@
 
 use super::yaml::{*, JwtConfigYaml, MtlsConfigYaml};
 use plexspaces_proto::node::v1::{
-    ApplicationConfig, GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec,
+    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec,
     RuntimeConfig, SecurityConfig, ShutdownConfig,
 };
+use plexspaces_proto::application::v1::ApplicationSpec;
 use std::collections::HashMap;
 use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
 use plexspaces_proto::storage::v1::{
@@ -25,8 +26,6 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             id: yaml.node.id,
             listen_addr: yaml.node.listen_addr,
             cluster_seed_nodes: yaml.node.cluster_seed_nodes,
-            default_tenant_id: "internal".to_string(), // Default for local development
-            default_namespace: "system".to_string(), // Default for local development
             cluster_name: String::new(), // Will be set from config if available
             max_connections: 100,
             heartbeat_interval_ms: 5000,
@@ -35,6 +34,7 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             metadata: HashMap::new(),
             node_registry: None,
             grpc_address: String::new(),
+            wasm_apps_directory: yaml.node.wasm_apps_directory,
         }),
         runtime: Some({
             let runtime_config = RuntimeConfig {
@@ -124,6 +124,7 @@ fn convert_security_config(yaml: SecurityConfigYaml) -> Result<SecurityConfig, S
                 client_certificate: mtls_yaml.client_certificate.clone(),
                 client_private_key: mtls_yaml.client_private_key.clone(),
                 auto_generate_certs: mtls_yaml.auto_generate_certs,
+                cert_dir: mtls_yaml.cert_dir.clone(),
                 disable_auth_for_testing: mtls_yaml.disable_auth_for_testing,
             })
         })
@@ -140,7 +141,6 @@ fn convert_security_config(yaml: SecurityConfigYaml) -> Result<SecurityConfig, S
             .into_iter()
             .map(convert_api_key)
             .collect(),
-        allow_disable_auth: false,
         disable_auth: false,
     })
 }
@@ -156,22 +156,66 @@ fn convert_service_identity(yaml: ServiceIdentityYaml) -> ServiceIdentity {
 }
 
 fn convert_mtls_config(yaml: MtlsConfigYaml) -> MtlsConfig {
+    // mTLS certificate paths can come from environment variables
+    // Priority: 1. Env var, 2. Config value
+    let ca_certificate_path = std::env::var("PLEXSPACES_MTLS_CA_CERT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| yaml.ca_certificate.clone());
+    
+    let server_certificate_path = std::env::var("PLEXSPACES_MTLS_SERVER_CERT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| yaml.client_certificate.clone());
+    
+    let server_key_path = std::env::var("PLEXSPACES_MTLS_SERVER_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| yaml.client_private_key.clone());
+    
     MtlsConfig {
         enable_mtls: yaml.enable_mtls,
-        ca_certificate_path: yaml.ca_certificate,
-        server_certificate_path: yaml.client_certificate,
-        server_key_path: yaml.client_private_key,
+        ca_certificate_path,
+        server_certificate_path,
+        server_key_path,
         auto_generate: yaml.auto_generate_certs,
-        cert_dir: "/app/certs".to_string(),
+        // Resolve cert_dir: Priority: 1. Env var, 2. YAML config, 3. Default
+        cert_dir: std::env::var("PLEXSPACES_MTLS_CERT_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                if !yaml.cert_dir.is_empty() {
+                    yaml.cert_dir.clone()
+                } else {
+                    "/app/certs".to_string()
+                }
+            }),
         certificate_rotation_interval: None,
         trusted_services: vec![],
     }
 }
 
 fn convert_jwt_config(yaml: JwtConfigYaml) -> JwtConfig {
+    // JWT secret should come from environment variable (PLEXSPACES_JWT_SECRET)
+    // Priority: 1. Env var, 2. Config value (for backward compatibility, but not recommended)
+    let secret = std::env::var("PLEXSPACES_JWT_SECRET")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            // Fallback to config value (warn if used)
+            if !yaml.secret.is_empty() {
+                tracing::warn!(
+                    "JWT secret found in config file. For production, use PLEXSPACES_JWT_SECRET env var instead."
+                );
+                yaml.secret.clone()
+            } else {
+                String::new()
+            }
+        });
+    
     JwtConfig {
         enable_jwt: yaml.enable_jwt,
-        secret: yaml.secret,
+        secret,
         issuer: yaml.issuer,
         jwks_url: yaml.jwks_url,
         allowed_audiences: yaml.allowed_audiences,
@@ -198,25 +242,34 @@ fn convert_api_key(yaml: ApiKeyYaml) -> ApiKey {
 
 // AuthnConfig and AuthzConfig are not in the proto yet - skip for now
 
-fn convert_application_config(yaml: ApplicationConfigYaml) -> ApplicationConfig {
-    use plexspaces_proto::node::v1::ShutdownStrategy;
+fn convert_application_config(yaml: ApplicationSpecYaml) -> ApplicationSpec {
+    use plexspaces_proto::application::v1::ShutdownStrategy;
     // Parse shutdown_strategy string to enum
     let shutdown_strategy = match yaml.shutdown_strategy.to_uppercase().as_str() {
         "GRACEFUL" => ShutdownStrategy::ShutdownStrategyGraceful as i32,
-        "BRUTAL_KILL" | "IMMEDIATE" => ShutdownStrategy::ShutdownStrategyBrutalKill as i32,
-        "INFINITY" => ShutdownStrategy::ShutdownStrategyInfinity as i32,
+        "BRUTAL_KILL" | "IMMEDIATE" => ShutdownStrategy::ShutdownStrategyImmediate as i32,
         _ => ShutdownStrategy::ShutdownStrategyGraceful as i32,  // Default
     };
     
-    ApplicationConfig {
+    // Convert shutdown timeout from seconds to Duration
+    let shutdown_timeout = Some(prost_types::Duration {
+        seconds: yaml.shutdown_timeout_seconds as i64,
+        nanos: 0,
+    });
+    
+    ApplicationSpec {
         name: yaml.name,
         version: yaml.version,
-        config_path: yaml.config_path,
+        description: yaml.description,
+        r#type: 0, // Default type
+        dependencies: yaml.dependencies,
+        env: std::collections::HashMap::new(),
+        supervisor: None,
         enabled: yaml.enabled,
         auto_start: yaml.auto_start,
-        shutdown_timeout_seconds: yaml.shutdown_timeout_seconds as i64,
+        shutdown_timeout,
         shutdown_strategy,
-        dependencies: yaml.dependencies,
+        metadata: None,
     }
 }
 

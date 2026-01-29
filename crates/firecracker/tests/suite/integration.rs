@@ -31,14 +31,11 @@
 //!
 //! ## Running Tests
 //! ```bash
-//! # Run all integration tests (requires setup above)
-//! cargo test -p plexspaces-firecracker --test integration -- --ignored --test-threads=1
+//! # Run all integration tests (tests will automatically skip if Firecracker is not available)
+//! cargo test -p plexspaces-firecracker --test-threads=1
 //!
 //! # Run specific test
-//! cargo test -p plexspaces-firecracker --test integration test_vm_lifecycle -- --ignored
-//!
-//! # Skip integration tests (default)
-//! cargo test -p plexspaces-firecracker
+//! cargo test -p plexspaces-firecracker test_vm_lifecycle --test-threads=1
 //! ```
 //!
 //! ## Test Setup
@@ -63,59 +60,19 @@
 //! ```
 //!
 //! ## Design Notes
-//! - All tests are marked `#[ignore]` by default (require manual environment setup)
+//! - Tests automatically skip if Firecracker prerequisites are not available
 //! - Tests run with `--test-threads=1` to avoid socket/resource conflicts
 //! - Tests clean up resources (VMs, TAP devices, sockets) on completion
 //! - Timeout: 30 seconds per test (VMs should boot in < 200ms)
 
+use plexspaces_common::skip_if_unavailable;
+use plexspaces_common::test_helpers::{firecracker_available, firecracker_prerequisites_error};
 use plexspaces_firecracker::{
     create_tap_device, delete_tap_device, generate_tap_name, FirecrackerVm, VmConfig, VmState,
 };
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
-
-/// Check if Firecracker is available
-fn is_firecracker_available() -> bool {
-    Path::new("/usr/bin/firecracker").exists()
-        || std::process::Command::new("firecracker")
-            .arg("--version")
-            .output()
-            .is_ok()
-}
-
-/// Check if kernel image is available
-fn is_kernel_available() -> bool {
-    Path::new("/var/lib/firecracker/vmlinux").exists()
-}
-
-/// Check if rootfs image is available
-fn is_rootfs_available() -> bool {
-    Path::new("/var/lib/firecracker/rootfs.ext4").exists()
-}
-
-/// Check if all prerequisites are met
-fn check_prerequisites() -> Result<(), String> {
-    if !is_firecracker_available() {
-        return Err("Firecracker binary not found. Install from: https://github.com/firecracker-microvm/firecracker/releases".to_string());
-    }
-
-    if !is_kernel_available() {
-        return Err(
-            "Kernel image not found at /var/lib/firecracker/vmlinux. See test documentation."
-                .to_string(),
-        );
-    }
-
-    if !is_rootfs_available() {
-        return Err(
-            "Rootfs image not found at /var/lib/firecracker/rootfs.ext4. See test documentation."
-                .to_string(),
-        );
-    }
-
-    Ok(())
-}
 
 // ============================================================================
 // VM Lifecycle Tests
@@ -136,10 +93,11 @@ fn check_prerequisites() -> Result<(), String> {
 /// - Firecracker process running
 /// - Cleanup removes socket and kills process
 #[tokio::test]
-#[ignore] // Requires Firecracker binary, kernel, rootfs
 async fn test_vm_create_and_start_firecracker() {
-    if let Err(e) = check_prerequisites() {
-        eprintln!("Skipping test: {}", e);
+    if !firecracker_available() {
+        if let Some(err) = firecracker_prerequisites_error() {
+            eprintln!("Skipping test: {}", err);
+        }
         return;
     }
 
@@ -206,10 +164,11 @@ async fn test_vm_create_and_start_firecracker() {
 /// Note: This tests basic lifecycle (4 states: Create → Start → Boot → Stop)
 /// For full lifecycle with pause/resume, see test_vm_full_lifecycle() in integration_comprehensive.rs
 #[tokio::test]
-#[ignore] // Requires Firecracker binary, kernel, rootfs
 async fn test_vm_basic_lifecycle() {
-    if let Err(e) = check_prerequisites() {
-        eprintln!("Skipping test: {}", e);
+    if !firecracker_available() {
+        if let Some(err) = firecracker_prerequisites_error() {
+            eprintln!("Skipping test: {}", err);
+        }
         return;
     }
 
@@ -275,10 +234,11 @@ async fn test_vm_basic_lifecycle() {
 /// - VM can be resumed from paused state
 /// - State transitions: Running → Paused → Running
 #[tokio::test]
-#[ignore] // Requires Firecracker binary, kernel, rootfs
 async fn test_vm_pause_resume() {
-    if let Err(e) = check_prerequisites() {
-        eprintln!("Skipping test: {}", e);
+    if !firecracker_available() {
+        if let Some(err) = firecracker_prerequisites_error() {
+            eprintln!("Skipping test: {}", err);
+        }
         return;
     }
 
@@ -327,10 +287,11 @@ async fn test_vm_pause_resume() {
 /// - VMs don't interfere with each other
 /// - All VMs can boot successfully
 #[tokio::test]
-#[ignore] // Requires Firecracker binary, kernel, rootfs
 async fn test_multiple_vms_concurrent() {
-    if let Err(e) = check_prerequisites() {
-        eprintln!("Skipping test: {}", e);
+    if !firecracker_available() {
+        if let Some(err) = firecracker_prerequisites_error() {
+            eprintln!("Skipping test: {}", err);
+        }
         return;
     }
 
@@ -390,8 +351,13 @@ async fn test_multiple_vms_concurrent() {
 /// ## Requirements
 /// - Root privileges or CAP_NET_ADMIN
 #[tokio::test]
-#[ignore] // Requires root privileges
 async fn test_tap_device_lifecycle() {
+    // This test requires root privileges - skip if not running as root
+    // Check by trying to access a root-only file
+    if std::fs::metadata("/proc/1/root").is_err() && std::env::var("CI").is_err() {
+        eprintln!("Skipping test: requires root privileges");
+        return;
+    }
     // Generate TAP name
     let vm_id = ulid::Ulid::new().to_string();
     let tap_name = generate_tap_name(&vm_id);
@@ -430,8 +396,12 @@ async fn test_tap_device_lifecycle() {
 /// ## Expected Behavior
 /// - No error when deleting non-existent device
 #[tokio::test]
-#[ignore] // Requires root privileges
 async fn test_tap_device_delete_nonexistent() {
+    // This test requires root privileges - skip if not running as root
+    if std::fs::metadata("/proc/1/root").is_err() && std::env::var("CI").is_err() {
+        eprintln!("Skipping test: requires root privileges");
+        return;
+    }
     let result = delete_tap_device("tap-nosuch123").await;
 
     // Should succeed even if device doesn't exist
@@ -517,10 +487,11 @@ async fn test_vm_boot_requires_ready_state() {
 /// - VM boots in < 2 seconds (including all setup)
 /// - Reports actual boot time for monitoring
 #[tokio::test]
-#[ignore] // Requires Firecracker binary, kernel, rootfs
 async fn test_vm_boot_performance() {
-    if let Err(e) = check_prerequisites() {
-        eprintln!("Skipping test: {}", e);
+    if !firecracker_available() {
+        if let Some(err) = firecracker_prerequisites_error() {
+            eprintln!("Skipping test: {}", err);
+        }
         return;
     }
 

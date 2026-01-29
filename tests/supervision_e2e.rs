@@ -56,8 +56,37 @@ fn create_test_message(payload: Vec<u8>) -> Message {
     }
 }
 use plexspaces_actor::supervisor::{
-    ActorSpec, ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
+    SupervisionStrategy, Supervisor, SupervisorEvent,
 };
+use plexspaces_actor::{ChildSpec, child_spec::{RestartStrategy, ShutdownSpec, StartedChild}};
+use plexspaces_core::ActorRef as CoreActorRef;
+
+// ============================================================================
+// Helper: Create ChildSpec from sync factory
+// ============================================================================
+
+/// Helper to create a ChildSpec from a sync factory (replaces ActorSpec pattern)
+fn create_child_spec(
+    id: String,
+    factory: Arc<dyn Fn() -> Result<ActorStruct, plexspaces_core::ActorError> + Send + Sync>,
+    restart: RestartStrategy,
+    shutdown_timeout_ms: Option<u64>,
+) -> ChildSpec {
+    let actor_ref = CoreActorRef::new(id.clone())
+        .expect("Failed to create actor ref");
+    
+    ChildSpec::worker_sync(
+        id.clone(),
+        id.clone(),
+        factory,
+        actor_ref,
+    )
+    .with_restart(restart)
+    .with_shutdown(match shutdown_timeout_ms {
+        Some(ms) => ShutdownSpec::Timeout(std::time::Duration::from_millis(ms)),
+        None => ShutdownSpec::Infinity,
+    })
+}
 
 // ============================================================================
 // Test Actor: Faulty Worker
@@ -150,20 +179,20 @@ impl ActorTrait for CounterWorker {
 #[tokio::test]
 async fn test_one_for_one_restart() {
     // Create supervisor with ONE_FOR_ONE strategy
-    let service_locator = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "one-for-one-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
         },
+        service_locator,
     );
-    supervisor = supervisor.with_service_locator(service_locator);
 
     // Add two workers: one faulty, one stable
-    let faulty_spec = ActorSpec {
-        id: "faulty-worker@localhost".to_string(),
-        factory: Arc::new(|| {
+    let faulty_spec = create_child_spec(
+        "faulty-worker@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "faulty-worker@localhost".to_string();
             // Create a new runtime on a separate thread to avoid blocking async runtime
             let mailbox = std::thread::spawn(move || {
@@ -187,14 +216,13 @@ async fn test_one_for_one_restart() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Permanent,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Permanent,
+        Some(5000),
+    );
 
-    let stable_spec = ActorSpec {
-        id: "stable-worker@localhost".to_string(),
-        factory: Arc::new(|| {
+    let stable_spec = create_child_spec(
+        "stable-worker@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "stable-worker@localhost".to_string();
             // Create a new runtime on a separate thread to avoid blocking async runtime
             let mailbox = std::thread::spawn(move || {
@@ -218,10 +246,9 @@ async fn test_one_for_one_restart() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Permanent,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Permanent,
+        Some(5000),
+    );
 
     let faulty_ref = supervisor
         .add_child(faulty_spec)
@@ -278,20 +305,20 @@ async fn test_one_for_one_restart() {
 #[tokio::test]
 async fn test_one_for_all_restart() {
     // Create supervisor with ONE_FOR_ALL strategy
-    let service_locator = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "one-for-all-supervisor".to_string(),
         SupervisionStrategy::OneForAll {
             max_restarts: 3,
             within_seconds: 60,
         },
+        service_locator,
     );
-    supervisor = supervisor.with_service_locator(service_locator);
 
     // Add two workers
-    let worker1_spec = ActorSpec {
-        id: "worker1@localhost".to_string(),
-        factory: Arc::new(|| {
+    let worker1_spec = create_child_spec(
+        "worker1@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "worker1@localhost".to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -314,14 +341,13 @@ async fn test_one_for_all_restart() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Permanent,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Permanent,
+        Some(5000),
+    );
 
-    let worker2_spec = ActorSpec {
-        id: "worker2@localhost".to_string(),
-        factory: Arc::new(|| {
+    let worker2_spec = create_child_spec(
+        "worker2@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "worker2@localhost".to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -344,10 +370,9 @@ async fn test_one_for_all_restart() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Permanent,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Permanent,
+        Some(5000),
+    );
 
     let worker1_ref = supervisor
         .add_child(worker1_spec)
@@ -379,21 +404,21 @@ async fn test_one_for_all_restart() {
 #[tokio::test]
 async fn test_rest_for_one_restart() {
     // Create supervisor with REST_FOR_ONE strategy
-    let service_locator = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "rest-for-one-supervisor".to_string(),
         SupervisionStrategy::RestForOne {
             max_restarts: 3,
             within_seconds: 60,
         },
+        service_locator,
     );
-    supervisor = supervisor.with_service_locator(service_locator);
 
     // Add three workers in order
     for i in 1..=3 {
-        let spec = ActorSpec {
-            id: format!("worker{}@localhost", i),
-            factory: Arc::new(move || {
+        let spec = create_child_spec(
+            format!("worker{}@localhost", i),
+            Arc::new(move || {
                 let behavior: Box<dyn ActorTrait> = if i == 2 {
                     // Worker 2 is faulty
                     Box::new(FaultyWorker::new(1))
@@ -423,10 +448,9 @@ async fn test_rest_for_one_restart() {
                     None, // node_id - will be set when spawned
                 ))
             }),
-            restart: RestartPolicy::Permanent,
-            child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-        };
+            RestartStrategy::Permanent,
+            Some(5000),
+        );
 
         supervisor
             .add_child(spec)
@@ -447,20 +471,20 @@ async fn test_rest_for_one_restart() {
 #[tokio::test]
 async fn test_restart_limits() {
     // Create supervisor with low restart limit
-    let service_locator = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "limited-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 2, // Only 2 restarts allowed
             within_seconds: 10,
         },
+        service_locator,
     );
-    supervisor = supervisor.with_service_locator(service_locator);
 
     // Add worker that always crashes
-    let spec = ActorSpec {
-        id: "crasher@localhost".to_string(),
-        factory: Arc::new(|| {
+    let spec = create_child_spec(
+        "crasher@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "crasher@localhost".to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -483,10 +507,9 @@ async fn test_restart_limits() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Permanent,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Permanent,
+        Some(5000),
+    );
 
     let crasher_ref = supervisor
         .add_child(spec)
@@ -513,15 +536,15 @@ async fn test_restart_limits() {
 #[tokio::test]
 async fn test_hierarchical_supervision() {
     // Create root supervisor
-    let service_locator = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let (mut root_supervisor, _root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
         },
+        service_locator.clone(),
     );
-    root_supervisor = root_supervisor.with_service_locator(service_locator.clone());
 
     // Create child supervisor
     let (mut child_supervisor, mut child_events) = Supervisor::new(
@@ -530,13 +553,13 @@ async fn test_hierarchical_supervision() {
             max_restarts: 3,
             within_seconds: 60,
         },
+        service_locator,
     );
-    child_supervisor = child_supervisor.with_service_locator(service_locator);
 
     // Add worker to child supervisor
-    let worker_spec = ActorSpec {
-        id: "leaf-worker@localhost".to_string(),
-        factory: Arc::new(|| {
+    let worker_spec = create_child_spec(
+        "leaf-worker@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "leaf-worker@localhost".to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -559,10 +582,9 @@ async fn test_hierarchical_supervision() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Permanent,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Permanent,
+        Some(5000),
+    );
 
     child_supervisor
         .add_child(worker_spec)
@@ -580,20 +602,20 @@ async fn test_hierarchical_supervision() {
 
 #[tokio::test]
 async fn test_permanent_restart_policy() {
-    let service_locator = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "policy-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,
         },
+        service_locator,
     );
-    supervisor = supervisor.with_service_locator(service_locator);
 
     // PERMANENT: Always restart
-    let permanent_spec = ActorSpec {
-        id: "permanent-worker@localhost".to_string(),
-        factory: Arc::new(|| {
+    let permanent_spec = create_child_spec(
+        "permanent-worker@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "permanent-worker@localhost".to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -616,10 +638,9 @@ async fn test_permanent_restart_policy() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Permanent,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Permanent,
+        Some(5000),
+    );
 
     supervisor
         .add_child(permanent_spec)
@@ -632,20 +653,20 @@ async fn test_permanent_restart_policy() {
 
 #[tokio::test]
 async fn test_temporary_restart_policy() {
-    let service_locator = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "temp-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,
         },
+        service_locator,
     );
-    supervisor = supervisor.with_service_locator(service_locator);
 
     // TEMPORARY: Never restart
-    let temp_spec = ActorSpec {
-        id: "temp-worker@localhost".to_string(),
-        factory: Arc::new(|| {
+    let temp_spec = create_child_spec(
+        "temp-worker@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "temp-worker@localhost".to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -668,10 +689,9 @@ async fn test_temporary_restart_policy() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Temporary,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Temporary,
+        Some(5000),
+    );
 
     supervisor
         .add_child(temp_spec)
@@ -684,20 +704,20 @@ async fn test_temporary_restart_policy() {
 
 #[tokio::test]
 async fn test_transient_restart_policy() {
-    let service_locator = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "transient-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,
         },
+        service_locator,
     );
-    supervisor = supervisor.with_service_locator(service_locator);
 
     // TRANSIENT: Restart only on abnormal exit
-    let transient_spec = ActorSpec {
-        id: "transient-worker@localhost".to_string(),
-        factory: Arc::new(|| {
+    let transient_spec = create_child_spec(
+        "transient-worker@localhost".to_string(),
+        Arc::new(|| {
             let actor_id = "transient-worker@localhost".to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -720,10 +740,9 @@ async fn test_transient_restart_policy() {
                 None, // node_id
             ))
         }),
-        restart: RestartPolicy::Transient,
-        child_type: ChildType::Worker,
-        shutdown_timeout_ms: Some(5000),
-    };
+        RestartStrategy::Transient,
+        Some(5000),
+    );
 
     supervisor
         .add_child(transient_spec)

@@ -37,6 +37,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use plexspaces_core::ServiceLocator;
+use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_services::dashboard_service::DashboardServiceImpl;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService,
@@ -44,14 +45,21 @@ use plexspaces_proto::dashboard::v1::{
     GetApplicationsRequest, GetActorsRequest, GetWorkflowsRequest,
     GetDependencyHealthRequest,
 };
-use plexspaces_proto::common::v1::{PageRequest, PageResponse};
+use plexspaces_proto::common::v1::PageRequest;
 use tonic::Request;
 
-/// Create dashboard router
-pub fn create_dashboard_router(
-    service_locator: Arc<dyn ServiceLocator>,
-    dashboard_service: Option<Arc<DashboardServiceImpl>>,
-) -> Router {
+/// Shared HTTP gateway state type (must match node's HttpGatewayState for router merge).
+pub type HttpGatewayState = (
+    Arc<ActorServiceImpl>,
+    bool,
+    Option<String>,
+    Arc<dyn ServiceLocator>,
+    Option<Arc<DashboardServiceImpl>>,
+);
+
+/// Create dashboard router with unified gateway state type so node can merge it.
+/// Node calls .with_state(gateway_state) once after merging to get Router<()> for serve.
+pub fn create_dashboard_router() -> Router<HttpGatewayState> {
     Router::new()
         .route("/", get(home_page))
         .route("/dashboard", get(home_page))  // Alias for home
@@ -71,7 +79,6 @@ pub fn create_dashboard_router(
         .route("/api/v1/dashboard/workflow/:definition_id", get(api_workflow_detail))
         .route("/api/v1/dashboard/dependencies", get(api_dependencies))
         .route("/api/v1/dashboard/system-info", get(api_system_info))
-        .with_state((service_locator, dashboard_service))
 }
 
 /// Home page handler
@@ -117,7 +124,7 @@ async fn serve_js() -> Response<String> {
 
 /// API: Get summary
 async fn api_summary(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -175,7 +182,7 @@ async fn api_summary(
 
 /// API: Get nodes
 async fn api_nodes(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -232,7 +239,7 @@ async fn api_nodes(
 
 /// API: Get node dashboard
 async fn api_node_dashboard(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Path(node_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -294,7 +301,7 @@ async fn api_node_dashboard(
 
 /// API: Get applications
 async fn api_applications(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -334,8 +341,8 @@ async fn api_applications(
         app_json.insert("status".to_string(), serde_json::Value::Number(app.status.into()));
         
         // Get namespace and tenant_id from ApplicationManager (stored in ApplicationInstance)
-        // Note: ApplicationManager is not available in HTTP handlers - use defaults
-        let (namespace, tenant_id) = ("default".to_string(), "internal".to_string());
+        // Note: ApplicationManager is not available in HTTP handlers - use empty values
+        let (namespace, tenant_id) = (String::new(), String::new());
         app_json.insert("namespace".to_string(), serde_json::Value::String(namespace));
         app_json.insert("tenant_id".to_string(), serde_json::Value::String(tenant_id));
         
@@ -366,7 +373,7 @@ async fn api_applications(
 
 /// API: Get actors
 async fn api_actors(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -425,7 +432,7 @@ async fn api_actors(
 
 /// API: Get workflows
 async fn api_workflows(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -521,7 +528,7 @@ async fn api_workflows(
 
 /// API: Get workflow detail by definition ID
 async fn api_workflow_detail(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Path(definition_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -549,15 +556,9 @@ async fn api_workflow_detail(
     use plexspaces_core::RequestContext;
     use plexspaces_proto::object_registry::v1::ObjectType;
     
-    let ctx = if let Some(node_config) = _service_locator.get_node_config().await {
-        RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-            .with_admin(true)
-            .with_internal(true)
-    } else {
-        RequestContext::new_without_auth(String::new(), String::new())
-            .with_admin(true)
-            .with_internal(true)
-    };
+    // Dashboard API path: use empty tenant/namespace (tenant comes from auth, not config)
+    // NOTE: default_tenant_id and default_namespace have been removed from NodeConfig.
+    let ctx = RequestContext::new_without_auth(String::new(), String::new());
     let node_count = if let Some(object_registry) = _service_locator.get_object_registry().await {
         // Query object-registry directly for workflow nodes
         let registrations_result: Result<Vec<plexspaces_core::ObjectRegistration>, _> = object_registry.discover(
@@ -624,7 +625,7 @@ async fn api_workflow_detail(
 
 /// API: Get dependencies
 async fn api_dependencies(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -664,7 +665,7 @@ async fn api_dependencies(
 
 /// API: Get application detail
 async fn api_application_detail(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Path(name): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -716,15 +717,9 @@ async fn api_application_detail(
         use plexspaces_core::RequestContext;
         use plexspaces_proto::object_registry::v1::ObjectType;
         
-        let ctx = if let Some(node_config) = _service_locator.get_node_config().await {
-            RequestContext::new_without_auth(node_config.default_tenant_id.clone(), node_config.default_namespace.clone())
-                .with_admin(true)
-                .with_internal(true)
-        } else {
-            RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true)
-                .with_internal(true)
-        };
+        // Dashboard API path: use empty tenant/namespace (tenant comes from auth, not config)
+        // NOTE: default_tenant_id and default_namespace have been removed from NodeConfig.
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
         if let Some(object_registry) = _service_locator.get_object_registry().await {
             // Use discover method with individual parameters
             if let Ok(registrations) = object_registry.discover(
@@ -776,7 +771,7 @@ async fn api_application_detail(
 
 /// API: Get actor detail
 async fn api_actor_detail(
-    axum::extract::State((_service_locator, dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
     Path(actor_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -848,7 +843,7 @@ async fn api_actor_detail(
 /// API: Get system info (version, build date, git commit)
 /// Uses build-time constants from build.rs
 async fn api_system_info(
-    axum::extract::State((_service_locator, _dashboard_service_opt)): axum::extract::State<(Arc<dyn ServiceLocator>, Option<Arc<DashboardServiceImpl>>)>,
+    axum::extract::State((_actor_svc, _auth_disabled, _jwt_secret, _service_locator, _dashboard_service_opt)): axum::extract::State<HttpGatewayState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let mut json = serde_json::Map::new();
     json.insert("version".to_string(), serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()));

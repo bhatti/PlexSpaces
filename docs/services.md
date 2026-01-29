@@ -501,7 +501,7 @@ Actor pool management for load balancing.
 
 Explore the PlexSpaces API interactively using Swagger UI:
 
-[![API Documentation](https://img.shields.io/badge/API-Swagger%20UI-85EA2D?style=for-the-badge&logo=swagger)](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/bhatti/PlexSpaces/main/docs/openapi.json)
+[![API Documentation](https://img.shields.io/badge/API-Swagger%20UI-85EA2D?style=for-the-badge&logo=swagger)](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/bhatti/PlexSpaces/refs/heads/master/docs/openapi.json)
 
 ### gRPC Client
 

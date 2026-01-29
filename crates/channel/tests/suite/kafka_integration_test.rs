@@ -26,8 +26,8 @@
 //! # Start Kafka and Zookeeper
 //! docker-compose up -d kafka zookeeper
 //!
-//! # Run tests
-//! cargo test --features kafka-backend --test kafka_integration_test
+//! # Run tests (tests will automatically skip if Kafka is not available)
+//! cargo test --features kafka-backend -p plexspaces-channel
 //! ```
 //!
 //! ## Test Coverage
@@ -44,25 +44,13 @@
 
 use futures::StreamExt;
 use plexspaces_channel::*;
+use plexspaces_common::skip_if_unavailable;
+use plexspaces_common::test_helpers::kafka_available;
 use plexspaces_proto::channel::v1::*;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types::Duration;
 use rdkafka::admin::{AdminClient, AdminOptions};
 use rdkafka::config::ClientConfig;
-use rdkafka::consumer::BaseConsumer;
-
-// Helper to check if Kafka is available
-async fn is_kafka_available() -> bool {
-    let client_config = ClientConfig::new()
-        .set("bootstrap.servers", "localhost:9092")
-        .set("socket.timeout.ms", "2000")
-        .clone();
-
-    match client_config.create::<BaseConsumer>() {
-        Ok(_) => true,
-        Err(_) => false,
-    }
-}
 
 // Helper to create test config
 fn create_test_config(name: &str) -> ChannelConfig {
@@ -106,12 +94,8 @@ async fn cleanup_kafka_topic(topic_name: &str) {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_send_and_receive_single_message() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-single-msg";
     cleanup_kafka_topic(topic_name).await;
@@ -143,12 +127,8 @@ async fn test_kafka_send_and_receive_single_message() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_send_and_receive_multiple_messages() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-multiple-msg";
     cleanup_kafka_topic(topic_name).await;
@@ -185,12 +165,8 @@ async fn test_kafka_send_and_receive_multiple_messages() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_try_receive_empty() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-try-receive-empty";
     cleanup_kafka_topic(topic_name).await;
@@ -211,12 +187,8 @@ async fn test_kafka_try_receive_empty() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_try_receive_with_messages() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-try-receive";
     cleanup_kafka_topic(topic_name).await;
@@ -247,12 +219,8 @@ async fn test_kafka_try_receive_with_messages() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_publish_subscribe() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let channel_name = "test-kafka-pubsub";
     cleanup_kafka_topic(channel_name).await;
@@ -292,12 +260,8 @@ async fn test_kafka_publish_subscribe() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_partition_key_routing() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-partition-key";
     cleanup_kafka_topic(topic_name).await;
@@ -335,12 +299,8 @@ async fn test_kafka_partition_key_routing() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_consumer_group() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-consumer-group";
     cleanup_kafka_topic(topic_name).await;
@@ -377,12 +337,8 @@ async fn test_kafka_consumer_group() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_ack() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-ack";
     cleanup_kafka_topic(topic_name).await;
@@ -415,12 +371,8 @@ async fn test_kafka_ack() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_get_stats() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-stats";
     cleanup_kafka_topic(topic_name).await;
@@ -450,12 +402,8 @@ async fn test_kafka_get_stats() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_close_channel() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-close";
     cleanup_kafka_topic(topic_name).await;
@@ -485,12 +433,8 @@ async fn test_kafka_close_channel() {
 }
 
 #[tokio::test]
-#[ignore] // Integration test - requires Kafka running
 async fn test_kafka_message_persistence() {
-    if !is_kafka_available().await {
-        eprintln!("Skipping test: Kafka not available");
-        return;
-    }
+    skip_if_unavailable!(kafka_available().await, "Kafka");
 
     let topic_name = "test-kafka-persistence";
     cleanup_kafka_topic(topic_name).await;

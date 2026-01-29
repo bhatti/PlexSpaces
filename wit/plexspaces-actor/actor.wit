@@ -4,7 +4,7 @@
 // The runtime calls these functions to interact with actors.
 
 interface actor {
-    use types.{actor-id, payload, actor-result, actor-error};
+    use types.{actor-id, payload};
 
     /// Initialize actor with state
     ///
@@ -54,7 +54,7 @@ interface actor {
     ///     }
     /// }
     /// ```
-    handle-message: func(from-actor: actor-id, msg-type: string, payload: payload) -> actor-result;
+    handle-message: func(from-actor: actor-id, msg-type: string, payload: payload) -> result<payload, string>;
 
     /// Snapshot actor state for persistence
     ///
@@ -104,7 +104,7 @@ interface actor {
     ///
     /// # Returns
     /// Response payload (MUST be provided)
-    handle-call: func(from-actor: actor-id, request: payload) -> actor-result;
+    handle-call: func(from-actor: actor-id, request: payload) -> result<payload, string>;
 
     /// Handle asynchronous message (GenServer pattern)
     ///

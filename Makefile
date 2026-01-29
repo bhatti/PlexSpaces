@@ -18,8 +18,7 @@ help:
 	@echo "  make proto            - Generate code from proto files (uses buf)"
 	@echo "  make proto-buf        - Generate proto using buf (RECOMMENDED - handles deps)"
 	@echo "  make proto-build      - Generate proto using tonic-build (no external deps)"
-	@echo "  make build            - Build default crates (faster, excludes optional crates)"
-	@echo "  make build-all        - Build all crates (including wasm-runtime, firecracker, cli, dashboard)"
+	@echo "  make build            - Build all crates (including wasm-runtime, firecracker, cli, dashboard)"
 	@echo "  make build-examples   - Build all examples"
 	@echo "  make build-wasm       - Build all WASM actors"
 	@echo "  make run-examples     - Run all examples (workspace + standalone)"
@@ -169,27 +168,9 @@ proto-buf:
 # Default proto generation (uses tonic-build via build.rs)
 proto: proto-buf
 
-# Build default crates (faster - excludes rarely-changed optional crates)
-# To build all crates including optional ones, use: make build-all
+# Build all crates (including wasm-runtime, firecracker, cli, dashboard)
 build:
-	@echo "Building default crates (excluding rarely-changed optional crates)..."
-	@echo "To build all crates including wasm-runtime, firecracker, cli, dashboard:"
-	@echo "  make build-all"
-	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
-	if [ "$$CARGO_JOBS" = "0" ]; then \
-		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
-	fi; \
-	MESSAGE_FORMAT=$${VERBOSE:-human}; \
-	if [ "$$VERBOSE" = "0" ]; then \
-		MESSAGE_FORMAT=short; \
-	fi; \
-	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
-	$(CARGO) build --all-features --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
-	@echo "Build complete!"
-
-# Build all crates including optional ones (wasm-runtime, firecracker, cli, dashboard)
-build-all:
-	@echo "Building all crates (including optional crates)..."
+	@echo "Building all crates..."
 	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
@@ -416,54 +397,37 @@ test:
 	fi; \
 	echo "Building workspace first for faster test execution (incremental build enabled)..." | tee -a test-out; \
 	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
+	echo "Building node_runner binary (required by plexspaces-services integration_tests)..." | tee -a test-out; \
+	$(CARGO) build --bin node_runner --all-features -p plexspaces-services --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
 	echo "" | tee -a test-out; \
-	TIMEOUT_CMD=""; \
-	if command -v timeout >/dev/null 2>&1; then \
-		TIMEOUT_CMD="timeout 900"; \
-	elif command -v gtimeout >/dev/null 2>&1; then \
-		TIMEOUT_CMD="gtimeout 900"; \
-	fi; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		echo "Using cargo-nextest for faster test execution..." | tee -a test-out; \
-		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..." | tee -a test-out; \
-		echo "Note: Tests have a 15-minute timeout per test (build/compile time excluded)" | tee -a test-out; \
-		cargo nextest run --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=1 --test-timeout 900s 2>&1 | tee -a test-out || exit 1; \
-		echo "" | tee -a test-out; \
-		echo "Running all other tests with parallel execution..." | tee -a test-out; \
-		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
-			--exclude plexspaces-tuplespace --test-timeout 900s 2>&1 | tee -a test-out || exit 1; \
-		echo "" | tee -a test-out; \
-		echo "Running WASM integration tests (offline, no AWS/MinIO required)..." | tee -a test-out; \
-		cargo nextest run --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast --test-timeout 900s 2>&1 | tee -a test-out || exit 1; \
+		echo "Using cargo-nextest for faster test execution (single run)..." | tee -a test-out; \
+		echo "Note: tuplespace tests run with single thread (configured in nextest.toml)" | tee -a test-out; \
+		echo "Running all tests including those marked #[ignore] (--run-ignored all)" | tee -a test-out; \
+		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all 2>&1 | tee -a test-out || exit 1; \
 	else \
 		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
 		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..." | tee -a test-out; \
-		echo "Note: Tests have a 15-minute timeout (build/compile time excluded)" | tee -a test-out; \
+		echo "Running all tests including those marked #[ignore] (--include-ignored)" | tee -a test-out; \
+		TIMEOUT_CMD=""; \
+		if command -v timeout >/dev/null 2>&1; then \
+			TIMEOUT_CMD="timeout 900"; \
+		elif command -v gtimeout >/dev/null 2>&1; then \
+			TIMEOUT_CMD="gtimeout 900"; \
+		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
-			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+				--exclude plexspaces-tuplespace -- --include-ignored 2>&1 | tee -a test-out || exit 1; \
 		else \
 			echo "Warning: timeout command not found, running without timeout (install coreutils for timeout: brew install coreutils)" | tee -a test-out; \
-			$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
-		fi; \
-		echo "" | tee -a test-out; \
-		echo "Running all other tests with parallel execution..." | tee -a test-out; \
-		if [ -n "$$TIMEOUT_CMD" ]; then \
-			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
-				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
-		else \
+			$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
 			$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
-				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
-		fi; \
-		echo "" | tee -a test-out; \
-		echo "Running WASM integration tests (offline, no AWS/MinIO required)..." | tee -a test-out; \
-		if [ -n "$$TIMEOUT_CMD" ]; then \
-			$$TIMEOUT_CMD $(CARGO) test --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast 2>&1 | tee -a test-out || exit 1; \
-		else \
-			$(CARGO) test --package plexspaces-wasm-runtime --test '*integration*' --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --no-fail-fast 2>&1 | tee -a test-out || exit 1; \
+				--exclude plexspaces-tuplespace -- --include-ignored 2>&1 | tee -a test-out || exit 1; \
 		fi; \
 	fi; \
 	echo "" | tee -a test-out; \
-	echo "All unit and integration tests passed!" | tee -a test-out
+	echo "All tests passed!" | tee -a test-out
 
 # Run tests matching a filter pattern
 # Usage: make test-filter FILTER="test_name_pattern"
@@ -482,11 +446,11 @@ test-filter:
 	if [ "$$VERBOSE" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
 	fi; \
-	echo "Running tests matching filter: $(FILTER)"; \
+	echo "Running tests matching filter: $(FILTER) (including ignored)"; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS --filter "$(FILTER)" || exit 1; \
+		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS --run-ignored all --filter "$(FILTER)" || exit 1; \
 	else \
-		$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS -- "$(FILTER)" || exit 1; \
+		$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS "$(FILTER)" -- --include-ignored || exit 1; \
 	fi; \
 	echo "Filtered tests completed!"
 
@@ -509,10 +473,11 @@ test-package:
 		MESSAGE_FORMAT=short; \
 	fi; \
 	echo "Running tests for package: $(PACKAGE)"; \
+	echo "Running all tests for package $(PACKAGE) (including ignored)"; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --lib --tests --all-features -p $(PACKAGE) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT || exit 1; \
+		cargo nextest run --lib --tests --all-features -p $(PACKAGE) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all || exit 1; \
 	else \
-		$(CARGO) test --lib --tests --all-features -p $(PACKAGE) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT || exit 1; \
+		$(CARGO) test --lib --tests --all-features -p $(PACKAGE) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --include-ignored || exit 1; \
 	fi; \
 	echo "Package tests completed!"
 
@@ -576,7 +541,7 @@ test-examples:
 			LOG_FILE="/tmp/test_$$EXAMPLE_LOG_NAME.log"; \
 			(cd "examples/$$example" && \
 				CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
-				$(CARGO) test --all-features --jobs $$CARGO_JOBS > "$$LOG_FILE" 2>&1 && \
+				$(CARGO) test --all-features --jobs $$CARGO_JOBS -- --include-ignored > "$$LOG_FILE" 2>&1 && \
 				echo "✓ $$example passed" || \
 				(echo "✗ $$example failed!"; [ -f "$$LOG_FILE" ] && cat "$$LOG_FILE" || echo "Log file not found: $$LOG_FILE"; exit 1)) & \
 			PIDS+=($$!); \

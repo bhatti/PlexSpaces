@@ -34,7 +34,6 @@ use plexspaces_circuit_breaker::CircuitBreaker;
 use plexspaces_proto::circuitbreaker::prv::{CircuitBreakerConfig, CircuitBreakerMetrics, CircuitState, FailureStrategy};
 use plexspaces_proto::system::v1::{CircuitBreakerHealthMetrics, DependencyCircuitBreakerInfo};
 use prost_types::Duration as ProstDuration;
-use prost_types::Timestamp;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

@@ -344,83 +344,26 @@ message ConfigOption {
 // maintaining strict separation of resources, state, and access control.
 //
 // ## Design Philosophy
-// - **Tenant = Customer/Organization**: Each tenant gets isolated environment
-// - **Namespace = Sub-environment**: production, staging, dev within a tenant
-// - **SecurityPolicy = Per-tenant rules**: What each tenant is allowed to do
-// - **ResourceQuota = Per-tenant limits**: Prevent resource exhaustion
+// - **Tenant-id**: Source of truth = auth (JWT/mTLS). Without auth, can be empty.
+// - **Namespace**: Source of truth = application (when deploying) or actor (when created).
+//   If actor is part of an app, namespace must match app namespace (error if mismatch).
+// - **RequestContext**: Carries tenant_id + namespace through the stack. Tenant from HTTP/gRPC
+//   request (auth); namespace from application/actor or passed with request for services like
+//   keyvalue/tuplespace.
 //
 // ## Enforcement Points
 // All PlexSpaces components enforce isolation at these levels:
-// 1. **ActorRegistry**: Actors only visible within same IsolationContext
+// 1. **ActorRegistry**: Actors only visible within same tenant_id + namespace
 // 2. **Messaging**: Messages cannot cross tenant boundaries (unless explicit policy)
-// 3. **TupleSpace**: Tuples isolated per tenant
+// 3. **TupleSpace**: Tuples isolated per tenant + namespace
 // 4. **Journal**: Events stored with tenant_id for GDPR compliance
-// 5. **Supervision**: Supervisors scoped to tenant
+// 5. **Supervision**: Supervisors scoped to tenant + namespace
 //
-// ## Example Use Cases
-//
-// ### SaaS Multi-Tenancy
-// ```protobuf
-// IsolationContext {
-//   tenant_id: { tenant_id: "customer-acme-corp" }
-//   namespace: "production"
-//   security_policy: {
-//     allow_cross_namespace: false  // Production can't talk to staging
-//     allow_tuplespace_read: true
-//     allow_tuplespace_write: true
-//     allow_remote_calls: true
-//     max_message_size_bytes: 1048576  // 1MB max
-//   }
-//   resource_quota: {
-//     max_actors: 10000
-//     max_memory_mb: 8192  // 8GB
-//     max_cpu_percent: 50.0  // 50% of node CPU
-//     max_disk_mb: 10240  // 10GB
-//     rate_limit_msg_per_sec: 10000
-//   }
-// }
-// ```
-//
-// ### Development Environment Isolation
-// ```protobuf
-// IsolationContext {
-//   tenant_id: { tenant_id: "internal-dev" }
-//   namespace: "dev-alice"
-//   security_policy: {
-//     allow_cross_namespace: true  // Dev can talk to other dev environments
-//     allow_tuplespace_read: true
-//     allow_tuplespace_write: true
-//     allow_remote_calls: false  // No external calls from dev
-//     max_message_size_bytes: 10485760  // 10MB for testing
-//   }
-//   resource_quota: {
-//     max_actors: 100
-//     max_memory_mb: 512
-//     max_cpu_percent: 10.0
-//     max_disk_mb: 1024
-//     rate_limit_msg_per_sec: 100
-//   }
-// }
-// ```
-
-// Tenant identifier for multi-tenancy isolation
-message TenantId {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Tenant ID"
-      description: "Unique identifier for a customer or organization"
-      required: ["tenant_id"]
-    }
-  };
-
-  // Unique tenant identifier (e.g., "customer-acme", "org-123", "team-alpha")
-  // Format: lowercase alphanumeric + hyphens, max 64 chars
-  // Example: "customer-acme-corp", "internal-dev", "client-xyz"
-  string tenant_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 64, pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"}
-  ];
-}
+// ## Note
+// TenantId and IsolationContext messages have been removed.
+// - Use `string tenant_id` and `string namespace` directly where needed.
+// - Tenant-id comes from auth (JWT/mTLS) in gRPC metadata, not from request body.
+// - Namespace comes from application/actor or is passed in request where appropriate.
 
 // Security policy for tenant isolation
 message SecurityPolicy {
@@ -494,33 +437,9 @@ message ResourceQuota {
   map<string, string> custom_quotas = 7;
 }
 
-// Complete isolation context for multi-tenancy
-message IsolationContext {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Isolation Context"
-      description: "Complete isolation metadata for multi-tenant actor execution"
-      required: ["tenant_id"]
-    }
-  };
-
-  // Tenant identifier (REQUIRED)
-  TenantId tenant_id = 1 [(google.api.field_behavior) = REQUIRED];
-
-  // Namespace within tenant (OPTIONAL)
-  // Common values: "production", "staging", "dev", "test"
-  // Format: lowercase alphanumeric + hyphens, max 32 chars
-  string namespace = 2 [(buf.validate.field).string = {max_len: 32, pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"}];
-
-  // Security policy for this isolation context
-  SecurityPolicy security_policy = 3;
-
-  // Resource quota for this isolation context
-  ResourceQuota resource_quota = 4;
-
-  // Additional metadata (labels, annotations)
-  Metadata metadata = 5;
-}
+// NOTE: IsolationContext message has been removed.
+// Tenant-id comes from auth (JWT/mTLS); namespace from application/actor or request.
+// Use RequestContext to carry tenant_id + namespace through the call chain.
 
 // ============================================================================
 // RESOURCE SPECIFICATION
@@ -612,9 +531,12 @@ message RequestContext {
     (buf.validate.field).string = {min_len: 1, max_len: 64}
   ];
 
-  // Namespace within tenant (optional, defaults to "default")
+  // Namespace within tenant (optional, can be empty)
   //
+  // Used for further isolation within a tenant. Can be empty string.
   // Common values: "production", "staging", "dev", "test"
+  // For admin/internal contexts with empty namespace, repository lookups
+  // bypass namespace filtering to allow cross-namespace queries.
   string namespace = 2 [
     (buf.validate.field).string = {max_len: 32}
   ];
@@ -654,7 +576,8 @@ message RequestContext {
   // Admin flag (from JWT, optional)
   //
   // When true, indicates the user has admin privileges.
-  // Admin users can bypass tenant filtering for administrative operations.
+  // Admin users with empty namespace can bypass namespace filtering for
+  // administrative operations (see should_skip_namespace_filter()).
   // Extracted from JWT claims (e.g., "admin" role or "is_admin" claim).
   bool admin = 8;
 
@@ -662,6 +585,8 @@ message RequestContext {
   //
   // When true, indicates this is an internal system operation.
   // Internal operations bypass authn/authz and tenant filtering.
+  // Internal contexts with empty namespace can bypass namespace filtering
+  // for system operations (see should_skip_namespace_filter()).
   // Used for system-level operations like heartbeats, node registration, etc.
   bool internal = 9;
 

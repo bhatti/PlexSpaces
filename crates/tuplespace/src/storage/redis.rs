@@ -139,14 +139,32 @@ impl RedisStorage {
             TupleSpaceError::ConnectionError(format!("Redis manager failed: {}", e))
         })?;
 
+        let key_prefix = if config.key_prefix.is_empty() {
+            "tuplespace".to_string()
+        } else {
+            config.key_prefix.clone()
+        };
+
+        // Mask password in URL for logging
+        let display_url = config.connection_string
+            .split('@')
+            .last()
+            .map(|s| format!("redis://...@{}", s))
+            .unwrap_or_else(|| config.connection_string.clone());
+
+        tracing::info!(
+            url = %display_url,
+            key_prefix = %key_prefix,
+            pool_size = config.pool_size,
+            pubsub = config.enable_pubsub,
+            backend = "Redis",
+            "TupleSpace storage initialized"
+        );
+
         Ok(RedisStorage {
             conn,
             client,
-            key_prefix: if config.key_prefix.is_empty() {
-                "tuplespace".to_string()
-            } else {
-                config.key_prefix
-            },
+            key_prefix,
             enable_pubsub: config.enable_pubsub,
             stats: Arc::new(std::sync::Mutex::new(RedisOperationStats::default())),
         })
@@ -841,6 +859,8 @@ impl TupleSpaceStorage for RedisStorage {
 mod tests {
     use super::*;
     use crate::{Lease, PatternField, TupleField};
+    use plexspaces_common::skip_if_unavailable;
+    use plexspaces_common::test_helpers::redis_available;
 
     /// Helper to create test Redis storage
     /// NOTE: Tests require Redis running on localhost:6379
@@ -858,8 +878,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_storage_basic() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let storage = create_test_storage().await;
 
         // Write tuple
@@ -898,8 +918,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_storage_blocking_read() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let storage = create_test_storage().await;
 
         // Spawn task to write tuple after delay
@@ -946,8 +966,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_storage_blocking_read_timeout() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let storage = create_test_storage().await;
 
         // Blocking read with no matching tuple should timeout
@@ -972,8 +992,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_storage_blocking_take() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let storage = create_test_storage().await;
 
         // Spawn task to write tuple after delay
@@ -1024,8 +1044,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_storage_lease() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let storage = create_test_storage().await;
 
         // Write tuple with short lease
@@ -1054,8 +1074,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_storage_stats() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let storage = create_test_storage().await;
 
         // Write some tuples
@@ -1073,8 +1093,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis
     async fn test_redis_storage_pattern_matching() {
+        skip_if_unavailable!(redis_available().await, "Redis");
         let storage = create_test_storage().await;
 
         // Write multiple tuples

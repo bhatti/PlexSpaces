@@ -224,12 +224,10 @@ pub async fn register_dependencies(
     }
 
     let mut registered_count = 0;
-    let default_namespace = config.default_namespace.as_str();
-    let default_tenant = config.default_tenant.as_str();
     
-    // Create RequestContext for dependency lookup (using config defaults)
+    // Create RequestContext for dependency lookup (tenant comes from auth, not config)
     use plexspaces_core::RequestContext;
-    let ctx = RequestContext::new_without_auth(default_tenant.to_string(), default_namespace.to_string());
+    let ctx = RequestContext::new_without_auth(String::new(), String::new());
 
     for dep_spec in &config.dependencies {
         // Parse dependency spec: "name:type:critical"

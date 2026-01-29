@@ -102,6 +102,22 @@ pub mod process_group_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        /** Create a new process group
+
+ ## Purpose
+ Creates a named group for pub/sub coordination. Groups must be created before
+ actors can join them.
+
+ ## Semantics
+ - Group names must be unique within tenant + namespace
+ - Empty groups are allowed (no members)
+ - Returns error if group already exists
+
+ ## Example
+ ```
+ CreateGroupRequest { group_name: "config-updates", tenant_id: "acme", namespace: "prod" }
+ ```
+*/
         pub async fn create_group(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateGroupRequest>,
@@ -473,6 +489,22 @@ pub mod process_group_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with ProcessGroupServiceServer.
     #[async_trait]
     pub trait ProcessGroupService: Send + Sync + 'static {
+        /** Create a new process group
+
+ ## Purpose
+ Creates a named group for pub/sub coordination. Groups must be created before
+ actors can join them.
+
+ ## Semantics
+ - Group names must be unique within tenant + namespace
+ - Empty groups are allowed (no members)
+ - Returns error if group already exists
+
+ ## Example
+ ```
+ CreateGroupRequest { group_name: "config-updates", tenant_id: "acme", namespace: "prod" }
+ ```
+*/
         async fn create_group(
             &self,
             request: tonic::Request<super::CreateGroupRequest>,

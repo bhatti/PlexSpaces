@@ -1,0 +1,19 @@
+[package]
+name = "heat_diffusion"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "heat_diffusion"
+path = "src/main.rs"
+
+[dependencies]
+# PlexSpaces crates
+plexspaces-tuplespace = { path = "../../../../crates/tuplespace" }
+plexspaces-core = { path = "../../../../crates/core" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }

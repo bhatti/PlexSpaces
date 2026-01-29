@@ -32,7 +32,6 @@
 
 use plexspaces_proto::metrics::v1::metrics_service_server::MetricsService;
 use plexspaces_proto::metrics::v1::*;
-use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 /// Metrics Service implementation

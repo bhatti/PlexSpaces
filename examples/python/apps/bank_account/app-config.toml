@@ -1,0 +1,30 @@
+# Bank Accounts Application Configuration
+# 
+# Deploys 3 bank account instances under a supervisor.
+# Each account has its own durable state (balance, transactions).
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Alice's account
+[[supervisor.children]]
+id = "account-alice"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+# Bob's account
+[[supervisor.children]]
+id = "account-bob"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+# Charlie's account
+[[supervisor.children]]
+id = "account-charlie"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5

@@ -778,7 +778,7 @@ async fn test_sqlite_ack_message_not_found() {
 #[cfg(feature = "redis-backend")]
 #[tokio::test]
 async fn test_redis_ack_message_not_found() {
-    use crate::redis_tests::{cleanup_redis, create_redis_config, is_redis_available};
+    use redis_tests::{cleanup_redis, create_redis_config, is_redis_available};
     use plexspaces_channel::RedisChannel;
 
     if !is_redis_available().await {

@@ -1,0 +1,28 @@
+# Registry Application Configuration
+# 
+# Demonstrates service discovery using RegistryFacet.
+# The RegistryFacet intercepts registry operation messages and uses the real
+# ObjectRegistry backend (configured via node-config/runtimeconfig, not hardcoded).
+#
+# Use case: Microservices service discovery - services register themselves,
+# clients discover services by type/category (similar to Consul, Eureka, Kubernetes).
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Service registry actor
+# Facets are defined as an array of inline tables inside each child (matching proto ChildSpec.facets)
+[[supervisor.children]]
+id = "registry"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+# Attach RegistryFacet to the actor
+# RegistryFacet intercepts messages with types: "register_object", "unregister_object", 
+# "lookup_object", "discover_objects"
+facets = [
+  { type = "registry", priority = 50, config = {} }
+]

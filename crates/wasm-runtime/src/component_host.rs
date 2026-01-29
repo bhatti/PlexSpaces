@@ -34,6 +34,37 @@ fn context_to_request_context(ctx: &plexspaces::actor::types::Context) -> Reques
     RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone())
 }
 
+/// Create a structured error string for WIT actor-error type
+///
+/// TODO: Once componentize-py supports complex variant types properly,
+/// consider reverting to the full ActorError record with ErrorCode enum.
+/// For now, we use JSON-formatted strings for structured errors.
+///
+/// # Arguments
+/// * `code` - Error code (e.g., "internal", "timeout", "actor-not-found")
+/// * `message` - Human-readable error message
+/// * `details` - Optional additional details
+///
+/// # Returns
+/// JSON-formatted error string: {"code":"...","message":"...","details":"..."}
+#[cfg(feature = "component-model")]
+fn make_actor_error(code: &str, message: impl Into<String>) -> String {
+    let msg = message.into();
+    // Simple JSON format - no external dependencies needed
+    format!(r#"{{"code":"{}","message":"{}"}}"#, code, msg.replace('"', "\\\""))
+}
+
+#[cfg(feature = "component-model")]
+fn make_actor_error_with_details(code: &str, message: impl Into<String>, details: impl Into<String>) -> String {
+    let msg = message.into();
+    let det = details.into();
+    format!(r#"{{"code":"{}","message":"{}","details":"{}"}}"#, 
+        code, 
+        msg.replace('"', "\\\""),
+        det.replace('"', "\\\"")
+    )
+}
+
 /// Host implementation for plexspaces host interfaces
 ///
 /// This struct holds the state needed to implement plexspaces host functions.
@@ -290,11 +321,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     error = %e,
                     "Failed to send message via tell"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: e,
-                    details: None,
-                })
+                Err(make_actor_error("internal", e))
             }
         }
     }
@@ -355,11 +382,11 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_messaging_ask_errors_total").increment(1);
                 let error_code = if e.contains("Timeout") || e.contains("timeout") {
-                    plexspaces::actor::types::ErrorCode::Timeout
+                    "timeout"
                 } else if e.contains("not found") || e.contains("ActorNotFound") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
+                    "actor-not-found"
                 } else {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 };
                 tracing::warn!(
                     actor_id = %self.actor_id,
@@ -368,11 +395,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     error = %e,
                     "Ask request failed"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: e,
-                    details: None,
-                })
+                Err(make_actor_error(error_code, e))
             }
         }
     }
@@ -430,11 +453,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     "Failed to send reply via channel (receiver dropped)"
                 );
                 metrics::counter!("plexspaces_wasm_messaging_reply_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: "Reply channel receiver dropped".to_string(),
-                    details: None,
-                })
+                Err(make_actor_error("internal", "Reply channel receiver dropped".to_string()))
             }
         } else {
             // No pending ask found - this might be a reply to a message that wasn't tracked
@@ -447,11 +466,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 "Reply called but no pending ask found - original sender not tracked"
             );
             metrics::counter!("plexspaces_wasm_messaging_reply_errors_total").increment(1);
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: format!("No pending ask found for correlation_id: {}", correlation_id),
-                details: None,
-            })
+            Err(make_actor_error("internal", format!("No pending ask found for correlation_id: {}", correlation_id)))
         }
     }
 
@@ -508,11 +523,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     error = %e,
                     "Failed to forward message"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to forward message: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to forward message: {}", e)))
             }
         }
     }
@@ -567,11 +578,11 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_messaging_spawn_errors_total").increment(1);
                 let error_code = if e.contains("not found") || e.contains("ActorNotFound") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
+                    "actor-not-found"
                 } else if e.contains("resource") || e.contains("limit") {
-                    plexspaces::actor::types::ErrorCode::ResourceExhausted
+                    "resource-exhausted"
                 } else {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 };
                 tracing::warn!(
                     actor_id = %self.actor_id,
@@ -579,11 +590,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     error = %e,
                     "Actor spawn failed"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: e,
-                    details: None,
-                })
+                Err(make_actor_error(error_code, e))
             }
         }
     }
@@ -638,11 +645,11 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_messaging_stop_errors_total").increment(1);
                 let error_code = if e.contains("not found") || e.contains("ActorNotFound") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
+                    "actor-not-found"
                 } else if e.contains("Timeout") || e.contains("timeout") {
-                    plexspaces::actor::types::ErrorCode::Timeout
+                    "timeout"
                 } else {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 };
                 tracing::warn!(
                     actor_id = %self.actor_id,
@@ -650,11 +657,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     error = %e,
                     "Actor stop failed"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: e,
-                    details: None,
-                })
+                Err(make_actor_error(error_code, e))
             }
         }
     }
@@ -685,11 +688,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_messaging_link_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to link actor: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to link actor: {}", e)))
             }
         }
     }
@@ -720,11 +719,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_messaging_unlink_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to unlink actor: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to unlink actor: {}", e)))
             }
         }
     }
@@ -765,11 +760,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_messaging_monitor_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to monitor actor: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to monitor actor: {}", e)))
             }
         }
     }
@@ -829,11 +820,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                         error = %e,
                         "Demonitor failed"
                     );
-                    Err(plexspaces::actor::types::ActorError {
-                        code: plexspaces::actor::types::ErrorCode::Internal,
-                        message: format!("Failed to demonitor actor: {}", e),
-                        details: None,
-                    })
+                    Err(make_actor_error("internal", format!("Failed to demonitor actor: {}", e)))
                 }
             }
         } else {
@@ -843,11 +830,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 monitor_ref = monitor_ref,
                 "Monitor reference not found"
             );
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::ActorNotFound,
-                message: format!("Monitor reference {} not found", monitor_ref),
-                details: None,
-            })
+            Err(make_actor_error("actor-not-found", format!("Monitor reference {} not found", monitor_ref)))
         }
     }
 
@@ -1013,11 +996,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 "Timer not found for cancellation"
             );
             metrics::counter!("plexspaces_wasm_messaging_cancel_timer_errors_total").increment(1);
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::ActorNotFound,
-                message: format!("Timer {} not found", timer_id),
-                details: None,
-            })
+            Err(make_actor_error("actor-not-found", format!("Timer {} not found", timer_id)))
         }
     }
 }
@@ -1047,26 +1026,10 @@ impl TuplespaceImpl {
     ) -> plexspaces::actor::types::ActorError {
         use plexspaces_tuplespace::TupleSpaceError;
         match error {
-            TupleSpaceError::BackendError(msg) => plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: msg,
-                details: None,
-            },
-            TupleSpaceError::PatternError(msg) => plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                message: msg,
-                details: None,
-            },
-            TupleSpaceError::NotFound => plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::ActorNotFound,
-                message: "Tuple not found".to_string(),
-                details: None,
-            },
-            _ => plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: format!("Tuplespace error: {:?}", error),
-                details: None,
-            },
+            TupleSpaceError::BackendError(msg) => make_actor_error("internal", msg),
+            TupleSpaceError::PatternError(msg) => make_actor_error("invalid-message", msg),
+            TupleSpaceError::NotFound => make_actor_error("actor-not-found", "Tuple not found".to_string()),
+            _ => make_actor_error("internal", format!("Tuplespace error: {:?}", error)),
         }
     }
 
@@ -1216,11 +1179,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Ok(t) => t,
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_write_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: format!("Failed to convert tuple: {}", e),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", format!("Failed to convert tuple: {}", e)));
             }
         };
 
@@ -1229,11 +1188,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Some(p) => p,
             None => {
                 metrics::counter!("plexspaces_wasm_tuplespace_write_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                    message: "TupleSpaceProvider not available".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("not-implemented", "TupleSpaceProvider not available".to_string()));
             }
         };
 
@@ -1253,11 +1208,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_write_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Tuplespace write failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Tuplespace write failed: {}", e)))
             }
         }
     }
@@ -1276,11 +1227,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Ok(t) => t,
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_write_with_ttl_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: format!("Failed to convert tuple: {}", e),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", format!("Failed to convert tuple: {}", e)));
             }
         };
 
@@ -1297,11 +1244,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Some(p) => p,
             None => {
                 metrics::counter!("plexspaces_wasm_tuplespace_write_with_ttl_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                    message: "TupleSpaceProvider not available".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("not-implemented", "TupleSpaceProvider not available".to_string()));
             }
         };
 
@@ -1315,11 +1258,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_write_with_ttl_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Tuplespace write_with_ttl failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Tuplespace write_with_ttl failed: {}", e)))
             }
         }
     }
@@ -1337,11 +1276,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Ok(p) => p,
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: format!("Failed to convert pattern: {}", e),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", format!("Failed to convert pattern: {}", e)));
             }
         };
 
@@ -1350,11 +1285,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Some(p) => p,
             None => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                    message: "TupleSpaceProvider not available".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("not-implemented", "TupleSpaceProvider not available".to_string()));
             }
         };
 
@@ -1374,11 +1305,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Tuplespace read failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Tuplespace read failed: {}", e)))
             }
         }
     }
@@ -1397,11 +1324,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Ok(p) => p,
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_blocking_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: format!("Failed to convert pattern: {}", e),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", format!("Failed to convert pattern: {}", e)));
             }
         };
 
@@ -1410,11 +1333,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Some(p) => p,
             None => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_blocking_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                    message: "TupleSpaceProvider not available".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("not-implemented", "TupleSpaceProvider not available".to_string()));
             }
         };
 
@@ -1431,11 +1350,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             match tokio::time::timeout(timeout_duration, read_future).await {
                 Ok(Ok(tuple)) => Ok(tuple),
                 Ok(Err(e)) => Err(self.map_tuplespace_error(e)),
-                Err(_) => Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Timeout,
-                    message: "Read timeout".to_string(),
-                    details: None,
-                }),
+                Err(_) => Err(make_actor_error("timeout", "Read timeout".to_string())),
             }
         } else {
             read_future.await.map_err(|e| self.map_tuplespace_error(e))
@@ -1455,11 +1370,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_blocking_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Tuplespace read_blocking failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Tuplespace read_blocking failed: {}", e)))
             }
         }
     }
@@ -1478,11 +1389,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Ok(p) => p,
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_all_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: format!("Failed to convert pattern: {}", e),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", format!("Failed to convert pattern: {}", e)));
             }
         };
 
@@ -1491,11 +1398,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Some(p) => p,
             None => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_all_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                    message: "TupleSpaceProvider not available".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("not-implemented", "TupleSpaceProvider not available".to_string()));
             }
         };
 
@@ -1517,11 +1420,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_read_all_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Tuplespace read_all failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Tuplespace read_all failed: {}", e)))
             }
         }
     }
@@ -1539,11 +1438,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Ok(p) => p,
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_take_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: format!("Failed to convert pattern: {}", e),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", format!("Failed to convert pattern: {}", e)));
             }
         };
 
@@ -1552,11 +1447,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Some(p) => p,
             None => {
                 metrics::counter!("plexspaces_wasm_tuplespace_take_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                    message: "TupleSpaceProvider not available".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("not-implemented", "TupleSpaceProvider not available".to_string()));
             }
         };
 
@@ -1576,11 +1467,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_take_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Tuplespace take failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Tuplespace take failed: {}", e)))
             }
         }
     }
@@ -1599,11 +1486,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Ok(p) => p,
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_take_blocking_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: format!("Failed to convert pattern: {}", e),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", format!("Failed to convert pattern: {}", e)));
             }
         };
 
@@ -1612,11 +1495,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Some(p) => p,
             None => {
                 metrics::counter!("plexspaces_wasm_tuplespace_take_blocking_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                    message: "TupleSpaceProvider not available".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("not-implemented", "TupleSpaceProvider not available".to_string()));
             }
         };
 
@@ -1632,11 +1511,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             match tokio::time::timeout(timeout_duration, take_future).await {
                 Ok(Ok(tuple)) => Ok(tuple),
                 Ok(Err(e)) => Err(self.map_tuplespace_error(e)),
-                Err(_) => Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Timeout,
-                    message: "Take timeout".to_string(),
-                    details: None,
-                }),
+                Err(_) => Err(make_actor_error("timeout", "Take timeout".to_string())),
             }
         } else {
             take_future.await.map_err(|e| self.map_tuplespace_error(e))
@@ -1657,11 +1532,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_take_blocking_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Tuplespace take_blocking failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Tuplespace take_blocking failed: {}", e)))
             }
         }
     }
@@ -1679,11 +1550,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Ok(p) => p,
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_count_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: format!("Failed to convert pattern: {}", e),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", format!("Failed to convert pattern: {}", e)));
             }
         };
 
@@ -1692,11 +1559,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             Some(p) => p,
             None => {
                 metrics::counter!("plexspaces_wasm_tuplespace_count_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                    message: "TupleSpaceProvider not available".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("not-implemented", "TupleSpaceProvider not available".to_string()));
             }
         };
 
@@ -1711,11 +1574,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_tuplespace_count_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Tuplespace count failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Tuplespace count failed: {}", e)))
             }
         }
     }
@@ -1728,11 +1587,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
         // NOTE: TupleSpace subscribe is not yet implemented in the backend (Phase 3 Week 6).
         // This is an acceptable limitation - subscribe/unsubscribe will be implemented when
         // distributed watchers are added to the TupleSpace backend.
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "subscribe not yet implemented - requires distributed watchers (Phase 3 Week 6)".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "subscribe not yet implemented - requires distributed watchers (Phase 3 Week 6)".to_string()))
     }
 
     async fn unsubscribe(
@@ -1742,11 +1597,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
         // NOTE: TupleSpace unsubscribe is not yet implemented in the backend (Phase 3 Week 6).
         // This is an acceptable limitation - subscribe/unsubscribe will be implemented when
         // distributed watchers are added to the TupleSpace backend.
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "unsubscribe not yet implemented - requires distributed watchers (Phase 3 Week 6)".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "unsubscribe not yet implemented - requires distributed watchers (Phase 3 Week 6)".to_string()))
     }
 
     async fn compare_and_swap(
@@ -1759,11 +1610,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
         // NOTE: TupleSpace compare_and_swap is not yet implemented in the backend.
         // This is an acceptable limitation - compare_and_swap requires atomic tuple operations
         // which will be added in a future backend enhancement.
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "compare_and_swap not yet implemented - requires atomic tuple operations in backend".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "compare_and_swap not yet implemented - requires atomic tuple operations in backend".to_string()))
     }
 }
 
@@ -1821,11 +1668,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                     error = %e,
                     "Failed to send message to queue"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: e,
-                    details: None,
-                })
+                Err(make_actor_error("internal", e))
             }
         }
     }
@@ -1893,11 +1736,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                     error = %e,
                     "Failed to receive message from queue"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: e,
-                    details: None,
-                })
+                Err(make_actor_error("internal", e))
             }
         }
     }
@@ -2000,11 +1839,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
                     error = %e,
                     "Failed to publish message to topic"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: e,
-                    details: None,
-                })
+                Err(make_actor_error("internal", e))
             }
         }
     }
@@ -2029,11 +1864,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         drop(_span);
 
         let channel_service = self.host_functions.channel_service()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ChannelService not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ChannelService not configured".to_string()))?;
 
         // Subscribe to topic using ChannelService
         // Note: ChannelService.subscribe_to_topic returns a stream, but WIT interface expects subscription ID
@@ -2073,11 +1904,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_channels_subscribe_to_topic_errors_total").increment(1);
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to subscribe to topic: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to subscribe to topic: {}", e)))
             }
         }
     }
@@ -2139,11 +1966,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         // part of the ChannelService trait. These are administrative operations that should be
         // handled at the node/service level, not by individual actors. This is an acceptable
         // limitation - queues are created automatically on first use.
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "create_queue not available - queues are created automatically on first use".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "create_queue not available - queues are created automatically on first use".to_string()))
     }
 
     async fn delete_queue(
@@ -2155,11 +1978,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         // part of the ChannelService trait. These are administrative operations that should be
         // handled at the node/service level, not by individual actors. This is an acceptable
         // limitation.
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "delete_queue not available - queue management is handled at node/service level".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "delete_queue not available - queue management is handled at node/service level".to_string()))
     }
 
     async fn queue_depth(
@@ -2171,11 +1990,7 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         // part of the ChannelService trait. These are administrative operations that should be
         // handled at the node/service level, not by individual actors. This is an acceptable
         // limitation.
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "queue_depth not available - queue management is handled at node/service level".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "queue_depth not available - queue management is handled at node/service level".to_string()))
     }
 }
 
@@ -2277,20 +2092,12 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                         error = %e,
                         "Blob upload failed"
                     );
-                    Err(plexspaces::actor::types::ActorError {
-                        code: plexspaces::actor::types::ErrorCode::Internal,
-                        message: format!("Blob upload failed: {}", e),
-                        details: None,
-                    })
+                    Err(make_actor_error("internal", format!("Blob upload failed: {}", e)))
                 }
             }
         } else {
             metrics::counter!("plexspaces_wasm_blob_upload_errors_total").increment(1);
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                message: "BlobService not available".to_string(),
-                details: None,
-            })
+            Err(make_actor_error("not-implemented", "BlobService not available".to_string()))
         }
     }
 
@@ -2325,33 +2132,18 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             // for download operations. This is an acceptable limitation - bucket+key lookup
             // will be added when blob metadata indexing is implemented.
             let effective_blob_id = if blob_id.is_empty() {
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: "blob_id is required for download".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", "blob_id is required for download".to_string()));
             } else {
                 blob_id
             };
             
-            // Get blob metadata first to extract tenant/namespace for proper RequestContext
-            // Use empty tenant/namespace for metadata lookup (works when auth is disabled)
-            // The metadata will contain the actual tenant/namespace for the blob
-            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true)
-                .with_internal(true);
+            // Get blob metadata first to extract tenant/namespace for proper RequestContext.
+            // Use default context (no admin) so tenant isolation is preserved.
+            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
             let metadata = blob_service.get_metadata(&temp_ctx, &effective_blob_id).await
                 .map_err(|e| {
-                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                        plexspaces::actor::types::ErrorCode::ActorNotFound
-                    } else {
-                        plexspaces::actor::types::ErrorCode::Internal
-                    };
-                    plexspaces::actor::types::ActorError {
-                        code: error_code,
-                        message: format!("Failed to get blob metadata: {}", e),
-                        details: None,
-                    }
+                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
+                    make_actor_error(error_code, format!("Failed to get blob metadata: {}", e))
                 })?;
             
             // Create proper RequestContext from blob metadata tenant/namespace
@@ -2376,30 +2168,18 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 }
                 Err(e) => {
                     metrics::counter!("plexspaces_wasm_blob_download_errors_total").increment(1);
-                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                        plexspaces::actor::types::ErrorCode::ActorNotFound
-                    } else {
-                        plexspaces::actor::types::ErrorCode::Internal
-                    };
+                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
                     tracing::warn!(
                         blob_id = %effective_blob_id,
                         error = %e,
                         "Blob download failed"
                     );
-                    Err(plexspaces::actor::types::ActorError {
-                        code: error_code,
-                        message: format!("Blob download failed: {}", e),
-                        details: None,
-                    })
+                    Err(make_actor_error(error_code, format!("Blob download failed: {}", e)))
                 }
             }
         } else {
             metrics::counter!("plexspaces_wasm_blob_download_errors_total").increment(1);
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                message: "BlobService not available".to_string(),
-                details: None,
-            })
+            Err(make_actor_error("not-implemented", "BlobService not available".to_string()))
         }
     }
 
@@ -2431,33 +2211,18 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             
             // Use blob_id if provided
             let effective_blob_id = if blob_id.is_empty() {
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: "blob_id is required for delete".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", "blob_id is required for delete".to_string()));
             } else {
                 blob_id
             };
             
-            // Get blob metadata first to extract tenant/namespace for proper RequestContext
-            // Use empty tenant/namespace for metadata lookup (works when auth is disabled)
-            // The metadata will contain the actual tenant/namespace for the blob
-            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true)
-                .with_internal(true);
+            // Get blob metadata first to extract tenant/namespace for proper RequestContext.
+            // Use default context (no admin) so tenant isolation is preserved.
+            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
             let metadata = blob_service.get_metadata(&temp_ctx, &effective_blob_id).await
                 .map_err(|e| {
-                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                        plexspaces::actor::types::ErrorCode::ActorNotFound
-                    } else {
-                        plexspaces::actor::types::ErrorCode::Internal
-                    };
-                    plexspaces::actor::types::ActorError {
-                        code: error_code,
-                        message: format!("Failed to get blob metadata: {}", e),
-                        details: None,
-                    }
+                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
+                    make_actor_error(error_code, format!("Failed to get blob metadata: {}", e))
                 })?;
             
             // Create proper RequestContext from blob metadata tenant/namespace
@@ -2481,30 +2246,18 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 }
                 Err(e) => {
                     metrics::counter!("plexspaces_wasm_blob_delete_errors_total").increment(1);
-                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                        plexspaces::actor::types::ErrorCode::ActorNotFound
-                    } else {
-                        plexspaces::actor::types::ErrorCode::Internal
-                    };
+                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
                     tracing::warn!(
                         blob_id = %effective_blob_id,
                         error = %e,
                         "Blob delete failed"
                     );
-                    Err(plexspaces::actor::types::ActorError {
-                        code: error_code,
-                        message: format!("Blob delete failed: {}", e),
-                        details: None,
-                    })
+                    Err(make_actor_error(error_code, format!("Blob delete failed: {}", e)))
                 }
             }
         } else {
             metrics::counter!("plexspaces_wasm_blob_delete_errors_total").increment(1);
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                message: "BlobService not available".to_string(),
-                details: None,
-            })
+            Err(make_actor_error("not-implemented", "BlobService not available".to_string()))
         }
     }
 
@@ -2524,20 +2277,13 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             
             // Use blob_id if provided
             let effective_blob_id = if blob_id.is_empty() {
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: "blob_id is required for exists check".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", "blob_id is required for exists check".to_string()));
             } else {
                 blob_id
             };
             
-            // Get blob metadata to check existence and extract tenant/namespace for proper RequestContext
-            // Use empty tenant/namespace for metadata lookup (works when auth is disabled)
-            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true)
-                .with_internal(true);
+            // Get blob metadata to check existence. Use default context (no admin) for tenant isolation.
+            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
             match blob_service.get_metadata(&temp_ctx, &effective_blob_id).await {
                 Ok(metadata) => {
                     // Blob exists - return true (we could use the metadata to create proper context
@@ -2548,20 +2294,12 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                     if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
                         Ok(false)
                     } else {
-                        Err(plexspaces::actor::types::ActorError {
-                            code: plexspaces::actor::types::ErrorCode::Internal,
-                            message: format!("Blob exists check failed: {}", e),
-                            details: None,
-                        })
+                        Err(make_actor_error("internal", format!("Blob exists check failed: {}", e)))
                     }
                 }
             }
         } else {
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                message: "BlobService not available".to_string(),
-                details: None,
-            })
+            Err(make_actor_error("not-implemented", "BlobService not available".to_string()))
         }
     }
 
@@ -2656,20 +2394,12 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                         error = %e,
                         "List blobs failed"
                     );
-                    Err(plexspaces::actor::types::ActorError {
-                        code: plexspaces::actor::types::ErrorCode::Internal,
-                        message: format!("List blobs failed: {}", e),
-                        details: None,
-                    })
+                    Err(make_actor_error("internal", format!("List blobs failed: {}", e)))
                 }
             }
         } else {
             metrics::counter!("plexspaces_wasm_blob_list_errors_total").increment(1);
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                message: "BlobService not available".to_string(),
-                details: None,
-            })
+            Err(make_actor_error("not-implemented", "BlobService not available".to_string()))
         }
     }
 
@@ -2689,20 +2419,13 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             
             // Use blob_id if provided
             let effective_blob_id = if blob_id.is_empty() {
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: "blob_id is required for metadata".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", "blob_id is required for metadata".to_string()));
             } else {
                 blob_id
             };
             
-            // Get metadata using BlobService - use empty tenant/namespace for metadata lookup
-            // then we can use the metadata's tenant/namespace for proper context if needed
-            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true)
-                .with_internal(true);
+            // Get metadata using BlobService. Use default context (no admin) for tenant isolation.
+            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
             match blob_service.get_metadata(&temp_ctx, &effective_blob_id).await {
                 Ok(m) => {
                     let last_modified = m.created_at
@@ -2730,30 +2453,18 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 }
                 Err(e) => {
                     metrics::counter!("plexspaces_wasm_blob_metadata_errors_total").increment(1);
-                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                        plexspaces::actor::types::ErrorCode::ActorNotFound
-                    } else {
-                        plexspaces::actor::types::ErrorCode::Internal
-                    };
+                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
                     tracing::warn!(
                         blob_id = %effective_blob_id,
                         error = %e,
                         "Get blob metadata failed"
                     );
-                    Err(plexspaces::actor::types::ActorError {
-                        code: error_code,
-                        message: format!("Get blob metadata failed: {}", e),
-                        details: None,
-                    })
+                    Err(make_actor_error(error_code, format!("Get blob metadata failed: {}", e)))
                 }
             }
         } else {
             metrics::counter!("plexspaces_wasm_blob_metadata_errors_total").increment(1);
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                message: "BlobService not available".to_string(),
-                details: None,
-            })
+            Err(make_actor_error("not-implemented", "BlobService not available".to_string()))
         }
     }
 
@@ -2788,34 +2499,19 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             
             // Use source_blob_id if provided, otherwise we'd need to look up by bucket+key
             let effective_source_blob_id = if source_blob_id.is_empty() {
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::InvalidMessage,
-                    message: "source_blob_id is required for copy".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("invalid-message", "source_blob_id is required for copy".to_string()));
             } else {
                 source_blob_id
             };
             
             // Create RequestContext from context (empty strings use defaults)
             let request_ctx = if ctx.tenant_id.is_empty() && ctx.namespace.is_empty() {
-                // If not provided, we need to look up metadata first to get tenant/namespace
-                // Use empty tenant/namespace for metadata lookup (works when auth is disabled)
-                let temp_ctx = RequestContext::new_without_auth(String::new(), String::new())
-                    .with_admin(true)
-                    .with_internal(true);
+                // If not provided, look up metadata first to get tenant/namespace. Use default context (no admin).
+                let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
                 let source_metadata = blob_service.get_metadata(&temp_ctx, &effective_source_blob_id).await
                     .map_err(|e| {
-                        let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                            plexspaces::actor::types::ErrorCode::ActorNotFound
-                        } else {
-                            plexspaces::actor::types::ErrorCode::Internal
-                        };
-                        plexspaces::actor::types::ActorError {
-                            code: error_code,
-                            message: format!("Failed to get source blob metadata: {}", e),
-                            details: None,
-                        }
+                        let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
+                        make_actor_error(error_code, format!("Failed to get source blob metadata: {}", e))
                     })?;
                 RequestContext::new_without_auth(source_metadata.tenant_id.clone(), source_metadata.namespace.clone())
             } else {
@@ -2826,26 +2522,14 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             // Get source blob metadata to preserve content_type and other properties
             let source_metadata = blob_service.get_metadata(&request_ctx, &effective_source_blob_id).await
                 .map_err(|e| {
-                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                        plexspaces::actor::types::ErrorCode::ActorNotFound
-                    } else {
-                        plexspaces::actor::types::ErrorCode::Internal
-                    };
-                    plexspaces::actor::types::ActorError {
-                        code: error_code,
-                        message: format!("Failed to get source blob metadata: {}", e),
-                        details: None,
-                    }
+                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
+                    make_actor_error(error_code, format!("Failed to get source blob metadata: {}", e))
                 })?;
             
             // Download source blob using proper context
             let data = blob_service.download_blob(&request_ctx, &effective_source_blob_id).await
                 .map_err(|e| {
-                    plexspaces::actor::types::ActorError {
-                        code: plexspaces::actor::types::ErrorCode::Internal,
-                        message: format!("Failed to download source blob: {}", e),
-                        details: None,
-                    }
+                    make_actor_error("internal", format!("Failed to download source blob: {}", e))
                 })?;
             
             // Upload to destination with same content_type
@@ -2910,20 +2594,12 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                         error = %e,
                         "Blob copy failed"
                     );
-                    Err(plexspaces::actor::types::ActorError {
-                        code: plexspaces::actor::types::ErrorCode::Internal,
-                        message: format!("Blob copy failed: {}", e),
-                        details: None,
-                    })
+                    Err(make_actor_error("internal", format!("Blob copy failed: {}", e)))
                 }
             }
         } else {
             metrics::counter!("plexspaces_wasm_blob_copy_errors_total").increment(1);
-            Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::NotImplemented,
-                message: "BlobService not available".to_string(),
-                details: None,
-            })
+            Err(make_actor_error("not-implemented", "BlobService not available".to_string()))
         }
     }
 }
@@ -3112,11 +2788,7 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
         // NOTE: get_workflow_context requires ExecutionContext which is not yet available.
         // This is an acceptable limitation - workflow context will be available when full
         // workflow orchestration is implemented.
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "get_workflow_context not yet implemented - requires ExecutionContext".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "get_workflow_context not yet implemented - requires ExecutionContext".to_string()))
     }
 }
 
@@ -3165,11 +2837,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
             Some(storage) => storage,
             None => {
                 metrics::counter!("plexspaces_wasm_durability_persist_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: "Journal storage not configured".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("internal", "Journal storage not configured".to_string()));
             }
         };
 
@@ -3215,11 +2883,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                     error = %e,
                     "Failed to persist event"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to persist event: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to persist event: {}", e)))
             }
         }
     }
@@ -3243,11 +2907,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
             Some(storage) => storage,
             None => {
                 metrics::counter!("plexspaces_wasm_durability_persist_batch_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: "Journal storage not configured".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("internal", "Journal storage not configured".to_string()));
             }
         };
 
@@ -3294,11 +2954,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                     error = %e,
                     "Failed to persist batch events"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to persist batch events: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to persist batch events: {}", e)))
             }
         }
     }
@@ -3321,11 +2977,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
             Some(storage) => storage,
             None => {
                 metrics::counter!("plexspaces_wasm_durability_checkpoint_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: "Journal storage not configured".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("internal", "Journal storage not configured".to_string()));
             }
         };
 
@@ -3386,11 +3038,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                     error = %e,
                     "Failed to create checkpoint"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to create checkpoint: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to create checkpoint: {}", e)))
             }
         }
     }
@@ -3502,11 +3150,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                     key = %key,
                     "No cached side effect found during replay"
                 );
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("No cached side effect found for key: {}", key),
-                    details: None,
-                });
+                return Err(make_actor_error("internal", format!("No cached side effect found for key: {}", key)));
             }
         }
 
@@ -3585,11 +3229,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
             Some(storage) => storage,
             None => {
                 metrics::counter!("plexspaces_wasm_durability_read_journal_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: "Journal storage not configured".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("internal", "Journal storage not configured".to_string()));
             }
         };
 
@@ -3652,11 +3292,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                     error = %e,
                     "Failed to read journal"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to read journal: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to read journal: {}", e)))
             }
         }
     }
@@ -3684,11 +3320,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
             Some(storage) => storage,
             None => {
                 metrics::counter!("plexspaces_wasm_durability_compact_errors_total").increment(1);
-                return Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: "Journal storage not configured".to_string(),
-                    details: None,
-                });
+                return Err(make_actor_error("internal", "Journal storage not configured".to_string()));
             }
         };
 
@@ -3708,25 +3340,17 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                 Ok(seq) => seq,
                 Err(e) => {
                     metrics::counter!("plexspaces_wasm_durability_compact_errors_total").increment(1);
-                    return Err(plexspaces::actor::types::ActorError {
-                        code: plexspaces::actor::types::ErrorCode::Internal,
-                        message: format!("Cannot compact: no checkpoint found. Error: {}", e.message),
-                        details: None,
-                    });
+                    return Err(make_actor_error("internal", format!("Cannot compact: no checkpoint found. Error: {}", e)));
                 }
             }
         };
 
         if checkpoint_sequence < up_to_sequence {
             metrics::counter!("plexspaces_wasm_durability_compact_errors_total").increment(1);
-            return Err(plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: format!(
+            return Err(make_actor_error("internal", format!(
                     "Cannot compact: checkpoint sequence ({}) is before requested sequence ({})",
                     checkpoint_sequence, up_to_sequence
-                ),
-                details: None,
-            });
+                )));
         }
 
         // Truncate journal entries up to the specified sequence
@@ -3752,11 +3376,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
                     error = %e,
                     "Failed to compact journal"
                 );
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Failed to compact journal: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Failed to compact journal: {}", e)))
             }
         }
     }
@@ -3787,11 +3407,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         .entered();
 
         let kv_store = self.host_functions.keyvalue_store()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "KeyValue store not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "KeyValue store not configured".to_string()))?;
 
         // Create RequestContext from context (empty strings use defaults)
         let request_ctx = context_to_request_context(&ctx);
@@ -3820,11 +3436,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_keyvalue_get_errors_total").increment(1);
                 tracing::warn!(key = %key, error = %e, "KeyValue get failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("KeyValue get failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("KeyValue get failed: {}", e)))
             }
         }
     }
@@ -3847,11 +3459,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         .entered();
 
         let kv_store = self.host_functions.keyvalue_store()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "KeyValue store not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "KeyValue store not configured".to_string()))?;
 
         // Create RequestContext from context (empty strings use defaults)
         let request_ctx = context_to_request_context(&ctx);
@@ -3871,11 +3479,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_keyvalue_put_errors_total").increment(1);
                 tracing::warn!(key = %key, error = %e, "KeyValue put failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("KeyValue put failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("KeyValue put failed: {}", e)))
             }
         }
     }
@@ -3900,11 +3504,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         .entered();
 
         let kv_store = self.host_functions.keyvalue_store()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "KeyValue store not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "KeyValue store not configured".to_string()))?;
 
         // Create RequestContext from context (empty strings use defaults)
         let request_ctx = context_to_request_context(&ctx);
@@ -3925,11 +3525,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_keyvalue_put_with_ttl_errors_total").increment(1);
                 tracing::warn!(key = %key, ttl_ms = ttl_ms, error = %e, "KeyValue put_with_ttl failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("KeyValue put_with_ttl failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("KeyValue put_with_ttl failed: {}", e)))
             }
         }
     }
@@ -3950,11 +3546,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         .entered();
 
         let kv_store = self.host_functions.keyvalue_store()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "KeyValue store not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "KeyValue store not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -3973,11 +3565,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_keyvalue_delete_errors_total").increment(1);
                 tracing::warn!(key = %key, error = %e, "KeyValue delete failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("KeyValue delete failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("KeyValue delete failed: {}", e)))
             }
         }
     }
@@ -3998,11 +3586,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         .entered();
 
         let kv_store = self.host_functions.keyvalue_store()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "KeyValue store not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "KeyValue store not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4021,11 +3605,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_keyvalue_exists_errors_total").increment(1);
                 tracing::warn!(key = %key, error = %e, "KeyValue exists failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("KeyValue exists failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("KeyValue exists failed: {}", e)))
             }
         }
     }
@@ -4048,11 +3628,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         .entered();
 
         let kv_store = self.host_functions.keyvalue_store()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "KeyValue store not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "KeyValue store not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4075,11 +3651,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_keyvalue_list_errors_total").increment(1);
                 tracing::warn!(prefix = %prefix, error = %e, "KeyValue list failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("KeyValue list failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("KeyValue list failed: {}", e)))
             }
         }
     }
@@ -4102,11 +3674,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         .entered();
 
         let kv_store = self.host_functions.keyvalue_store()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "KeyValue store not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "KeyValue store not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4125,11 +3693,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_keyvalue_compare_and_swap_errors_total").increment(1);
                 tracing::warn!(key = %key, error = %e, "KeyValue compare_and_swap failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("KeyValue compare_and_swap failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("KeyValue compare_and_swap failed: {}", e)))
             }
         }
     }
@@ -4152,11 +3716,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         .entered();
 
         let kv_store = self.host_functions.keyvalue_store()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "KeyValue store not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "KeyValue store not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4175,11 +3735,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_keyvalue_increment_errors_total").increment(1);
                 tracing::warn!(key = %key, delta = delta, error = %e, "KeyValue increment failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("KeyValue increment failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("KeyValue increment failed: {}", e)))
             }
         }
     }
@@ -4209,11 +3765,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_keyvalue_watch_duration_seconds").record(duration.as_secs_f64());
         metrics::counter!("plexspaces_wasm_keyvalue_watch_success_total").increment(1);
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "KeyValue watch not yet implemented".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "KeyValue watch not yet implemented".to_string()))
     }
 
     async fn unwatch(
@@ -4240,11 +3792,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_keyvalue_unwatch_duration_seconds").record(duration.as_secs_f64());
         metrics::counter!("plexspaces_wasm_keyvalue_unwatch_success_total").increment(1);
-        Err(plexspaces::actor::types::ActorError {
-            code: plexspaces::actor::types::ErrorCode::NotImplemented,
-            message: "KeyValue unwatch not yet implemented".to_string(),
-            details: None,
-        })
+        Err(make_actor_error("not-implemented", "KeyValue unwatch not yet implemented".to_string()))
     }
 }
 
@@ -4278,17 +3826,11 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
         drop(_span);
 
         let registry = self.host_functions.process_group_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ProcessGroupRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ProcessGroupRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
-        let tenant_id = request_ctx.tenant_id.clone();
-        let namespace_str = request_ctx.namespace.clone();
 
-        match registry.create_group(&group_name, &tenant_id, &namespace_str).await {
+        match registry.create_group(&request_ctx, &group_name).await {
             Ok(_) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_create_group_duration_seconds").record(duration.as_secs_f64());
@@ -4300,17 +3842,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_create_group_errors_total").increment(1);
-                let error_code = if e.to_string().contains("already exists") {
-                    plexspaces::actor::types::ErrorCode::Internal
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("already exists") { "internal" } else { "internal" };
                 tracing::warn!(group_name = %group_name, namespace = %namespace, error = %e, "ProcessGroup create_group failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("ProcessGroup create_group failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("ProcessGroup create_group failed: {}", e)))
             }
         }
     }
@@ -4331,11 +3865,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
         .entered();
 
         let registry = self.host_functions.process_group_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ProcessGroupRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ProcessGroupRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4354,11 +3884,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_delete_group_errors_total").increment(1);
                 tracing::warn!(group_name = %group_name, error = %e, "ProcessGroup delete_group failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("ProcessGroup delete_group failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("ProcessGroup delete_group failed: {}", e)))
             }
         }
     }
@@ -4383,20 +3909,14 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
         .entered();
 
         let registry = self.host_functions.process_group_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ProcessGroupRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ProcessGroupRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
-        let tenant_id = request_ctx.tenant_id.clone();
-        let namespace_str = request_ctx.namespace.clone();
         let actor_id = plexspaces_core::ActorId::from(self.actor_id.clone());
 
         // Drop span before await to ensure Send
         drop(_span);
-        match registry.join_group(&group_name, &tenant_id, &namespace_str, &actor_id, topics).await {
+        match registry.join_group(&request_ctx, &group_name, &actor_id, topics).await {
             Ok(()) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!("plexspaces_wasm_process_groups_join_group_duration_seconds").record(duration.as_secs_f64());
@@ -4408,17 +3928,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_join_group_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("not found") { "actor-not-found" } else { "internal" };
                 tracing::warn!(group_name = %group_name, namespace = %namespace, error = %e, "ProcessGroup join_group failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("ProcessGroup join_group failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("ProcessGroup join_group failed: {}", e)))
             }
         }
     }
@@ -4439,11 +3951,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
         .entered();
 
         let registry = self.host_functions.process_group_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ProcessGroupRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ProcessGroupRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
         let actor_id = plexspaces_core::ActorId::from(self.actor_id.clone());
@@ -4462,17 +3970,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_leave_group_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") || e.to_string().contains("not in group") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("not found") || e.to_string().contains("not in group") { "actor-not-found" } else { "internal" };
                 tracing::warn!(group_name = %group_name, error = %e, "ProcessGroup leave_group failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("ProcessGroup leave_group failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("ProcessGroup leave_group failed: {}", e)))
             }
         }
     }
@@ -4493,11 +3993,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
         .entered();
 
         let registry = self.host_functions.process_group_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ProcessGroupRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ProcessGroupRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4519,17 +4015,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_get_members_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("not found") { "actor-not-found" } else { "internal" };
                 tracing::warn!(group_name = %group_name, error = %e, "ProcessGroup get_members failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("ProcessGroup get_members failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("ProcessGroup get_members failed: {}", e)))
             }
         }
     }
@@ -4550,11 +4038,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
         .entered();
 
         let registry = self.host_functions.process_group_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ProcessGroupRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ProcessGroupRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4576,17 +4060,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_get_local_members_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("not found") { "actor-not-found" } else { "internal" };
                 tracing::warn!(group_name = %group_name, error = %e, "ProcessGroup get_local_members failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("ProcessGroup get_local_members failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("ProcessGroup get_local_members failed: {}", e)))
             }
         }
     }
@@ -4605,11 +4081,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
         .entered();
 
         let registry = self.host_functions.process_group_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ProcessGroupRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ProcessGroupRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4628,11 +4100,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_list_groups_errors_total").increment(1);
                 tracing::warn!(error = %e, "ProcessGroup list_groups failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("ProcessGroup list_groups failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("ProcessGroup list_groups failed: {}", e)))
             }
         }
     }
@@ -4657,11 +4125,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
         .entered();
 
         let registry = self.host_functions.process_group_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ProcessGroupRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ProcessGroupRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4683,17 +4147,9 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_publish_to_group_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("not found") { "actor-not-found" } else { "internal" };
                 tracing::warn!(group_name = %group_name, topic = ?topic, error = %e, "ProcessGroup publish_to_group failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("ProcessGroup publish_to_group failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("ProcessGroup publish_to_group failed: {}", e)))
             }
         }
     }
@@ -4728,11 +4184,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         .entered();
 
         let lock_manager = self.host_functions.lock_manager()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "LockManager not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "LockManager not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
@@ -4777,17 +4229,9 @@ impl plexspaces::actor::locks::Host for LocksImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_locks_acquire_errors_total").increment(1);
-                let error_code = if e.to_string().contains("already held") {
-                    plexspaces::actor::types::ErrorCode::Internal
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("already held") { "internal" } else { "internal" };
                 tracing::warn!(lock_key = %lock_key, holder_id = %holder_id, error = %e, "Lock acquire failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("Lock acquire failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("Lock acquire failed: {}", e)))
             }
         }
     }
@@ -4814,11 +4258,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         .entered();
 
         let lock_manager = self.host_functions.lock_manager()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "LockManager not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "LockManager not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
@@ -4863,18 +4303,14 @@ impl plexspaces::actor::locks::Host for LocksImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_locks_renew_errors_total").increment(1);
                 let error_code = if e.to_string().contains("version mismatch") {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 } else if e.to_string().contains("not found") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
+                    "actor-not-found"
                 } else {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 };
                 tracing::warn!(lock_key = %lock_key, holder_id = %holder_id, version = %version, error = %e, "Lock renew failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("Lock renew failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("Lock renew failed: {}", e)))
             }
         }
     }
@@ -4901,11 +4337,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         .entered();
 
         let lock_manager = self.host_functions.lock_manager()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "LockManager not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "LockManager not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -4931,18 +4363,14 @@ impl plexspaces::actor::locks::Host for LocksImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_locks_release_errors_total").increment(1);
                 let error_code = if e.to_string().contains("version mismatch") {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 } else if e.to_string().contains("not found") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
+                    "actor-not-found"
                 } else {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 };
                 tracing::warn!(lock_key = %lock_key, holder_id = %holder_id, version = %version, error = %e, "Lock release failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("Lock release failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("Lock release failed: {}", e)))
             }
         }
     }
@@ -4967,11 +4395,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         .entered();
 
         let lock_manager = self.host_functions.lock_manager()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "LockManager not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "LockManager not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
@@ -5027,11 +4451,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                 } else {
                     metrics::counter!("plexspaces_wasm_locks_try_acquire_errors_total").increment(1);
                     tracing::warn!(lock_key = %lock_key, holder_id = %holder_id, error = %e, "Lock try_acquire failed");
-                    Err(plexspaces::actor::types::ActorError {
-                        code: plexspaces::actor::types::ErrorCode::Internal,
-                        message: format!("Lock try_acquire failed: {}", e),
-                        details: None,
-                    })
+                    Err(make_actor_error("internal", format!("Lock try_acquire failed: {}", e)))
                 }
             }
         }
@@ -5053,11 +4473,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         .entered();
 
         let lock_manager = self.host_functions.lock_manager()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "LockManager not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "LockManager not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -5102,11 +4518,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_locks_get_lock_errors_total").increment(1);
                 tracing::warn!(lock_key = %lock_key, error = %e, "Lock get_lock failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Lock get_lock failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Lock get_lock failed: {}", e)))
             }
         }
     }
@@ -5225,11 +4637,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         .entered();
 
         let registry = self.host_functions.object_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ObjectRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ObjectRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -5278,18 +4686,14 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_register_errors_total").increment(1);
                 let error_code = if e.to_string().contains("already registered") {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 } else if e.to_string().contains("Invalid input") {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 } else {
-                    plexspaces::actor::types::ErrorCode::Internal
+                    "internal"
                 };
                 tracing::warn!(object_id = %object_id, object_type = ?object_type, error = %e, "Registry register failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("Registry register failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("Registry register failed: {}", e)))
             }
         }
     }
@@ -5312,11 +4716,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         .entered();
 
         let registry = self.host_functions.object_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ObjectRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ObjectRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -5347,17 +4747,9 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_unregister_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("not found") { "actor-not-found" } else { "internal" };
                 tracing::warn!(object_type = ?object_type, object_id = %object_id, error = %e, "Registry unregister failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("Registry unregister failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("Registry unregister failed: {}", e)))
             }
         }
     }
@@ -5380,11 +4772,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         .entered();
 
         let registry = self.host_functions.object_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ObjectRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ObjectRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -5426,11 +4814,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_lookup_errors_total").increment(1);
                 tracing::warn!(object_type = ?object_type, object_id = %object_id, error = %e, "Registry lookup failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Registry lookup failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Registry lookup failed: {}", e)))
             }
         }
     }
@@ -5459,11 +4843,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         .entered();
 
         let registry = self.host_functions.object_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ObjectRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ObjectRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -5511,11 +4891,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_discover_errors_total").increment(1);
                 tracing::warn!(object_type = ?object_type, error = %e, "Registry discover failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: plexspaces::actor::types::ErrorCode::Internal,
-                    message: format!("Registry discover failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error("internal", format!("Registry discover failed: {}", e)))
             }
         }
     }
@@ -5538,11 +4914,7 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         .entered();
 
         let registry = self.host_functions.object_registry()
-            .ok_or_else(|| plexspaces::actor::types::ActorError {
-                code: plexspaces::actor::types::ErrorCode::Internal,
-                message: "ObjectRegistry not configured".to_string(),
-                details: None,
-            })?;
+            .ok_or_else(|| make_actor_error("internal", "ObjectRegistry not configured".to_string()))?;
 
         let request_ctx = context_to_request_context(&ctx);
 
@@ -5573,17 +4945,9 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_heartbeat_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") {
-                    plexspaces::actor::types::ErrorCode::ActorNotFound
-                } else {
-                    plexspaces::actor::types::ErrorCode::Internal
-                };
+                let error_code = if e.to_string().contains("not found") { "actor-not-found" } else { "internal" };
                 tracing::warn!(object_type = ?object_type, object_id = %object_id, error = %e, "Registry heartbeat failed");
-                Err(plexspaces::actor::types::ActorError {
-                    code: error_code,
-                    message: format!("Registry heartbeat failed: {}", e),
-                    details: None,
-                })
+                Err(make_actor_error(error_code, format!("Registry heartbeat failed: {}", e)))
             }
         }
     }

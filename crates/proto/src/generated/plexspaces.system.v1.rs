@@ -339,12 +339,6 @@ pub struct DependencyRegistrationConfig {
     /// Format: "name:type:critical" (e.g., "database:service:true", "redis:service:false")
     #[prost(string, repeated, tag="2")]
     pub dependencies: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// Default namespace for dependency lookup
-    #[prost(string, tag="3")]
-    pub default_namespace: ::prost::alloc::string::String,
-    /// Default tenant for dependency lookup
-    #[prost(string, tag="4")]
-    pub default_tenant: ::prost::alloc::string::String,
 }
 /// Dependency health check
 ///
@@ -519,6 +513,8 @@ pub struct BeginShutdownRequest {
     #[prost(string, tag="1")]
     pub reason: ::prost::alloc::string::String,
     /// Override default drain timeout
+    ///
+    /// Max 1 hour
     #[prost(message, optional, tag="2")]
     pub drain_timeout: ::core::option::Option<::prost_types::Duration>,
 }
@@ -774,6 +770,7 @@ pub struct RestoreBackupResponse {
 pub struct ShutdownRequest {
     #[prost(bool, tag="1")]
     pub graceful: bool,
+    /// Max 1 hour
     #[prost(message, optional, tag="2")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
     #[prost(string, tag="3")]

@@ -36,7 +36,6 @@
 
 // Use HealthReporter trait from core - no dependency on node
 use plexspaces_core::HealthReporter;
-use async_trait::async_trait;
 use plexspaces_proto::system::v1::system_service_server::SystemService;
 use plexspaces_proto::system::v1::*;
 use std::sync::Arc;
@@ -85,12 +84,12 @@ impl SystemService for SystemServiceImpl {
         system.refresh_all();
         
         let total_memory = system.total_memory();
-        let used_memory = system.used_memory();
-        let available_memory = system.available_memory();
+        let _used_memory = system.used_memory();
+        let _available_memory = system.available_memory();
         let cpu_count = system.cpus().len() as u32;
         
         // Get CPU usage (average across all CPUs)
-        let cpu_usage = if include_details {
+        let _cpu_usage = if include_details {
             system.cpus().iter().map(|cpu| cpu.cpu_usage() as f64).sum::<f64>() / cpu_count as f64
         } else {
             0.0
@@ -233,7 +232,7 @@ impl SystemService for SystemServiceImpl {
         &self,
         _request: Request<GetNodeReadinessRequest>,
     ) -> Result<Response<GetNodeReadinessResponse>, Status> {
-        let mut readiness = self.health_reporter.get_readiness().await;
+        let readiness = self.health_reporter.get_readiness().await;
         
         Ok(Response::new(GetNodeReadinessResponse {
             readiness: Some(readiness),
@@ -615,7 +614,7 @@ impl SystemService for SystemServiceImpl {
         let state = self.health_reporter.get_state().await;
         
         use plexspaces_proto::system::v1::{ShutdownStatus, ShutdownPhase, ShutdownSignal};
-        use prost_types::Timestamp;
+        
         use std::time::SystemTime;
         
         let phase = if state.shutdown_in_progress {

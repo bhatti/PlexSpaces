@@ -34,7 +34,7 @@
 //! - Checks are async to support network calls
 //! - Errors indicate unhealthy dependencies
 
-use plexspaces_proto::system::v1::{DependencyCheck, DependencyCircuitBreakerInfo, HealthStatus};
+use plexspaces_proto::system::v1::{DependencyCheck, HealthStatus};
 use prost_types::{Duration, Timestamp};
 use std::time::SystemTime;
 use thiserror::Error;
@@ -42,12 +42,15 @@ use thiserror::Error;
 /// Error type for health checks
 #[derive(Debug, Error)]
 pub enum HealthCheckError {
+    /// Health check explicitly failed
     #[error("Health check failed: {0}")]
     CheckFailed(String),
     
+    /// Health check timed out
     #[error("Health check timeout: {0}")]
     Timeout(String),
     
+    /// Other health check error
     #[error("Health check error: {0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
 }

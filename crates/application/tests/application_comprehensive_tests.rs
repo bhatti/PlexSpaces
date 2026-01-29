@@ -4,7 +4,7 @@
 // Comprehensive tests for Application trait to improve coverage
 
 use plexspaces_application::{Application, ApplicationNode, ApplicationError};
-use plexspaces_proto::v1::application::{ApplicationConfig, HealthStatus, ShutdownStrategy};
+use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus, ShutdownStrategy};
 use async_trait::async_trait;
 use std::sync::Arc;
 

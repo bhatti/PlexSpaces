@@ -34,7 +34,7 @@
 //
 // ## Component Interactions
 // - Used by: PlexSpacesNode (node startup/shutdown)
-// - Depends on: application.proto (ApplicationConfig)
+// - Depends on: application.proto (ApplicationSpec)
 //
 // ## Design Decisions
 // - Why TOML mapping: Human-friendly configuration (release.toml)
@@ -43,12 +43,13 @@
 
 syntax = "proto3";
 package plexspaces.node.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node/release;plexspaces_node_v1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node;plexspaces_node_v1";
 
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
+import "plexspaces/v1/application/application.proto";
 import "plexspaces/v1/security/security.proto";
 import "plexspaces/v1/storage/blob.proto";
 import "plexspaces/v1/storage/storage_config.proto";
@@ -82,7 +83,8 @@ message ReleaseSpec {
   repeated string system_applications = 6;
 
   // User applications (business logic)
-  repeated ApplicationConfig applications = 7;
+  // NOTE: ApplicationConfig has been merged into ApplicationSpec
+  repeated plexspaces.application.v1.ApplicationSpec applications = 7;
 
   // Environment variables for all applications
   map<string, string> env = 8;
@@ -106,19 +108,6 @@ message NodeConfig {
   // Cluster seed nodes for discovery
   // e.g., ["node1.cluster.local:8000", "node2.cluster.local:8000"]
   repeated string cluster_seed_nodes = 3;
-
-  // Default tenant ID for this node
-  //
-  // Used when auth is disabled or when creating actors from embedded applications.
-  // If not set and auth is disabled, will use "default".
-  // If auth is enabled and tenant_id is not provided, will error.
-  string default_tenant_id = 4;
-
-  // Default namespace for this node
-  //
-  // Used when namespace is not specified in requests.
-  // Defaults to "default" if not set.
-  string default_namespace = 5;
 
   // Cluster name for grouping nodes that share UDP/ZeroMQ channels
   //
@@ -159,6 +148,24 @@ message NodeConfig {
   // If not set, derived from listen_addr. Should be externally reachable.
   // Example: "http://node1.example.com:8000"
   string grpc_address = 21;
+
+  // ==================== WASM AUTO-DEPLOY CONFIGURATION ====================
+
+  // Directory containing WASM applications to auto-deploy on startup
+  //
+  // Structure: wasm_apps/<app-name>/app.wasm (required) + app-config.toml (optional)
+  // Each subdirectory is deployed as a separate application.
+  // If empty, no auto-deploy happens (default behavior).
+  //
+  // Environment variable: PLEXSPACES_WASM_APPS_DIR (takes precedence over config)
+  // Example: "./wasm_apps" or "/opt/plexspaces/apps"
+  string wasm_apps_directory = 22 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Directory containing WASM applications to auto-deploy on startup. Each subdirectory should contain app.wasm (required) and optionally app-config.toml. If empty, no auto-deploy happens. Can be overridden by PLEXSPACES_WASM_APPS_DIR env var."
+      default: ""
+      example: "\"./wasm_apps\""
+    }
+  ];
 }
 
 // Node registry configuration
@@ -623,16 +630,12 @@ message SecurityConfig {
   // Keys are service-scoped (not user-scoped).
   repeated plexspaces.security.v1.ApiKey api_keys = 4;
 
-  // Allow disabling auth for local testing (default: false)
+  // Disable authentication (default: false)
   //
-  // Security: Only set to true in development/test environments.
-  // Production should always have auth enabled.
-  bool allow_disable_auth = 5;
-
-  // Disable authentication (only if allow_disable_auth = true)
-  //
-  // Security: Only for integration tests. Never use in production.
-  bool disable_auth = 6;
+  // Security: Only for integration tests and local development.
+  // Can be enabled via PLEXSPACES_DISABLE_AUTH env variable or this config.
+  // Never use in production - always keep auth enabled.
+  bool disable_auth = 5;
 }
 
 // Application configuration (in release)

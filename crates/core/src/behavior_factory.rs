@@ -53,7 +53,6 @@
 //! - **Error Handling**: Returns `BehaviorFactoryError` for unknown modules or creation failures
 
 use crate::Actor;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;

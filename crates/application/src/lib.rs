@@ -34,7 +34,6 @@
 //! - This crate provides the management and controller implementations
 //! - Uses proto-generated types from `plexspaces_proto`
 
-use std::sync::Arc;
 
 // Application trait is defined in this crate (application_trait.rs)
 pub mod application_trait;
@@ -47,11 +46,13 @@ pub use application_manager::ApplicationManagerImpl;
 // Type alias for convenience (ApplicationManagerImpl implements ApplicationManager trait)
 pub type ApplicationManager = ApplicationManagerImpl;
 pub mod controller;
-pub mod supervisor_builder;
 
 // Re-export main types (ApplicationManager is the type alias above)
 pub use controller::ApplicationController;
-pub use supervisor_builder::SupervisorBuilder;
+
+// SupervisorBuilder is now in plexspaces-actor crate
+// Re-export for backward compatibility
+pub use plexspaces_actor::ProtoSupervisorBuilder as SupervisorBuilder;
 
 // Application implementations
 pub mod wasm_application;
@@ -69,7 +70,6 @@ pub use application_manager_ext::ApplicationManagerExt;
 pub use plexspaces_proto::application::v1::{
     ApplicationRuntimeState, ApplicationSpec, ApplicationStatus, ApplicationType,
 };
-pub use plexspaces_proto::node::v1::ApplicationConfig;
 pub use plexspaces_proto::v1::application::{ApplicationState, ApplicationStatistics, HealthStatus, ShutdownStrategy};
 
 // ApplicationManager is NOT registered in ServiceLocator.

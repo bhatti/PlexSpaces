@@ -1,0 +1,48 @@
+// PlexSpaces Simple Actor Interface
+//
+// Ultra-simplified for maximum Python componentize-py compatibility.
+// Uses ONLY strings to completely avoid PyObject_SetItem lifting issues.
+//
+// Design: All complex data passed as JSON strings.
+// No records, no options, no lists - just primitives and strings.
+
+package plexspaces:simple-actor@0.1.0;
+
+/// Ultra-minimal actor interface using only strings
+interface actor {
+    /// Initialize with JSON config
+    /// Returns empty string on success, or error message on failure
+    init: func(config-json: string) -> string;
+    
+    /// Handle message
+    /// from-actor: sender ID
+    /// msg-type: message type (e.g., "call", "cast", "get_state")  
+    /// payload-json: JSON message content
+    /// Returns: JSON response, or "ERROR:message" on failure
+    handle: func(from-actor: string, msg-type: string, payload-json: string) -> string;
+    
+    /// Get state as JSON
+    get-state: func() -> string;
+    
+    /// Set state from JSON
+    /// Returns empty string on success, or error message
+    set-state: func(state-json: string) -> string;
+}
+
+/// Minimal host interface  
+interface host {
+    /// Send message to another actor
+    /// Returns empty string on success, or error message
+    send: func(to: string, msg-type: string, payload-json: string) -> string;
+    
+    /// Log a message
+    log: func(level: string, message: string);
+    
+    /// Get timestamp in milliseconds
+    now-ms: func() -> u64;
+}
+
+world actor-world {
+    import host;
+    export actor;
+}

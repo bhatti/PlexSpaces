@@ -367,32 +367,24 @@ impl DynamoDBWorkflowStorage {
 
     /// Create composite partition key for tenant isolation.
     fn composite_key(ctx: &RequestContext, entity_id: &str) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
+        let tenant_id = ctx.tenant_id();
+        // For admin/internal contexts with empty namespace, skip namespace in key
+        if ctx.should_skip_namespace_filter() {
+            format!("{}#{}", tenant_id, entity_id)
         } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-        format!("{}#{}#{}", tenant_id, namespace, entity_id)
+            format!("{}#{}#{}", tenant_id, ctx.namespace(), entity_id)
+        }
     }
 
     /// Create tenant_namespace key for GSI.
     fn tenant_namespace_key(ctx: &RequestContext) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
+        let tenant_id = ctx.tenant_id();
+        // For admin/internal contexts with empty namespace, use just tenant_id
+        if ctx.should_skip_namespace_filter() {
+            tenant_id.to_string()
         } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-        format!("{}#{}", tenant_id, namespace)
+            format!("{}#{}", tenant_id, ctx.namespace())
+        }
     }
 
     /// Ensure definitions table exists.
@@ -1202,10 +1194,15 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                 Ok(result) => {
                     for item in result.items() {
                         // Check tenant isolation
+                        // For admin/internal with empty namespace, match tenant_id only
                         if let Some(pk_attr) = item.get("pk") {
                             if let Ok(pk) = pk_attr.as_s() {
-                                if !pk.starts_with(&format!("{}#", tenant_namespace)) {
-                                    continue; // Skip items from other tenants
+                                if ctx.should_skip_namespace_filter() {
+                                    if !pk.starts_with(&format!("{}#", ctx.tenant_id())) {
+                                        continue; // Skip items from other tenants
+                                    }
+                                } else if !pk.starts_with(&format!("{}#", tenant_namespace)) {
+                                    continue; // Skip items from other tenants/namespaces
                                 }
                             }
                         }

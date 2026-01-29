@@ -47,11 +47,8 @@ pub use plexspaces_persistence as journal; // Pillar 3: Durable execution
 pub use plexspaces_actor::supervisor as supervision; // Pillar 2: Fault tolerance (merged into actor crate)
 pub use plexspaces_tuplespace as tuplespace; // Pillar 1: Universal coordination // Storage backend for registry and coordination
 
-// Testing infrastructure for multi-environment support
-pub mod testing;
-
-// Release management (Erlang/OTP-inspired)
-pub mod release;
+// Re-export release parser from common crate
+pub use plexspaces_common::release_parser as release;
 
 // Re-export proto definitions from the proto crate (if available)
 pub use plexspaces_proto as proto;

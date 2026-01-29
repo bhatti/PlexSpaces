@@ -254,9 +254,9 @@ pub use v1::actor::{
 
 // Re-export v1 tuplespace service for convenience
 pub use v1::tuplespace::{
-    tuple_plex_space_service_client::TuplePlexSpaceServiceClient,
-    tuple_plex_space_service_server::TuplePlexSpaceService,
-    tuple_plex_space_service_server::TuplePlexSpaceServiceServer,
+    tuple_space_service_client::TupleSpaceServiceClient,
+    tuple_space_service_server::TupleSpaceService,
+    tuple_space_service_server::TupleSpaceServiceServer,
 };
 
 // Re-export v1 process groups types and service for convenience

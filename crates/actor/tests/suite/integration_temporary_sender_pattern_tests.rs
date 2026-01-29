@@ -259,6 +259,7 @@ async fn register_test_actor(
     use plexspaces_core::MessageSender;
     let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         actor_id.clone(),
+        "system".to_string(),
         mailbox,
         service_locator,
     ));
@@ -318,6 +319,7 @@ impl GenServer for ForwarderActor {
         let node_id = self.target_actor_id.split('@').nth(1).unwrap_or("unknown").to_string();
         let target_ref = ActorRef::remote(
             self.target_actor_id.clone(),
+            ctx.namespace.clone(),
             node_id,
             ctx.service_locator.clone(),
         );
@@ -494,6 +496,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
+        "default".to_string(),
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
     ));
@@ -613,6 +616,7 @@ async fn test_chained_asks_multi_node() {
     let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
+        "default".to_string(),
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
     ));
@@ -730,6 +734,7 @@ async fn test_concurrent_asks_multi_node() {
     let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
+        "default".to_string(),
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
     ));
@@ -781,6 +786,7 @@ async fn test_concurrent_asks_multi_node() {
     // Create ActorRef for remote counter using local_node_id (triggers "local via remote" path)
     let counter_ref = ActorRef::remote(
         counter_id.clone(),
+        "default".to_string(),
         local_node_id.to_string(), // Matches local_node_id, so "local via remote" path is used
         node1_service_locator.clone(),
     );

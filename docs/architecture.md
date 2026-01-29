@@ -351,10 +351,19 @@ Composable capabilities that extend actor behavior at runtime:
 - **DurabilityFacet**: Automatic persistence and recovery (Restate-inspired)
 - **MobilityFacet**: Actor migration between nodes
 
-**Capability Facets**:
+**Capability Facets** (Message Interception Pattern):
+- **LockFacet**: Distributed lock coordination (task queues, resource coordination, leader election)
+- **ProcessGroupFacet**: Distributed pub/sub and group messaging (Erlang pg2-style)
+- **RegistryFacet**: Service discovery and object registration
 - **HttpClientFacet**: HTTP client for outbound requests
 - **KeyValueFacet**: Key-value store access
 - **BlobStorageFacet**: Blob storage access
+
+**Capability Facet Design**:
+- Facets intercept messages with specific types (e.g., `"acquire_lock"`, `"join_group"`, `"register_object"`)
+- Facets use real backend services from ServiceLocator (configured via node-config/runtimeconfig, not hardcoded)
+- Works for both Rust and WASM actors via message interception
+- Actor's `handle()` method is never called for intercepted messages
 
 **Timer/Reminder Facets**:
 - **TimerFacet**: Scheduled tasks (one-shot and periodic)
@@ -570,6 +579,7 @@ Lightweight, location-transparent handle to an actor:
 ```rust
 pub struct ActorRef {
     actor_id: ActorId,
+    namespace: String,      // Source of truth for namespace (from app/actor)
     location: ActorLocation,
     service_locator: Arc<ServiceLocator>,
 }
@@ -579,6 +589,13 @@ pub struct ActorRef {
 - `tell(message)` - Fire-and-forget messaging
 - `ask(message, timeout)` - Request-reply messaging
 - `actor_id()` - Get actor identifier
+- `namespace()` - Get actor's namespace
+
+**Multi-tenancy**:
+```rust
+// Get RequestContext with tenant from auth and namespace from ActorRef
+let ctx = actor_ref.get_request_context(tenant_id);
+```
 
 ### ActorContext
 
@@ -786,7 +803,7 @@ POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
 PUT  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
 DELETE /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
 
-# Alternative paths without tenant_id (defaults to "default")
+# Alternative paths without tenant_id (uses default_tenant_id from node config)
 GET  /api/v1/actors/{namespace}/{actor_type}?param1=value1&param2=value2
 POST /api/v1/actors/{namespace}/{actor_type}
 PUT  /api/v1/actors/{namespace}/{actor_type}
@@ -919,15 +936,40 @@ Ready for AWS Lambda Function URLs:
 3. Route `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}` to Lambda
 4. Automatic scaling based on request volume
 
-### Multi-Tenancy
+### Multi-Tenancy Architecture
 
-- **Tenant Isolation**: All actors scoped by `tenant_id` (defaults to "default" if not provided)
-- **Namespace Isolation**: Actors organized by namespace within tenant (defaults to "default" if not provided)
-- **Lookup Key**: `(tenant_id, namespace, actor_type)` for efficient O(1) lookup
-- **JWT Authentication**: Extract `tenant_id` from JWT claims
-- **Access Control**: Verify JWT `tenant_id` matches path `tenant_id`
-- **Default Tenant**: "default" when not provided in path or when no authentication provided
-- **Default Namespace**: "default" when not provided in path
+PlexSpaces implements **two-level tenant isolation**:
+
+1. **Tenant-id** (Primary isolation)
+   - **Source of Truth**: JWT token (HTTP) or mTLS certificate (gRPC)
+   - **Purpose**: Tenant-level data isolation
+   - **Storage**: Extracted from auth at request time, passed via `RequestContext`
+   - **When empty**: Only allowed when auth is disabled
+
+2. **Namespace** (Sub-tenant isolation)
+   - **Source of Truth**: Application (when actor is part of app) or Actor creation
+   - **Purpose**: Allows tenants to create multiple isolated environments
+   - **Storage**: Stored in `ActorRef.namespace` and `Actor.namespace`
+   - **When empty**: Represents default namespace within tenant
+
+**Key Design Principles:**
+- **Tenant-id** NEVER stored in ActorRef (comes from auth at request time)
+- **Namespace** stored in ActorRef (source of truth is application/actor)
+- **RequestContext** carries both through the call chain
+- **Services** (locks, registry, keyvalue) take namespace as explicit parameter
+
+**Data Flow:**
+```
+Auth (JWT/mTLS) → tenant_id ─┐
+                              ├──→ RequestContext → Service → Repository → Database
+Application/Actor → namespace ┘
+```
+
+- **Lookup Key**: `(tenant_id, namespace, actor_type)` for O(1) actor lookup
+- **JWT Authentication**: Extract `tenant_id` from JWT claims only
+- **Admin/Internal Contexts**: With empty namespace bypass namespace filtering for cross-namespace queries
+
+See [Security Guide](security.md) for comprehensive multi-tenancy documentation.
 
 See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) and [Detailed Design: InvokeActor Service](detailed-design.md#invokeactor-service) for implementation details.
 
@@ -1064,9 +1106,14 @@ let masked = masker.mask("password", sensitive_value);
 
 ### Multi-Tenancy
 
-- Isolation contexts
-- Resource quotas
-- Access control
+PlexSpaces enforces mandatory tenant isolation through:
+
+- **Two-level isolation**: Tenant-id (from auth) + Namespace (from application/actor)
+- **RequestContext**: Carries tenant_id and namespace through entire call chain
+- **Database-level enforcement**: All queries filter by tenant_id and namespace
+- **Resource quotas**: Per-tenant resource limits (CPU, memory, storage)
+
+See [Multi-Tenancy Architecture](#multi-tenancy-architecture) and [Security Guide](security.md) for details.
 
 ### Network Security
 

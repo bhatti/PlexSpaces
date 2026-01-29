@@ -67,7 +67,7 @@ pub use plexspaces_proto::application::v1::{
     ApplicationRuntimeState, ApplicationSpec, ApplicationStatus, ApplicationType,
 };
 pub use plexspaces_proto::node::v1::{
-    ApplicationConfig,
+    ApplicationSpec,
 };
 
 // Sub-modules
@@ -137,7 +137,7 @@ impl ApplicationContext {
     /// ## Arguments
     /// * `config` - Application configuration
     /// * `env` - Environment variables
-    pub fn from_config(config: ApplicationConfig, env: HashMap<String, String>) -> Self {
+    pub fn from_config(config: ApplicationSpec, env: HashMap<String, String>) -> Self {
         let state = ApplicationRuntimeState {
             name: config.name.clone(),
             status: ApplicationStatus::ApplicationStatusLoading.into(),
@@ -292,7 +292,7 @@ mod tests {
     /// Test: Create application context
     #[test]
     fn test_application_context_creation() {
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -317,7 +317,7 @@ mod tests {
     async fn test_application_start() {
         let app = MockApplication::new("test-app");
 
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -343,7 +343,7 @@ mod tests {
     async fn test_application_stop() {
         let app = MockApplication::new("test-app");
 
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -384,7 +384,7 @@ mod tests {
     /// Test: Environment variable access
     #[test]
     fn test_environment_variable_access() {
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),

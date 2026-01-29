@@ -37,9 +37,14 @@
 
 pub mod service_locator;
 pub mod service_wrappers;
+pub mod actor_factory_helpers;
 
 // Re-export ServiceLocatorImpl and related types
-pub use service_locator::{ServiceLocatorImpl, ServiceStorage, request_context_from_grpc_request};
+pub use service_locator::{ServiceLocatorImpl, ServiceStorage};
+/// Single source of truth: RequestContext from gRPC metadata (tenant/namespace propagation).
+pub use plexspaces_core::request_context_from_grpc_request;
+// ActorFactory is now in core crate - use ServiceLocator methods directly:
+// Example: service_locator.get_actor_factory().await
 // Re-export Service trait from core
 pub use plexspaces_core::Service;
 // Re-export ServiceLocator trait from core (trait)
@@ -52,7 +57,6 @@ pub type ServiceLocator = ServiceLocatorImpl;
 
 // Service implementations
 pub mod actor_service;
-pub mod tuplespace_service;
 pub mod blob_service;
 pub mod application_service;
 pub mod tuple_service;
@@ -74,4 +78,7 @@ pub use node_registry::NodeRegistry;
 
 // Re-export NodeServiceImpl for convenience
 pub use node_service::NodeServiceImpl;
+
+// Re-export application deployment helpers for consistent behavior
+pub use application_service::create_default_application_spec;
 

@@ -40,15 +40,23 @@ impl SqliteSchedulingStateStore {
     /// ## Arguments
     /// - `path`: Database file path (use ":memory:" for in-memory database)
     pub async fn new(path: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let connection_string = format!("sqlite:{}", path);
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&format!("sqlite:{}", path))
+            .connect(&connection_string)
             .await?;
 
         // Run migrations
         sqlx::migrate!("./migrations/sqlite")
             .run(&pool)
             .await?;
+
+        tracing::info!(
+            db_path = %path,
+            table = "scheduling_requests",
+            backend = "SQLite",
+            "Scheduler state store initialized"
+        );
 
         Ok(Self { pool })
     }

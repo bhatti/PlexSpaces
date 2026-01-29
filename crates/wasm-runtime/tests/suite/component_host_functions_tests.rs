@@ -141,7 +141,8 @@ mod tests {
         ).await;
         assert!(ask_result.is_err(), "ask should fail when message sender not configured");
         if let Err(e) = ask_result {
-            assert!(!e.message.is_empty(), "error message should not be empty");
+            // actor-error is now a string (JSON), not a record
+            assert!(!e.is_empty(), "error message should not be empty");
         }
     }
 
@@ -473,9 +474,8 @@ mod tests {
 
         assert!(ask_result.is_err());
         if let Err(e) = ask_result {
-            assert!(!e.message.is_empty(), "error message should not be empty");
-            // Error code should be NotImplemented
-            // (We can't easily check the enum value without importing generated types)
+            // actor-error is now a string (JSON), not a record
+            assert!(!e.is_empty(), "error message should not be empty");
         }
     }
 

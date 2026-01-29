@@ -18,9 +18,8 @@
 use crate::api_client::FirecrackerApiClient;
 use crate::error::{FirecrackerError, FirecrackerResult};
 use crate::vm::VmState;
-use plexspaces_core::RequestContext;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// VM registry entry
 #[derive(Debug, Clone)]

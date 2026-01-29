@@ -119,13 +119,13 @@ import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/tuplespace/tuplespace_storage.proto";
 
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/tuplespace/tuplespace;plexspaces_tuplespace_v1";
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/tuplespace;plexspaces_tuplespace_v1";
 option java_package = "com.bhatti.plexspaces.tuplespace.v1";
 option java_multiple_files = true;
 
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpace TuplePlexSpace API";
+    title: "PlexSpace TupleSpace API";
     version: "1.0";
     description: "API for Linda-style tuplespace operations";
   };
@@ -814,8 +814,8 @@ message PostgresBackend {
   string table_name = 2 [(buf.validate.field).string.max_len = 128];
 }
 
-// TuplePlexSpace service
-service TuplePlexSpaceService {
+// TupleSpace service
+service TupleSpaceService {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
     description: "Service for Linda-style tuplespace operations"
   };
@@ -958,7 +958,7 @@ service TuplePlexSpaceService {
       delete: "/api/v1/tuplespace/tuples"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Clear TuplePlexSpace"
+      summary: "Clear TupleSpace"
       description: "Clear all tuples from the tuplespace"
       tags: "Tuples"
     };

@@ -32,11 +32,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use plexspaces_core::actor_context::{
-    ActorService, ChannelService, FacetService, ObjectRegistry, ObjectRegistration, ProcessGroupService, TupleSpaceProvider,
+    ActorService, ChannelService, ProcessGroupService, TupleSpaceProvider,
 };
-use plexspaces_core::{RequestContext, Service};
-use plexspaces_facet::Facet;
-use plexspaces_core::ActorRef;
+use plexspaces_core::Service;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use futures::stream::BoxStream;
@@ -313,7 +311,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         group_name: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.registry
-            .create_group(group_name, ctx.tenant_id(), ctx.namespace())
+            .create_group(ctx, group_name)
             .await
             .map(|_| ())
             .map_err(|e| format!("Failed to create group {}: {}", group_name, e).into())
@@ -339,14 +337,14 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // ProcessGroupRegistry requires group to exist first, so we create it if needed
         // This is a convenience - in production, groups should be created explicitly
-        let _ = self.registry.create_group(group_name, ctx.tenant_id(), ctx.namespace()).await;
+        let _ = self.registry.create_group(ctx, group_name).await;
         
         // Convert actor_id string to ActorId
         use plexspaces_core::ActorId;
         let actor_id = ActorId::from(actor_id.to_string());
         
         self.registry
-            .join_group(group_name, ctx.tenant_id(), ctx.namespace(), &actor_id, topics)
+            .join_group(ctx, group_name, &actor_id, topics)
             .await
             .map_err(|e| format!("Failed to join group {}: {}", group_name, e).into())
     }

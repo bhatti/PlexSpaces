@@ -514,6 +514,37 @@ pub struct CheckpointConfig {
     #[prost(map="string, string", tag="8")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
+// ============================================================================
+// gRPC Service Definition (Proto Behavior)
+// ============================================================================
+
+// / Journal service for distributed journaling
+// /
+// / ## Purpose
+// / Provides gRPC API for remote journal operations (Restate-style distributed journaling).
+// /
+// / ## Why This Exists
+// / - Distributed actors: Actors on different nodes share journal
+// / - Remote replay: Replay journal from remote storage
+// / - Centralized journaling: Dedicated journal service for multiple nodes
+// /
+// / ## Design Notes
+// / - Streaming: ReplayFrom uses streaming for large journals
+// / - Batching: AppendBatch for atomic multi-entry writes
+// / - Statistics: GetStats for observability
+// /
+// / ## Usage
+// / ```rust
+// / // Local journaling (single node)
+// / let storage = PostgresJournalStorage::new(config);
+// / let facet = DurabilityFacet::new_local(storage);
+// /
+// / // Distributed journaling (multi-node)
+// / let client = JournalServiceClient::connect("<http://journal-service:9090">);
+// / let facet = DurabilityFacet::new_remote(client);
+// / ```
+// Note: JournalService gRPC service removed - local journaling implementation retained via JournalStorage trait
+
 // Request/Response messages
 
 /// / Append single journal entry request
@@ -1249,5 +1280,4 @@ impl ExecutionMode {
         }
     }
 }
-include!("plexspaces.journaling.v1.tonic.rs");
 // @@protoc_insertion_point(module)

@@ -32,6 +32,7 @@ syntax = "proto3";
 
 package plexspaces.dashboard.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
@@ -161,13 +162,13 @@ service DashboardService {
 // Dashboard summary request
 message GetSummaryRequest {
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // Filter by node ID (optional)
-  string node_id = 2;
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by cluster ID (optional)
-  string cluster_id = 3;
+  string cluster_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Show data since this timestamp (default: now - 24 hours)
   google.protobuf.Timestamp since = 4;
@@ -205,10 +206,10 @@ message GetSummaryResponse {
 // Get nodes request
 message GetNodesRequest {
   // Filter by tenant ID (optional)
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // Filter by cluster ID (optional)
-  string cluster_id = 2;
+  string cluster_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Pagination
   plexspaces.common.v1.PageRequest page = 3;
@@ -223,7 +224,10 @@ message GetNodesResponse {
 // Get node dashboard request
 message GetNodeDashboardRequest {
   // Node ID (required)
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string node_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Show data since this timestamp (default: now - 24 hours)
   google.protobuf.Timestamp since = 2;
@@ -269,16 +273,16 @@ message NodeSummaryMetrics {
 // Get applications request
 message GetApplicationsRequest {
   // Filter by node ID (optional)
-  string node_id = 1;
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2;
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 3;
+  string namespace = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by application name/ID pattern (optional)
-  string name_pattern = 4;
+  string name_pattern = 4 [(buf.validate.field).string.max_len = 512];
 
   // Pagination
   plexspaces.common.v1.PageRequest page = 5;
@@ -293,25 +297,25 @@ message GetApplicationsResponse {
 // Get actors request
 message GetActorsRequest {
   // Filter by node ID (optional)
-  string node_id = 1;
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2;
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 3;
+  string namespace = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by actor ID pattern (optional)
-  string actor_id_pattern = 4;
+  string actor_id_pattern = 4 [(buf.validate.field).string.max_len = 512];
 
   // Filter by actor group (optional)
-  string actor_group = 5;
+  string actor_group = 5 [(buf.validate.field).string.max_len = 255];
 
   // Filter by actor type (optional)
-  string actor_type = 6;
+  string actor_type = 6 [(buf.validate.field).string.max_len = 255];
 
   // Filter by status: "running" or "terminated" (optional)
-  string status = 7;
+  string status = 7 [(buf.validate.field).string.max_len = 50];
 
   // Show data since this timestamp (default: now - 24 hours)
   google.protobuf.Timestamp since = 8;
@@ -372,13 +376,13 @@ message GetActorsResponse {
 // Get workflows request
 message GetWorkflowsRequest {
   // Filter by node ID (optional, empty = all nodes)
-  string node_id = 1;
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2;
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by definition ID (optional)
-  string definition_id = 3;
+  string definition_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by status (optional)
   plexspaces.workflow.v1.ExecutionStatus status = 4;
@@ -412,7 +416,7 @@ message GetWorkflowsResponse {
 // Get dependency health request
 message GetDependencyHealthRequest {
   // Filter by node ID (optional, empty = all nodes)
-  string node_id = 1;
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // Include non-critical dependencies (default: true)
   bool include_non_critical = 2;

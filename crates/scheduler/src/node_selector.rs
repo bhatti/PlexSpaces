@@ -31,7 +31,7 @@
 //! - **Placement Preferences**: Preferred nodes get higher scores, avoided nodes are excluded
 
 use plexspaces_proto::{
-    v1::actor::{ActorResourceRequirements, PlacementPreferences, PlacementStrategy},
+    v1::actor::{ActorResourceRequirements, PlacementPreferences},
     common::v1::ResourceSpec,
     node::v1::NodeCapacity,
 };
@@ -193,7 +193,7 @@ impl NodeSelector {
         placement: &PlacementPreferences,
     ) -> Vec<(&'a String, &'a NodeCapacity)> {
         // First, exclude nodes in avoid_node_ids (anti-affinity)
-        let mut filtered: Vec<(&'a String, &'a NodeCapacity)> = candidates
+        let filtered: Vec<(&'a String, &'a NodeCapacity)> = candidates
             .into_iter()
             .filter(|(node_id, _)| !placement.avoid_node_ids.contains(node_id))
             .collect();
@@ -273,6 +273,7 @@ impl NodeSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_proto::v1::actor::PlacementStrategy;
 
     fn create_test_node_capacity(
         _node_id: &str,

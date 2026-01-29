@@ -58,6 +58,7 @@ pub async fn lookup_actor_ref(
                     // This ensures lazy activation works correctly
                     Ok(Some(ActorRef::remote(
                         actor_id.clone(),
+                        "".to_string(), // test namespace
                         node.id().as_str().to_string(),
                         node.service_locator().clone(),
                     )))
@@ -70,6 +71,7 @@ pub async fn lookup_actor_ref(
                             let mailbox = actor.mailbox().clone();
                             Ok(Some(ActorRef::local(
                                 actor_id.clone(),
+                                "".to_string(), // test namespace
                                 mailbox,
                                 node.service_locator().clone(),
                             )))
@@ -77,6 +79,7 @@ pub async fn lookup_actor_ref(
                             // Can't get mailbox - return remote ActorRef as fallback
                             Ok(Some(ActorRef::remote(
                                 actor_id.clone(),
+                                "".to_string(), // test namespace
                                 node.id().as_str().to_string(),
                                 node.service_locator().clone(),
                             )))
@@ -85,6 +88,7 @@ pub async fn lookup_actor_ref(
                         // No actor instance but MessageSender exists - return remote ActorRef
                         Ok(Some(ActorRef::remote(
                             actor_id.clone(),
+                            "".to_string(), // test namespace
                             node.id().as_str().to_string(),
                             node.service_locator().clone(),
                         )))
@@ -97,6 +101,7 @@ pub async fn lookup_actor_ref(
             // Remote actor
             Ok(Some(ActorRef::remote(
                 actor_id.clone(),
+                "".to_string(), // test namespace
                 routing_info.node_id,
                 node.service_locator().clone(),
             )))
@@ -105,6 +110,7 @@ pub async fn lookup_actor_ref(
         // Actor exists but no routing info - assume local
         Ok(Some(ActorRef::remote(
             actor_id.clone(),
+            "".to_string(), // test namespace
             node.id().as_str().to_string(),
             node.service_locator().clone(),
         )))
@@ -181,13 +187,11 @@ pub async fn activate_virtual_actor(
     node: &Node,
     actor_id: &ActorId,
 ) -> Result<ActorRef, plexspaces_node::NodeError> {
-    use plexspaces_actor::{ActorFactory, get_actor_factory};
-    
     // Normalize actor ID
     let actor_id = normalize_actor_id(node, actor_id);
     
     // Get ActorFactory from ServiceLocator
-    let actor_factory: Arc<dyn ActorFactory> = get_actor_factory(node.service_locator().as_ref()).await
+    let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = node.service_locator().get_actor_factory().await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorFactory not found".to_string()))?;
     
     // Use ActorFactory to activate
@@ -209,15 +213,13 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<plexspaces_actor::Actor, plexspaces_node::NodeError>>,
 {
-    use plexspaces_actor::{ActorFactory, get_actor_factory};
-    
     // Normalize actor ID
     let actor_id = normalize_actor_id(node, &actor_id);
     
     // Get ActorRegistry and ActorFactory from ServiceLocator
     let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string()))?;
-    let actor_factory_impl: Arc<dyn ActorFactory> = get_actor_factory(node.service_locator().as_ref()).await
+    let actor_factory_trait: Arc<dyn plexspaces_core::ActorFactory> = node.service_locator().get_actor_factory().await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorFactory not found".to_string()))?;
     
     // Check if actor already exists (activated or virtual)
@@ -249,14 +251,18 @@ where
                     plexspaces_core::BehaviorType::Custom(ref s) => Some(s.clone()),
                 };
                 
-                // Use spawn_built_actor to preserve the built actor with its behavior and facets
-                // Note: spawn_built_actor normalizes the actor ID internally, so we need to get
-                // the actual registered ID after spawning
+                // Use spawn_actor to create the actor
+                // Note: spawn_actor normalizes the actor ID internally
                 let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
-                let _message_sender = actor_factory_impl.spawn_built_actor(
+                let actor_type_str = actor_type.unwrap_or_else(|| "GenServer".to_string());
+                let _message_sender = actor_factory_trait.spawn_actor(
                     &ctx,
-                    std::sync::Arc::new(actor),
-                    actor_type,
+                    &actor_id,
+                    &actor_type_str,
+                    vec![],
+                    None,
+                    std::collections::HashMap::new(),
+                    vec![],
                 ).await
                     .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor: {}", e)))?;
                 
@@ -288,13 +294,18 @@ where
                 plexspaces_core::BehaviorType::Custom(ref s) => Some(s.clone()),
             };
             
-            // Use spawn_built_actor to preserve the built actor with its behavior and facets
-            // Note: spawn_built_actor normalizes the actor ID internally
+            // Use spawn_actor to create the actor
+            // Note: spawn_actor normalizes the actor ID internally
             let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
-            let _message_sender = actor_factory_impl.spawn_built_actor(
+            let actor_type_str = actor_type.unwrap_or_else(|| "GenServer".to_string());
+            let _message_sender = actor_factory_trait.spawn_actor(
                 &ctx,
-                std::sync::Arc::new(actor),
-                actor_type,
+                &actor_id,
+                &actor_type_str,
+                vec![],
+                None,
+                std::collections::HashMap::new(),
+                vec![],
             ).await
                 .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor: {}", e)))?;
             
@@ -387,33 +398,34 @@ pub async fn spawn_actor_helper(
     node: &Node,
     actor: plexspaces_actor::Actor,
 ) -> Result<ActorRef, plexspaces_node::NodeError> {
-    use plexspaces_actor::{ActorFactory, get_actor_factory};
-    
     // Get ActorFactory from ServiceLocator
-    let actor_factory: Arc<dyn ActorFactory> = get_actor_factory(node.service_locator().as_ref()).await
+    let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = node.service_locator().get_actor_factory().await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError(
             "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string()
         ))?;
     
-    // Extract actor_id and actor_type before wrapping in Arc
+    // Extract actor_id and actor_type before spawning
     let actor_id = actor.id().clone();
     let behavior_type = actor.behavior().read().await.behavior_type();
-    let actor_type = match behavior_type {
-        plexspaces_core::BehaviorType::GenServer => Some("GenServer".to_string()),
-        plexspaces_core::BehaviorType::GenEvent => Some("GenEvent".to_string()),
-        plexspaces_core::BehaviorType::GenStateMachine => Some("GenStateMachine".to_string()),
-        plexspaces_core::BehaviorType::Workflow => Some("Workflow".to_string()),
-        plexspaces_core::BehaviorType::Custom(ref s) => Some(s.clone()),
+    let actor_type_str = match behavior_type {
+        plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
+        plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
+        plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+        plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+        plexspaces_core::BehaviorType::Custom(ref s) => s.clone(),
     };
     
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     
-    // Use spawn_built_actor to preserve facets attached to the actor
-    let actor_arc = Arc::new(actor);
-    let _message_sender = actor_factory.spawn_built_actor(
+    // Use spawn_actor to create the actor
+    let _message_sender = actor_factory.spawn_actor(
         &ctx,
-        actor_arc,
-        actor_type,
+        &actor_id,
+        &actor_type_str,
+        vec![],
+        None,
+        std::collections::HashMap::new(),
+        vec![],
     ).await
         .map_err(|e| plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor via ActorFactory: {}", e)))?;
     

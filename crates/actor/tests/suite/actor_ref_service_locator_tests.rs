@@ -126,6 +126,7 @@ async fn test_actor_ref_remote_uses_service_locator() {
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
         "test-actor@remote-node",
+        "default",
         "remote-node",
         service_locator.clone(),
     );
@@ -168,6 +169,7 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
         "test-actor@remote-node",
+        "default",
         "remote-node",
         service_locator.clone(),
     );
@@ -229,6 +231,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
         "test-actor@remote-node",
+        "default",
         "remote-node",
         service_locator.clone(),
     );
@@ -263,7 +266,7 @@ async fn test_actor_ref_local_unchanged() {
     let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let actor_ref = ActorRef::local("test-actor", mailbox.clone(), service_locator.clone());
+    let actor_ref = ActorRef::local("test-actor", "test", mailbox.clone(), service_locator.clone());
     
     assert!(actor_ref.is_local());
     assert_eq!(actor_ref.id(), "test-actor");

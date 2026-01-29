@@ -483,69 +483,7 @@ message ScatterGatherStats {
 // See plexspaces.actor.v1.PartitionStrategy
 // See plexspaces.actor.v1.RebalancePolicy
 
-// Actor group service
-service ActorGroupService {
-  // Create an actor group with N shards
-  rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actor-groups"
-      body: "*"
-    };
-  }
-
-  // Delete an actor group and all shards
-  rpc DeleteGroup(DeleteGroupRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/actor-groups/{group_id}"
-    };
-  }
-
-  // Get group information
-  rpc GetGroup(GetGroupRequest) returns (GetGroupResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/actor-groups/{group_id}"
-    };
-  }
-
-  // List all actor groups
-  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/actor-groups"
-    };
-  }
-
-  // Scale group (add or remove shards)
-  rpc ScaleGroup(ScaleGroupRequest) returns (ScaleGroupResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actor-groups/{group_id}:scale"
-      body: "*"
-    };
-  }
-
-  // Send message to specific shard based on partition key
-  rpc SendToShard(SendToShardRequest) returns (SendToShardResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actor-groups/{group_id}/shards:send"
-      body: "*"
-    };
-  }
-
-  // Scatter-gather query across all shards
-  rpc ScatterGather(ScatterGatherQuery) returns (ScatterGatherResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actor-groups/{group_id}:scatterGather"
-      body: "*"
-    };
-  }
-
-  // Stream responses as shards respond (for low-latency queries)
-  rpc ScatterGatherStream(ScatterGatherQuery) returns (stream ShardResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actor-groups/{group_id}:scatterGatherStream"
-      body: "*"
-    };
-  }
-}
+// Note: ActorGroupService gRPC service removed - message types retained for future implementation
 
 message CreateGroupRequest {
   // Group identifier

@@ -21,7 +21,6 @@
 //! Provides a way to run blob HTTP endpoints alongside the gRPC server.
 //! Uses Axum router for blob HTTP endpoints and integrates with tonic server.
 
-use axum::Router;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;

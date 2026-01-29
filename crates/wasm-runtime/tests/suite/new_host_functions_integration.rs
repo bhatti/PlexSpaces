@@ -202,7 +202,8 @@ mod tests {
         let result = kv.get(test_context("", ""), "test-key".to_string()).await;
         assert!(result.is_err(), "get should fail when KeyValueStore not configured");
         let error = result.unwrap_err();
-        assert!(error.message.contains("not configured"));
+        // actor-error is now a string (JSON), not a record
+        assert!(error.contains("not configured"), "Error should mention not configured, got: {}", error);
     }
 
     #[tokio::test]

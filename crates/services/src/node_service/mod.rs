@@ -43,7 +43,7 @@ use futures::Stream;
 use prost_types::Timestamp;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use plexspaces_core::{RequestContext, ServiceLocator, mask_release_spec};
 use plexspaces_proto::node::v1::{
@@ -57,7 +57,7 @@ use plexspaces_proto::node::v1::{
     UnregisterNodeResponse,
 };
 
-use crate::service_locator::request_context_from_grpc_request;
+use crate::request_context_from_grpc_request;
 
 /// Metrics tracking for NodeService
 struct NodeServiceMetrics {
@@ -635,7 +635,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         metrics::counter!("plexspaces_swim_pings_received").increment(1);
 
         // Get our incarnation from SWIM protocol
-        let incarnation = if let Some(node_registry) = self.service_locator.get_node_registry().await {
+        let incarnation = if let Some(_node_registry) = self.service_locator.get_node_registry().await {
             // Get incarnation from local SWIM state - for now return 0
             // In production this would query the SWIM protocol state
             0u64

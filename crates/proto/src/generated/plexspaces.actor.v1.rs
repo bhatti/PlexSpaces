@@ -44,11 +44,6 @@ pub struct Actor {
     /// Examples: virtual_actor, otp_genserver, otp_supervisor, durable_execution, workflow
     #[prost(message, repeated, tag="10")]
     pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
-    /// MULTI-TENANCY: Isolation context for tenant separation and security
-    /// Enables hosting multiple customers/organizations on shared infrastructure
-    /// while maintaining strict resource and security boundaries
-    #[prost(message, optional, tag="11")]
-    pub isolation: ::core::option::Option<super::super::common::v1::IsolationContext>,
     /// Schema version of actor_state serialization for format evolution
     ///
     /// ## Purpose
@@ -160,6 +155,11 @@ pub struct Actor {
     /// - Contains error message from actor crash or failure
     #[prost(string, tag="13")]
     pub error_message: ::prost::alloc::string::String,
+    /// Namespace for this actor's data isolation.
+    /// When actor is part of an application deployment, namespace must match application namespace.
+    /// Source of truth for namespace is the application (when deploying) or actor creation request.
+    #[prost(string, tag="14")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Exit reason details (for EXIT_REASON_ERROR and EXIT_REASON_LINKED)
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -570,6 +570,14 @@ pub struct SpawnActorRequest {
     /// Examples: {"env": "prod", "team": "platform", "version": "v2"}
     #[prost(map="string, string", tag="5")]
     pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Optional facets to attach during spawn
+    /// Facets are attached in priority order (high priority first) before actor.init() is called
+    /// Examples:
+    /// - VirtualActorFacet: Makes actor virtual (Orleans-style grain)
+    /// - DurabilityFacet: Enables state persistence
+    /// - MetricsFacet: Adds metrics collection
+    #[prost(message, repeated, tag="6")]
+    pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
 }
 /// Response from SpawnActor
 ///

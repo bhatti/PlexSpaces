@@ -51,7 +51,7 @@ pub struct ObjectRegistration {
     /// Format: "<http://host:port"> or "<https://host:port">
     /// Examples:
     /// - Actor: "<http://node1:8000"> (ActorService endpoint)
-    /// - TupleSpace: "<http://ts-node:8001"> (TuplePlexSpaceService endpoint)
+    /// - TupleSpace: "<http://ts-node:8001"> (TupleSpaceService endpoint)
     /// - Service: "<http://order-pod:50051"> (Custom service endpoint)
     #[prost(string, tag="8")]
     pub grpc_address: ::prost::alloc::string::String,
@@ -230,6 +230,8 @@ pub struct DiscoverRequest {
     pub health_status: i32,
     /// Filter by minimum health age (exclude stale objects)
     /// Example: last_heartbeat < (now - max_age) → excluded
+    ///
+    /// Max 7 days
     #[prost(message, optional, tag="9")]
     pub max_heartbeat_age: ::core::option::Option<::prost_types::Duration>,
     // ==================== PAGINATION ====================

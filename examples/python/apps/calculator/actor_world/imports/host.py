@@ -1,0 +1,32 @@
+"""
+Minimal host interface
+"""
+from typing import TypeVar, Generic, Union, Optional, Protocol, Tuple, List, Any, Self
+from enum import Flag, Enum, auto
+from dataclasses import dataclass
+from abc import abstractmethod
+import weakref
+
+from ..types import Result, Ok, Err, Some
+
+
+
+def send(to: str, msg_type: str, payload_json: str) -> str:
+    """
+    Send message to another actor
+    Returns empty string on success, or error message
+    """
+    raise NotImplementedError
+
+def log(level: str, message: str) -> None:
+    """
+    Log a message
+    """
+    raise NotImplementedError
+
+def now_ms() -> int:
+    """
+    Get timestamp in milliseconds
+    """
+    raise NotImplementedError
+

@@ -53,7 +53,6 @@ async fn main() {
 }
 
 #[test]
-#[ignore = "Requires manual verification"]
 fn manual_signal_test_instructions() {
     // This test exists to document how to manually test signal handling
     println!("\n=== Manual Signal Handling Test ===");

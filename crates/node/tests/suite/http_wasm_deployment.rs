@@ -290,7 +290,6 @@ async fn test_http_deploy_wasm_application_small() {
 }
 
 #[tokio::test]
-#[ignore] // Requires WASM file to be built first
 async fn test_http_deploy_wasm_application() {
     if !calculator_wasm_exists() {
         eprintln!("Skipping test: calculator_actor.wasm not found.");
@@ -412,7 +411,6 @@ async fn test_http_deploy_wasm_application() {
 }
 
 #[tokio::test]
-#[ignore] // Requires WASM file to be built first
 async fn test_http_deploy_wasm_size_limit() {
     // Start node
     let node = Arc::new(NodeBuilder::new("test-node-http-wasm-size".to_string())

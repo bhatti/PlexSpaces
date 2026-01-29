@@ -313,34 +313,24 @@ impl DynamoDBStore {
         }
     }
 
-    /// Create composite partition key.
+    /// Create composite partition key. Aligns with main keyvalue DDB: no hardcoded defaults;
+    /// for admin/internal contexts with empty namespace, omit namespace from key.
     fn composite_key(ctx: &RequestContext, key: &str) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
+        let tenant_id = ctx.tenant_id();
+        if ctx.should_skip_namespace_filter() {
+            format!("{}#{}", tenant_id, key)
         } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-        format!("{}#{}#{}", tenant_id, namespace, key)
+            format!("{}#{}#{}", tenant_id, ctx.namespace(), key)
+        }
     }
 
-    /// Create tenant_namespace key for GSI.
+    /// Create tenant_namespace key for GSI. For admin/internal with empty namespace, use tenant_id only.
     fn tenant_namespace_key(ctx: &RequestContext) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
+        if ctx.should_skip_namespace_filter() {
+            ctx.tenant_id().to_string()
         } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-        format!("{}#{}", tenant_id, namespace)
+            format!("{}#{}", ctx.tenant_id(), ctx.namespace())
+        }
     }
 
     /// Extract prefix from key.
@@ -361,7 +351,7 @@ impl DynamoDBStore {
         }
     }
 
-    /// Convert key-value to DynamoDB item.
+    /// Convert key-value to DynamoDB item. Uses ctx tenant_id/namespace as-is (empty allowed).
     fn kv_to_item(
         &self,
         ctx: &RequestContext,
@@ -369,17 +359,6 @@ impl DynamoDBStore {
         value: &[u8],
         expires_at_secs: Option<i64>,
     ) -> HashMap<String, AttributeValue> {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
-        } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-
         let pk = Self::composite_key(ctx, key);
         let tenant_namespace = Self::tenant_namespace_key(ctx);
         let prefix = Self::extract_prefix(key);

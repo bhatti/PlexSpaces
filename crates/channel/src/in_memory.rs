@@ -22,7 +22,7 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelStats, DeliveryGuarantee,
+    channel_config, ChannelBackend, ChannelConfig, ChannelStats,
 };
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
@@ -347,21 +347,29 @@ impl Channel for InMemoryChannel {
     }
 
     async fn ack(&self, message_id: &str) -> ChannelResult<()> {
-        // In-memory channels don't support ack/nack - messages are fire-and-forget
-        // Once delivered, they're gone and can't be acknowledged
-        // Return MessageNotFound to indicate the message is not available for ack
-        // Note: This is expected behavior, not an error, so we don't log it as an error
-        // The caller (actor message processing) will handle this gracefully
-        Err(ChannelError::MessageNotFound(message_id.to_string()))
+        // In-memory channels don't track individual messages for ack/nack
+        // Messages are fire-and-forget - once delivered, they're gone
+        // Return Ok(()) as a no-op since there's nothing to acknowledge
+        // This avoids error handling complexity in callers for expected behavior
+        tracing::trace!(
+            channel = %self.config.name,
+            message_id = %message_id,
+            "In-memory channel ack (no-op)"
+        );
+        Ok(())
     }
 
     async fn nack(&self, message_id: &str, _requeue: bool) -> ChannelResult<()> {
-        // In-memory channels don't support ack/nack - messages are fire-and-forget
-        // Once delivered, they're gone and can't be nacked or requeued
-        // Return MessageNotFound to indicate the message is not available for nack
-        // Note: This is expected behavior, not an error, so we don't log it as an error
-        // The caller (actor message processing) will handle this gracefully
-        Err(ChannelError::MessageNotFound(message_id.to_string()))
+        // In-memory channels don't track individual messages for ack/nack
+        // Messages are fire-and-forget - once delivered, they're gone
+        // Return Ok(()) as a no-op since there's nothing to nack/requeue
+        // This avoids error handling complexity in callers for expected behavior
+        tracing::trace!(
+            channel = %self.config.name,
+            message_id = %message_id,
+            "In-memory channel nack (no-op)"
+        );
+        Ok(())
     }
 
     async fn get_stats(&self) -> ChannelResult<ChannelStats> {

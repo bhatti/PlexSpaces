@@ -71,6 +71,15 @@ make test-examples
 make test-wasm
 ```
 
+### Testing Examples with and without Auth
+
+Examples and HTTP/gRPC APIs should be tested both with auth disabled and with auth enabled to ensure tenant/namespace handling is correct.
+
+- **Auth disabled** (e.g. `PLEXSPACES_DISABLE_AUTH=1`): `tenant_id` and `namespace` come from node config (`default_tenant_id`, `default_namespace`) or can be empty. No JWT required.
+- **Auth enabled**: `tenant_id` is required (from JWT or request); `namespace` is optional. RequestContext validation rejects empty `tenant_id` when auth is enabled.
+
+Run the server with auth disabled for local/testing, then run example scripts (e.g. registry, task-queue). Run again with auth enabled and valid JWT to verify API behavior.
+
 ### Run Tests with Output
 
 ```bash
@@ -143,14 +152,53 @@ Tests use in-memory implementations:
 - **Messaging**: `MockMessageSender`
 - **Channels**: `MockChannelService`
 
-### Excluded Tests
+### Test Guards for External Services
 
-The following tests are excluded from `make test` (require external services):
+Integration tests that require external services use automatic guard checks that skip
+tests gracefully if the service is not available. This allows `make test` to run all
+tests without failures, while still supporting integration testing when services are running.
+
+**Available Guard Functions** (`plexspaces_common::test_helpers`):
+- `redis_available()` - Redis (localhost:6379)
+- `nats_available()` - NATS (localhost:4222)
+- `kafka_available()` - Kafka (localhost:9092)
+- `postgres_available()` - PostgreSQL (localhost:5432)
+- `dynamodb_local_available()` - DynamoDB Local (localhost:8000)
+- `localstack_available()` / `sqs_simulator_available()` - LocalStack (localhost:4566)
+- `minio_available()` - MinIO/S3 (localhost:9000)
+- `firecracker_available()` - Firecracker binary + kernel + rootfs
+
+**Usage in Tests**:
+```rust
+use plexspaces_common::skip_if_unavailable;
+use plexspaces_common::test_helpers::redis_available;
+
+#[tokio::test]
+async fn test_with_redis() {
+    skip_if_unavailable!(redis_available().await, "Redis");
+    // ... test code that requires Redis
+}
+```
+
+**Running with Services**:
+```bash
+# Start services (e.g., with docker-compose)
+docker-compose up -d redis nats kafka
+
+# Run tests - integration tests will now execute
+make test
+```
+
+### Previously Excluded Tests
+
+The following tests require external services but now skip gracefully:
 - AWS/MinIO blob storage tests (require MinIO running)
-- Distributed tests (require Redis/Kafka)
+- Distributed tests (require Redis/Kafka/NATS)
+- Firecracker tests (require Firecracker binary + kernel + rootfs)
 - Network-based tests (require external endpoints)
 
-These can be run separately with `make test-integration` if services are available.
+All tests can be run with `make test` - tests that require unavailable services
+will be skipped with an informational message.
 
 ## Test Coverage
 

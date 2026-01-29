@@ -96,6 +96,9 @@ pub struct BackgroundScheduler {
 
 impl BackgroundScheduler {
     /// Create a new background scheduler
+    ///
+    /// NOTE: default_tenant_id and default_namespace have been removed.
+    /// The background scheduler operates as a system process with admin privileges.
     pub fn new(
         node_id: String,
         lock_manager: Arc<dyn LockManager>,
@@ -118,6 +121,11 @@ impl BackgroundScheduler {
             shutdown: Arc::new(tokio::sync::Notify::new()),
         }
     }
+    
+    /// RequestContext for system operations (admin context with empty tenant/namespace).
+    fn default_context(&self) -> RequestContext {
+        RequestContext::new_without_auth(String::new(), String::new()).with_admin(true)
+    }
 
     /// Start the background scheduler
     ///
@@ -136,7 +144,7 @@ impl BackgroundScheduler {
                 refresh_period_ms: 100,
                 metadata: std::collections::HashMap::new(),
             };
-            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+            let ctx = self.default_context();
             self.lock_manager
                 .acquire_lock(&ctx, options)
                 .await
@@ -185,7 +193,7 @@ impl BackgroundScheduler {
             metadata: std::collections::HashMap::new(),
         };
 
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = self.default_context();
         self.lock_manager
             .acquire_lock(&ctx, options)
             .await
@@ -208,7 +216,7 @@ impl BackgroundScheduler {
                 metadata: std::collections::HashMap::new(),
             };
 
-            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+            let ctx = self.default_context();
             match self.lock_manager.renew_lock(&ctx, options).await {
                 Ok(renewed) => {
                     let mut current = self.current_lease.write().await;
@@ -240,7 +248,7 @@ impl BackgroundScheduler {
                 delete_lock: false, // Keep for audit
             };
 
-            let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+            let ctx = self.default_context();
             self.lock_manager
                 .release_lock(&ctx, options)
                 .await
@@ -350,12 +358,10 @@ impl BackgroundScheduler {
 
         info!("Processing scheduling request: {}", request.request_id);
 
-        // Create RequestContext from request's tenant/namespace for proper isolation
-        // Use this context for all operations related to this request
-        let ctx = RequestContext::new_without_auth(
-            request.tenant_id.clone(),
-            request.namespace.clone(),
-        );
+        // Create admin RequestContext for background scheduling operations
+        // NOTE: tenant_id and namespace have been removed from SchedulingRequest.
+        // The background scheduler operates as a system process with admin privileges.
+        let ctx = RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
 
         // Get node capacities (use request context - capacity tracking may filter by tenant)
         let node_capacities = self
@@ -541,7 +547,7 @@ mod tests {
         assert!(current.is_none());
         
         // Verify lease is no longer held in lock manager
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+        let ctx = scheduler.default_context();
         let lock = scheduler.lock_manager.get_lock(&ctx, &scheduler.lease_key).await.unwrap();
         assert!(lock.is_none() || !lock.unwrap().locked);
     }
@@ -565,8 +571,8 @@ mod tests {
                 placement: None,
                 actor_groups: vec![],
             }),
-            namespace: "default".to_string(),
-            tenant_id: "default".to_string(),
+            namespace: String::new(), // Empty for test
+            tenant_id: String::new(), // Empty for test
             status: SchedulingStatus::SchedulingStatusPending as i32,
             selected_node_id: String::new(),
             actor_id: String::new(),
@@ -576,8 +582,8 @@ mod tests {
             completed_at: None,
         };
 
-        // Store request
-        let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
+        // Store request - use node-config defaults for test
+        let ctx = scheduler.default_context();
         state_store.store_request(&ctx, request.clone()).await.unwrap();
 
         // Create channel message

@@ -62,6 +62,7 @@ Lightweight, location-transparent handle to an actor:
 ```rust
 pub struct ActorRef {
     actor_id: ActorId,
+    namespace: String,      // Source of truth for namespace (from app/actor)
     location: ActorLocation,
     service_locator: Arc<ServiceLocator>,
 }
@@ -72,6 +73,23 @@ pub struct ActorRef {
 - Automatic routing (local vs remote)
 - Efficient gRPC client caching
 - Correlation ID tracking for replies
+- **Namespace storage**: Source of truth for sub-tenant isolation
+
+**Multi-tenancy Methods**:
+```rust
+// Get actor's namespace
+let ns = actor_ref.namespace();
+
+// Create RequestContext with tenant from auth + namespace from ActorRef
+let ctx = actor_ref.get_request_context(tenant_id);
+
+// Or get default context (empty tenant, ActorRef's namespace)
+let ctx = actor_ref.get_default_request_context().await?;
+```
+
+**Design Philosophy**:
+- **Tenant-id**: NOT stored in ActorRef. Comes from auth (JWT/mTLS) at request time.
+- **Namespace**: Stored in ActorRef. Source of truth is application (if deployed) or actor creation.
 
 ### Message Passing
 
@@ -404,6 +422,135 @@ pub struct MobilityFacet {
 **Use Cases**: Load balancing, node maintenance, mobile agents
 
 ### Capability Facets (I/O Operations)
+
+Capability facets use **message interception** to provide capabilities to actors. Actors send messages with specific types, and facets intercept and handle them using real backend services from ServiceLocator.
+
+#### LockFacet
+
+Distributed lock coordination for task queues, resource coordination, and leader election.
+
+**Message Types Intercepted**:
+- `"acquire_lock"`: Acquire lock with lease duration
+- `"release_lock"`: Release lock (requires version)
+- `"renew_lock"`: Renew lock lease (heartbeat)
+- `"try_acquire_lock"`: Non-blocking lock attempt
+- `"get_lock"`: Get current lock state
+
+**Backend**: Uses LockManager from ServiceLocator (configured via node-config/runtimeconfig)
+- **MemoryLockManager**: In-memory (testing)
+- **SQLiteLockManager**: SQLite-backed (production)
+- **DynamoDBLockManager**: DynamoDB-backed (distributed)
+- **RedisLockManager**: Redis-backed (distributed)
+
+**Use Cases**:
+- Distributed task queues (ensure only one worker processes each job)
+- Resource coordination (prevent concurrent access)
+- Leader election (elect a master node)
+
+**Example**:
+```toml
+# app-config.toml
+[[supervisor.children.facets]]
+type = "locks"
+priority = 50
+config = {}
+```
+
+```rust
+// Actor sends message - facet intercepts it
+let msg = Message::json(&json!({
+    "lock_key": "job:job-123",
+    "holder_id": "worker-1",
+    "lease_duration_secs": 300
+}))
+.with_message_type("acquire_lock");
+
+let reply = actor_ref.ask(msg.to_proto(), Duration::from_secs(5)).await?;
+// LockFacet handled the operation, actor's handle() was never called
+```
+
+**See Also**: [Task Queue Example](../../examples/python/apps/task-queue/) - Complete distributed task queue implementation
+
+#### ProcessGroupFacet
+
+Distributed pub/sub and group messaging (Erlang pg2-style).
+
+**Message Types Intercepted**:
+- `"create_group"`: Create a new process group
+- `"join_group"`: Join a process group (with optional topics)
+- `"leave_group"`: Leave a process group
+- `"get_members"`: Get all members (cluster-wide)
+- `"get_local_members"`: Get local members only
+- `"list_groups"`: List all groups
+- `"publish_to_group"`: Publish message to group members
+
+**Backend**: Uses ProcessGroupService from ServiceLocator (configured via node-config/runtimeconfig)
+
+**Use Cases**:
+- Pub/sub messaging (chat rooms, notifications)
+- Actor clustering (group actors for coordination)
+- Broadcast messaging (send to all group members)
+
+**Example**:
+```toml
+# app-config.toml
+[[supervisor.children.facets]]
+type = "process_groups"
+priority = 50
+config = {}
+```
+
+```rust
+// Actor sends message - facet intercepts it
+let msg = Message::json(&json!({
+    "group_name": "chat-room-1",
+    "actor_id": "user-123",
+    "topics": ["general", "announcements"]
+}))
+.with_message_type("join_group");
+
+let reply = actor_ref.ask(msg.to_proto(), Duration::from_secs(5)).await?;
+// ProcessGroupFacet handled the operation
+```
+
+#### RegistryFacet
+
+Service discovery and object registration.
+
+**Message Types Intercepted**:
+- `"register_object"`: Register an object in the registry
+- `"unregister_object"`: Unregister an object
+- `"lookup_object"`: Lookup an object by ID
+- `"discover_objects"`: Discover objects with filters
+
+**Backend**: Uses ObjectRegistry from ServiceLocator (configured via node-config/runtimeconfig)
+
+**Use Cases**:
+- Service discovery (find services by type)
+- Actor discovery (find actors by type)
+- Object registration (register services, actors, tuplespaces)
+
+**Example**:
+```toml
+# app-config.toml
+[[supervisor.children.facets]]
+type = "registry"
+priority = 50
+config = {}
+```
+
+```rust
+// Actor sends message - facet intercepts it
+let msg = Message::json(&json!({
+    "object_id": "payment-service",
+    "object_type": "Service",
+    "grpc_address": "http://payment-service:50051"
+}))
+.with_message_type("register_object");
+
+let reply = actor_ref.ask(msg.to_proto(), Duration::from_secs(5)).await?;
+// RegistryFacet handled the operation
+```
 
 #### HttpClientFacet
 
@@ -1544,8 +1691,8 @@ sequenceDiagram
     
     Client->>Gateway: GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}?action=get
     Gateway->>InvokeActor: InvokeActorRequest
-    InvokeActor->>InvokeActor: Default tenant_id to "default" if empty
-    InvokeActor->>InvokeActor: Default namespace to "default" if empty
+    InvokeActor->>InvokeActor: Use default_tenant_id from node config if empty
+    InvokeActor->>InvokeActor: Use default_namespace from node config if empty
     InvokeActor->>Registry: discover_actors_by_type(tenant_id, namespace, actor_type)
     Registry-->>InvokeActor: [actor_id1, actor_id2, ...]
     InvokeActor->>InvokeActor: Random selection
@@ -1575,7 +1722,7 @@ rpc InvokeActor(InvokeActorRequest) returns (InvokeActorResponse) {
     additional_bindings {
       delete: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
     }
-    # Alternative paths without tenant_id (defaults to "default")
+    # Alternative paths without tenant_id (uses default_tenant_id from node config)
     additional_bindings {
       get: "/api/v1/actors/{namespace}/{actor_type}"
     }
@@ -1594,8 +1741,8 @@ rpc InvokeActor(InvokeActorRequest) returns (InvokeActorResponse) {
 }
 
 message InvokeActorRequest {
-  string tenant_id = 1;           // From path (optional, defaults to "default")
-  string namespace = 2;           // From path (required, defaults to "default" if empty)
+  string tenant_id = 1;           // From path (optional, uses default_tenant_id from node config if empty)
+  string namespace = 2;           // From path (optional, uses default_namespace from node config if empty)
   string actor_type = 3;          // From path (required)
   string http_method = 4;         // GET, POST, PUT, or DELETE
   bytes payload = 5;              // Query params (GET/DELETE) or body (POST/PUT)
@@ -1638,8 +1785,8 @@ actor_registry.register_actor(
     actor_id,
     message_sender,
     Some("counter".to_string()),  // actor_type
-    Some("default".to_string()),   // tenant_id (defaults to "default" if None)
-    Some("default".to_string()),   // namespace (defaults to "default" if None)
+    Some("tenant-1".to_string()), // tenant_id (from RequestContext or node config)
+    Some("ns-1".to_string()),     // namespace (from RequestContext or node config, can be empty)
 ).await;
 ```
 
@@ -1867,17 +2014,19 @@ impl GrpcClientPool {
 ### Multi-Tenancy
 
 **Tenant and Namespace Isolation**:
-- All actors must have `tenant_id` (defaults to "default" if not provided)
-- All actors must have `namespace` (defaults to "default" if not provided)
+- All actors must have `tenant_id` (from JWT/auth, node config, or can be empty if auth disabled)
+- All actors have `namespace` (optional, can be empty, from RequestContext or node config)
 - Path parameters `{tenant_id}` and `{namespace}` extracted from URL
 - Supports paths with or without tenant_id: `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`
 - JWT authentication extracts `tenant_id` from claims
 - Access control: JWT `tenant_id` must match path `tenant_id`
+- Admin/internal contexts with empty namespace bypass namespace filtering for cross-namespace queries
 
 **Default Behavior**:
-- If no authentication: `tenant_id = "default"`
+- If no authentication: `tenant_id` from node config `default_tenant_id` (can be empty)
 - If JWT provided: `tenant_id` from JWT claims
 - Validation: JWT `tenant_id` must match requested `tenant_id`
+- Namespace: Uses `default_namespace` from node config if not provided (can be empty)
 
 ### Observability
 
@@ -1911,7 +2060,7 @@ impl GrpcClientPool {
 **API Gateway Integration**:
 1. Create REST API or HTTP API
 2. Configure routes: `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` → Lambda
-3. Or configure routes: `/api/v1/actors/{namespace}/{actor_type}` → Lambda (tenant_id defaults to "default")
+3. Or configure routes: `/api/v1/actors/{namespace}/{actor_type}` → Lambda (tenant_id from node config)
 3. Add JWT authorizer for tenant isolation
 4. Enable CORS for web applications
 

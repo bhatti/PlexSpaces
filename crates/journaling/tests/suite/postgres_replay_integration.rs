@@ -8,12 +8,13 @@
 
 #[cfg(feature = "postgres-backend")]
 mod postgres_integration_tests {
+    use plexspaces_common::skip_if_unavailable;
+    use plexspaces_common::test_helpers::postgres_available;
     use plexspaces_journaling::*;
     use plexspaces_journaling::sql::PostgresJournalStorage;
     use plexspaces_facet::Facet;
     use plexspaces_proto::prost_types;
-    use plexspaces_mailbox::Message;
-    use plexspaces_core::{ActorContext, ServiceLocator};
+    use plexspaces_core::{ActorContext, Message, ServiceLocator};
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use async_trait::async_trait;
@@ -133,8 +134,8 @@ mod postgres_integration_tests {
 
     /// Test 1: Full replay (no checkpoint) - Happy path
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL database
     async fn test_full_replay_no_checkpoint() {
+        skip_if_unavailable!(postgres_available().await, "PostgreSQL");
         let storage = create_test_storage().await;
         let config = create_durability_config(1000, true);
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
@@ -182,8 +183,8 @@ mod postgres_integration_tests {
 
     /// Test 2: Checkpoint + Delta Replay
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL database
     async fn test_checkpoint_delta_replay() {
+        skip_if_unavailable!(postgres_available().await, "PostgreSQL");
         let storage = create_test_storage().await;
         let config = create_durability_config(50, true);
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
@@ -235,8 +236,8 @@ mod postgres_integration_tests {
 
     /// Test 3: Schema Version Validation
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL database
     async fn test_schema_version_validation() {
+        skip_if_unavailable!(postgres_available().await, "PostgreSQL");
         let storage = create_test_storage().await;
         let mut config = create_durability_config(100, true);
         config.state_schema_version = 1;
@@ -272,8 +273,8 @@ mod postgres_integration_tests {
 
     /// Test 4: Automatic State Loading
     #[tokio::test]
-    #[ignore] // Requires PostgreSQL database
     async fn test_automatic_state_loading() {
+        skip_if_unavailable!(postgres_available().await, "PostgreSQL");
         let storage = create_test_storage().await;
         let config = create_durability_config(100, true);
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);

@@ -28,3 +28,6 @@
 
 pub mod http_client;
 pub mod keyvalue;
+pub mod locks;
+pub mod process_groups;
+pub mod registry;

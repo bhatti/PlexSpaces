@@ -133,11 +133,12 @@ impl DynamoDBBlobRepository {
         )
         .record(duration.as_secs_f64());
 
-        debug!(
-            table_name = %table_name,
+        tracing::info!(
+            table = %table_name,
             region = %region,
+            backend = "DynamoDB",
             duration_ms = duration.as_millis(),
-            "DynamoDB BlobRepository initialized"
+            "Blob metadata repository initialized"
         );
 
         Ok(Self {
@@ -396,32 +397,24 @@ impl DynamoDBBlobRepository {
 
     /// Create composite partition key for tenant isolation.
     fn composite_key(ctx: &RequestContext, blob_id: &str) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
+        let tenant_id = ctx.tenant_id();
+        // For admin/internal contexts with empty namespace, skip namespace in key
+        if ctx.should_skip_namespace_filter() {
+            format!("{}#{}", tenant_id, blob_id)
         } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-        format!("{}#{}#{}", tenant_id, namespace, blob_id)
+            format!("{}#{}#{}", tenant_id, ctx.namespace(), blob_id)
+        }
     }
 
     /// Create tenant_namespace key for GSI.
     fn tenant_namespace_key(ctx: &RequestContext) -> String {
-        let tenant_id = if ctx.tenant_id().is_empty() {
-            "default"
+        let tenant_id = ctx.tenant_id();
+        // For admin/internal contexts with empty namespace, use just tenant_id
+        if ctx.should_skip_namespace_filter() {
+            tenant_id.to_string()
         } else {
-            ctx.tenant_id()
-        };
-        let namespace = if ctx.namespace().is_empty() {
-            "default"
-        } else {
-            ctx.namespace()
-        };
-        format!("{}#{}", tenant_id, namespace)
+            format!("{}#{}", tenant_id, ctx.namespace())
+        }
     }
 
     /// Convert DDB item to BlobMetadata.

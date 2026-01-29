@@ -113,7 +113,7 @@ impl WorkflowServiceImpl {
     /// Convert internal WorkflowExecution to proto
     fn internal_execution_to_proto(exec: &WorkflowExecution) -> ProtoWorkflowExecution {
         use plexspaces_proto::workflow::v1::ExecutionStatus as ProtoExecutionStatus;
-        use prost_types::{Struct, Timestamp, Value};
+        
 
         let status = match exec.status {
             ExecutionStatus::Pending => ProtoExecutionStatus::ExecutionStatusPending,

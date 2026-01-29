@@ -198,7 +198,7 @@ async fn test_mock_restart_recover_unacked() {
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
     use super::*;
-    use crate::SqliteChannel;
+    use plexspaces_channel::SqliteChannel;
     use tempfile::TempDir;
 
     async fn create_sqlite_channel(name: &str, db_path: &str) -> SqliteChannel {
@@ -351,7 +351,7 @@ mod sqlite_tests {
 #[cfg(feature = "redis-backend")]
 mod redis_tests {
     use super::*;
-    use crate::RedisChannel;
+    use plexspaces_channel::RedisChannel;
 
     async fn is_redis_available() -> bool {
         #[cfg(feature = "test-helpers")]

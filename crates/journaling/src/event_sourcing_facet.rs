@@ -70,14 +70,14 @@
 //! # }
 //! ```
 
-use crate::{ActorEvent, ActorHistory, EventSourcingConfig, JournalResult, JournalStorage};
+use crate::{ActorEvent, EventSourcingConfig, JournalResult, JournalStorage};
 use async_trait::async_trait;
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
 use plexspaces_proto::prost_types;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use tokio::sync::RwLock;
 
 /// Event sourcing facet providing event logging and state reconstruction

@@ -7,6 +7,7 @@
 [![License: LGPL v2.1](https://img.shields.io/badge/License-LGPL%20v2.1-blue.svg)](https://www.gnu.org/licenses/lgpl-2.1)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/plexobject/plexspaces)
+[![API Docs](https://img.shields.io/badge/API-Swagger-green.svg)](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/bhatti/tspaces/main/docs/openapi.json)
 
 [Features](#features) • [Quick Start](#quick-start) • [Documentation](#documentation) • [Examples](#examples) • [Comparison](#comparison)
 
@@ -71,7 +72,7 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
   - **AWS Lambda URL Support**: Ready for integration with AWS Lambda Function URLs
   - **Serverless Patterns**: Invoke actors like serverless functions with automatic load balancing
 - **Resource-Aware Scheduling**: Intelligent placement based on CPU, memory, and I/O profiles
-- **Multi-Tenancy**: Built-in isolation contexts for secure multi-tenant deployments
+- **Multi-Tenancy**: Two-level isolation (tenant-id from auth + namespace from application/actor) for secure multi-tenant deployments
 - **Event Sourcing**: Complete audit trail with time-travel debugging
 - **Distributed Coordination**: Actor groups, process groups, and distributed locks
 - **Observability**: Built-in metrics, tracing, and health checks
@@ -305,6 +306,7 @@ See [Examples](examples/README.md) for the complete list.
 - **[Concepts](docs/concepts.md)**: Core concepts explained (Actors, Behaviors, Facets, TupleSpace, FaaS-Style Invocation, etc.)
 - **[Architecture](docs/architecture.md)**: System design, abstractions, and primitives (including FaaS Invocation)
 - **[Detailed Design](docs/detailed-design.md)**: Comprehensive component documentation with all facets, behaviors, APIs, and primitives (including InvokeActor Service)
+- **[Security](docs/security.md)**: Authentication (JWT for HTTP, mTLS for gRPC), tenant isolation, JWT claims and CLI token creation, middleware, and local testing (`PLEXSPACES_DISABLE_AUTH`)
 - **[Installation](docs/installation.md)**: Docker, Kubernetes, and manual setup
 - **[Testing](docs/testing.md)**: How to run unit tests, integration tests, and example tests
 - **[WASM Deployment](docs/wasm-deployment.md)**: Deploy polyglot WASM applications (Rust, Python, TypeScript, Go)
@@ -377,6 +379,30 @@ make test-examples
 # Check code coverage
 cargo tarpaulin --lib --fail-under 95
 ```
+
+### Testing Backend Initialization Logging
+
+PlexSpaces logs detailed information when initializing storage backends. To see these logs:
+
+```bash
+# Start a node with INFO logging enabled
+RUST_LOG=info cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr 0.0.0.0:8090
+
+# Run an example with logging
+cd examples/rust/embedded/durable_actor
+RUST_LOG=info cargo run
+```
+
+Example output showing backend initialization:
+
+```
+INFO plexspaces_keyvalue: KeyValue storage initialized db_path="/tmp/plexspaces-test-node.db" table="kv_store" backend="SQLite"
+INFO plexspaces_locks: Locks storage initialized db_url="sqlite:///tmp/plexspaces.db" table="locks" backend="SQLite"
+INFO plexspaces_journaling: Journal storage initialized backend="InMemory"
+INFO plexspaces_blob: Blob storage initialized backend="minio" bucket="plexspaces" endpoint="http://localhost:9000"
+```
+
+Supported backends: SQLite, PostgreSQL, Redis, DynamoDB, MinIO/S3/GCP/Azure (blob), InMemory.
 
 ## License
 

@@ -193,12 +193,24 @@ impl WorkflowStorage {
                     .run(pool)
                     .await
                     .map_err(|e| WorkflowError::Storage(format!("SQLite migration failed: {}", e)))?;
+                
+                tracing::info!(
+                    tables = "workflows, workflow_steps, workflow_events",
+                    backend = "SQLite",
+                    "Workflow storage initialized"
+                );
             }
             SqlPool::Postgres(pool) => {
                 sqlx::migrate!("./migrations/postgres")
                     .run(pool)
                     .await
                     .map_err(|e| WorkflowError::Storage(format!("PostgreSQL migration failed: {}", e)))?;
+                
+                tracing::info!(
+                    tables = "workflows, workflow_steps, workflow_events",
+                    backend = "PostgreSQL",
+                    "Workflow storage initialized"
+                );
             }
         }
         Ok(())

@@ -44,7 +44,6 @@
 
 use crate::{FirecrackerVm, VmConfig};
 use crate::error::{FirecrackerError, FirecrackerResult};
-use ulid::Ulid;
 
 /// Builder for deploying applications to Firecracker VMs
 ///
@@ -142,6 +141,7 @@ impl ApplicationDeployment {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ulid::Ulid;
 
     #[tokio::test]
     async fn test_application_deployment_creation() {

@@ -30,12 +30,10 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::task::JoinHandle;
-use plexspaces_core::{ActorId, Service, ServiceLocator as ServiceLocatorTrait, ActorRegistry, MessageSender, VirtualActorManager, FacetManagerServiceWrapper, ActorContext, RequestContext, ExitReason};
-use plexspaces_facet::FacetManager;
-use plexspaces_core::service_names;
+use plexspaces_core::{ActorId, Service, ServiceLocator as ServiceLocatorTrait, ActorRegistry, MessageSender, VirtualActorManager, ActorContext, RequestContext, ExitReason, ActorFactory};
 use plexspaces_proto::ActorLifecycleEvent;
 use prost_types::Timestamp;
-use crate::{ActorFactory, Actor, ActorRef};
+use crate::{Actor, ActorRef};
 use crate::{VirtualActorWrapper};
 
 /// ActorFactory implementation
@@ -45,11 +43,47 @@ use crate::{VirtualActorWrapper};
 /// needed for spawning actors. This decouples ActorFactory from Node directly.
 pub struct ActorFactoryImpl {
     service_locator: Arc<dyn ServiceLocatorTrait>,
+    /// Self-reference as ActorFactory trait object (for VirtualActorWrapper)
+    /// This is set after creation via set_self_reference()
+    self_as_factory: Arc<tokio::sync::RwLock<Option<Arc<dyn ActorFactory>>>>,
 }
 
 impl ActorFactoryImpl {
     pub fn new(service_locator: Arc<dyn ServiceLocatorTrait>) -> Self {
-        Self { service_locator }
+        Self {
+            service_locator,
+            self_as_factory: Arc::new(tokio::sync::RwLock::new(None)),
+        }
+    }
+    
+    /// Create ActorFactoryImpl and wrap in Arc with self-reference set
+    /// 
+    /// ## Purpose
+    /// Helper function that creates ActorFactoryImpl, wraps it in Arc, and sets the self-reference
+    /// so that VirtualActorWrapper can access it. This avoids needing to call set_self_reference() separately.
+    /// 
+    /// ## Note
+    /// This is async because it needs to set the self-reference using async RwLock.
+    pub async fn new_arc(service_locator: Arc<dyn ServiceLocatorTrait>) -> Arc<Self> {
+        let impl_instance = Arc::new(Self::new(service_locator));
+        let factory_trait: Arc<dyn ActorFactory> = impl_instance.clone();
+        impl_instance.set_self_reference(factory_trait).await;
+        impl_instance
+    }
+    
+    /// Set self-reference as ActorFactory (called after wrapping in Arc)
+    /// 
+    /// ## Note
+    /// This is async because it uses tokio::sync::RwLock which requires async access.
+    /// Cannot use blocking_write() from within an async runtime.
+    pub async fn set_self_reference(&self, self_ref: Arc<dyn ActorFactory>) {
+        let mut guard = self.self_as_factory.write().await;
+        *guard = Some(self_ref);
+    }
+    
+    /// Get self as ActorFactory (for VirtualActorWrapper)
+    async fn get_self_as_factory(&self) -> Option<Arc<dyn ActorFactory>> {
+        self.self_as_factory.read().await.clone()
     }
     
     /// Normalize actor ID to include node ID
@@ -448,18 +482,19 @@ impl ActorFactory for ActorFactoryImpl {
             let mailbox = actor_arc.mailbox().clone();
             
             // Create ActorRef (already registered by start())
-            let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+            let actor_ref = ActorRef::local(
                 actor_id.clone(),
+                activation_ctx.namespace().to_string(),
                 mailbox.clone(),
                 self.service_locator.clone(),
-            ));
+            );
             
             // Update registration with config and instance (idempotent - ActorRef already registered in Actor::start())
             // This ensures config and instance are stored for resource tracking and ask() pattern
             registry.register_actor(
                 &activation_ctx,
                 actor_id.clone(),
-                actor_ref.clone(),
+                Arc::new(actor_ref.clone()) as Arc<dyn MessageSender>,
                 None, // actor_type already set
                 actor_arc.context().config.clone(), // Config for resource tracking
                 Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
@@ -479,7 +514,7 @@ impl ActorFactory for ActorFactoryImpl {
                 .map_err(|e| format!("Failed to get virtual actor facet: {}", e))?;
             {
                 let facet_guard = facet_arc.read().await;
-                use std::any::Any;
+                
                 use plexspaces_journaling::VirtualActorFacet;
                 if let Some(virtual_facet) = facet_guard.as_ref().downcast_ref::<VirtualActorFacet>() {
                     virtual_facet.mark_activated().await;
@@ -548,7 +583,7 @@ impl ActorFactory for ActorFactoryImpl {
             // Get the facet from VirtualActorManager metadata to recreate it
             let facet_arc = metadata.facet.clone();
             let facet_guard = facet_arc.read().await;
-            use std::any::Any;
+            
             use plexspaces_journaling::VirtualActorFacet;
             // facet_guard is RwLockReadGuard<Box<dyn Any + Send + Sync>>
             // We need to access the inner Box and downcast it
@@ -689,17 +724,18 @@ impl ActorFactory for ActorFactoryImpl {
                         
                         let actor_arc = Arc::new(actor);
                         let mailbox = actor_arc.mailbox().clone();
-                        let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+                        let actor_ref = ActorRef::local(
                             actor_id.clone(),
+                            activation_ctx.namespace().to_string(),
                             mailbox.clone(),
                             self.service_locator.clone(),
-                        ));
+                        );
                         
                         // Re-register with ActorRef (replacing VirtualActorWrapper)
                         registry.register_actor(
                             &activation_ctx,
                             actor_id.clone(),
-                            actor_ref.clone(),
+                            Arc::new(actor_ref.clone()) as Arc<dyn MessageSender>,
                             Some(actor_type.clone()),
                             actor_arc.context().config.clone(),
                             Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>),
@@ -824,7 +860,7 @@ impl ActorFactory for ActorFactoryImpl {
         actor_type: &str,
         initial_state: Vec<u8>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-        labels: HashMap<String, String>,
+        _labels: HashMap<String, String>,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
         use crate::ActorBuilder;
@@ -896,7 +932,7 @@ impl ActorFactory for ActorFactoryImpl {
         };
 
         // Extract tenant_id and namespace from context (required, no defaults)
-        let tenant_id = ctx.tenant_id().to_string();
+        let _tenant_id = ctx.tenant_id().to_string();
         let namespace = ctx.namespace().to_string();
 
         // Create Actor using ActorBuilder
@@ -914,16 +950,32 @@ impl ActorFactory for ActorFactoryImpl {
             .map_err(|e| format!("Failed to build actor: {}", e))?;
         
         // Attach facets before spawning
-        for mut facet in facets {
+        for facet in facets {
             actor.attach_facet(facet).await
                 .map_err(|e| format!("Failed to attach facet: {}", e))?;
         }
         
         // Spawn the built actor with type information
-        self.spawn_built_actor(ctx, Arc::new(actor), Some(actor_type.to_string())).await
+        // spawn_built_actor_impl returns Arc<dyn MessageSender> directly
+        self.spawn_built_actor_impl(ctx, Arc::new(actor), Some(actor_type.to_string())).await
     }
     
-    async fn spawn_built_actor(
+    async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Delegate to the impl method
+        self.stop_actor_impl(actor_id).await
+    }
+}
+
+// Regular impl block for methods that need concrete Actor type (not part of the core trait)
+impl ActorFactoryImpl {
+    /// Internal implementation of spawn_built_actor
+    /// 
+    /// This is the actual implementation that's called by both the trait method
+    /// in ActorFactoryExt and internally by spawn_actor.
+    /// 
+    /// ## Returns
+    /// ActorRef wrapped as Arc<dyn MessageSender> for trait compatibility
+    pub async fn spawn_built_actor_impl(
         &self,
         ctx: &RequestContext,
         actor: Arc<Actor>,
@@ -1049,7 +1101,7 @@ impl ActorFactory for ActorFactoryImpl {
             
             // Extract VirtualActorFacet to check activation strategy
             let virtual_facet_guard = virtual_facet_arc.read().await;
-            use std::any::Any;
+            
             use plexspaces_journaling::VirtualActorFacet;
             let virtual_facet = virtual_facet_guard.as_any().downcast_ref::<VirtualActorFacet>()
                 .ok_or_else(|| format!("Failed to downcast to VirtualActorFacet"))?;
@@ -1105,14 +1157,19 @@ impl ActorFactory for ActorFactoryImpl {
             // Create VirtualActorWrapper (MessageSender - mailbox is internal)
             // Note: For lazy virtual actors, we register immediately since start() is deferred
             // For eager virtual actors, registration happens inside Actor::start() after init() succeeds
+            // Get self as ActorFactory for VirtualActorWrapper
+            let actor_factory = self.get_self_as_factory().await
+                .ok_or_else(|| "ActorFactoryImpl self-reference not set - call set_self_reference() after wrapping in Arc".to_string())?;
             let virtual_wrapper = Arc::new(VirtualActorWrapper::new(
                 actor_id.clone(),
                 self.service_locator.clone(),
+                actor_factory,
             ));
             
             // Create ActorRef (for return value - not used for lazy virtual actors)
-            let actor_ref = ActorRef::local(
+            let _actor_ref = ActorRef::local(
                 actor_id.clone(),
+                ctx.namespace().to_string(),
                 mailbox.clone(),
                 self.service_locator.clone(),
             );
@@ -1126,15 +1183,16 @@ impl ActorFactory for ActorFactoryImpl {
                 // Create ActorRef for return value
                 // Note: Registration happens INSIDE Actor::start() AFTER init() succeeds
                 let mailbox = actor.mailbox().clone();
-                let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+                let actor_ref = ActorRef::local(
                     actor_id.clone(),
+                    ctx.namespace().to_string(),
                     mailbox.clone(),
                     self.service_locator.clone(),
-                ));
+                );
                 
                 // CRITICAL: Check actor state before calling start() to ensure we only call it once
                 use crate::ActorState;
-                let current_state = actor.state().await;
+                let _current_state = actor.state().await;
                 
                 // Start the actor (calls init() internally, then registers in ActorRegistry)
                 // If init() fails, actor is not registered (prevents memory leaks)
@@ -1176,7 +1234,7 @@ impl ActorFactory for ActorFactoryImpl {
                 registry.register_actor(
                     &ctx,
                     actor_id.clone(),
-                    actor_ref.clone(),
+                    Arc::new(actor_ref.clone()) as Arc<dyn MessageSender>,
                     actor_type.clone(),
                     actor_config.clone(), // Config for resource tracking
                     Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
@@ -1207,6 +1265,8 @@ impl ActorFactory for ActorFactoryImpl {
                             );
                         }
                     }
+                
+                return Ok(Arc::new(actor_ref) as Arc<dyn MessageSender>);
                 }
                 
                 if tracing::enabled!(tracing::Level::DEBUG) {
@@ -1242,13 +1302,14 @@ impl ActorFactory for ActorFactoryImpl {
             }
             
             // Create ActorRef for return value (for lazy virtual actors, VirtualActorWrapper is already registered)
-            let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+            let actor_ref = ActorRef::local(
                 actor_id.clone(),
+                ctx.namespace().to_string(),
                 mailbox.clone(),
                 self.service_locator.clone(),
-            ));
+            );
             
-            return Ok(actor_ref);
+            return Ok(Arc::new(actor_ref) as Arc<dyn MessageSender>);
         }
         
         // Normal actor - start immediately
@@ -1259,15 +1320,10 @@ impl ActorFactory for ActorFactoryImpl {
         // Get mailbox (for creating ActorRef)
         let mailbox = actor.mailbox().clone();
         
-        // Create ActorRef (implements MessageSender) for return value
+        // Create ActorRef for return value
         // Note: Registration happens INSIDE Actor::start() AFTER init() succeeds
         // This ensures failed actors are never registered (prevents memory leaks)
         // and allows supervisor to wait for init() before starting next child
-        let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
-            actor_id.clone(),
-            mailbox.clone(),
-            self.service_locator.clone(),
-        ));
         
         // CRITICAL: Check actor state before calling start() to ensure we only call it once
         use crate::ActorState;
@@ -1296,21 +1352,22 @@ impl ActorFactory for ActorFactoryImpl {
         // Store actor in Arc after starting
         let actor_arc = Arc::new(actor);
         
-        // Create ActorRef (implements MessageSender) - this is what will be returned
+        // Create ActorRef - this is what will be returned
         // Note: The ActorRef was already registered in Actor::start() via register_in_registry()
         // We just need to ensure config and instance are stored (idempotent update)
-        let actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+        let actor_ref = ActorRef::local(
             actor_id.clone(),
+            ctx.namespace().to_string(),
             mailbox.clone(),
             self.service_locator.clone(),
-        ));
+        );
         
         // Update registration with config and instance (idempotent - ActorRef already registered)
         // This ensures config and instance are stored for resource tracking and ask() pattern
         registry.register_actor(
             &ctx,
             actor_id.clone(),
-            actor_ref.clone(),
+            Arc::new(actor_ref.clone()) as Arc<dyn MessageSender>,
             actor_type.clone(),
             actor_config.clone(), // Config for resource tracking
             Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
@@ -1334,11 +1391,18 @@ impl ActorFactory for ActorFactoryImpl {
         let exit_reason_arc = actor_arc.exit_reason();
         self.watch_actor_termination(actor_id.clone(), join_handle, exit_reason_arc).await;
         
-        // Return ActorRef (implements MessageSender)
-        Ok(actor_ref)
+        // Return ActorRef wrapped as Arc<dyn MessageSender>
+        // ActorRef implements MessageSender, so we can wrap it
+        Ok(Arc::new(actor_ref) as Arc<dyn MessageSender>)
     }
-    
-    async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+}
+
+impl ActorFactoryImpl {
+    /// stop_actor implementation
+    /// 
+    /// This method is separate because we already closed the main impl block.
+    /// It implements the stop_actor functionality from ActorFactory trait.
+    async fn stop_actor_impl(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Get services from ServiceLocator
         let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
@@ -1352,9 +1416,10 @@ impl ActorFactory for ActorFactoryImpl {
                 let ctx = RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
                 (Some(ctx), namespace)
             } else {
-                // Fallback: use default context for routing lookup (system-level operation)
-                let default_ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
-                (Some(default_ctx), "default".to_string())
+                // Fallback: use empty strings for routing lookup (system-level operation)
+                // Tenant comes from auth, not config
+                let default_ctx = RequestContext::new_without_auth(String::new(), String::new());
+                (Some(default_ctx), String::new())
             }
         };
         
@@ -1397,7 +1462,7 @@ impl ActorFactory for ActorFactoryImpl {
         // OBSERVABILITY: Update ActorMetrics before stopping
         // Note: unregister_with_cleanup will also decrement active, but we track here for explicit observability
         {
-            use plexspaces_core::message_metrics::ActorMetricsExt;
+            
             let _actor_metrics = registry.actor_metrics().write().await;
             // Active count will be decremented by unregister_with_cleanup, but we track here for observability
             // This ensures metrics are updated even if unregister_with_cleanup fails

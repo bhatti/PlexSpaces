@@ -1,0 +1,21 @@
+[package]
+name = "mpi_collectives"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "mpi_collectives"
+path = "src/main.rs"
+
+[dependencies]
+# PlexSpaces crates
+plexspaces-process-groups = { path = "../../../../crates/process-groups" }
+plexspaces-keyvalue = { path = "../../../../crates/keyvalue" }
+plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-tuplespace = { path = "../../../../crates/tuplespace" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }

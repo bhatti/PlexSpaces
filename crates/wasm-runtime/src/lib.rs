@@ -224,6 +224,7 @@
 pub mod capabilities;
 #[cfg(feature = "component-model")]
 pub mod component_host;
+pub mod simple_component_host;
 pub mod deployment_service;
 pub mod error;
 pub mod grpc_service;
@@ -298,8 +299,8 @@ impl Default for WasmConfig {
     fn default() -> Self {
         Self {
             limits: ResourceLimits {
-                max_memory_bytes: 16 * 1024 * 1024, // 16MB
-                max_stack_bytes: 512 * 1024,        // 512KB
+                max_memory_bytes: 64 * 1024 * 1024, // 64MB (increased for Python)
+                max_stack_bytes: 8 * 1024 * 1024,   // 8MB (required for Python)
                 max_fuel: 10_000_000_000,           // 10 billion units
                 max_execution_time: None,           // Rely on fuel instead
                 max_table_elements: 10_000,
@@ -323,7 +324,7 @@ mod tests {
         assert_eq!(config.profile_name, "default");
         assert!(config.enable_pooling);
         assert!(!config.enable_aot);
-        assert_eq!(config.limits.max_memory_bytes, 16 * 1024 * 1024); // 16MB
+        assert_eq!(config.limits.max_memory_bytes, 64 * 1024 * 1024); // 64MB (for Python)
     }
 
     #[test]

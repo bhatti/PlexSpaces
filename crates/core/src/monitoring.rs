@@ -26,7 +26,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use async_trait::async_trait;
-use crate::{Service, ActorMetricsHandle};
+use crate::ActorMetricsHandle;
 
 /// Trait for accessing NodeMetrics (both reading and updating)
 ///

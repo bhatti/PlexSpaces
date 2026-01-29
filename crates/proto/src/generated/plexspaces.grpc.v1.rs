@@ -252,6 +252,12 @@ pub struct JwtClaims {
     /// Custom claims (extensible)
     #[prost(map="string, string", tag="8")]
     pub custom_claims: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Groups (for group-based access)
+    #[prost(string, repeated, tag="9")]
+    pub groups: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Admin flag (elevated privileges; bypass namespace filtering when empty namespace)
+    #[prost(bool, tag="10")]
+    pub is_admin: bool,
 }
 /// Authentication middleware configuration
 ///

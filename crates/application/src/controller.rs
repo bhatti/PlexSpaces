@@ -34,7 +34,7 @@
 use crate::ApplicationError;
 use crate::{Application, ApplicationNode};
 use plexspaces_proto::application::v1::{ApplicationRuntimeState, ApplicationStatus};
-use plexspaces_proto::node::v1::ApplicationConfig;
+use plexspaces_proto::application::v1::ApplicationSpec;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,7 +59,7 @@ pub struct ApplicationController {
     states: Arc<RwLock<HashMap<String, ApplicationRuntimeState>>>,
 
     /// Application configurations
-    configs: Arc<RwLock<HashMap<String, ApplicationConfig>>>,
+    configs: Arc<RwLock<HashMap<String, ApplicationSpec>>>,
 
     /// ApplicationNode to pass to applications during start() (interior mutability)
     node: Arc<RwLock<Option<Arc<dyn ApplicationNode>>>>,
@@ -102,7 +102,7 @@ impl ApplicationController {
     pub async fn load(
         &self,
         app: Box<dyn Application>,
-        config: ApplicationConfig,
+        config: ApplicationSpec,
     ) -> Result<(), ApplicationError> {
         let name = app.name().to_string();
 
@@ -233,7 +233,7 @@ impl ApplicationController {
                     }
                     started_apps.push(app_name.clone());
                 }
-                Err(e) => {
+                Err(_e) => {
                     // Update state to failed
                     {
                         let mut states = self.states.write().await;
@@ -714,7 +714,7 @@ mod tests {
         let controller = ApplicationController::new();
         let app = Box::new(MockApp::new("test-app"));
 
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -745,7 +745,7 @@ mod tests {
         let app1 = Box::new(MockApp::new("test-app"));
         let app2 = Box::new(MockApp::new("test-app"));
 
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -781,7 +781,7 @@ mod tests {
         });
         controller.set_node(mock_node).await;
 
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -831,7 +831,7 @@ mod tests {
         });
         controller.set_node(mock_node).await;
 
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -903,7 +903,7 @@ mod tests {
             version: "1.0.0".to_string(),
         });
 
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "slow-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -939,7 +939,7 @@ mod tests {
         });
         controller.set_node(mock_node).await;
 
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),
@@ -970,7 +970,7 @@ mod tests {
         let app1 = Box::new(MockApp::new("app1"));
         let app2 = Box::new(MockApp::new("app2"));
 
-        let config1 = ApplicationConfig {
+        let config1 = ApplicationSpec {
             name: "app1".to_string(),
             version: "1.0.0".to_string(),
             config_path: "app1.toml".to_string(),
@@ -981,7 +981,7 @@ mod tests {
             dependencies: vec![],
         };
 
-        let config2 = ApplicationConfig {
+        let config2 = ApplicationSpec {
             name: "app2".to_string(),
             version: "1.0.0".to_string(),
             config_path: "app2.toml".to_string(),
@@ -1009,7 +1009,7 @@ mod tests {
         assert_eq!(controller.count().await, 0);
 
         let app = Box::new(MockApp::new("test-app"));
-        let config = ApplicationConfig {
+        let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             config_path: "test.toml".to_string(),

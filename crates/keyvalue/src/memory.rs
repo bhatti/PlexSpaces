@@ -115,6 +115,11 @@ pub struct InMemoryKVStore {
 impl InMemoryKVStore {
     /// Create a new in-memory KeyValue store.
     pub fn new() -> Self {
+        tracing::info!(
+            backend = "InMemory",
+            "KeyValue storage initialized (non-persistent)"
+        );
+        
         Self {
             data: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(Vec::new())),
@@ -394,7 +399,7 @@ impl KeyValueStore for InMemoryKVStore {
         <Self as KeyValueStore>::increment(self, ctx, key, -delta).await
     }
 
-    async fn watch(&self, ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch(&self, _ctx: &RequestContext, key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: key.to_string(),
@@ -408,7 +413,7 @@ impl KeyValueStore for InMemoryKVStore {
         Ok(rx)
     }
 
-    async fn watch_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(&self, _ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: prefix.to_string(),

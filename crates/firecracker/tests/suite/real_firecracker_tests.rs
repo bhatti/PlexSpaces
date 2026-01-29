@@ -20,7 +20,7 @@
 //!
 //! ## Purpose
 //! These tests verify real Firecracker API client integration with actual Firecracker binary.
-//! Tests are marked `#[ignore]` by default as they require:
+//! Tests automatically skip if prerequisites are not available:
 //! - Firecracker binary installed
 //! - Linux kernel image
 //! - Root filesystem image
@@ -28,63 +28,18 @@
 //!
 //! ## Running Tests
 //! ```bash
-//! # Run all real Firecracker tests (requires setup)
-//! cargo test -p plexspaces-firecracker --test real_firecracker_tests -- --ignored
-//!
-//! # Run specific test
-//! cargo test -p plexspaces-firecracker --test real_firecracker_tests test_api_client_configure_vm -- --ignored
+//! # Run all real Firecracker tests (tests will skip if prerequisites not available)
+//! cargo test -p plexspaces-firecracker --test-threads=1
 //! ```
 
+use plexspaces_common::skip_if_unavailable;
+use plexspaces_common::test_helpers::{firecracker_available, firecracker_prerequisites_error};
 use plexspaces_firecracker::{
     FirecrackerApiClient, FirecrackerVm, VmConfig, VmState,
 };
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
-
-/// Check if Firecracker is available
-fn is_firecracker_available() -> bool {
-    Path::new("/usr/bin/firecracker").exists()
-        || std::process::Command::new("firecracker")
-            .arg("--version")
-            .output()
-            .is_ok()
-}
-
-/// Check if kernel image is available
-fn is_kernel_available() -> bool {
-    Path::new("/var/lib/firecracker/vmlinux").exists()
-        || Path::new("/tmp/test-kernel").exists()
-}
-
-/// Check if rootfs image is available
-fn is_rootfs_available() -> bool {
-    Path::new("/var/lib/firecracker/rootfs.ext4").exists()
-        || Path::new("/tmp/test-rootfs").exists()
-}
-
-/// Check if all prerequisites are met
-fn check_prerequisites() -> Result<(), String> {
-    if !is_firecracker_available() {
-        return Err("Firecracker binary not found. Install from: https://github.com/firecracker-microvm/firecracker/releases".to_string());
-    }
-
-    if !is_kernel_available() {
-        return Err(
-            "Kernel image not found. See test documentation for setup instructions."
-                .to_string(),
-        );
-    }
-
-    if !is_rootfs_available() {
-        return Err(
-            "Rootfs image not found. See test documentation for setup instructions."
-                .to_string(),
-        );
-    }
-
-    Ok(())
-}
 
 /// Test: API client can configure VM via real Firecracker
 ///
@@ -100,10 +55,11 @@ fn check_prerequisites() -> Result<(), String> {
 /// 5. Attach rootfs drive
 /// 6. Verify configuration succeeded
 #[tokio::test]
-#[ignore] // Requires Firecracker binary, kernel, rootfs
 async fn test_api_client_configure_vm() {
-    if let Err(e) = check_prerequisites() {
-        eprintln!("Skipping test: {}", e);
+    if !firecracker_available() {
+        if let Some(err) = firecracker_prerequisites_error() {
+            eprintln!("Skipping test: {}", err);
+        }
         return;
     }
 
@@ -204,10 +160,11 @@ async fn test_api_client_configure_vm() {
 /// 2. Call start_instance()
 /// 3. Verify instance state is "Running"
 #[tokio::test]
-#[ignore] // Requires Firecracker binary, kernel, rootfs
 async fn test_api_client_start_instance() {
-    if let Err(e) = check_prerequisites() {
-        eprintln!("Skipping test: {}", e);
+    if !firecracker_available() {
+        if let Some(err) = firecracker_prerequisites_error() {
+            eprintln!("Skipping test: {}", err);
+        }
         return;
     }
 
@@ -310,10 +267,11 @@ async fn test_api_client_start_instance() {
 /// 4. Verify VM is running
 /// 5. Stop VM
 #[tokio::test]
-#[ignore] // Requires Firecracker binary, kernel, rootfs
 async fn test_full_vm_lifecycle_real_firecracker() {
-    if let Err(e) = check_prerequisites() {
-        eprintln!("Skipping test: {}", e);
+    if !firecracker_available() {
+        if let Some(err) = firecracker_prerequisites_error() {
+            eprintln!("Skipping test: {}", err);
+        }
         return;
     }
 
@@ -377,8 +335,13 @@ async fn test_full_vm_lifecycle_real_firecracker() {
 /// 3. Verify device exists
 /// 4. Delete TAP device
 #[tokio::test]
-#[ignore] // Requires root privileges
 async fn test_tap_device_creation_real() {
+    // This test requires root privileges - skip if not running as root
+    if std::fs::metadata("/proc/1/root").is_err() && std::env::var("CI").is_err() {
+        eprintln!("Skipping test: requires root privileges");
+        return;
+    }
+
     use plexspaces_firecracker::network::{create_tap_device, delete_tap_device, generate_tap_name};
 
     let vm_id = ulid::Ulid::new().to_string();
@@ -414,8 +377,8 @@ async fn test_tap_device_creation_real() {
 /// 2. Deploy application bundle
 /// 3. Verify application is running
 #[tokio::test]
-#[ignore] // Requires Firecracker setup + application deployment implementation
 async fn test_application_deployment_to_vm() {
+    skip_if_unavailable!(firecracker_available(), "Firecracker");
     // TODO: Implement after application deployment layer is ready
     // This test verifies the design: VM contains entire applications, not individual actors
     assert!(true);

@@ -1005,7 +1005,7 @@ impl SwimProtocol {
         let cluster_size = self.cluster_size().await;
         let suspicion_timeout = self.config.suspicion_timeout(cluster_size);
 
-        let mut members = self.members.write().await;
+        let members = self.members.write().await;
         let mut to_declare_dead = Vec::new();
 
         for member in members.values() {

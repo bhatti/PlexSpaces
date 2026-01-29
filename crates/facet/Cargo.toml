@@ -15,6 +15,8 @@ plexspaces-proto = { workspace = true }
 
 # Note: plexspaces-core dependency removed to break circular dependency
 # Service trait implementation moved to core::facet_service_wrapper
+# Factories that need ServiceLocator are created in actor crate (which has both dependencies)
+# ServiceLocator is passed as trait object from actor crate
 
 # Core dependencies
 tokio = { workspace = true }
@@ -45,8 +47,19 @@ ddb-backend = ["aws-sdk-dynamodb", "aws-config"]
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Test helpers for checking DynamoDB Local availability
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
+# Integration test dependencies
+plexspaces-actor = { path = "../actor" }
+plexspaces-core = { workspace = true }
+plexspaces-mailbox = { workspace = true }
+plexspaces-node = { path = "../node" }
+plexspaces-locks = { path = "../locks", features = ["memory-backend"] }
+plexspaces-application = { path = "../application" }
+plexspaces-services = { path = "../services" }
+plexspaces-proto = { workspace = true }
+ulid = "1.1"
 
 [lib]
 name = "plexspaces_facet"

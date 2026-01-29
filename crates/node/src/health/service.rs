@@ -45,7 +45,7 @@
 
 use super::checker::{HealthChecker, HealthCheckContext, run_health_check};
 use plexspaces_proto::system::v1::{
-    DependencyCheck, DependencyRegistrationConfig, DetailedHealthCheck, HealthCheck, HealthProbeConfig, HealthStatus,
+    DetailedHealthCheck, HealthCheck, HealthProbeConfig, HealthStatus,
     NodeHealthState, NodeReadinessStatus, ServingStatus,
 };
 use std::sync::Arc;
@@ -472,7 +472,7 @@ impl PlexSpacesHealthReporter {
             let mut service_status = self.service_status.write().await;
             service_status.insert("".to_string(), ServingStatus::ServingStatusServing); // Overall health
             service_status.insert("plexspaces.actor.v1.ActorService".to_string(), ServingStatus::ServingStatusServing);
-            service_status.insert("plexspaces.tuplespace.v1.TuplePlexSpaceService".to_string(), ServingStatus::ServingStatusServing);
+            service_status.insert("plexspaces.tuplespace.v1.TupleSpaceService".to_string(), ServingStatus::ServingStatusServing);
             service_status.insert("plexspaces.supervisor.v1.SupervisorService".to_string(), ServingStatus::ServingStatusServing);
         }
 
@@ -536,7 +536,7 @@ impl PlexSpacesHealthReporter {
             let mut service_status = self.service_status.write().await;
             service_status.insert("".to_string(), ServingStatus::ServingStatusNotServing); // Overall health
             service_status.insert("plexspaces.actor.v1.ActorService".to_string(), ServingStatus::ServingStatusNotServing);
-            service_status.insert("plexspaces.tuplespace.v1.TuplePlexSpaceService".to_string(), ServingStatus::ServingStatusNotServing);
+            service_status.insert("plexspaces.tuplespace.v1.TupleSpaceService".to_string(), ServingStatus::ServingStatusNotServing);
             service_status.insert("plexspaces.supervisor.v1.SupervisorService".to_string(), ServingStatus::ServingStatusNotServing);
         }
 
@@ -668,7 +668,7 @@ impl PlexSpacesHealthReporter {
         let mut service_status = self.service_status.write().await;
         service_status.insert("".to_string(), recreate_status(status_i32)); // Overall health
         service_status.insert("plexspaces.actor.v1.ActorService".to_string(), recreate_status(status_i32));
-        service_status.insert("plexspaces.tuplespace.v1.TuplePlexSpaceService".to_string(), recreate_status(status_i32));
+        service_status.insert("plexspaces.tuplespace.v1.TupleSpaceService".to_string(), recreate_status(status_i32));
         service_status.insert("plexspaces.supervisor.v1.SupervisorService".to_string(), recreate_status(status_i32));
     }
 
@@ -820,6 +820,7 @@ impl Default for PlexSpacesHealthReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_proto::system::v1::DependencyRegistrationConfig;
 
     #[tokio::test]
     async fn test_health_reporter_initialization() {
@@ -940,8 +941,6 @@ mod tests {
             dependency_registration: Some(DependencyRegistrationConfig {
                 enabled: false,
                 dependencies: vec![],
-                default_namespace: String::new(),
-                default_tenant: String::new(),
             }),
             circuit_breaker_config: None,
             monitoring_interval: Some(prost_types::Duration {
@@ -974,8 +973,6 @@ mod tests {
             dependency_registration: Some(DependencyRegistrationConfig {
                 enabled: false,
                 dependencies: vec![],
-                default_namespace: String::new(),
-                default_tenant: String::new(),
             }),
             circuit_breaker_config: None,
             monitoring_interval: None,

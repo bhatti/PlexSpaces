@@ -25,10 +25,10 @@
 
 #[cfg(feature = "locks")]
 mod distributed_lock_tests {
-    use plexspaces_core::{ActorId, ActorRef, ActorService};
+    use plexspaces_core::{ActorId, ActorRef, ActorService, Message};
     use plexspaces_journaling::{TimerFacet, TimerRegistration};
     use plexspaces_locks::{LockManager, memory::MemoryLockManager};
-    use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
+    use plexspaces_mailbox::{Mailbox, MailboxConfig};
     use plexspaces_facet::Facet;
     use plexspaces_proto::prost_types;
     use std::sync::Arc;
@@ -55,7 +55,7 @@ mod distributed_lock_tests {
             _actor_id: &str,
             message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            self.mailbox.send(message).await
+            self.mailbox.send(message.into()).await
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
             Ok("message-id".to_string())
         }

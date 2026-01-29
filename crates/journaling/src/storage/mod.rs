@@ -34,13 +34,8 @@
 //! - [`RedisJournalStorage`]: Redis (distributed, eventually consistent)
 //! - [`SqliteJournalStorage`]: SQLite with WAL mode (edge deployments)
 
-use crate::{Checkpoint, JournalEntry, JournalStats, ActorEvent, ActorHistory};
 use plexspaces_core::{JournalError, JournalResult};
-use async_trait::async_trait;
-use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use std::sync::Arc;
-use std::time::SystemTime;
-use plexspaces_proto::prost_types;
 
 // Re-export reminder types from proto
 pub use plexspaces_proto::timer::v1::{ReminderRegistration, ReminderState};

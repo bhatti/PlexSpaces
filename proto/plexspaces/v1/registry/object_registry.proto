@@ -164,6 +164,7 @@ syntax = "proto3";
 
 package plexspaces.object_registry.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
@@ -300,7 +301,7 @@ message ObjectRegistration {
   // Format: "http://host:port" or "https://host:port"
   // Examples:
   // - Actor: "http://node1:8000" (ActorService endpoint)
-  // - TupleSpace: "http://ts-node:8001" (TuplePlexSpaceService endpoint)
+  // - TupleSpace: "http://ts-node:8001" (TupleSpaceService endpoint)
   // - Service: "http://order-pod:50051" (Custom service endpoint)
   string grpc_address = 8 [(google.api.field_behavior) = REQUIRED];
 
@@ -479,16 +480,19 @@ message RegisterResponse {
 // Unregister object request
 message UnregisterRequest {
   // Object ID to unregister
-  string object_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string object_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Object type (for key construction)
   ObjectType object_type = 2;
 
   // Tenant ID (for multi-tenancy)
-  string tenant_id = 3;
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Namespace (for logical grouping)
-  string namespace = 4;
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 }
 
 message UnregisterResponse {
@@ -499,16 +503,19 @@ message UnregisterResponse {
 // Lookup single object request
 message LookupRequest {
   // Object ID to lookup
-  string object_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string object_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Object type (optional - if not specified, searches all types)
   ObjectType object_type = 2;
 
   // Tenant ID (for multi-tenancy)
-  string tenant_id = 3;
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Namespace (for logical grouping)
-  string namespace = 4;
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 }
 
 message LookupResponse {
@@ -528,28 +535,28 @@ message DiscoverRequest {
 
   // Filter by object category (exact match)
   // Examples: "GenServer", "redis", "order-service"
-  string object_category = 2;
+  string object_category = 2 [(buf.validate.field).string.max_len = 255];
 
   // ==================== LOCATION FILTERING ====================
 
   // Filter by node ID
-  string node_id = 3;
+  string node_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID
-  string tenant_id = 4;
+  string tenant_id = 4 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace
-  string namespace = 5;
+  string namespace = 5 [(buf.validate.field).string.max_len = 255];
 
   // ==================== CAPABILITY FILTERING ====================
 
   // Filter by capabilities (ALL must be present)
   // Example: ["persistent", "distributed"] → only objects with BOTH capabilities
-  repeated string capabilities = 6;
+  repeated string capabilities = 6 [(buf.validate.field).repeated.max_items = 100];
 
   // Filter by labels (ANY can match)
   // Example: ["prod", "us-west-2"] → objects with "prod" OR "us-west-2"
-  repeated string labels = 7;
+  repeated string labels = 7 [(buf.validate.field).repeated.max_items = 100];
 
   // ==================== HEALTH FILTERING ====================
 
@@ -558,21 +565,21 @@ message DiscoverRequest {
 
   // Filter by minimum health age (exclude stale objects)
   // Example: last_heartbeat < (now - max_age) → excluded
-  google.protobuf.Duration max_heartbeat_age = 9;
+  google.protobuf.Duration max_heartbeat_age = 9 [(buf.validate.field).duration.lte.seconds = 604800];  // Max 7 days
 
   // ==================== PAGINATION ====================
 
   // Maximum results per page (default: 100, max: 1000)
-  int32 page_size = 10;
+  int32 page_size = 10 [(buf.validate.field).int32 = {gte: 0, lte: 1000}];
 
   // Pagination token from previous response (opaque)
-  string page_token = 11;
+  string page_token = 11 [(buf.validate.field).string.max_len = 512];
 
   // ==================== SORTING ====================
 
   // Sort field (default: "created_at")
   // Options: "object_id", "created_at", "updated_at", "last_heartbeat"
-  string sort_by = 12;
+  string sort_by = 12 [(buf.validate.field).string.max_len = 50];
 
   // Sort order (default: ascending)
   bool descending = 13;
@@ -595,16 +602,19 @@ message DiscoverResponse {
 // Heartbeat request
 message HeartbeatRequest {
   // Object ID sending heartbeat
-  string object_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string object_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
 
   // Object type
   ObjectType object_type = 2;
 
   // Tenant ID
-  string tenant_id = 3;
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Namespace
-  string namespace = 4;
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 
   // Updated health status (optional)
   HealthStatus health_status = 5;
@@ -624,7 +634,7 @@ message HeartbeatResponse {
 // Batch heartbeat request
 message BatchHeartbeatRequest {
   // Multiple heartbeats
-  repeated HeartbeatRequest heartbeats = 1;
+  repeated HeartbeatRequest heartbeats = 1 [(buf.validate.field).repeated.max_items = 1000];
 }
 
 message BatchHeartbeatResponse {
@@ -641,10 +651,10 @@ message BatchHeartbeatResponse {
 // List object types request
 message ListObjectTypesRequest {
   // Filter by tenant (optional)
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 2;
+  string namespace = 2 [(buf.validate.field).string.max_len = 255];
 }
 
 // Object type summary

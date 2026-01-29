@@ -240,14 +240,14 @@ mod tests {
         // ASSERT: Should return error
         assert!(result.is_err(), "persist should fail without storage");
         let error = result.unwrap_err();
-        assert_eq!(
-            error.code,
-            actor_types::ErrorCode::Internal,
-            "Error code should be Internal"
+        // actor-error is now a string (JSON), not a record
+        assert!(
+            error.contains("internal") || error.contains("Internal"),
+            "Error should indicate internal error type, got: {}", error
         );
         assert!(
-            error.message.contains("Journal storage not configured"),
-            "Error message should mention storage not configured"
+            error.contains("Journal storage not configured") || error.contains("not configured"),
+            "Error message should mention storage not configured, got: {}", error
         );
     }
 }

@@ -190,7 +190,7 @@ impl EventEmitterFacet {
         }
 
         if self.config.log_events {
-            println!("Event emitted: {:?}", event);
+            tracing::debug!(event_type = %event.event_type, "Event emitted");
         }
 
         let subs = self.subscribers.read().await;
@@ -209,13 +209,18 @@ impl EventEmitterFacet {
                 let subscriber_id = subscriber.id.clone();
                 tokio::spawn(async move {
                     // Send event to subscriber
-                    println!(
-                        "Sending event to subscriber {}: {:?}",
-                        subscriber_id, event_clone
+                    tracing::trace!(
+                        subscriber_id = %subscriber_id,
+                        event_type = %event_clone.event_type,
+                        "Sending event to subscriber async"
                     );
                 });
             } else {
-                println!("Sending event to subscriber {}: {:?}", subscriber.id, event);
+                tracing::trace!(
+                    subscriber_id = %subscriber.id,
+                    event_type = %event.event_type,
+                    "Sending event to subscriber"
+                );
             }
         }
 
@@ -247,14 +252,14 @@ impl Facet for EventEmitterFacet {
 
     async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
         // Use stored config, ignore parameter (config is set in constructor)
-        println!("Event emitter facet attached to actor: {}", actor_id);
+        tracing::debug!(actor_id = %actor_id, "Event emitter facet attached to actor");
         Ok(())
     }
 
     async fn on_detach(&mut self, actor_id: &str) -> Result<(), FacetError> {
         // Clear all subscribers
         self.subscribers.write().await.clear();
-        println!("Event emitter facet detached from actor: {}", actor_id);
+        tracing::debug!(actor_id = %actor_id, "Event emitter facet detached from actor");
         Ok(())
     }
 

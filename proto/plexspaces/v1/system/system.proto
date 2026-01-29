@@ -31,6 +31,7 @@ syntax = "proto3";
 
 package plexspaces.system.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
@@ -412,11 +413,6 @@ message DependencyRegistrationConfig {
   // Format: "name:type:critical" (e.g., "database:service:true", "redis:service:false")
   repeated string dependencies = 2;
 
-  // Default namespace for dependency lookup
-  string default_namespace = 3;
-
-  // Default tenant for dependency lookup
-  string default_tenant = 4;
 }
 
 // Dependency health check
@@ -550,7 +546,7 @@ message DetailedHealthCheck {
 // - Initial actors spawned
 message MarkStartupCompleteRequest {
   // Optional message explaining what was initialized
-  string message = 1;
+  string message = 1 [(buf.validate.field).string.max_len = 1024];
 }
 
 message MarkStartupCompleteResponse {
@@ -575,10 +571,10 @@ message MarkStartupCompleteResponse {
 // - Pod has terminationGracePeriodSeconds (default 30s) before SIGKILL
 message BeginShutdownRequest {
   // Reason for shutdown (for logging)
-  string reason = 1;
+  string reason = 1 [(buf.validate.field).string.max_len = 1024];
 
   // Override default drain timeout
-  google.protobuf.Duration drain_timeout = 2;
+  google.protobuf.Duration drain_timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
 }
 
 message BeginShutdownResponse {
@@ -675,7 +671,7 @@ message GetMetricsResponse {
 }
 
 message GetConfigRequest {
-  string key_pattern = 1; // Glob pattern for keys
+  string key_pattern = 1 [(buf.validate.field).string.max_len = 512];  // Glob pattern for keys
   bool include_secrets = 2;
 }
 
@@ -787,8 +783,8 @@ message ShutdownRequest {
   };
 
   bool graceful = 1;
-  google.protobuf.Duration timeout = 2;
-  string reason = 3;
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  string reason = 3 [(buf.validate.field).string.max_len = 1024];
 }
 
 message ShutdownResponse {

@@ -102,9 +102,7 @@ message SchedulingRequest {
   
   // Request details (imported from actor_runtime.proto)
   plexspaces.actor.v1.ActorResourceRequirements requirements = 2;
-  string namespace = 3;
-  string tenant_id = 4;
-  
+
   // Status
   SchedulingStatus status = 5;
   
@@ -119,6 +117,16 @@ message SchedulingRequest {
   google.protobuf.Timestamp created_at = 9;
   google.protobuf.Timestamp scheduled_at = 10;
   google.protobuf.Timestamp completed_at = 11;
+
+  // Tenant ID for storage isolation (set from gRPC metadata/auth when request is created)
+  // NOTE: This is NOT an API input field - tenant comes from auth (JWT/mTLS).
+  // Stored here for tracking, isolation, and state store operations.
+  string tenant_id = 12;
+
+  // Namespace for storage isolation (set from gRPC metadata when request is created)
+  // NOTE: This is NOT an API input field - namespace comes from request metadata.
+  // Stored here for tracking, isolation, and state store operations.
+  string namespace = 13;
 }
 
 // Scheduling status enum
@@ -168,13 +176,7 @@ service SchedulingService {
 message ScheduleActorRequest {
   // Actor resource requirements (imported from actor_runtime.proto)
   plexspaces.actor.v1.ActorResourceRequirements requirements = 1 [(google.api.field_behavior) = REQUIRED];
-  
-  // Namespace (optional)
-  string namespace = 2;
-  
-  // Tenant ID (optional)
-  string tenant_id = 3;
-  
+
   // Optional: Client-provided request ID (for idempotency)
   // If not provided, server generates one
   string request_id = 4;

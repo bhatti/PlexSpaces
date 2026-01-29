@@ -6,10 +6,12 @@
 //! These tests spawn actual ActorService processes and test real gRPC communication.
 //!
 //! To run:
-//!   cargo test --test integration_tests -- --ignored --test-threads=1
+//!   make test
+//! or (build node_runner first):
+//!   cargo build --bin node_runner -p plexspaces-services --all-features
+//!   cargo test -p plexspaces-services --test integration_tests -- auth_tests -- --test-threads=1
 //!
-//! Note: Tests are marked #[ignore] because they spawn processes and are slower.
-//! Use --test-threads=1 to avoid port conflicts.
+//! Note: Use --test-threads=1 to avoid port conflicts when tests spawn processes.
 
 #[path = "integration/harness.rs"]
 mod harness;

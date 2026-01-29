@@ -446,9 +446,9 @@ impl TupleSpaceStats {
 
 impl Default for TupleSpace {
     fn default() -> Self {
-        // Use internal tenant/namespace for default (system operations)
+        // Default tenant/namespace blank; callers should pass context from request (JWT/mTLS) or node config default.
         // Note: Can't use RequestContext here due to circular dependency (core -> tuplespace)
-        Self::with_tenant_namespace("internal", "system")
+        Self::with_tenant_namespace("", "")
     }
 }
 
@@ -474,8 +474,8 @@ impl TupleSpace {
         capabilities.insert("barriers".to_string(), "enabled".to_string());
         capabilities.insert("leases".to_string(), "enabled".to_string());
 
-        let tenant_str = tenant.to_string();
-        let namespace_str = namespace.to_string();
+        let _tenant_str = tenant.to_string();
+        let _namespace_str = namespace.to_string();
 
         TupleSpace {
             storage: TupleSpaceBackend::InMemory {
@@ -971,7 +971,7 @@ impl TupleSpace {
                 let mut tuples = storage.take(pattern.clone(), None).await?;
                 let tuple = tuples.pop();
 
-                if let Some(ref t) = tuple {
+                if let Some(ref _t) = tuple {
                     stats.total_takes += 1;
                 }
 

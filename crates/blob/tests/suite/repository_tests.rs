@@ -86,6 +86,16 @@ mod sql_tests {
         RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string())
     }
 
+    fn create_admin_context(tenant_id: &str) -> RequestContext {
+        RequestContext::new_without_auth(tenant_id.to_string(), String::new())
+            .with_admin(true)
+    }
+
+    fn create_internal_context(tenant_id: &str) -> RequestContext {
+        RequestContext::new_without_auth(tenant_id.to_string(), String::new())
+            .with_internal(true)
+    }
+
     #[tokio::test]
     async fn test_save_and_get() {
         let repo = create_test_repository().await;
@@ -348,5 +358,85 @@ mod sql_tests {
         let expired_ns2 = repo.find_expired(&ctx_ns2, 10).await.unwrap();
         assert_eq!(expired_ns2.len(), 1);
         assert_eq!(expired_ns2[0].blob_id, "blob-2");
+    }
+
+    #[tokio::test]
+    async fn test_admin_internal_empty_namespace_get() {
+        let repo = create_test_repository().await;
+        let ctx_ns1 = create_test_context("tenant-1", "ns-1");
+        let ctx_ns2 = create_test_context("tenant-1", "ns-2");
+
+        let metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
+        repo.save(&ctx_ns1, &metadata1).await.unwrap();
+
+        let metadata2 = create_test_metadata("blob-2", "tenant-1", "ns-2");
+        repo.save(&ctx_ns2, &metadata2).await.unwrap();
+
+        // Admin context with empty namespace should find blobs across namespaces
+        let admin_ctx = create_admin_context("tenant-1");
+        let retrieved = repo.get(&admin_ctx, "blob-1").await.unwrap();
+        assert!(retrieved.is_some(), "Admin should find blob across namespaces");
+        assert_eq!(retrieved.unwrap().blob_id, "blob-1");
+
+        // Internal context with empty namespace should find blobs across namespaces
+        let internal_ctx = create_internal_context("tenant-1");
+        let retrieved = repo.get(&internal_ctx, "blob-2").await.unwrap();
+        assert!(retrieved.is_some(), "Internal should find blob across namespaces");
+        assert_eq!(retrieved.unwrap().blob_id, "blob-2");
+    }
+
+    #[tokio::test]
+    async fn test_admin_internal_empty_namespace_get_by_sha256() {
+        let repo = create_test_repository().await;
+        let ctx_ns1 = create_test_context("tenant-1", "ns-1");
+        let ctx_ns2 = create_test_context("tenant-1", "ns-2");
+
+        let sha256 = "e".repeat(64);
+        let mut metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
+        metadata1.sha256 = sha256.clone();
+        repo.save(&ctx_ns1, &metadata1).await.unwrap();
+
+        let mut metadata2 = create_test_metadata("blob-2", "tenant-1", "ns-2");
+        metadata2.sha256 = "f".repeat(64);
+        repo.save(&ctx_ns2, &metadata2).await.unwrap();
+
+        // Admin context with empty namespace should find blob by sha256 across namespaces
+        let admin_ctx = create_admin_context("tenant-1");
+        let retrieved = repo.get_by_sha256(&admin_ctx, &sha256).await.unwrap();
+        assert!(retrieved.is_some(), "Admin should find blob by sha256 across namespaces");
+        assert_eq!(retrieved.unwrap().blob_id, "blob-1");
+
+        // Internal context with empty namespace should find blob by sha256 across namespaces
+        let internal_ctx = create_internal_context("tenant-1");
+        let retrieved = repo.get_by_sha256(&internal_ctx, &sha256).await.unwrap();
+        assert!(retrieved.is_some(), "Internal should find blob by sha256 across namespaces");
+        assert_eq!(retrieved.unwrap().blob_id, "blob-1");
+    }
+
+    #[tokio::test]
+    async fn test_admin_internal_empty_namespace_list() {
+        let repo = create_test_repository().await;
+        let ctx_ns1 = create_test_context("tenant-1", "ns-1");
+        let ctx_ns2 = create_test_context("tenant-1", "ns-2");
+
+        let metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
+        repo.save(&ctx_ns1, &metadata1).await.unwrap();
+
+        let metadata2 = create_test_metadata("blob-2", "tenant-1", "ns-2");
+        repo.save(&ctx_ns2, &metadata2).await.unwrap();
+
+        // Admin context with empty namespace should list blobs from all namespaces
+        let admin_ctx = create_admin_context("tenant-1");
+        let (results, total) = repo.list(&admin_ctx, &ListFilters::default(), 10, 0).await.unwrap();
+        assert!(total >= 2, "Admin list should return blobs from all namespaces");
+        assert!(results.iter().any(|b| b.blob_id == "blob-1"));
+        assert!(results.iter().any(|b| b.blob_id == "blob-2"));
+
+        // Internal context with empty namespace should list blobs from all namespaces
+        let internal_ctx = create_internal_context("tenant-1");
+        let (results, total) = repo.list(&internal_ctx, &ListFilters::default(), 10, 0).await.unwrap();
+        assert!(total >= 2, "Internal list should return blobs from all namespaces");
+        assert!(results.iter().any(|b| b.blob_id == "blob-1"));
+        assert!(results.iter().any(|b| b.blob_id == "blob-2"));
     }
 }

@@ -20,7 +20,7 @@
 
 use crate::chain::{Interceptor, InterceptorError};
 use async_trait::async_trait;
-use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use plexspaces_proto::grpc::v1::{
     AuthMethod, AuthMiddlewareConfig, InterceptorDecision, InterceptorRequest, InterceptorResponse,
     InterceptorResult,
@@ -43,9 +43,18 @@ use std::fs;
 /// - Config: `AuthMiddlewareConfig` from proto
 /// - Claims: Maps JWT to proto `JwtClaims`
 /// - RBAC: Uses proto `RbacConfig`
+/// Which JWT algorithm we expect (from key type). Pinned to avoid algorithm-confusion attacks.
+#[derive(Clone, Copy)]
+enum JwtKeyType {
+    Hmac,  // HS256
+    Rsa,   // RS256
+}
+
 pub struct AuthInterceptor {
     config: AuthMiddlewareConfig,
     decoding_key: Option<DecodingKey>,
+    /// Pinned algorithm from key type (never trust token's alg header).
+    jwt_algorithm: Option<JwtKeyType>,
     mtls_trusted_services: std::collections::HashSet<String>,
 }
 
@@ -54,6 +63,7 @@ pub struct AuthInterceptor {
 /// ## Design Note
 /// This is a Rust-side mirror of proto `JwtClaims` for deserialization.
 /// We extract from JWT, then can convert to proto type if needed.
+/// Standard: sub, exp, iat (RFC 7519). Custom: tenant_id, roles, groups, is_admin.
 #[derive(Debug, Serialize, Deserialize)]
 struct InternalJwtClaims {
     sub: String,
@@ -67,6 +77,10 @@ struct InternalJwtClaims {
     roles: Vec<String>,
     #[serde(default)]
     tenant_id: String,
+    #[serde(default)]
+    groups: Vec<String>,
+    #[serde(default)]
+    is_admin: bool,
 }
 
 impl AuthInterceptor {
@@ -82,10 +96,11 @@ impl AuthInterceptor {
     /// - Invalid JWT key format
     /// - Unreadable public key file
     pub fn new(config: AuthMiddlewareConfig) -> Result<Self, InterceptorError> {
-        let decoding_key = if config.method == AuthMethod::AuthMethodJwt as i32 {
-            Some(Self::load_decoding_key(&config.jwt_key)?)
+        let (decoding_key, jwt_algorithm) = if config.method == AuthMethod::AuthMethodJwt as i32 {
+            let (key, key_type) = Self::load_decoding_key_and_algorithm(&config.jwt_key)?;
+            (Some(key), Some(key_type))
         } else {
-            None
+            (None, None)
         };
 
         // Build trusted services set for mTLS
@@ -98,11 +113,12 @@ impl AuthInterceptor {
         Ok(Self {
             config,
             decoding_key,
+            jwt_algorithm,
             mtls_trusted_services,
         })
     }
 
-    /// Load JWT decoding key from config
+    /// Load JWT decoding key and expected algorithm from config
     ///
     /// ## Arguments
     /// * `key_str` - Either secret string or path to public key file
@@ -113,8 +129,12 @@ impl AuthInterceptor {
     /// ## Supports
     /// - HS256: Direct secret string
     /// - RS256: Path to PEM public key file
-    fn load_decoding_key(key_str: &str) -> Result<DecodingKey, InterceptorError> {
-        // If key_str looks like a file path, load it
+    ///
+    /// ## Security
+    /// Returns expected algorithm so we never trust the token's alg header (algorithm-confusion).
+    fn load_decoding_key_and_algorithm(
+        key_str: &str,
+    ) -> Result<(DecodingKey, JwtKeyType), InterceptorError> {
         if key_str.ends_with(".pem") || key_str.starts_with("/") || key_str.starts_with("./") {
             let pem_data = fs::read(key_str).map_err(|e| {
                 InterceptorError::AuthenticationFailed(format!(
@@ -122,12 +142,15 @@ impl AuthInterceptor {
                     key_str, e
                 ))
             })?;
-            DecodingKey::from_rsa_pem(&pem_data).map_err(|e| {
+            let key = DecodingKey::from_rsa_pem(&pem_data).map_err(|e| {
                 InterceptorError::AuthenticationFailed(format!("Invalid RSA public key: {}", e))
-            })
+            })?;
+            Ok((key, JwtKeyType::Rsa))
         } else {
-            // Treat as HMAC secret
-            Ok(DecodingKey::from_secret(key_str.as_bytes()))
+            Ok((
+                DecodingKey::from_secret(key_str.as_bytes()),
+                JwtKeyType::Hmac,
+            ))
         }
     }
 
@@ -164,12 +187,15 @@ impl AuthInterceptor {
             InterceptorError::AuthenticationFailed("JWT decoding key not configured".to_string())
         })?;
 
-        // Determine algorithm from token header
-        let header = decode_header(token).map_err(|e| {
-            InterceptorError::AuthenticationFailed(format!("Invalid JWT header: {}", e))
+        // SECURITY: Pin algorithm from our key type; never trust token's alg header (algorithm-confusion).
+        let alg = self.jwt_algorithm.ok_or_else(|| {
+            InterceptorError::AuthenticationFailed("JWT algorithm not configured".to_string())
         })?;
-
-        let mut validation = Validation::new(header.alg);
+        let expected_alg = match alg {
+            JwtKeyType::Hmac => Algorithm::HS256,
+            JwtKeyType::Rsa => Algorithm::RS256,
+        };
+        let mut validation = Validation::new(expected_alg);
 
         // Disable audience validation (can enable if needed)
         validation.validate_aud = false;
@@ -387,10 +413,10 @@ impl AuthInterceptor {
                         metrics: vec![],
                     });
                 } else {
-                    // Strict mode: deny
+                    // Strict mode: deny with actionable message
                     return Ok(InterceptorResult {
                         decision: InterceptorDecision::InterceptorDecisionDeny as i32,
-                        error_message: "Missing authorization header".to_string(),
+                        error_message: "Missing Authorization header (Bearer token required). For local testing, set PLEXSPACES_DISABLE_AUTH=1.".to_string(),
                         modified_headers: std::collections::HashMap::new(),
                         metrics: vec![],
                     });
@@ -414,6 +440,8 @@ impl AuthInterceptor {
         modified_headers.insert("x-tenant-id".to_string(), String::new());
         modified_headers.insert("x-user-id".to_string(), String::new());
         modified_headers.insert("x-user-roles".to_string(), String::new());
+        modified_headers.insert("x-user-groups".to_string(), String::new());
+        modified_headers.insert("x-admin".to_string(), String::new());
         
         // Now set them ONLY from JWT claims (not from incoming headers)
         // This ensures security: users cannot spoof tenant_id/user_id via headers
@@ -421,16 +449,20 @@ impl AuthInterceptor {
         if !claims.tenant_id.is_empty() {
             modified_headers.insert("x-tenant-id".to_string(), claims.tenant_id.clone());
         } else {
-            // Remove the header if tenant_id is empty (don't include it in modified_headers)
             modified_headers.remove("x-tenant-id");
         }
         modified_headers.insert("x-user-id".to_string(), claims.sub.clone());
         if !claims.roles.is_empty() {
             modified_headers.insert("x-user-roles".to_string(), claims.roles.join(","));
         } else {
-            // Remove the header if roles is empty (don't include it in modified_headers)
             modified_headers.remove("x-user-roles");
         }
+        if !claims.groups.is_empty() {
+            modified_headers.insert("x-user-groups".to_string(), claims.groups.join(","));
+        } else {
+            modified_headers.remove("x-user-groups");
+        }
+        modified_headers.insert("x-admin".to_string(), if claims.is_admin { "true" } else { "false" }.to_string());
 
         // Authentication and authorization successful
         Ok(InterceptorResult {
@@ -455,6 +487,7 @@ impl Default for AuthInterceptor {
                 mtls_trusted_services: vec![],
             },
             decoding_key: None,
+            jwt_algorithm: None,
             mtls_trusted_services: std::collections::HashSet::new(),
         }
     }
@@ -487,10 +520,10 @@ impl Interceptor for AuthInterceptor {
                         metrics: vec![],
                     })
                 } else {
-                    // Strict mode: deny
+                    // Strict mode: deny with actionable message
                     Ok(InterceptorResult {
                         decision: InterceptorDecision::InterceptorDecisionDeny as i32,
-                        error_message: "Authentication method not configured".to_string(),
+                        error_message: "Authentication method not configured. For local testing, set PLEXSPACES_DISABLE_AUTH=1.".to_string(),
                         modified_headers: std::collections::HashMap::new(),
                         metrics: vec![],
                     })

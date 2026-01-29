@@ -37,7 +37,7 @@ use tokio::time::sleep;
 
 use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_core::TupleSpaceProvider;
-use plexspaces_proto::{tuplespace::v1::*, TuplePlexSpaceServiceClient};
+use plexspaces_proto::{tuplespace::v1::*, TupleSpaceServiceClient};
 use plexspaces_tuplespace::{
     Pattern, PatternField, Tuple as InternalTuple, TupleField as InternalTupleField,
 };
@@ -89,7 +89,6 @@ fn create_proto_pattern(fields: Vec<tuple_field::Value>) -> ProtoTuple {
 }
 
 #[tokio::test]
-#[ignore] // Ignored by default - requires running nodes
 async fn test_distributed_tuplespace_write_read_across_nodes() {
     // Setup: Create 2 nodes
     let node1 = create_test_node("node1", 8000).await;
@@ -132,7 +131,7 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
         let _: Result<(), _> = tuplespace_provider.write(tuple).await;
 
         // Connect to node1 via gRPC from external client
-        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:8000")
+        let mut client = TupleSpaceServiceClient::connect("http://127.0.0.1:8000")
             .await
             .expect("Failed to connect to node1");
 
@@ -167,7 +166,7 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
     // Test 2: Write via gRPC to node2, read from node2's local TupleSpace
     {
         // Connect to node2 via gRPC
-        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:8001")
+        let mut client = TupleSpaceServiceClient::connect("http://127.0.0.1:8001")
             .await
             .expect("Failed to connect to node2");
 
@@ -198,7 +197,7 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
     // Test 3: Take operation via gRPC
     {
         // Connect to node1 via gRPC
-        let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:8000")
+        let mut client = TupleSpaceServiceClient::connect("http://127.0.0.1:8000")
             .await
             .expect("Failed to connect to node1");
 
@@ -242,7 +241,6 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
 }
 
 #[tokio::test]
-#[ignore] // Ignored by default - requires running nodes
 async fn test_distributed_tuplespace_count_and_exists() {
     // Setup: Create 2 nodes
     let node1 = create_test_node("node1", 8002).await;
@@ -270,7 +268,7 @@ async fn test_distributed_tuplespace_count_and_exists() {
     }
 
     // Connect to node1 via gRPC
-    let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:8002")
+    let mut client = TupleSpaceServiceClient::connect("http://127.0.0.1:8002")
         .await
         .expect("Failed to connect to node1");
 
@@ -335,7 +333,6 @@ async fn test_distributed_tuplespace_count_and_exists() {
 }
 
 #[tokio::test]
-#[ignore] // Ignored by default - requires running nodes
 async fn test_distributed_tuplespace_pattern_matching() {
     // Setup: Create node
     let node = create_test_node("node1", 9005).await;
@@ -373,7 +370,7 @@ async fn test_distributed_tuplespace_pattern_matching() {
         .await;
 
     // Connect via gRPC
-    let mut client = TuplePlexSpaceServiceClient::connect("http://127.0.0.1:9005")
+    let mut client = TupleSpaceServiceClient::connect("http://127.0.0.1:9005")
         .await
         .expect("Failed to connect to node");
 

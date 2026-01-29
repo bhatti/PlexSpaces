@@ -88,7 +88,6 @@ mod tests {
             mtls: Some(mtls_config),
             jwt: Some(jwt_config),
             api_keys: vec![api_key],
-            allow_disable_auth: false,
             disable_auth: false,
         };
 
@@ -111,7 +110,6 @@ mod tests {
             mtls: None,
             jwt: None,
             api_keys: vec![],
-            allow_disable_auth: false,
             disable_auth: false,
         };
 
@@ -146,7 +144,6 @@ mod tests {
             mtls: None,
             jwt: None,
             api_keys: vec![],
-            allow_disable_auth: false,
             disable_auth: false,
         };
 

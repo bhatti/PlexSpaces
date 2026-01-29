@@ -69,43 +69,17 @@ interface types {
     /// Pattern for tuple matching
     type pattern = list<pattern-field>;
 
-    /// Generic result with payload
-    variant actor-result {
-        ok(payload),
-        err(actor-error),
-    }
-
-    /// Structured error type
-    record actor-error {
-        /// Error code for programmatic handling
-        code: error-code,
-        /// Human-readable message
-        message: string,
-        /// Optional details (JSON-encoded)
-        details: option<string>,
-    }
-
-    /// Standard error codes
-    enum error-code {
-        /// Unknown/unspecified error
-        unknown,
-        /// Actor not found
-        actor-not-found,
-        /// Message delivery failed
-        delivery-failed,
-        /// Timeout waiting for response
-        timeout,
-        /// Invalid message format
-        invalid-message,
-        /// Operation not permitted
-        not-permitted,
-        /// Resource exhausted (mailbox full, memory limit, etc.)
-        resource-exhausted,
-        /// Internal error
-        internal,
-        /// Not implemented
-        not-implemented,
-    }
+    /// Error type - simple string message
+    /// 
+    /// For structured errors, use JSON format:
+    /// - Simple: "Error message"  
+    /// - Structured: {"code":"timeout","message":"Request timed out","details":"..."}
+    ///
+    /// Common error codes (when using structured format):
+    /// - unknown, actor-not-found, delivery-failed, timeout
+    /// - invalid-message, not-permitted, resource-exhausted  
+    /// - internal, not-implemented
+    type actor-error = string;
 
     /// Message envelope with metadata
     record message {

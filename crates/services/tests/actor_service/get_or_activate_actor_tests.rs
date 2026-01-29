@@ -160,10 +160,12 @@ async fn create_test_actor_service(
     service_locator.register_service(virtual_actor_manager).await;
     service_locator.register_service(facet_manager).await;
 
-    let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory.clone()).await;
+    let actor_factory = ActorFactoryImpl::new_arc(service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>).await;
+    service_locator.register_service_by_name(plexspaces_core::service_names::ACTOR_FACTORY_IMPL, actor_factory.clone()).await;
+    let factory_trait: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory.clone();
+    service_locator.register_actor_factory(factory_trait).await;
 
-    let actor_service = Arc::new(ActorServiceImpl::new(service_locator.clone(), node_id.to_string()));
+    let actor_service = Arc::new(ActorServiceImpl::new(service_locator, node_id.to_string()));
 
     (actor_service, actor_registry, service_locator)
 }

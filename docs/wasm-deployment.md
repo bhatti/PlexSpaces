@@ -611,10 +611,11 @@ cargo run --release --bin plexspaces -- application deploy \
 
 **⚠️ Critical Notes**:
 - **Application Name vs Application ID**: The `name` field is used by `ApplicationManager` for storage and lookup. Use the `name` (not `application_id`) when undeploying.
-- **WASM Components vs Traditional Modules**: 
-  - **Traditional WASM modules** (Rust, Go, JavaScript): ✅ **Supported** - Use these for testing
-  - **WASM Components** (Python from `componentize-py`): ❌ **Not yet supported** - Will fail with component instantiation error
-  - **See [WASM_COMPONENT_VS_MODULE.md](WASM_COMPONENT_VS_MODULE.md) for details**
+- **WASM Components (Python)**: ✅ **Fully Supported** - Python WASM components built with `componentize-py` are supported using the `simple-actor` WIT interface
+  - Uses JSON strings for all complex data (avoids pyo3 lifting issues)
+  - See `examples/python/` for working examples
+  - See `wit/plexspaces-simple-actor/` for the WIT interface
+- **Traditional WASM Modules** (Rust, Go, JavaScript): ✅ **Supported** - Use standard actor interface
 - **ApplicationSpec is Required**: All WASM deployments must include an ApplicationSpec (auto-generated or provided). This ensures applications follow the Erlang-style application model.
 
 **Testing WASM Deployment**:
@@ -719,6 +720,91 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 2. Consider Rust/Go for smaller files
 3. Split application into multiple smaller modules (future)
 
+### "PyObject_SetItem" Error (Python WASM Components)
+
+**Problem**: Python WASM components crash during initialization with:
+```
+error while executing at wasm backtrace:
+    ...
+    libpython3.12.so!PyObject_SetItem
+    libcomponentize_py_runtime.so!set_item::inner
+```
+
+**Root Cause**: componentize-py's pyo3 runtime tries to call `os.putenv()` during Python initialization. WASI doesn't support runtime environment variable modification, causing the crash.
+
+**Solution**: The PlexSpaces runtime is configured to NOT inherit environment variables. Instead, it explicitly sets only the minimal env vars Python needs:
+
+```rust
+// In crates/wasm-runtime/src/instance.rs
+let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new()
+    .inherit_stdio()
+    // Don't use inherit_env() - causes PyObject_SetItem errors
+    .env("PYTHONDONTWRITEBYTECODE", "1")
+    .env("PYTHONUNBUFFERED", "1")
+    .env("HOME", "/")
+    .env("PATH", "/")
+    .build();
+```
+
+This fix is already applied in the codebase. If you're running an older version, update to the latest.
+
+### Python 3.14 WASM Memory Bugs (Critical)
+
+**Problem**: Python WASM actors crash with memory deallocation errors:
+```
+error while executing at wasm backtrace:
+    0: libpython3.14.so!tuple_dealloc
+    1: libpython3.14.so!_Py_Dealloc
+    ...
+```
+
+**Error Types**:
+| Error | Symptom | Cause |
+|-------|---------|-------|
+| `match_dealloc` | Crash when using pattern matching or hashlib | `hashlib.md5()` and similar functions |
+| `tuple_dealloc` | Crash when returning from functions | Complex return values, `json.dumps()` |
+| `func_dealloc` | Crash during function cleanup | Helper function calls |
+
+**Root Cause**: The Python 3.14 runtime in componentize-py has memory management bugs in the WASM environment.
+
+**Workarounds**:
+
+```python
+# ❌ CRASHES - hashlib causes match_dealloc
+import hashlib
+h = hashlib.md5((flag + user).encode()).hexdigest()
+
+# ✅ WORKS - simple inline hash
+h = 0
+for c in (flag + user):
+    h = (h + ord(c)) % 100
+
+# ❌ MAY CRASH - json.dumps with complex nested data
+return json.dumps({"status": "ok", "data": {"nested": "value"}})
+
+# ✅ WORKS - string literal for simple responses
+return '{"status":"ok"}'
+
+# ❌ MAY CRASH - helper function call
+def my_hash(s):
+    return sum(ord(c) for c in s) % 100
+h = my_hash(flag + user)
+
+# ✅ WORKS - inline the logic
+h = 0
+for c in (flag + user):
+    h = (h + ord(c)) % 100
+```
+
+**Best Practices for Stable Python WASM Actors**:
+1. **Avoid hashlib entirely** - Use simple arithmetic hash functions
+2. **Use string literals for simple JSON** - `'{"ok":true}'` instead of `json.dumps({"ok": True})`
+3. **Inline calculations** - Don't extract logic into helper functions
+4. **Flat control flow** - Avoid nested try-except blocks
+5. **Simple return values** - Keep data structures flat and simple
+
+**Reference**: See `examples/python/apps/feature_flags/` for a working example with all workarounds applied.
+
 ### WASM File Too Large
 
 **Problem**: Python WASM files are 30-40MB
@@ -744,6 +830,239 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 1. HTTP gateway runs on gRPC port + 1 (e.g., if gRPC is 8000, HTTP is 8001)
 2. Check node logs for "Starting HTTP gateway server on http://..."
 3. Verify firewall allows connections to HTTP port
+
+## Python WASM Development
+
+### Prerequisites
+
+```bash
+# Create Python 3.12+ virtual environment
+python3.12 -m venv ~/venv
+source ~/venv/bin/activate
+
+# Install componentize-py
+pip install componentize-py
+```
+
+### WIT Interface (Simple Actor)
+
+Python components use the `simple-actor` WIT interface located at `wit/plexspaces-simple-actor/world.wit`. This interface uses JSON strings for all complex data to avoid componentize-py's pyo3 lifting issues:
+
+```wit
+package plexspaces:simple-actor@0.1.0;
+
+interface actor {
+    init: func(config-json: string) -> string;
+    handle: func(from-actor: string, msg-type: string, payload-json: string) -> string;
+    get-state: func() -> string;
+    set-state: func(state-json: string) -> string;
+}
+
+interface host {
+    send: func(to: string, msg-type: string, payload-json: string) -> string;
+    log: func(level: string, message: string);
+    now-ms: func() -> u64;
+}
+
+world actor-world {
+    import host;
+    export actor;
+}
+```
+
+### Building Python Actors
+
+```bash
+cd examples/python/apps/calculator
+./build.sh
+```
+
+The build script:
+1. Generates Python bindings from WIT
+2. Compiles Python to WASM Component using componentize-py
+3. Produces a ~35MB WASM file (includes Python runtime)
+
+### Example Python Actor
+
+```python
+import json
+from wit_world import exports
+
+class Actor(exports.Actor):
+    def init(self, config_json: str) -> str:
+        """Returns "" on success, "ERROR: ..." on failure"""
+        return ""
+    
+    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
+        """Returns JSON response or "ERROR: ..."."""
+        request = json.loads(payload_json)
+        operation = request.get('operation', msg_type)
+        if operation == 'add':
+            result = sum(request.get('operands', []))
+            return json.dumps({'result': result})
+        return json.dumps({'error': 'Unknown operation'})
+    
+    def get_state(self) -> str:
+        return json.dumps({})
+    
+    def set_state(self, state_json: str) -> str:
+        return ""
+```
+
+See `examples/python/README.md` for complete documentation.
+
+## WASM Actor State Persistence (Durability)
+
+WASM actors support **checkpoint-based durability** via the `get-state()` and `set-state()` WIT interface functions. This follows the [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/) pattern.
+
+### How It Works
+
+1. **Actor manages state internally**: Your WASM actor maintains state in memory
+2. **Framework calls `get-state()`**: On shutdown or checkpoint interval, framework gets state
+3. **State is persisted**: Framework stores state snapshot in SQLite/PostgreSQL
+4. **On restart, `set-state()` is called**: Framework restores state from checkpoint
+
+### Implementing State Persistence
+
+```python
+import json
+
+class StatefulActor:
+    def __init__(self):
+        self.data = {}  # Internal state
+    
+    def get_state(self) -> str:
+        """Called by framework to checkpoint state."""
+        return json.dumps(self.data)
+    
+    def set_state(self, state_json: str) -> str:
+        """Called by framework to restore state on restart."""
+        if state_json:
+            self.data = json.loads(state_json)
+        return ""  # Empty = success
+    
+    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
+        # Update self.data based on messages
+        pass
+```
+
+### Key Points
+
+- **JSON format**: State must be JSON-serializable
+- **Empty string = success**: `set-state()` returns empty string on success
+- **Graceful degradation**: `set-state()` should handle empty/null input
+- **Size matters**: Keep state small for fast checkpointing
+
+### Metrics
+
+State operations are fully instrumented with Prometheus metrics:
+
+- `plexspaces_wasm_get_state_total`: Total checkpoint calls
+- `plexspaces_wasm_set_state_total`: Total state restore calls
+- `plexspaces_wasm_state_size_bytes`: Size of persisted state
+
+See [Durability Documentation](durability.md#wasm-actor-durability-cloudflare-durable-objects-pattern) for complete details.
+
+## Supervisor Integration for WASM Actors
+
+WASM actors are deployed under a supervisor tree that provides automatic restart on failure. This follows the Erlang/OTP supervision model.
+
+### Default Supervisor Configuration
+
+When deploying a WASM application without explicit supervisor configuration, the server automatically creates a default supervisor:
+
+```
+Strategy: OneForOne (restart only the failed actor)
+Max Restarts: 5
+Children: The WASM actor as a permanent worker
+```
+
+### How Supervisor Integration Works
+
+The supervisor integration for WASM actors uses a unified approach:
+
+1. **Factory Function Pattern**: Each WASM actor has a factory function (`StartFn`) that can recreate the actor
+2. **`build_wasm_actor` Helper**: Single entry point for building WASM actors with full service wiring
+3. **`Supervisor.add_child()`**: Adds WASM actors to the supervisor with proper ChildSpec
+4. **Automatic Restart**: When an actor crashes, the supervisor calls the factory to recreate it
+
+### Architecture
+
+```
+WasmApplication
+  └── Root Supervisor (one-for-one)
+       ├── worker-1 (WASM actor) ← Factory can recreate on crash
+       └── worker-2 (WASM actor) ← Factory can recreate on crash
+```
+
+### Key Components
+
+**`create_wasm_actor_child_spec()`** - Creates a ChildSpec with factory:
+```rust
+// Uses ChildSpec::worker() for consistency with Rust supervisor patterns
+let spec = ChildSpec::worker(child_id, actor_id, factory);
+```
+
+**`build_wasm_actor()`** - Unified helper that:
+- Wires up all services (TupleSpace, ObjectRegistry, JournalStorage, etc.)
+- Creates unstarted Actor with proper context
+- Returns (Actor, ActorRef) for supervisor management
+
+**Factory Function** - Captured context for restart:
+- node, proto_child_spec, module_hash, runtime
+- Called by supervisor when actor needs restart
+
+### Supervision Strategies
+
+| Strategy | Behavior | Use Case |
+|----------|----------|----------|
+| OneForOne | Restart only failed actor | Independent workers |
+| OneForAll | Restart all actors | Tightly coupled actors |
+| RestForOne | Restart failed + started after | Dependency chain |
+
+### Example: Feature Flags with Supervisor
+
+```bash
+# Deploy feature flags service (supervisor auto-created)
+./target/debug/plexspaces deploy \
+  --node localhost:8090 \
+  -i feature-flags-test \
+  -n flags \
+  -w examples/python/apps/feature_flags/feature_flags_actor.wasm
+```
+
+The deployed application automatically has:
+- OneForOne supervisor
+- Automatic restart on crash (up to 5 times)
+- Full service access (TupleSpace, ObjectRegistry, etc.)
+
+### Custom Supervisor Configuration
+
+To customize supervisor settings, provide a config TOML file:
+
+```toml
+# app-config.toml
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "worker-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+```
+
+Deploy with custom config:
+```bash
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
+  -F "application_id=my-app" \
+  -F "name=my-app" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@my_actor.wasm" \
+  -F "config=@app-config.toml"
+```
 
 ## Best Practices
 
@@ -777,7 +1096,9 @@ Tests cover:
 ## References
 
 - **[Polyglot WASM Development Guide](polyglot.md)** - Comprehensive guide for polyglot development (Python, TypeScript, Rust, Go) with all WIT abstractions
+- **[Python WASM Examples](../examples/python/README.md)** - Python WASM actors with componentize-py
 - [WIT Specification](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md)
+- [componentize-py](https://github.com/bytecodealliance/componentize-py) - Python to WASM Component compiler
 - [wasm-opt Documentation](https://github.com/WebAssembly/binaryen)
 - [HTTP Multipart Upload Best Practices](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/POST)
 - [Polyglot WASM Deployment Example](../examples/simple/polyglot_wasm_deployment/README.md)

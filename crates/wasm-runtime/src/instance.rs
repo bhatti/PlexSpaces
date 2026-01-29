@@ -8,7 +8,7 @@
 use crate::{HostFunctions, WasmCapabilities, WasmError, WasmModule, WasmResult};
 use plexspaces_core::ChannelService;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use wasmtime::{Caller, Engine, Instance, Linker, Store, StoreLimits, StoreLimitsBuilder};
 
 #[cfg(feature = "component-model")]
@@ -33,6 +33,8 @@ pub struct ComponentContext {
     pub process_groups_impl: crate::component_host::ProcessGroupsImpl,
     pub locks_impl: crate::component_host::LocksImpl,
     pub registry_impl: crate::component_host::RegistryImpl,
+    /// Simple actor host for Python-compatible components
+    pub simple_host_impl: crate::simple_component_host::SimpleHostImpl,
 }
 
 #[cfg(feature = "component-model")]
@@ -46,6 +48,26 @@ impl wasmtime_wasi::WasiView for ComponentContext {
     }
 }
 
+/// Component bindings - either PlexspacesActor or SimpleActor
+#[cfg(feature = "component-model")]
+pub enum ComponentBindings {
+    /// Full PlexspacesActor bindings (for Rust components)
+    PlexspacesActor(crate::component_host::PlexspacesActor),
+    /// SimpleActor bindings (for Python-compatible components)
+    SimpleActor(crate::simple_component_host::ActorWorld),
+}
+
+/// Holds both component store and bindings together under a single lock
+/// This is needed because PlexspacesActor contains references to the store's WASI context
+/// which has non-Sync types (RngCore, clocks, stdio streams).
+#[cfg(feature = "component-model")]
+pub struct ComponentState {
+    /// Component store with WASI context
+    store: Store<ComponentContext>,
+    /// Component bindings for typed export access (either PlexspacesActor or SimpleActor)
+    bindings: ComponentBindings,
+}
+
 /// WASM actor instance with state and execution context
 pub struct WasmInstance {
     /// Actor ID
@@ -57,13 +79,14 @@ pub struct WasmInstance {
     /// Wasmtime instance (for traditional modules)
     instance: Instance,
 
-    /// Component instance (for WASM components, None for traditional modules)
+    /// Component state (store + bindings) for WASM components, None for traditional modules
+    /// Wrapped in Arc<Mutex<...>> because ComponentState contains non-Sync WASI types
+    /// We use Mutex instead of RwLock because:
+    /// - RwLock<T>: Sync requires T: Send + Sync
+    /// - Mutex<T>: Sync only requires T: Send
+    /// - WASI types are Send but not Sync
     #[cfg(feature = "component-model")]
-    pub(crate) component_instance: Option<wasmtime::component::Instance>,
-
-    /// Component store (for WASM components, None for traditional modules)
-    #[cfg(feature = "component-model")]
-    component_store: Option<Arc<RwLock<Store<ComponentContext>>>>,
+    component_state: Option<Arc<Mutex<ComponentState>>>,
 
     /// Module metadata
     module: WasmModule,
@@ -93,24 +116,29 @@ pub struct InstanceContext {
 // 3. We can still cache compiled components (just not instances)
 
 // SAFETY: WasmInstance is Send + Sync because:
-// 1. All Store access is through Arc<RwLock<...>> which provides synchronization
-// 2. component_store is wrapped in Arc<RwLock<Store<ComponentContext>>> which ensures
-//    thread-safe access even though ComponentContext contains non-Sync WasiCtx
-// 3. All methods that access the store acquire the RwLock before accessing
-// 4. Instance and component_instance are Send + Sync types from wasmtime
-// 5. Module metadata (WasmModule) is Send + Sync
-// 6. actor_id is String which is Send + Sync
+// 1. Traditional store access is through Arc<RwLock<...>> which provides synchronization
+// 2. component_state is wrapped in Arc<Mutex<ComponentState>> which ensures
+//    thread-safe access even though ComponentState contains:
+//    - ComponentContext with non-Sync WasiCtx (RngCore, clocks, stdio streams)
+//    - PlexspacesActor bindings that reference the WASI context
+// 3. We use Mutex instead of RwLock for component_state because:
+//    - Mutex<T>: Sync only requires T: Send
+//    - RwLock<T>: Sync requires T: Send + Sync
+//    - WASI types are Send but not Sync
+// 4. All methods that access the store/bindings acquire the lock before accessing
+// 5. Instance (traditional modules) is Send + Sync from wasmtime
+// 6. Module metadata (WasmModule) is Send + Sync
+// 7. actor_id is String which is Send + Sync
 //
-// This is safe because we never access the store concurrently without proper locking.
-// The RwLock ensures that only one thread can access the store at a time, making
+// This is safe because we never access the store/bindings concurrently without proper locking.
+// The Mutex ensures that only one thread can access them at a time, making
 // the overall WasmInstance safe to share across threads.
 //
-// Note: Even though ComponentContext contains WasiCtx which is not Sync, the Arc<RwLock<...>>
-// wrapper provides the necessary synchronization. The RwLock serializes all access to the
-// store, ensuring thread safety.
+// Note: ComponentState contains both the store (with WasiCtx) and PlexspacesActor bindings
+// (which reference the store's exports). Both are accessed only under the same lock.
 //
-// Send: All fields are Send (Arc, RwLock, Instance, String are all Send)
-// Sync: All fields are Sync or protected by synchronization primitives (Arc<RwLock<...>>)
+// Send: All fields are Send (Arc, RwLock, Mutex, Instance, String are all Send)
+// Sync: All fields are Sync or protected by synchronization primitives (Arc<Mutex<...>>)
 unsafe impl Send for WasmInstance {}
 unsafe impl Sync for WasmInstance {}
 
@@ -244,9 +272,17 @@ impl WasmInstance {
                             capabilities: capabilities_clone1,
                             limits: limits_clone1,
                         };
+                        // Configure WASI context for Python components
+                        // Note: Do NOT use inherit_env() - Python's runtime tries to setenv()
+                        // which WASI doesn't support, causing PyObject_SetItem errors.
+                        // Instead, explicitly set only required environment variables.
                         let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new()
                             .inherit_stdio()
-                            .inherit_env()
+                            // Set minimal env vars Python needs (avoids setenv calls during runtime init)
+                            .env("PYTHONDONTWRITEBYTECODE", "1")
+                            .env("PYTHONUNBUFFERED", "1")
+                            .env("HOME", "/")
+                            .env("PATH", "/")
                             .build();
                         
                         let plexspaces_host = crate::component_host::PlexspacesHost::new(
@@ -295,6 +331,10 @@ impl WasmInstance {
                                 actor_id: actor_id.clone(),
                                 host_functions: context_clone.host_functions.clone(),
                             },
+                            simple_host_impl: crate::simple_component_host::SimpleHostImpl::new(
+                                actor_id.clone(),
+                                context_clone.host_functions.clone(),
+                            ),
                         };
                         
                         // Create a new store for the component (not pooled, not Send)
@@ -312,7 +352,7 @@ impl WasmInstance {
                                 "Failed to add WASI bindings: {}", e
                             )))?;
                         
-                        // Add plexspaces host function bindings
+                        // Add plexspaces host function bindings (for plexspaces-actor interface)
                         crate::component_host::add_plexspaces_host_to_linker(
                             &mut component_linker,
                         )
@@ -320,26 +360,60 @@ impl WasmInstance {
                             "Failed to add plexspaces host bindings: {}", e
                         )))?;
                         
+                        // Add simple-actor host function bindings (for Python-compatible components)
+                        crate::simple_component_host::plexspaces::simple_actor::host::add_to_linker(
+                            &mut component_linker,
+                            |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
+                        )
+                        .map_err(|e| WasmError::InstantiationError(format!(
+                            "Failed to add simple-actor host bindings: {}", e
+                        )))?;
+                        
+                        // Check if this is a simple-actor component (Python-compatible)
+                        let is_simple_actor = crate::simple_component_host::is_simple_actor_component(c);
+                        
                         if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             actor_id = %actor_id,
+                            is_simple_actor = is_simple_actor,
                             "Attempting component instantiation with WASI bindings"
                         );
                         }
                         
-                        // Try to instantiate with WASI bindings
-                        let component_instance = component_linker
-                            .instantiate_async(&mut component_store, c)
+                        // Instantiate based on component type
+                        let component_bindings = if is_simple_actor {
+                            // Use SimpleActor bindings for Python-compatible components
+                            tracing::debug!(
+                                actor_id = %actor_id,
+                                "Instantiating simple-actor component (Python-compatible)"
+                            );
+                            let simple_bindings = crate::simple_component_host::ActorWorld::instantiate_async(
+                                &mut component_store,
+                                c,
+                                &component_linker,
+                            )
+                            .await
+                            .map_err(|e| WasmError::InstantiationError(format!(
+                                "Simple-actor component instantiation failed: {}", e
+                            )))?;
+                            ComponentBindings::SimpleActor(simple_bindings)
+                        } else {
+                            // Use PlexspacesActor bindings for full Rust components
+                            let plexspaces_bindings = crate::component_host::PlexspacesActor::instantiate_async(
+                                &mut component_store,
+                                c,
+                                &component_linker,
+                            )
                             .await
                             .map_err(|e| {
                                 let error_msg = e.to_string();
                                 if error_msg.contains("plexspaces:actor/") && error_msg.contains("matching implementation was not found") {
-                                WasmError::InstantiationError(format!(
+                                    WasmError::InstantiationError(format!(
                                         "Component requires plexspaces host function bindings (e.g., plexspaces:actor/logging@0.1.0, plexspaces:actor/messaging@0.1.0). \
                                         These require WIT bindings to be generated using wasmtime::component::bindgen! macro. \
                                         For now, use traditional WASM modules (wasm32-unknown-unknown) instead of components (wasm32-wasip2) \
                                         if you need plexspaces host functions. \
-                                    Error details: {}",
+                                        Error details: {}",
                                         error_msg
                                     ))
                                 } else if error_msg.contains("wasi:") && error_msg.contains("matching implementation was not found") {
@@ -355,9 +429,11 @@ impl WasmInstance {
                                     ))
                                 }
                             })?;
+                            ComponentBindings::PlexspacesActor(plexspaces_bindings)
+                        };
                         
                         // Component instantiation succeeded!
-                        tracing::info!(
+                        tracing::debug!(
                             actor_id = %actor_id,
                             "WASM component instantiated successfully with WASI bindings"
                         );
@@ -404,26 +480,113 @@ impl WasmInstance {
                                 "Failed to create dummy instance for component: {}", e
                             )))?;
                         
+                        // Create ComponentState that holds both store and bindings together
+                        // This ensures they're always accessed under the same lock
+                        let component_state = ComponentState {
+                            store: component_store,
+                            bindings: component_bindings,
+                        };
+                        
                         let instance = WasmInstance {
                             actor_id: actor_id.clone(),
                             store: Arc::new(RwLock::new(dummy_store)),
                             instance: dummy_instance,
                             #[cfg(feature = "component-model")]
-                            component_instance: Some(component_instance),
-                            #[cfg(feature = "component-model")]
-                            component_store: Some(Arc::new(RwLock::new(component_store))),
+                            component_state: Some(Arc::new(Mutex::new(component_state))),
                             module,
                         };
                         
-                        // Call init if initial state provided
-                        // Note: Component init is currently not implemented (wasmtime v25 API changes)
-                        // This is logged as a warning but doesn't block instantiation
-                        // We skip the call to avoid Send issues with non-Send WasmInstance
-                        if !initial_state.is_empty() {
-                            tracing::warn!(
-                                actor_id = %actor_id,
-                                "Component init() call not yet implemented for wasmtime v25 API changes - initial state will be ignored"
-                            );
+                        // Call init() to properly initialize the component
+                        // This is REQUIRED for Python components to set up the runtime
+                        {
+                            let component_state_ref = instance.component_state.as_ref()
+                                .ok_or_else(|| WasmError::ActorFunctionError(
+                                    "Component state not available after instantiation".to_string()
+                                ))?;
+                            
+                            let mut state = component_state_ref.lock().await;
+                            let ComponentState { store, bindings } = &mut *state;
+                            
+                            // Convert initial_state to JSON string for SimpleActor
+                            let config_json = if initial_state.is_empty() {
+                                String::new()
+                            } else {
+                                String::from_utf8_lossy(initial_state).to_string()
+                            };
+                            
+                            match bindings {
+                                ComponentBindings::SimpleActor(simple_bindings) => {
+                                    tracing::debug!(
+                                        actor_id = %actor_id,
+                                        config_len = config_json.len(),
+                                        "Calling simple-actor init()"
+                                    );
+                                    
+                                    let result = simple_bindings.plexspaces_simple_actor_actor()
+                                        .call_init(store, &config_json)
+                                        .await
+                                        .map_err(|e| {
+                                            tracing::error!(
+                                                actor_id = %actor_id,
+                                                error = %e,
+                                                "Simple-actor init() call failed"
+                                            );
+                                            WasmError::ActorFunctionError(format!(
+                                                "Simple-actor init() failed: {}", e
+                                            ))
+                                        })?;
+                                    
+                                    if !result.is_empty() {
+                                        tracing::error!(
+                                            actor_id = %actor_id,
+                                            error = %result,
+                                            "Simple-actor init() returned error"
+                                        );
+                                        return Err(WasmError::ActorFunctionError(format!(
+                                            "Simple-actor init() error: {}", result
+                                        )));
+                                    }
+                                    
+                                    tracing::debug!(
+                                        actor_id = %actor_id,
+                                        "Simple-actor init() succeeded"
+                                    );
+                                }
+                                ComponentBindings::PlexspacesActor(plexspaces_bindings) => {
+                                    if !initial_state.is_empty() {
+                                        let initial_state_vec = initial_state.to_vec();
+                                        let result = plexspaces_bindings.plexspaces_actor_actor()
+                                            .call_init(store, &initial_state_vec)
+                                            .await
+                                            .map_err(|e| {
+                                                tracing::error!(
+                                                    actor_id = %actor_id,
+                                                    error = %e,
+                                                    "PlexspacesActor init() call failed"
+                                                );
+                                                WasmError::ActorFunctionError(format!(
+                                                    "PlexspacesActor init() failed: {}", e
+                                                ))
+                                            })?;
+                                        
+                                        if let Err(error_msg) = result {
+                                            tracing::error!(
+                                                actor_id = %actor_id,
+                                                error = %error_msg,
+                                                "PlexspacesActor init() returned error"
+                                            );
+                                            return Err(WasmError::ActorFunctionError(format!(
+                                                "PlexspacesActor init() error: {}", error_msg
+                                            )));
+                                        }
+                                        
+                                        tracing::info!(
+                                            actor_id = %actor_id,
+                                            "PlexspacesActor init() succeeded"
+                                        );
+                                    }
+                                }
+                            }
                         }
                         
                         return Ok(instance);
@@ -513,9 +676,7 @@ impl WasmInstance {
             store: Arc::new(RwLock::new(store)),
             instance,
             #[cfg(feature = "component-model")]
-            component_instance: None,
-            #[cfg(feature = "component-model")]
-            component_store: None,
+            component_state: None,
             module,
         })
     }
@@ -849,7 +1010,7 @@ impl WasmInstance {
     /// Check if this is a component instance (components are not Send and cannot be pooled)
     #[cfg(feature = "component-model")]
     pub fn is_component_instance(&self) -> bool {
-        self.component_instance.is_some()
+        self.component_state.is_some()
     }
 
     #[cfg(not(feature = "component-model"))]
@@ -944,7 +1105,7 @@ impl WasmInstance {
         // Check if this is a component instance
         #[cfg(feature = "component-model")]
         {
-            if self.component_instance.is_some() {
+            if self.component_state.is_some() {
                 return self.handle_message_component(from, message_type, payload).await;
             }
         }
@@ -1094,29 +1255,111 @@ impl WasmInstance {
     }
 
     /// Call component init function (for WASM components only)
+    /// 
+    /// Uses the bindgen!-generated PlexspacesActor bindings to call the exported
+    /// init function with proper typing.
     #[cfg(feature = "component-model")]
     async fn call_component_init(&self, initial_state: &[u8]) -> WasmResult<()> {
-        // NOTE: Component init() function calling requires wasmtime v25 API updates.
-        // The bindgen! macro generates code, but the API for calling exported functions
-        // from a component instance has changed in wasmtime v25. This is an acceptable
-        // limitation - component init will be updated when the wasmtime v25 API is fully integrated.
-        // For now, we skip calling init if initial_state is empty, otherwise log a warning.
-        if !initial_state.is_empty() {
-            tracing::warn!(
-                actor_id = %self.actor_id,
-                "Component init() call not yet implemented for wasmtime v25 API changes"
-            );
+        // Get the component state (store + bindings together)
+        let component_state = self.component_state.as_ref()
+            .ok_or_else(|| WasmError::ActorFunctionError(
+                "Component state not available".to_string()
+            ))?;
+        
+        // Acquire lock on the component state (both store and bindings)
+        let mut state = component_state.lock().await;
+        
+        // Destructure to get separate mutable references to store and bindings
+        // This avoids borrow checker issues when calling methods
+        let ComponentState { store, bindings } = &mut *state;
+        
+        // Call init based on binding type
+        match bindings {
+            ComponentBindings::PlexspacesActor(plexspaces_bindings) => {
+                // Full PlexspacesActor bindings - init takes Vec<u8>
+                let initial_state_vec = initial_state.to_vec();
+                let result = plexspaces_bindings.plexspaces_actor_actor()
+                    .call_init(store, &initial_state_vec)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(
+                            actor_id = %self.actor_id,
+                            error = %e,
+                            "Component init() call failed"
+                        );
+                        WasmError::ActorFunctionError(format!(
+                            "Component init() call failed: {}", e
+                        ))
+                    })?;
+                
+                match result {
+                    Ok(()) => {
+                        tracing::info!(
+                            actor_id = %self.actor_id,
+                            initial_state_len = initial_state.len(),
+                            "Component init() succeeded"
+                        );
+                        Ok(())
+                    }
+                    Err(error_msg) => {
+                        tracing::error!(
+                            actor_id = %self.actor_id,
+                            error = %error_msg,
+                            "Component init() returned error"
+                        );
+                        Err(WasmError::ActorFunctionError(format!(
+                            "Component init() returned error: {}", error_msg
+                        )))
+                    }
+                }
+            }
+            ComponentBindings::SimpleActor(simple_bindings) => {
+                // SimpleActor bindings - init takes JSON string
+                let config_json = if initial_state.is_empty() {
+                    String::new()
+                } else {
+                    String::from_utf8_lossy(initial_state).to_string()
+                };
+                
+                let result = simple_bindings.plexspaces_simple_actor_actor()
+                    .call_init(store, &config_json)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(
+                            actor_id = %self.actor_id,
+                            error = %e,
+                            "Simple actor init() call failed"
+                        );
+                        WasmError::ActorFunctionError(format!(
+                            "Simple actor init() call failed: {}", e
+                        ))
+                    })?;
+                
+                // Empty string = success, non-empty = error message
+                if result.is_empty() {
+                    tracing::info!(
+                        actor_id = %self.actor_id,
+                        "Simple actor init() succeeded"
+                    );
+                    Ok(())
+                } else {
+                    tracing::error!(
+                        actor_id = %self.actor_id,
+                        error = %result,
+                        "Simple actor init() returned error"
+                    );
+                    Err(WasmError::ActorFunctionError(format!(
+                        "Simple actor init() returned error: {}", result
+                    )))
+                }
+            }
         }
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            actor_id = %self.actor_id,
-            "Skipping component init (API needs to be updated for wasmtime v25)"
-        );
-        }
-        Ok(())
     }
     
     /// Handle message for component (for WASM components only)
+    /// 
+    /// Uses the bindgen!-generated PlexspacesActor bindings to call the exported
+    /// handle-message function with proper typing.
     #[cfg(feature = "component-model")]
     async fn handle_message_component(
         &self,
@@ -1124,22 +1367,338 @@ impl WasmInstance {
         message_type: &str,
         payload: Vec<u8>,
     ) -> WasmResult<Vec<u8>> {
-        // NOTE: Component handle_message() requires wasmtime v25 API updates for calling
-        // exported component functions. The bindgen! macro generates code, but the API for
-        // calling exported functions from a component instance has changed in wasmtime v25.
-        // This is an acceptable limitation - component message handling will be updated
-        // when the wasmtime v25 API is fully integrated.
-        tracing::warn!(
+        // Note: WIT uses result<payload, string> for better componentize-py compatibility
+        // The Result<Vec<u8>, String> maps directly to Rust's Result type
+        
+        metrics::counter!("plexspaces_wasm_component_message_handled_total").increment(1);
+        let start_time = std::time::Instant::now();
+        
+        tracing::debug!(
             actor_id = %self.actor_id,
             from = from,
             message_type = message_type,
-            "Component handle-message() call not yet implemented for wasmtime v25 API changes"
+            payload_len = payload.len(),
+            "Component handle_message called"
         );
-        metrics::counter!("plexspaces_wasm_component_message_handled_total").increment(1);
-        metrics::counter!("plexspaces_wasm_component_message_errors_total").increment(1);
-        Err(WasmError::ActorFunctionError(
-            "Component handle-message() call not yet implemented for wasmtime v25 API changes".to_string()
-        ))
+        
+        // Get the component state (store + bindings together)
+        let component_state = self.component_state.as_ref()
+            .ok_or_else(|| WasmError::ActorFunctionError(
+                "Component state not available".to_string()
+            ))?;
+        
+        // Acquire lock on the component state (both store and bindings)
+        let mut state = component_state.lock().await;
+        
+        // Destructure to get separate mutable references to store and bindings
+        // This avoids borrow checker issues when calling methods
+        let ComponentState { store, bindings } = &mut *state;
+        
+        let from_string = from.to_string();
+        let message_type_string = message_type.to_string();
+        
+        // Call handle based on binding type
+        match bindings {
+            ComponentBindings::PlexspacesActor(plexspaces_bindings) => {
+                // Full PlexspacesActor bindings - handle_message takes Vec<u8>
+                let result = plexspaces_bindings.plexspaces_actor_actor()
+                    .call_handle_message(store, &from_string, &message_type_string, &payload)
+                    .await
+                    .map_err(|e| {
+                        let error_msg = e.to_string();
+                        tracing::error!(
+                            actor_id = %self.actor_id,
+                            error = %error_msg,
+                            "Component handle-message() call failed"
+                        );
+                        metrics::counter!("plexspaces_wasm_component_message_errors_total").increment(1);
+                        WasmError::ActorFunctionError(format!(
+                            "Component handle-message() call failed: {}", error_msg
+                        ))
+                    })?;
+                
+                let duration = start_time.elapsed();
+                
+                match result {
+                    Ok(response_payload) => {
+                        metrics::histogram!("plexspaces_wasm_component_message_duration_seconds")
+                            .record(duration.as_secs_f64());
+                        metrics::counter!("plexspaces_wasm_component_message_success_total").increment(1);
+                        
+                        tracing::info!(
+                            actor_id = %self.actor_id,
+                            from = from,
+                            message_type = message_type,
+                            response_len = response_payload.len(),
+                            duration_ms = duration.as_millis(),
+                            "🔧 [COMPONENT] handle-message() returned Ok"
+                        );
+                        
+                        Ok(response_payload)
+                    }
+                    Err(error_message) => {
+                        metrics::counter!("plexspaces_wasm_component_message_errors_total").increment(1);
+                        
+                        tracing::warn!(
+                            actor_id = %self.actor_id,
+                            error_message = %error_message,
+                            "Component handle-message() returned error"
+                        );
+                        
+                        Err(WasmError::ActorFunctionError(format!(
+                            "Actor error: {}", error_message
+                        )))
+                    }
+                }
+            }
+            ComponentBindings::SimpleActor(simple_bindings) => {
+                // SimpleActor bindings - handle takes JSON strings
+                // Convert payload to JSON string (it should already be JSON)
+                let payload_json = String::from_utf8_lossy(&payload).to_string();
+                
+                let result = simple_bindings.plexspaces_simple_actor_actor()
+                    .call_handle(store, &from_string, &message_type_string, &payload_json)
+                    .await
+                    .map_err(|e| {
+                        let error_msg = e.to_string();
+                        tracing::error!(
+                            actor_id = %self.actor_id,
+                            error = %error_msg,
+                            "Simple actor handle() call failed"
+                        );
+                        metrics::counter!("plexspaces_wasm_component_message_errors_total").increment(1);
+                        WasmError::ActorFunctionError(format!(
+                            "Simple actor handle() call failed: {}", error_msg
+                        ))
+                    })?;
+                
+                let duration = start_time.elapsed();
+                
+                // Result is a string - "ERROR:..." means error, otherwise it's the response
+                if result.starts_with("ERROR:") {
+                    let error_message = result.strip_prefix("ERROR:").unwrap_or(&result);
+                    metrics::counter!("plexspaces_wasm_component_message_errors_total").increment(1);
+                    
+                    tracing::warn!(
+                        actor_id = %self.actor_id,
+                        error_message = %error_message,
+                        "Simple actor handle() returned error"
+                    );
+                    
+                    Err(WasmError::ActorFunctionError(format!(
+                        "Actor error: {}", error_message
+                    )))
+                } else {
+                    metrics::histogram!("plexspaces_wasm_component_message_duration_seconds")
+                        .record(duration.as_secs_f64());
+                    metrics::counter!("plexspaces_wasm_component_message_success_total").increment(1);
+                    
+                    tracing::info!(
+                        actor_id = %self.actor_id,
+                        from = from,
+                        message_type = message_type,
+                        response_len = result.len(),
+                        duration_ms = duration.as_millis(),
+                        "🔧 [SIMPLE-ACTOR] handle() returned Ok"
+                    );
+                    
+                    // Return response as bytes
+                    Ok(result.into_bytes())
+                }
+            }
+        }
+    }
+    
+    /// Get actor state for persistence (Cloudflare Durable Objects pattern)
+    ///
+    /// For WASM components, calls the actor's `get-state()` function.
+    /// This is the recommended pattern for WASM actor durability.
+    ///
+    /// ## Returns
+    /// State as JSON string bytes, or empty if no state
+    ///
+    /// ## Errors
+    /// Returns error if get_state call fails
+    ///
+    /// ## Metrics
+    /// - `plexspaces_wasm_get_state_total`: Total get-state calls
+    /// - `plexspaces_wasm_get_state_success_total`: Successful get-state calls
+    /// - `plexspaces_wasm_get_state_errors_total`: Failed get-state calls
+    /// - `plexspaces_wasm_get_state_duration_seconds`: Duration of get-state calls
+    /// - `plexspaces_wasm_state_size_bytes`: Size of state returned
+    #[cfg(feature = "component-model")]
+    pub async fn get_state_component(&self) -> WasmResult<Vec<u8>> {
+        metrics::counter!("plexspaces_wasm_get_state_total",
+            "actor_id" => self.actor_id.clone()
+        ).increment(1);
+        let start_time = std::time::Instant::now();
+        
+        let component_state = self.component_state.as_ref()
+            .ok_or_else(|| {
+                metrics::counter!("plexspaces_wasm_get_state_errors_total",
+                    "actor_id" => self.actor_id.clone(),
+                    "error" => "no_component_state"
+                ).increment(1);
+                WasmError::ActorFunctionError(
+                    "Component state not available (not a component actor)".to_string()
+                )
+            })?;
+        
+        let mut state = component_state.lock().await;
+        let ComponentState { store, bindings } = &mut *state;
+        
+        let result = match bindings {
+            ComponentBindings::SimpleActor(simple_bindings) => {
+                simple_bindings.plexspaces_simple_actor_actor()
+                    .call_get_state(store)
+                    .await
+                    .map(|s| s.into_bytes())
+                    .map_err(|e| WasmError::ActorFunctionError(format!(
+                        "get-state() call failed: {}", e
+                    )))
+            }
+            ComponentBindings::PlexspacesActor(plexspaces_bindings) => {
+                plexspaces_bindings.plexspaces_actor_actor()
+                    .call_get_state(store)
+                    .await
+                    .map(|s| s.into_bytes())
+                    .map_err(|e| WasmError::ActorFunctionError(format!(
+                        "get-state() call failed: {}", e
+                    )))
+            }
+        };
+        
+        let duration = start_time.elapsed();
+        metrics::histogram!("plexspaces_wasm_get_state_duration_seconds",
+            "actor_id" => self.actor_id.clone()
+        ).record(duration.as_secs_f64());
+        
+        match result {
+            Ok(state_bytes) => {
+                metrics::counter!("plexspaces_wasm_get_state_success_total",
+                    "actor_id" => self.actor_id.clone()
+                ).increment(1);
+                metrics::gauge!("plexspaces_wasm_state_size_bytes",
+                    "actor_id" => self.actor_id.clone()
+                ).set(state_bytes.len() as f64);
+                
+                tracing::debug!(
+                    actor_id = %self.actor_id,
+                    state_len = state_bytes.len(),
+                    duration_ms = duration.as_millis(),
+                    "WASM actor get-state() succeeded"
+                );
+                
+                Ok(state_bytes)
+            }
+            Err(e) => {
+                metrics::counter!("plexspaces_wasm_get_state_errors_total",
+                    "actor_id" => self.actor_id.clone(),
+                    "error" => "call_failed"
+                ).increment(1);
+                Err(e)
+            }
+        }
+    }
+    
+    /// Set actor state for recovery (Cloudflare Durable Objects pattern)
+    ///
+    /// For WASM components, calls the actor's `set-state()` function.
+    /// This is called after restart to restore state from persistence.
+    ///
+    /// ## Arguments
+    /// * `state_json` - State as JSON string
+    ///
+    /// ## Returns
+    /// Empty string on success, error message on failure
+    ///
+    /// ## Errors
+    /// Returns error if set_state call fails
+    ///
+    /// ## Metrics
+    /// - `plexspaces_wasm_set_state_total`: Total set-state calls
+    /// - `plexspaces_wasm_set_state_success_total`: Successful set-state calls (state restored)
+    /// - `plexspaces_wasm_set_state_errors_total`: Failed set-state calls
+    /// - `plexspaces_wasm_set_state_duration_seconds`: Duration of set-state calls
+    #[cfg(feature = "component-model")]
+    pub async fn set_state_component(&self, state_json: &str) -> WasmResult<()> {
+        metrics::counter!("plexspaces_wasm_set_state_total",
+            "actor_id" => self.actor_id.clone()
+        ).increment(1);
+        let start_time = std::time::Instant::now();
+        
+        let component_state = self.component_state.as_ref()
+            .ok_or_else(|| {
+                metrics::counter!("plexspaces_wasm_set_state_errors_total",
+                    "actor_id" => self.actor_id.clone(),
+                    "error" => "no_component_state"
+                ).increment(1);
+                WasmError::ActorFunctionError(
+                    "Component state not available (not a component actor)".to_string()
+                )
+            })?;
+        
+        let mut state = component_state.lock().await;
+        let ComponentState { store, bindings } = &mut *state;
+        
+        let result = match bindings {
+            ComponentBindings::SimpleActor(simple_bindings) => {
+                simple_bindings.plexspaces_simple_actor_actor()
+                    .call_set_state(store, state_json)
+                    .await
+                    .map_err(|e| WasmError::ActorFunctionError(format!(
+                        "set-state() call failed: {}", e
+                    )))
+            }
+            ComponentBindings::PlexspacesActor(_plexspaces_bindings) => {
+                // Full PlexspacesActor doesn't have set_state in the same interface
+                // It uses a different state management pattern
+                Err(WasmError::ActorFunctionError(
+                    "set-state() not available for full PlexspacesActor (use checkpoint pattern)".to_string()
+                ))
+            }
+        };
+        
+        let duration = start_time.elapsed();
+        metrics::histogram!("plexspaces_wasm_set_state_duration_seconds",
+            "actor_id" => self.actor_id.clone()
+        ).record(duration.as_secs_f64());
+        
+        // Handle result and record metrics
+        match result {
+            Ok(result_str) => {
+                // Empty string means success, non-empty is error
+                if result_str.is_empty() {
+                    metrics::counter!("plexspaces_wasm_set_state_success_total",
+                        "actor_id" => self.actor_id.clone()
+                    ).increment(1);
+                    
+                    tracing::info!(
+                        actor_id = %self.actor_id,
+                        state_len = state_json.len(),
+                        duration_ms = duration.as_millis(),
+                        "✅ WASM actor state restored via set-state()"
+                    );
+                    Ok(())
+                } else {
+                    metrics::counter!("plexspaces_wasm_set_state_errors_total",
+                        "actor_id" => self.actor_id.clone(),
+                        "error" => "actor_error"
+                    ).increment(1);
+                    
+                    Err(WasmError::ActorFunctionError(format!(
+                        "set-state() returned error: {}", result_str
+                    )))
+                }
+            }
+            Err(e) => {
+                metrics::counter!("plexspaces_wasm_set_state_errors_total",
+                    "actor_id" => self.actor_id.clone(),
+                    "error" => "call_failed"
+                ).increment(1);
+                Err(e)
+            }
+        }
     }
 
     /// Snapshot actor state for persistence
@@ -1219,5 +1778,170 @@ impl WasmInstance {
         }
 
         Ok(())
+    }
+    
+    /// Save actor state to checkpoint storage
+    ///
+    /// ## Purpose
+    /// Persists actor state to journal storage for durability.
+    /// Called on graceful shutdown or periodic checkpointing.
+    ///
+    /// ## How it works (Cloudflare Durable Objects pattern)
+    /// 1. Calls actor's get-state() WIT function
+    /// 2. Saves state to journal checkpoint table via save_checkpoint()
+    /// 3. Records metrics for observability
+    ///
+    /// ## Returns
+    /// Number of bytes saved, or error
+    ///
+    /// ## Metrics
+    /// - `plexspaces_wasm_checkpoint_save_total`: Total checkpoint saves
+    /// - `plexspaces_wasm_checkpoint_save_duration_seconds`: Save duration
+    #[cfg(feature = "component-model")]
+    pub async fn save_checkpoint(&self) -> WasmResult<usize> {
+        metrics::counter!("plexspaces_wasm_checkpoint_save_total",
+            "actor_id" => self.actor_id.clone()
+        ).increment(1);
+        let start_time = std::time::Instant::now();
+        
+        // Get state from actor
+        let state_bytes = self.get_state_component().await?;
+        
+        if state_bytes.is_empty() {
+            tracing::debug!(
+                actor_id = %self.actor_id,
+                "WASM checkpoint save: empty state, skipping"
+            );
+            return Ok(0);
+        }
+        
+        // Get journal storage from host functions
+        let store = self.store.read().await;
+        let journal_storage = store.data().host_functions.journal_storage()
+            .ok_or_else(|| WasmError::ActorFunctionError(
+                "Journal storage not available for checkpoint".to_string()
+            ))?.clone();
+        drop(store); // Release lock before async operation
+        
+        // Create checkpoint using proper Checkpoint struct
+        use plexspaces_core::journal_storage::Checkpoint;
+        let checkpoint = Checkpoint {
+            actor_id: self.actor_id.clone(),
+            sequence: 0, // Will be set by storage
+            timestamp: None, // Storage layer handles timestamp
+            state_data: state_bytes.clone(),
+            compression: 0, // No compression
+            state_schema_version: 1,
+            metadata: std::collections::HashMap::new(),
+        };
+        
+        // Save checkpoint to journal storage
+        journal_storage.save_checkpoint(&checkpoint).await
+            .map_err(|e| WasmError::ActorFunctionError(format!(
+                "Checkpoint save failed: {}", e
+            )))?;
+        
+        let duration = start_time.elapsed();
+        metrics::histogram!("plexspaces_wasm_checkpoint_save_duration_seconds",
+            "actor_id" => self.actor_id.clone()
+        ).record(duration.as_secs_f64());
+        
+        tracing::info!(
+            actor_id = %self.actor_id,
+            state_size = state_bytes.len(),
+            duration_ms = duration.as_millis(),
+            "✅ WASM checkpoint saved"
+        );
+        
+        Ok(state_bytes.len())
+    }
+    
+    /// Load and restore actor state from checkpoint storage
+    ///
+    /// ## Purpose
+    /// Restores actor state from journal storage on startup.
+    /// Called during actor initialization (init hook).
+    ///
+    /// ## How it works (Cloudflare Durable Objects pattern)
+    /// 1. Queries journal for latest checkpoint via get_latest_checkpoint()
+    /// 2. If checkpoint exists, calls actor's set-state() WIT function
+    /// 3. Records metrics for observability
+    ///
+    /// ## Returns
+    /// Number of bytes restored, or 0 if no checkpoint found
+    ///
+    /// ## Metrics
+    /// - `plexspaces_wasm_checkpoint_load_total`: Total checkpoint loads
+    /// - `plexspaces_wasm_checkpoint_load_duration_seconds`: Load duration
+    #[cfg(feature = "component-model")]
+    pub async fn load_checkpoint(&self) -> WasmResult<usize> {
+        metrics::counter!("plexspaces_wasm_checkpoint_load_total",
+            "actor_id" => self.actor_id.clone()
+        ).increment(1);
+        let start_time = std::time::Instant::now();
+        
+        // Get journal storage from host functions
+        let store = self.store.read().await;
+        let journal_storage = match store.data().host_functions.journal_storage() {
+            Some(js) => js.clone(),
+            None => {
+                tracing::debug!(
+                    actor_id = %self.actor_id,
+                    "WASM checkpoint load: no journal storage, skipping"
+                );
+                return Ok(0);
+            }
+        };
+        drop(store); // Release lock before async operation
+        
+        // Load latest checkpoint from journal storage
+        let checkpoint = match journal_storage.get_latest_checkpoint(&self.actor_id).await {
+            Ok(cp) => cp,
+            Err(plexspaces_core::journal_storage::JournalError::CheckpointNotFound(_)) => {
+                tracing::debug!(
+                    actor_id = %self.actor_id,
+                    "🆕 WASM checkpoint load: no checkpoint found, fresh start"
+                );
+                return Ok(0);
+            }
+            Err(e) => {
+                return Err(WasmError::ActorFunctionError(format!(
+                    "Checkpoint load failed: {}", e
+                )));
+            }
+        };
+        
+        let state_bytes = checkpoint.state_data;
+        
+        if state_bytes.is_empty() {
+            tracing::debug!(
+                actor_id = %self.actor_id,
+                "WASM checkpoint load: empty checkpoint, skipping restore"
+            );
+            return Ok(0);
+        }
+        
+        // Convert bytes to JSON string for set-state
+        let state_json = String::from_utf8(state_bytes.clone())
+            .map_err(|e| WasmError::ActorFunctionError(format!(
+                "Invalid UTF-8 in checkpoint: {}", e
+            )))?;
+        
+        // Restore state to actor
+        self.set_state_component(&state_json).await?;
+        
+        let duration = start_time.elapsed();
+        metrics::histogram!("plexspaces_wasm_checkpoint_load_duration_seconds",
+            "actor_id" => self.actor_id.clone()
+        ).record(duration.as_secs_f64());
+        
+        tracing::info!(
+            actor_id = %self.actor_id,
+            state_size = state_bytes.len(),
+            duration_ms = duration.as_millis(),
+            "✅ WASM state restored from checkpoint"
+        );
+        
+        Ok(state_bytes.len())
     }
 }

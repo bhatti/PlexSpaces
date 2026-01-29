@@ -42,12 +42,13 @@ pub mod service_wrappers;
 pub mod service_trait;
 pub use service_trait::{Service, service_names};
 pub mod service_locator_trait;
-pub use service_locator_trait::{ServiceLocator, ApplicationManager, ServiceLocatorInitialization, WasmRuntimeTrait, BlobServiceTrait, NodeRegistryTrait};
+pub use service_locator_trait::{ServiceLocator, ApplicationManager, WasmRuntimeTrait, BlobServiceTrait, NodeRegistryTrait};
 pub mod service_locator;
 pub mod keyvalue_store;
 pub use keyvalue_store::KeyValueStore;
-pub mod lock_manager;
-pub use lock_manager::{LockManager, Lock, LockError, LockResult, AcquireLockOptions, RenewLockOptions, ReleaseLockOptions};
+// LockManager trait is in plexspaces-locks crate - re-export for convenience
+pub use plexspaces_locks::{LockManager, LockError, LockResult};
+pub use plexspaces_proto::locks::prv::{Lock, AcquireLockOptions, RenewLockOptions, ReleaseLockOptions};
 pub use service_locator::request_context_from_grpc_request;
 pub mod application_node_trait;
 pub use application_node_trait::ApplicationNode;
@@ -70,7 +71,12 @@ pub use monitoring::{NodeMetricsAccessor, NodeConnectionInfo};
 pub use message_metrics::{ActorMetrics, ActorMetricsHandle, ActorMetricsExt, new_actor_metrics};
 pub mod journal_storage;
 pub use journal_storage::{JournalStorage, JournalError, JournalResult};
-// Health module - consolidated health checking, reporting, and service functionality
+/// Health module - consolidated health checking, reporting, and service functionality.
+///
+/// This module provides:
+/// - `HealthChecker`: Run health checks on components
+/// - `HealthReporter`: Report health status
+/// - `PlexSpacesHealthReporter`: Tonic-integrated health service
 pub mod health;
 pub use health::reporter::HealthReporter;
 pub use health::checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, run_health_check};
@@ -81,6 +87,8 @@ pub use health::checker as health_checker;
 pub use health::service as health_service;
 pub mod secret_masker;
 pub use secret_masker::{SecretMasker, mask_release_spec, mask_map_secrets, DEFAULT_MASK};
+pub mod actor_factory;
+pub use actor_factory::ActorFactory;
 
 // Re-export enhanced ActorContext
 pub use actor_context::{

@@ -505,7 +505,7 @@ impl NodeRegistry {
             self.update_cache(&node_reg.node_id, node_reg.clone()).await;
 
             // Update SWIM if node is not already known with higher incarnation
-            if let Some(existing) = self.swim.get_member(&obj_reg.object_id).await {
+            if let Some(_existing) = self.swim.get_member(&obj_reg.object_id).await {
                 // DB doesn't have incarnation, so only update if SWIM doesn't know this node
                 continue;
             }
@@ -783,7 +783,7 @@ impl NodeRegistryTrait for NodeRegistry {
                     self.update_cache(node_id, node_reg.clone()).await;
                     
                     // Also update SWIM
-                    let mut member = SwimMember::new(
+                    let member = SwimMember::new(
                         obj_reg.object_id.clone(),
                         obj_reg.grpc_address.clone(),
                     );

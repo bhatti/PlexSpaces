@@ -12,10 +12,30 @@ output = "test"
 failure-output = "immediate"
 # Show test output for successful tests (set to "never" to reduce noise)
 success-output = "never"
+# Global test timeout (15 minutes)
+slow-timeout = { period = "60s", terminate-after = 15 }
 
 [profile.default.junit]
 # Generate JUnit XML reports
 path = "target/nextest/junit.xml"
+
+# Test groups to limit parallelism for specific tests
+# tuplespace tests need single-thread execution to avoid env var race conditions
+[test-groups.tuplespace-serial]
+max-threads = 1
+
+# Configure which tests belong to which groups
+[[profile.default.overrides]]
+filter = "package(plexspaces-tuplespace)"
+test-group = "tuplespace-serial"
+
+# Services actor_service integration_tests spawn processes and use fixed ports - run serially
+[[profile.default.overrides]]
+filter = "package(plexspaces-services) and test(integration_tests)"
+test-group = "services-integration-serial"
+
+[test-groups.services-integration-serial]
+max-threads = 1
 
 # Profile for CI (more verbose)
 [profile.ci]

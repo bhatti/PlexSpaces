@@ -21,6 +21,7 @@
 ///
 /// ## Storage
 /// Stored in KeyValueStore with key format: `tenant:{tenant_id}:group:{group_name}`
+/// NOTE: tenant_id comes from auth (JWT/mTLS) when creating/accessing groups, then stored here.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ProcessGroup {
@@ -30,7 +31,8 @@ pub struct ProcessGroup {
     /// Example: "config-updates", "user_events", "cluster-nodes"
     #[prost(string, tag="1")]
     pub group_name: ::prost::alloc::string::String,
-    /// Tenant ID for multi-tenancy isolation
+    /// Tenant ID for multi-tenancy isolation (stored from auth context when created)
+    /// NOTE: Tenant-id comes from auth (JWT/mTLS) when creating groups, stored here for isolation.
     #[prost(string, tag="2")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Namespace for hierarchical isolation within tenant
@@ -122,10 +124,7 @@ pub struct CreateGroupRequest {
     /// Group name (required)
     #[prost(string, tag="1")]
     pub group_name: ::prost::alloc::string::String,
-    /// Tenant ID (required for multi-tenancy isolation)
-    #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
-    /// Namespace (optional hierarchical isolation)
+    /// Namespace (optional hierarchical isolation within tenant)
     #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
     /// Metadata (labels, annotations)
@@ -145,9 +144,6 @@ pub struct DeleteGroupRequest {
     /// Group name to delete
     #[prost(string, tag="1")]
     pub group_name: ::prost::alloc::string::String,
-    /// Tenant ID (for security - prevent cross-tenant deletion)
-    #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -155,9 +151,6 @@ pub struct JoinGroupRequest {
     /// Group to join
     #[prost(string, tag="1")]
     pub group_name: ::prost::alloc::string::String,
-    /// Tenant ID
-    #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
     /// Actor ID to add to group
     #[prost(string, tag="3")]
     pub actor_id: ::prost::alloc::string::String,
@@ -189,9 +182,6 @@ pub struct LeaveGroupRequest {
     /// Group to leave
     #[prost(string, tag="1")]
     pub group_name: ::prost::alloc::string::String,
-    /// Tenant ID
-    #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
     /// Actor ID to remove from group
     #[prost(string, tag="3")]
     pub actor_id: ::prost::alloc::string::String,
@@ -202,9 +192,6 @@ pub struct GetMembersRequest {
     /// Group name
     #[prost(string, tag="1")]
     pub group_name: ::prost::alloc::string::String,
-    /// Tenant ID
-    #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
     /// Pagination (optional)
     #[prost(int32, tag="3")]
     pub page_size: i32,
@@ -229,9 +216,6 @@ pub struct GetLocalMembersRequest {
     /// Group name
     #[prost(string, tag="1")]
     pub group_name: ::prost::alloc::string::String,
-    /// Tenant ID
-    #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -246,9 +230,6 @@ pub struct GetLocalMembersResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListGroupsRequest {
-    /// Filter by tenant (required - prevents cross-tenant access)
-    #[prost(string, tag="1")]
-    pub tenant_id: ::prost::alloc::string::String,
     /// Filter by namespace (optional)
     #[prost(string, tag="2")]
     pub namespace: ::prost::alloc::string::String,
@@ -279,9 +260,6 @@ pub struct PublishToGroupRequest {
     /// Group to publish to
     #[prost(string, tag="1")]
     pub group_name: ::prost::alloc::string::String,
-    /// Tenant ID (for security - prevent cross-tenant publishing)
-    #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
     /// Topic within the group (optional - if not specified, publishes to all members)
     ///
     /// ## Purpose

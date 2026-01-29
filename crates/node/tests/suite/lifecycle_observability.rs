@@ -556,7 +556,7 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
 
     // Start gRPC server for node2 (actor host)
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let service = ActorServiceImpl::new(node2.service_locator().clone(), node2.id().as_str().to_string());
+    let service = ActorServiceImpl::new(node2.service_locator_impl(), node2.id().as_str().to_string());
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
 

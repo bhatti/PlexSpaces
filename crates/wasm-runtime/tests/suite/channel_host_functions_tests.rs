@@ -256,6 +256,7 @@ async fn test_send_to_queue_host_function() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        false, // durability_enabled
     )
     .await
     .expect("Failed to create instance");
@@ -310,6 +311,7 @@ async fn test_publish_to_topic_host_function() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        false, // durability_enabled
     )
     .await
     .expect("Failed to create instance");
@@ -361,6 +363,7 @@ async fn test_send_to_queue_without_channel_service() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        false, // durability_enabled
     )
     .await
     .expect("Failed to create instance");

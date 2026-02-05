@@ -36,12 +36,83 @@ mod tests {
         types::Context,
     };
     use plexspaces_core::ActorId;
-    use plexspaces_keyvalue::InMemoryKVStore;
+    use plexspaces_keyvalue::SqliteKVStore;
     use plexspaces_process_groups::ProcessGroupRegistry;
-    use plexspaces_locks::memory::MemoryLockManager;
-    use plexspaces_object_registry::ObjectRegistry;
+    use plexspaces_locks::sql::SqliteLockManager;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use std::sync::Arc;
+    use std::collections::HashMap;
+    use tokio::sync::RwLock;
+    use std::time::Duration;
     use plexspaces_wasm_runtime::HostFunctions;
+
+    /// Simple in-memory KeyValueStore for testing (implements plexspaces_core::KeyValueStore)
+    struct TestMemoryKVStore {
+        data: RwLock<HashMap<String, Vec<u8>>>,
+    }
+
+    impl TestMemoryKVStore {
+        fn new() -> Self {
+            Self {
+                data: RwLock::new(HashMap::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl plexspaces_core::KeyValueStore for TestMemoryKVStore {
+        async fn get(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> Result<Option<Vec<u8>>, String> {
+            Ok(self.data.read().await.get(key).cloned())
+        }
+
+        async fn put(&self, _ctx: &plexspaces_core::RequestContext, key: &str, value: Vec<u8>) -> Result<(), String> {
+            self.data.write().await.insert(key.to_string(), value);
+            Ok(())
+        }
+
+        async fn put_with_ttl(&self, _ctx: &plexspaces_core::RequestContext, key: &str, value: Vec<u8>, _ttl: Duration) -> Result<(), String> {
+            self.data.write().await.insert(key.to_string(), value);
+            Ok(())
+        }
+
+        async fn delete(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> Result<(), String> {
+            self.data.write().await.remove(key);
+            Ok(())
+        }
+
+        async fn exists(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> Result<bool, String> {
+            Ok(self.data.read().await.contains_key(key))
+        }
+
+        async fn list_keys(&self, _ctx: &plexspaces_core::RequestContext, prefix: &str) -> Result<Vec<String>, String> {
+            Ok(self.data.read().await.keys()
+                .filter(|k| k.starts_with(prefix))
+                .cloned()
+                .collect())
+        }
+
+        async fn cas(&self, _ctx: &plexspaces_core::RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> Result<bool, String> {
+            let mut data = self.data.write().await;
+            let current = data.get(key).cloned();
+            if current == expected {
+                data.insert(key.to_string(), new_value);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+
+        async fn increment(&self, _ctx: &plexspaces_core::RequestContext, key: &str, delta: i64) -> Result<i64, String> {
+            let mut data = self.data.write().await;
+            let current = data.get(key)
+                .and_then(|v| String::from_utf8(v.clone()).ok())
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(0);
+            let new_val = current + delta;
+            data.insert(key.to_string(), new_val.to_string().into_bytes());
+            Ok(new_val)
+        }
+    }
 
     // Helper to create context for tests
     fn test_context(tenant_id: &str, namespace: &str) -> Context {
@@ -51,24 +122,29 @@ mod tests {
         }
     }
 
-    fn create_test_host_functions_with_services() -> Arc<HostFunctions> {
-        // Create in-memory services for testing
-        let kv_store = Arc::new(InMemoryKVStore::new());
+    async fn create_test_host_functions_with_services() -> Arc<HostFunctions> {
+        // Create in-memory services for testing (using SQLite :memory: backends)
+        // SqliteKVStore implements plexspaces_keyvalue::KeyValueStore (for ProcessGroupRegistry)
+        // TestMemoryKVStore implements plexspaces_core::KeyValueStore (for HostFunctions)
+        let kv_store_for_pg: Arc<dyn plexspaces_keyvalue::KeyValueStore> =
+            Arc::new(SqliteKVStore::new(":memory:").await.unwrap());
+        let kv_store_for_host: Arc<dyn plexspaces_core::KeyValueStore> = Arc::new(TestMemoryKVStore::new());
         let process_group_registry = Arc::new(ProcessGroupRegistry::new(
             "test-node".to_string(),
-            kv_store.clone(),
+            kv_store_for_pg,
         ));
-        let lock_manager = Arc::new(MemoryLockManager::new());
-        let object_registry = Arc::new(ObjectRegistry::new(kv_store.clone()));
+        let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry = Arc::new(ObjectRegistryImpl::new(object_repo));
 
         // Create default in-memory journal storage for testing
-        use plexspaces_journaling::{JournalStorage, MemoryJournalStorage};
-        let journal_storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        use plexspaces_journaling::{JournalStorage, SqliteJournalStorage};
+        let journal_storage: Arc<dyn JournalStorage + Send + Sync> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
 
         Arc::new(HostFunctions::with_all_services(
             None, // No message sender
             None, // No channel service
-            Some(kv_store),
+            Some(kv_store_for_host),
             Some(process_group_registry),
             Some(lock_manager),
             Some(object_registry),
@@ -81,7 +157,7 @@ mod tests {
     async fn test_keyvalue_impl_get_put() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -102,7 +178,7 @@ mod tests {
     async fn test_keyvalue_impl_delete_exists() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -130,7 +206,7 @@ mod tests {
     async fn test_keyvalue_impl_increment() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -151,7 +227,7 @@ mod tests {
     async fn test_keyvalue_impl_compare_and_swap() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -210,7 +286,7 @@ mod tests {
     async fn test_process_groups_impl_create_join_leave() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut pg = ProcessGroupsImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -250,7 +326,7 @@ mod tests {
     async fn test_process_groups_impl_publish_to_group() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut pg = ProcessGroupsImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -281,7 +357,7 @@ mod tests {
     async fn test_locks_impl_acquire_release() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut locks = LocksImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -315,7 +391,7 @@ mod tests {
     async fn test_locks_impl_renew() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut locks = LocksImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -346,7 +422,7 @@ mod tests {
     async fn test_locks_impl_try_acquire() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut locks = LocksImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -373,11 +449,88 @@ mod tests {
         assert!(result.unwrap().is_none(), "lock should not be acquired (already held)");
     }
 
+    /// Leader election: 2 actors, same lock (tenant/namespace/key), 2 different holder_ids.
+    /// Must enforce single holder: first acquires, second fails until first releases.
+    /// Uses same (tenant, namespace, lock_key) as simple_component_host for lock_id "leader".
+    #[tokio::test]
+    async fn test_leader_election_two_actors_same_lock() {
+        let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
+        let host_functions = Arc::new(HostFunctions::with_all_services(
+            None,
+            None,
+            Some(Arc::new(TestMemoryKVStore::new())),
+            Some(Arc::new(ProcessGroupRegistry::new(
+                "test-node".to_string(),
+                {
+                    let kv: Arc<dyn plexspaces_keyvalue::KeyValueStore> =
+                        Arc::new(SqliteKVStore::new(":memory:").await.unwrap());
+                    kv
+                },
+            ))),
+            Some(lock_manager),
+            Some(Arc::new(ObjectRegistryImpl::new(
+                Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap()),
+            ))),
+            Some(Arc::new(
+                plexspaces_journaling::SqliteJournalStorage::new(":memory:").await.unwrap(),
+            )),
+            None,
+        ));
+        let ctx_leader = test_context("", "leader-election");
+        let lock_key = "leader".to_string();
+        let holder_term1 = "LeaderElection:leader-election-term1@test-node".to_string();
+        let holder_term2 = "LeaderElection:leader-election-term2@test-node".to_string();
+
+        let mut locks1 = LocksImpl {
+            actor_id: ActorId::from(holder_term1.clone()),
+            host_functions: host_functions.clone(),
+        };
+        let mut locks2 = LocksImpl {
+            actor_id: ActorId::from(holder_term2.clone()),
+            host_functions: host_functions.clone(),
+        };
+
+        let lease_ms = 30_000u64;
+
+        // Term1 try_acquire -> must succeed
+        let r1 = locks1.try_acquire(ctx_leader.clone(), lock_key.clone(), holder_term1.clone(), lease_ms).await.unwrap();
+        let lock1 = r1.expect("term1 must acquire leader lock");
+        assert!(lock1.locked);
+        assert_eq!(lock1.holder_id, holder_term1);
+
+        // Term2 try_acquire -> must fail (same lock, different holder)
+        let r2 = locks2.try_acquire(ctx_leader.clone(), lock_key.clone(), holder_term2.clone(), lease_ms).await.unwrap();
+        assert!(r2.is_none(), "term2 must NOT acquire while term1 holds lock");
+
+        // Term1 renew -> success
+        let renewed = locks1.renew(
+            ctx_leader.clone(),
+            lock_key.clone(),
+            holder_term1.clone(),
+            lock1.version,
+            lease_ms,
+        ).await.unwrap();
+        assert!(!renewed.version.is_empty());
+
+        // Term2 try_acquire again -> still none
+        let r2b = locks2.try_acquire(ctx_leader.clone(), lock_key.clone(), holder_term2.clone(), lease_ms).await.unwrap();
+        assert!(r2b.is_none());
+
+        // Term1 release
+        locks1.release(ctx_leader.clone(), lock_key.clone(), holder_term1.clone(), renewed.version, false).await.unwrap();
+
+        // Term2 can now acquire
+        let r2c = locks2.try_acquire(ctx_leader.clone(), lock_key.clone(), holder_term2.clone(), lease_ms).await.unwrap();
+        let lock2 = r2c.expect("term2 must acquire after term1 release");
+        assert!(lock2.locked);
+        assert_eq!(lock2.holder_id, holder_term2);
+    }
+
     #[tokio::test]
     async fn test_registry_impl_register_lookup() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -418,7 +571,7 @@ mod tests {
     async fn test_registry_impl_unregister() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -456,7 +609,7 @@ mod tests {
     async fn test_registry_impl_discover() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
@@ -504,7 +657,7 @@ mod tests {
     async fn test_registry_impl_heartbeat() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services();
+        let host_functions = create_test_host_functions_with_services().await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),

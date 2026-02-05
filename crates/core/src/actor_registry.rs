@@ -589,6 +589,7 @@ impl ActorRegistry {
     /// * `actor_type` - Optional actor type for dashboard visibility
     /// * `config` - Optional actor configuration (resource requirements, etc.)
     /// * `instance` - Optional actor instance (for activated actors - stored for ask() to get mailbox)
+    /// * `behavior_kind` - Optional OTP-style behavior kind for logging (GenServer, GenEvent, etc.)
     ///
     /// ## Design
     /// - Virtual actors: Always registered (VirtualActorWrapper when lazy, ActorRef when activated)
@@ -608,6 +609,7 @@ impl ActorRegistry {
         actor_type: Option<String>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         instance: Option<Arc<dyn std::any::Any + Send + Sync>>,
+        behavior_kind: Option<crate::BehaviorType>,
     ) {
         // Register MessageSender in actors map (always - for both virtual and regular actors)
         // For virtual actors: VirtualActorWrapper when lazy, ActorRef when activated
@@ -657,20 +659,25 @@ impl ActorRegistry {
             {
                 let mut actor_types = self.actor_types.write().await;
                 actor_types.insert(actor_id.clone(), actor_type.clone());
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("[ACTOR_REGISTRY] Stored actor_type: actor_id={}, actor_type={}", actor_id, actor_type);
-                }
             }
             
             let mut index = self.actor_type_index.write().await;
             let key = (ctx.tenant_id().to_string(), ctx.namespace().to_string(), actor_type.clone());
             index.entry(key).or_insert_with(Vec::new).push(actor_id.clone());
             
-            // OBSERVABILITY: Log actor registration with type
+            // OBSERVABILITY: Log actor registration with type and behavior kind
             if tracing::enabled!(tracing::Level::DEBUG) {
+                let behavior_str = behavior_kind.as_ref().map(|b| match b {
+                    crate::BehaviorType::GenServer => "GenServer",
+                    crate::BehaviorType::GenEvent => "EventHandler",
+                    crate::BehaviorType::GenStateMachine => "GenStateMachine",
+                    crate::BehaviorType::Workflow => "Workflow",
+                    crate::BehaviorType::Custom(s) => s.as_str(),
+                });
                 tracing::debug!(
                 actor_id = %actor_id,
                 actor_type = %actor_type,
+                behavior = ?behavior_str,
                 tenant_id = %ctx.tenant_id(),
                 namespace = %ctx.namespace(),
                 was_new = was_new,
@@ -960,9 +967,9 @@ impl ActorRegistry {
             metrics.decrement_active();
         }
         
-        // OBSERVABILITY: Log actor unregistration
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        // OBSERVABILITY: Log actor unregistration (TRACE to reduce log noise)
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
             actor_id = %actor_id,
             existed = existed,
             "Actor unregistered with cleanup"
@@ -1019,6 +1026,7 @@ impl ActorRegistry {
             Some("TemporarySender".to_string()), // Actor type for observability
             None, // No config for temporary senders
             None, // No instance for temporary senders (they're just ActorRefs)
+            None, // No behavior_kind for temporary senders
         ).await;
         
         // Also store in temporary_senders map for correlation_id lookup and cleanup
@@ -1031,8 +1039,8 @@ impl ActorRegistry {
         let count = temp_senders.len();
         drop(temp_senders);
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
             "ActorRegistry: Registered temporary sender ActorRef: temporary_sender_id={}, correlation_id={}, expires_at={:?}, total_temp_senders={}",
             temporary_sender_id,
             correlation_id,
@@ -1078,8 +1086,8 @@ impl ActorRegistry {
         // Also remove from temporary_senders map
         let mut temp_senders = self.temporary_senders.write().await;
         if temp_senders.remove(temporary_sender_id).is_some() {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
                     "ActorRegistry: Removed temporary sender: temporary_sender_id={}, remaining={}",
                     temporary_sender_id,
                     temp_senders.len()
@@ -1174,7 +1182,16 @@ impl ActorRegistry {
     ) -> Vec<ActorId> {
         let index = self.actor_type_index.read().await;
         let key = (ctx.tenant_id().to_string(), ctx.namespace().to_string(), actor_type.to_string());
-        index.get(&key).cloned().unwrap_or_default()
+        let actor_ids = index.get(&key).cloned().unwrap_or_default();
+        tracing::debug!(
+            tenant_id = %key.0,
+            namespace = %key.1,
+            actor_type = %key.2,
+            actor_count = actor_ids.len(),
+            actor_ids = ?actor_ids,
+            "discover_actors_by_type"
+        );
+        actor_ids
     }
 
     pub async fn temporary_sender_count(&self) -> usize {
@@ -1256,12 +1273,12 @@ impl ActorRegistry {
             "child_id" => child_id.clone()
         ).increment(1);
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-            parent = %parent_id,
-            child = %child_id,
-            "Registered parent-child relationship"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                parent = %parent_id,
+                child = %child_id,
+                "Registered parent-child relationship"
+            );
         }
     }
 

@@ -40,6 +40,8 @@ use plexspaces_proto::node::v1::{
 use plexspaces_proto::security::v1::{JwtConfig, MtlsConfig};
 use prost_types::Duration;
 
+use crate::config_manager::{get_env, get_env_or, ENV_JWT_SECRET, ENV_MTLS_CERT_DIR};
+
 /// Create default release configuration
 ///
 /// ## Purpose
@@ -67,12 +69,10 @@ pub async fn create_default_release_config(
     listen_addr: String,
 ) -> ReleaseSpec {
     // Get JWT secret from env var (empty if not set - will use JWKS or fail validation)
-    let jwt_secret = std::env::var("PLEXSPACES_JWT_SECRET")
-        .unwrap_or_else(|_| String::new());
+    let jwt_secret = get_env(ENV_JWT_SECRET).unwrap_or_default();
     
     // Get cert directory from env var or use default
-    let cert_dir = std::env::var("PLEXSPACES_MTLS_CERT_DIR")
-        .unwrap_or_else(|_| "/app/certs".to_string());
+    let cert_dir = get_env_or(ENV_MTLS_CERT_DIR, "/app/certs");
     
     // Create default security config
     let security = Some(SecurityConfig {
@@ -111,6 +111,7 @@ pub async fn create_default_release_config(
     // Create default node config
     // NOTE: default_tenant_id and default_namespace have been removed.
     // Tenant-id comes from auth (JWT/mTLS); namespace from application/actor.
+    // NOTE: wasm_apps_directory moved to RuntimeConfig
     let node = NodeConfig {
         id: node_id.clone(),
         listen_addr: listen_addr.clone(),
@@ -123,7 +124,6 @@ pub async fn create_default_release_config(
         metadata: std::collections::HashMap::new(),
         node_registry: None,
         grpc_address: format!("http://{}", listen_addr),
-        wasm_apps_directory: "/app/wasm".to_string(),
     };
     
     // Create default gRPC config
@@ -143,18 +143,20 @@ pub async fn create_default_release_config(
     };
     
     // Create default runtime config
+    // Note: base_dir, wasm_apps_directory, db, channel_provider, mailbox_provider
+    // are set by config_manager::initialize()
     let runtime = RuntimeConfig {
         grpc: Some(grpc),
         health: Some(health),
         security,
         blob: None,
-        shared_database: None,
+        db: None, // Set by config_manager::initialize
         locks_provider: None,
-        channel_provider: None,
-        tuplespace_provider: None,
-        mailbox_provider: None,
-        journaling_provider: None,
+        channel_provider: 0, // ChannelProvider::ChannelProviderInMemory - set by config_manager::initialize
+        mailbox_provider: 0, // ChannelProvider::ChannelProviderInMemory - set by config_manager::initialize
         framework_info: None,
+        base_dir: String::new(), // Set by config_manager::initialize
+        wasm_apps_directory: String::new(), // Set by config_manager::initialize
     };
     
     // Create default shutdown config

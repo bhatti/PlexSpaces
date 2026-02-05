@@ -133,6 +133,8 @@ async fn test_wasm_component_instantiation() {
         profile_name: "default".to_string(),
         enable_pooling: false,
         enable_aot: false,
+        durability_enabled: false,
+        use_instance_pool: false,
     };
     
     let actor_id = "test-calculator-actor".to_string();
@@ -229,6 +231,8 @@ async fn test_component_init_function() {
         profile_name: "default".to_string(),
         enable_pooling: false,
         enable_aot: false,
+        durability_enabled: false,
+        use_instance_pool: false,
     };
     
     let actor_id = "test-calculator-init".to_string();
@@ -293,6 +297,8 @@ async fn test_component_handle_message() {
         profile_name: "default".to_string(),
         enable_pooling: false,
         enable_aot: false,
+        durability_enabled: false,
+        use_instance_pool: false,
     };
     
     let actor_id = "test-calculator-handle".to_string();
@@ -417,6 +423,8 @@ async fn test_component_empty_initial_state() {
         profile_name: "default".to_string(),
         enable_pooling: false,
         enable_aot: false,
+        durability_enabled: false,
+        use_instance_pool: false,
     };
     
     // ACT: Instantiate with empty initial state (with timeout)
@@ -473,6 +481,8 @@ async fn test_component_observability() {
         profile_name: "default".to_string(),
         enable_pooling: false,
         enable_aot: false,
+        durability_enabled: false,
+        use_instance_pool: false,
     };
     
     // ACT: Instantiate and call handle_message (with timeout)
@@ -540,6 +550,8 @@ async fn test_component_different_message_types() {
         profile_name: "default".to_string(),
         enable_pooling: false,
         enable_aot: false,
+        durability_enabled: false,
+        use_instance_pool: false,
     };
     
     let runtime_guard = runtime.lock().await;

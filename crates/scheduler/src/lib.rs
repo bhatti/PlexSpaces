@@ -44,9 +44,6 @@ pub use task_router::{TaskRouter, RoutingStrategy, TaskRouterError, TaskRouterRe
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 pub use state_store::sql::SqliteSchedulingStateStore;
 
-#[cfg(feature = "memory-backend")]
-pub use state_store::memory::MemorySchedulingStateStore;
-
 #[cfg(feature = "ddb-backend")]
 pub use state_store::ddb::DynamoDBSchedulingStateStore;
 

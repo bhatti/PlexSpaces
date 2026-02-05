@@ -4,65 +4,91 @@
 - **Actors**: Stateful computation units (actor model)
 - **TupleSpaces**: Coordination primitives (Linda model)
 - **Services**: Microservices and gRPC endpoints
+- **Nodes**: PlexSpaces node instances
+- **Workflows**: Durable workflow definitions
+- **Applications**: Deployed applications
 
 ## Overview
 
 This crate consolidates three separate registries (ActorRegistry, TupleSpaceRegistry, ServiceRegistry) into ONE unified registry following Proto-First Design principles.
 
-### Component Diagram
+### Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│                 ObjectRegistry                           │
+│              ObjectRegistryImpl                          │
 │  register() / unregister() / lookup() / discover()      │
+│  heartbeat() / find_stale() / update_health_status()    │
 └────────────────────┬────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────┐
-│              KeyValueStore Backend                       │
-│  (InMemory, SQLite, Redis, PostgreSQL)                  │
-│  Key: {tenant}:{namespace}:{type}:{object_id}           │
-│  Value: ObjectRegistration (proto serialized)           │
-└─────────────────────────────────────────────────────────┘
+│         ObjectRegistryRepository (trait)                │
+│  put() / get() / delete() / discover() / heartbeat()    │
+└────────────────────┬────────────────────────────────────┘
+                     │
+        ┌───────────┼─────────────────────┐
+        ▼           ▼                     ▼
+   ┌────────┐  ┌────────────┐       ┌────────┐
+   │ SQLite │  │ PostgreSQL │       │DynamoDB│
+   └────────┘  └────────────┘       └────────┘
+       ↑
+  Use :memory:
+  for testing
 ```
 
-## Key Components
+## Key Features
 
-### ObjectRegistry
+### Indexed Columns for Fast Queries
 
-Main registry struct with KeyValueStore backend:
+Unlike a generic key-value store, this repository uses indexed columns:
+
+| Column | Purpose |
+|--------|---------|
+| `tenant_id`, `namespace`, `object_id` | Primary key for tenant isolation |
+| `object_type` | Fast discover by type (actors, services, nodes) |
+| `node_id` | Find all objects on a specific node |
+| `health_status` | Filter by health state |
+| `last_heartbeat` | Find stale registrations efficiently |
+| `object_category` | Sub-type filtering (e.g., "GenServer", "redis") |
+| `registration_blob` | Full ObjectRegistration protobuf |
+
+### Performance Characteristics
+
+| Operation | Complexity | Notes |
+|-----------|------------|-------|
+| `register()` | O(1) | Single repository write |
+| `lookup()` | O(1) | Primary key lookup |
+| `discover()` | O(log n + k) | Indexed query + filter |
+| `heartbeat()` | O(1) | Single column UPDATE (no blob read/write) |
+| `find_stale()` | O(log n + k) | Uses `last_heartbeat` index |
+
+### Multi-Backend Support
+
+| Backend | Use Case | Feature Flag |
+|---------|----------|--------------|
+| **SQLite** | Embedded, single-node; use `:memory:` for testing | `sql-backend` |
+| **PostgreSQL** | Production, multi-node | `sql-backend` |
+| **DynamoDB** | AWS serverless | `ddb-backend` |
+
+> **Note**: In-memory testing uses `SqliteObjectRegistryRepository::new(":memory:")` which provides fast, isolated storage without persistence.
+
+## Usage
+
+### Basic Usage with SQLite In-Memory Backend
 
 ```rust
-pub struct ObjectRegistry {
-    kv_store: Arc<dyn KeyValueStore>,
-}
-```
-
-### ObjectRegistration
-
-Registration information:
-
-```rust
-pub struct ObjectRegistration {
-    pub object_id: String,
-    pub object_type: ObjectType,
-    pub object_category: String,
-    pub grpc_address: String,
-    pub metadata: HashMap<String, String>,
-}
-```
-
-## Usage Examples
-
-### Register Actor
-
-```rust
-use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-use plexspaces_keyvalue::InMemoryKVStore;
+use plexspaces_common::RequestContext;
+use std::sync::Arc;
 
-let kv = Arc::new(InMemoryKVStore::new());
-let registry = ObjectRegistry::new(kv);
+// Create repository with in-memory SQLite (for testing)
+let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await?);
+let registry = ObjectRegistryImpl::new(repo);
+
+// Create context for tenant isolation
+let ctx = RequestContext::new_without_auth("tenant-1".to_string(), "production".to_string());
 
 // Register actor
 let registration = ObjectRegistration {
@@ -73,39 +99,96 @@ let registration = ObjectRegistration {
     ..Default::default()
 };
 
-registry.register(registration).await?;
+registry.register(&ctx, registration).await?;
 ```
 
-### Discover Objects by Type
+### Using Configuration
+
+```rust
+use plexspaces_object_registry::{ObjectRegistryImpl, ObjectRegistryConfig, create_repository_from_config};
+
+// SQLite backend
+let config = ObjectRegistryConfig::sqlite("/tmp/registry.db");
+let repo = create_repository_from_config(&config).await?;
+let registry = ObjectRegistryImpl::new(repo);
+
+// Or from environment variables
+let repo = plexspaces_object_registry::create_repository_from_env().await?;
+let registry = ObjectRegistryImpl::new(repo);
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PLEXSPACES_OBJECT_REGISTRY_BACKEND` | Backend type: `memory`, `sqlite`, `postgres`, `dynamodb` | `memory` |
+| `PLEXSPACES_OBJECT_REGISTRY_SQLITE_PATH` | SQLite database file path | `:memory:` |
+| `PLEXSPACES_OBJECT_REGISTRY_POSTGRES_URL` | PostgreSQL connection string | - |
+| `PLEXSPACES_OBJECT_REGISTRY_DDB_TABLE` | DynamoDB table name | `plexspaces-object-registry` |
+| `PLEXSPACES_OBJECT_REGISTRY_DDB_REGION` | DynamoDB AWS region | `us-east-1` |
+| `PLEXSPACES_OBJECT_REGISTRY_DDB_ENDPOINT` | DynamoDB endpoint (for local) | - |
+
+### Discover Objects
 
 ```rust
 // Discover all actors
 let actors = registry.discover(
-    Some(ObjectType::ObjectTypeActor),
-    None,
-    None,
-    None,
-    None,
-    100
+    &ctx,
+    Some(ObjectType::ObjectTypeActor),  // Filter by type
+    None,  // object_category
+    None,  // capabilities
+    None,  // labels
+    None,  // health_status
+    0,     // offset
+    100    // limit
 ).await?;
+
+// Find stale registrations (no heartbeat in 60 seconds)
+let stale = registry.find_stale(&ctx, 60, None, 100).await?;
 ```
+
+### Heartbeat Updates
+
+```rust
+// Efficient heartbeat - single column UPDATE, no blob read/write
+registry.heartbeat(&ctx, ObjectType::ObjectTypeActor, "counter@node1").await?;
+
+// Update health status
+registry.update_health_status(&ctx, "counter@node1", HealthStatus::HealthStatusUnhealthy).await?;
+```
+
+## Migrations
+
+Database schema is managed through SQL migrations:
+
+```
+crates/object-registry/migrations/
+├── postgres/
+│   ├── 001_object_registrations.up.sql
+│   └── 001_object_registrations.down.sql
+└── sqlite/
+    ├── 001_object_registrations.up.sql
+    └── 001_object_registrations.down.sql
+```
+
+Migrations run automatically when creating a SQL repository.
 
 ## Dependencies
 
 This crate depends on:
-- `plexspaces_proto`: Protocol buffer definitions
-- `plexspaces_keyvalue`: Key-value storage backend
+- `plexspaces-proto`: Protocol buffer definitions (object_registry.proto)
+- `plexspaces-common`: RequestContext for multi-tenancy
+- `plexspaces-core`: Service trait and ObjectRegistry trait
 
 ## Dependents
 
 This crate is used by:
-- `plexspaces_node`: Node uses registry for discovery
-- `plexspaces_tuplespace`: TupleSpace uses registry for distributed coordination
-- All services: For service discovery
+- `plexspaces-services`: ServiceLocator initializes ObjectRegistry
+- `plexspaces-node`: Node uses registry for discovery
+- All gRPC services: For service discovery
 
 ## References
 
-- Implementation: `crates/object-registry/src/`
-- Tests: `crates/object-registry/tests/`
-- Proto definitions: `proto/plexspaces/v1/object_registry.proto`
-
+- [Architecture](../../docs/architecture.md): Object Registry section
+- [Database Models](../../docs/detailed-design.md#database-models-and-er-diagram): ER diagram and schema details
+- Proto definitions: `proto/plexspaces/v1/registry/object_registry.proto`

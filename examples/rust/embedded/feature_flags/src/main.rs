@@ -10,7 +10,7 @@
 //
 // Use Case: Feature toggles, A/B testing, gradual rollouts
 
-use plexspaces_keyvalue::InMemoryKVStore;
+use plexspaces_keyvalue::SqliteKVStore;
 use plexspaces_process_groups::ProcessGroupRegistry;
 use plexspaces_core::{ActorId, RequestContext};
 use std::collections::HashMap;
@@ -77,8 +77,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Use Case: Instant feature toggle propagation across services");
     println!();
 
-    // Create backend
-    let kv_store = Arc::new(InMemoryKVStore::new());
+    // Create backend (SQLite :memory: for demo)
+    let kv_store = Arc::new(SqliteKVStore::new(":memory:").await?);
     let registry = ProcessGroupRegistry::new("config-server", kv_store);
 
     let tenant_id = "acme-corp";

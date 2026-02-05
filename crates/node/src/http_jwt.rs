@@ -3,94 +3,56 @@
 //
 // This file is part of PlexSpaces.
 //
-// Validates JWT for HTTP gateway. Uses same claim structure as grpc-middleware
-// (tenant_id, roles, groups, is_admin) so tokens work for both HTTP and gRPC.
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-use serde::{Deserialize, Serialize};
+//! HTTP JWT Validation
+//!
+//! ## Purpose
+//! Re-exports shared JWT validation from grpc-middleware for HTTP gateway use.
+//! This ensures consistent JWT validation between HTTP and gRPC endpoints.
+//!
+//! ## Design
+//! - Single source of truth: `plexspaces_grpc_middleware::jwt`
+//! - `JwtClaims` contains all needed fields (tenant_id, sub, is_admin)
+//! - `JwtClaims::to_request_context()` converts to proper `RequestContext`
+//!
+//! ## Usage
+//! ```rust,ignore
+//! use plexspaces_node::http_jwt::{validate_bearer_token, JwtClaims};
+//!
+//! let claims = validate_bearer_token("secret", Some("Bearer eyJ..."))?;
+//! let ctx = claims.to_request_context("namespace".to_string(), true);
+//! ```
 
-/// Claims extracted from JWT for HTTP request context (must match grpc-middleware InternalJwtClaims).
-#[derive(Debug, Serialize, Deserialize)]
-struct JwtClaims {
-    sub: String,
-    exp: i64,
-    iat: i64,
-    #[serde(default)]
-    tenant_id: String,
-    #[serde(default)]
-    roles: Vec<String>,
-    #[serde(default)]
-    groups: Vec<String>,
-    #[serde(default)]
-    is_admin: bool,
-}
-
-/// Result of successful JWT validation for HTTP gateway.
-#[derive(Debug, Clone)]
-pub struct HttpJwtClaims {
-    pub tenant_id: String,
-    pub namespace: String,
-    pub sub: String,
-    pub is_admin: bool,
-}
-
-/// Validate Authorization Bearer token and return claims for HTTP gateway.
-/// Returns error message suitable for 401 response (includes hint when applicable).
-pub fn validate_http_jwt(
-    secret: &str,
-    auth_header: Option<&str>,
-) -> Result<HttpJwtClaims, String> {
-    let token = auth_header
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(str::trim);
-    let token = token.ok_or_else(|| {
-        format!(
-            "Missing or invalid Authorization header (expected: Bearer <token>).{}",
-            plexspaces_common::AUTH_REQUIRED_HINT
-        )
-    })?;
-
-    let key = jsonwebtoken::DecodingKey::from_secret(secret.as_bytes());
-    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
-    validation.validate_exp = true;
-    validation.validate_aud = false;
-
-    let token_data = jsonwebtoken::decode::<JwtClaims>(token, &key, &validation).map_err(|e| {
-        format!(
-            "JWT validation failed: {} (token may be expired or invalid).{}",
-            e,
-            plexspaces_common::AUTH_REQUIRED_HINT
-        )
-    })?;
-
-    let c = &token_data.claims;
-    if c.tenant_id.is_empty() {
-        return Err(format!(
-            "JWT missing tenant_id claim.{}",
-            plexspaces_common::AUTH_REQUIRED_HINT
-        ));
-    }
-
-    Ok(HttpJwtClaims {
-        tenant_id: c.tenant_id.clone(),
-        namespace: String::new(), // namespace not in standard claims; can add to JWT later
-        sub: c.sub.clone(),
-        is_admin: c.is_admin,
-    })
-}
+// Re-export everything from grpc-middleware JWT module
+pub use plexspaces_grpc_middleware::jwt::{
+    validate_bearer_token,
+    validate_jwt_token,
+    resolve_tenant_id,
+    JwtClaims,
+    AUTH_REQUIRED_HINT,
+};
 
 // ============================================================================
-// TESTS (TDD: high coverage for auth path)
+// TESTS
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn make_token(
-        secret: &str,
-        tenant_id: &str,
-        exp_offset_secs: i64,
-    ) -> String {
+    fn make_token(secret: &str, tenant_id: &str, exp_offset_secs: i64) -> String {
         #[derive(serde::Serialize)]
         struct C {
             sub: String,
@@ -117,11 +79,11 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_http_jwt_valid_token() {
+    fn test_validate_bearer_token_valid() {
         let secret = "test-secret";
         let token = make_token(secret, "tenant-1", 3600);
         let auth = format!("Bearer {}", token);
-        let out = validate_http_jwt(secret, Some(&auth));
+        let out = validate_bearer_token(secret, Some(&auth));
         assert!(out.is_ok(), "valid token should succeed: {:?}", out);
         let c = out.unwrap();
         assert_eq!(c.tenant_id, "tenant-1");
@@ -130,8 +92,8 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_http_jwt_missing_header() {
-        let out = validate_http_jwt("secret", None);
+    fn test_validate_bearer_token_missing_header() {
+        let out = validate_bearer_token("secret", None);
         assert!(out.is_err());
         let e = out.unwrap_err();
         assert!(e.contains("Missing or invalid Authorization"));
@@ -139,16 +101,16 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_http_jwt_empty_bearer() {
-        let out = validate_http_jwt("secret", Some("Bearer "));
+    fn test_validate_bearer_token_empty() {
+        let out = validate_bearer_token("secret", Some("Bearer "));
         assert!(out.is_err());
     }
 
     #[test]
-    fn test_validate_http_jwt_wrong_secret() {
+    fn test_validate_bearer_token_wrong_secret() {
         let token = make_token("right-secret", "t1", 3600);
         let auth = format!("Bearer {}", token);
-        let out = validate_http_jwt("wrong-secret", Some(&auth));
+        let out = validate_bearer_token("wrong-secret", Some(&auth));
         assert!(out.is_err());
         let e = out.unwrap_err();
         assert!(e.contains("JWT validation failed"));
@@ -156,10 +118,10 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_http_jwt_expired() {
+    fn test_validate_bearer_token_expired() {
         let token = make_token("secret", "t1", -3600); // expired 1h ago
         let auth = format!("Bearer {}", token);
-        let out = validate_http_jwt("secret", Some(&auth));
+        let out = validate_bearer_token("secret", Some(&auth));
         assert!(out.is_err());
         let e = out.unwrap_err();
         assert!(e.contains("JWT validation failed") || e.contains("expired"));
@@ -167,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_http_jwt_missing_tenant_id() {
+    fn test_validate_bearer_token_missing_tenant_id() {
         #[derive(serde::Serialize)]
         struct C {
             sub: String,
@@ -186,7 +148,7 @@ mod tests {
         let key = jsonwebtoken::EncodingKey::from_secret(b"secret");
         let token = jsonwebtoken::encode(&header, &claims, &key).unwrap();
         let auth = format!("Bearer {}", token);
-        let out = validate_http_jwt("secret", Some(&auth));
+        let out = validate_bearer_token("secret", Some(&auth));
         assert!(out.is_err());
         let e = out.unwrap_err();
         assert!(e.contains("tenant_id"));
@@ -194,9 +156,30 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_http_jwt_not_bearer_prefix() {
+    fn test_validate_bearer_token_not_bearer_prefix() {
         let token = make_token("s", "t", 3600);
-        let out = validate_http_jwt("s", Some(&token)); // no "Bearer " prefix
+        let out = validate_bearer_token("s", Some(&token)); // no "Bearer " prefix
         assert!(out.is_err());
+    }
+
+    #[test]
+    fn test_jwt_claims_to_request_context() {
+        let claims = JwtClaims {
+            sub: "user-123".to_string(),
+            exp: 0,
+            iat: 0,
+            iss: String::new(),
+            aud: vec![],
+            tenant_id: "tenant-456".to_string(),
+            roles: vec!["admin".to_string()],
+            groups: vec![],
+            is_admin: true,
+        };
+
+        let ctx = claims.to_request_context("my-namespace".to_string(), true);
+        assert_eq!(ctx.tenant_id(), "tenant-456");
+        assert_eq!(ctx.namespace(), "my-namespace");
+        assert_eq!(ctx.user_id(), Some("user-123"));
+        assert!(ctx.is_admin());
     }
 }

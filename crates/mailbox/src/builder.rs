@@ -22,7 +22,7 @@
 //! Simplifies selection of InMemory, Redis, Kafka, SQLite, or other backends.
 
 use crate::{Mailbox, MailboxConfig, MailboxError, mailbox_config_default};
-use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, RedisConfig, KafkaConfig, SqliteConfig};
+use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, RedisConfig, KafkaConfig, SqliteConfig};
 
 /// Builder for creating mailboxes with fluent API
 ///
@@ -54,7 +54,7 @@ use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, RedisConfig, 
 /// ```
 pub struct MailboxBuilder {
     config: MailboxConfig,
-    channel_backend: Option<ChannelBackend>,
+    channel_provider: Option<ChannelProvider>,
     channel_config: Option<ChannelConfig>,
 }
 
@@ -69,7 +69,7 @@ impl MailboxBuilder {
     pub fn new() -> Self {
         MailboxBuilder {
             config: mailbox_config_default(),
-            channel_backend: None, // Will default to InMemory
+            channel_provider: None, // Will default to InMemory
             channel_config: None,
         }
     }
@@ -78,7 +78,7 @@ impl MailboxBuilder {
     ///
     /// Fast, non-persistent mailbox. Messages lost on restart.
     pub fn with_in_memory(mut self) -> Self {
-        self.channel_backend = Some(ChannelBackend::ChannelBackendInMemory);
+        self.channel_provider = Some(ChannelProvider::ChannelProviderInMemory);
         self
     }
 
@@ -87,7 +87,7 @@ impl MailboxBuilder {
     /// ## Arguments
     /// * `url` - Redis connection URL (e.g., "redis://localhost:6379")
     pub fn with_redis(mut self, url: String) -> Self {
-        self.channel_backend = Some(ChannelBackend::ChannelBackendRedis);
+        self.channel_provider = Some(ChannelProvider::ChannelProviderRedis);
         
         let redis_config = RedisConfig {
             url,
@@ -101,7 +101,7 @@ impl MailboxBuilder {
         
         let channel_config = ChannelConfig {
             name: String::new(), // Will be set from mailbox_id
-            backend: ChannelBackend::ChannelBackendRedis as i32,
+            provider: ChannelProvider::ChannelProviderRedis as i32,
             capacity: self.config.capacity as u64,
             backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(redis_config)),
             ..Default::default()
@@ -116,7 +116,7 @@ impl MailboxBuilder {
     /// ## Arguments
     /// * `brokers` - Kafka broker addresses (e.g., vec!["localhost:9092"])
     pub fn with_kafka(mut self, brokers: Vec<String>) -> Self {
-        self.channel_backend = Some(ChannelBackend::ChannelBackendKafka);
+        self.channel_provider = Some(ChannelProvider::ChannelProviderKafka);
         
         let kafka_config = KafkaConfig {
             brokers,
@@ -132,7 +132,7 @@ impl MailboxBuilder {
         
         let channel_config = ChannelConfig {
             name: String::new(), // Will be set from mailbox_id
-            backend: ChannelBackend::ChannelBackendKafka as i32,
+            provider: ChannelProvider::ChannelProviderKafka as i32,
             capacity: self.config.capacity as u64,
             backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(kafka_config)),
             ..Default::default()
@@ -148,7 +148,7 @@ impl MailboxBuilder {
     /// * `database_path` - SQLite database path (":memory:" for in-memory, file path for persistent)
     /// * `wal_mode` - Enable WAL mode for better concurrency (default: true)
     pub fn with_sqlite(mut self, database_path: String) -> Self {
-        self.channel_backend = Some(ChannelBackend::ChannelBackendSqlite);
+        self.channel_provider = Some(ChannelProvider::ChannelProviderSqlite);
         
         let sqlite_config = SqliteConfig {
             database_path,
@@ -160,7 +160,7 @@ impl MailboxBuilder {
         
         let channel_config = ChannelConfig {
             name: String::new(), // Will be set from mailbox_id
-            backend: ChannelBackend::ChannelBackendSqlite as i32,
+            provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: self.config.capacity as u64,
             backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
             ..Default::default()
@@ -208,8 +208,8 @@ impl MailboxBuilder {
     pub fn with_channel_config(mut self, config: ChannelConfig) -> Self {
         self.channel_config = Some(config);
         // Update backend from channel config
-        if let Ok(backend) = ChannelBackend::try_from(self.channel_config.as_ref().unwrap().backend) {
-            self.channel_backend = Some(backend);
+        if let Ok(backend) = ChannelProvider::try_from(self.channel_config.as_ref().unwrap().provider) {
+            self.channel_provider = Some(backend);
         }
         self
     }
@@ -228,8 +228,8 @@ impl MailboxBuilder {
     pub async fn build(self, mailbox_id: String) -> Result<Mailbox, MailboxError> {
         // Set channel backend in config if specified
         let mut config = self.config;
-        if let Some(backend) = self.channel_backend {
-            config.channel_backend = backend as i32;
+        if let Some(backend) = self.channel_provider {
+            config.channel_provider = backend as i32;
         }
         
         // Update channel config name if provided
@@ -268,7 +268,7 @@ impl Default for MailboxBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_proto::channel::v1::ChannelBackend;
+    use plexspaces_proto::channel::v1::ChannelProvider;
 
     #[tokio::test]
     async fn test_mailbox_builder_default() {
@@ -405,7 +405,7 @@ mod tests {
         
         let custom_config = ChannelConfig {
             name: "custom-channel".to_string(),
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 5000,
             ..Default::default()
         };
@@ -434,7 +434,7 @@ mod tests {
         // Test that invalid backend in MailboxConfig causes error
         // Note: Mailbox::new() validates backend and returns error for invalid values
         let mut config = mailbox_config_default();
-        config.channel_backend = 999; // Invalid backend value
+        config.channel_provider = 999; // Invalid backend value
         
         let result = Mailbox::new(config, "test-mailbox".to_string()).await;
         

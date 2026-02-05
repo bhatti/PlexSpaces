@@ -202,34 +202,27 @@ message MailboxConfig {
   // Maximum cache size for message ID deduplication (default: 10000)
   // LRU cache with fixed size - evicts least recently used when full
   // Range: 100 to 1,000,000 entries
-  uint32 message_id_cache_size = 14;
+  uint32 message_id_cache_size = 8;
 
   // Maximum cache size for idempotency key deduplication (default: 10000)
   // LRU cache with fixed size - evicts least recently used when full
   // Range: 100 to 1,000,000 entries
-  uint32 idempotency_cache_size = 15;
-
-  // Storage strategy (where messages are stored)
-  StorageStrategy storage_strategy = 8;
+  uint32 idempotency_cache_size = 9;
 
   // Ordering strategy (how messages are ordered)
-  OrderingStrategy ordering_strategy = 9;
+  OrderingStrategy ordering_strategy = 10;
 
-  // Durability strategy (durability guarantees)
-  // This is a hint/requirement - the actual implementation is determined by channel_backend
-  DurabilityStrategy durability_strategy = 10;
-
-  // Channel backend implementation (defaults to IN_MEMORY if not specified)
-  // This directly specifies which channel backend to use for the mailbox.
-  // The backend must be available/configured, otherwise mailbox creation will fail.
-  plexspaces.channel.v1.ChannelBackend channel_backend = 12;
+  // Channel provider implementation (defaults to IN_MEMORY if not specified)
+  // This directly specifies which channel provider to use for the mailbox.
+  // The provider must be available/configured, otherwise mailbox creation will fail.
+  plexspaces.channel.v1.ChannelProvider channel_provider = 11;
 
   // Channel-specific configuration (optional, backend-specific)
-  // Only used if channel_backend is specified. If not provided, backend uses defaults.
-  plexspaces.channel.v1.ChannelConfig channel_config = 13;
+  // Only used if channel_provider is specified. If not provided, provider uses defaults.
+  plexspaces.channel.v1.ChannelConfig channel_config = 12;
 
   // Metadata
-  map<string, string> metadata = 11;
+  map<string, string> metadata = 13;
 }
 
 // Backpressure strategy when mailbox is full
@@ -247,24 +240,6 @@ enum BackpressureStrategy {
 
   // Return error to sender
   ERROR = 4;
-}
-
-// Storage strategy for mailbox messages
-//
-// ## Purpose
-// Defines where mailbox messages are stored (memory, disk, distributed).
-// Composable strategy pattern for flexible mailbox implementations.
-enum StorageStrategy {
-  STORAGE_STRATEGY_UNSPECIFIED = 0;
-
-  // In-memory only (fastest, lost on restart)
-  MEMORY = 1;
-
-  // Disk-backed (spills to disk when full, survives restart)
-  DISK = 2;
-
-  // Distributed (Redis, Kafka, etc. for multi-node)
-  DISTRIBUTED = 3;
 }
 
 // Ordering strategy for mailbox messages
@@ -286,27 +261,6 @@ enum OrderingStrategy {
 
   // Random (for load balancing)
   ORDERING_RANDOM = 4;
-}
-
-// Durability strategy for mailbox messages
-//
-// ## Purpose
-// Defines durability guarantees for mailbox messages.
-// Composable strategy pattern for flexible mailbox implementations.
-enum DurabilityStrategy {
-  DURABILITY_STRATEGY_UNSPECIFIED = 0;
-
-  // No durability (messages lost on crash)
-  DURABILITY_NONE = 1;
-
-  // At-least-once delivery (journaled, may replay)
-  DURABILITY_AT_LEAST_ONCE = 2;
-
-  // Exactly-once delivery (with deduplication)
-  DURABILITY_EXACTLY_ONCE = 3;
-
-  // Fully durable (messages persisted immediately)
-  DURABILITY_DURABLE = 4;
 }
 
 // Mailbox error types
@@ -367,28 +321,6 @@ message MailboxStats {
 
   // Last update timestamp
   google.protobuf.Timestamp updated_at = 10;
-}
-
-message CreateMailboxRequest {
-  string actor_id = 1;
-  MailboxConfig config = 2;
-}
-
-message CreateMailboxResponse {
-  bool success = 1;
-  string error_message = 2;
-}
-
-message DeleteMailboxRequest {
-  string actor_id = 1;
-}
-
-message GetMailboxStatsRequest {
-  string actor_id = 1;
-}
-
-message GetMailboxStatsResponse {
-  MailboxStats stats = 1;
 }
 
 message UpdateMailboxConfigRequest {

@@ -110,9 +110,8 @@ async fn test_remote_actor_ref_node_not_found() {
     // Test: Remote ActorRef should handle node not found in registry
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
         Arc::new(ObjectRegistryAdapter { inner: object_registry_impl });
     let actor_registry = Arc::new(ActorRegistry::new(
@@ -143,9 +142,8 @@ async fn test_remote_actor_ref_connection_failure() {
     // Test: Remote ActorRef should handle connection failures gracefully
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
     
     // Register node with unreachable address
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
@@ -188,9 +186,8 @@ async fn test_remote_actor_ref_ask_timeout() {
     // Test: Remote ActorRef.ask() should timeout when no response
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
     
     // Register node with unreachable address
     let node_registration = ObjectRegistration {
@@ -233,9 +230,8 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
     // Test: Multiple ActorRefs to same node should share gRPC client via ServiceLocator
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
     
     // Register node
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());

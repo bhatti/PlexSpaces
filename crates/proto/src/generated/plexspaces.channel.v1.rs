@@ -7,9 +7,9 @@ pub struct ChannelConfig {
     /// Unique channel name/topic
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
-    /// Backend type (in-memory, Redis, Kafka)
-    #[prost(enumeration="ChannelBackend", tag="2")]
-    pub backend: i32,
+    /// Provider type (in-memory, Redis, Kafka, etc.)
+    #[prost(enumeration="ChannelProvider", tag="2")]
+    pub provider: i32,
     /// Capacity (0 = unbounded, >0 = bounded)
     /// - In-memory: buffer size
     /// - Redis: stream max length
@@ -375,9 +375,9 @@ pub struct ChannelStats {
     /// Channel name
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
-    /// Backend type
-    #[prost(enumeration="ChannelBackend", tag="2")]
-    pub backend: i32,
+    /// Provider type
+    #[prost(enumeration="ChannelProvider", tag="2")]
+    pub provider: i32,
     /// Total messages sent
     #[prost(uint64, tag="3")]
     pub messages_sent: u64,
@@ -550,97 +550,97 @@ pub struct DeleteChannelResponse {
     #[prost(bool, tag="1")]
     pub deleted: bool,
 }
-/// Channel backend type determines the underlying transport
+/// Channel provider type determines the underlying transport
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
-pub enum ChannelBackend {
+pub enum ChannelProvider {
     /// In-process multi-producer single-consumer channel (Go-like)
     /// - Fastest for same-node communication
     /// - No persistence, lost on crash
     /// - Bounded or unbounded capacity
-    ChannelBackendInMemory = 0,
+    ChannelProviderInMemory = 0,
     /// Redis Streams for distributed messaging
     /// - Persistent, survives crashes
     /// - Consumer groups for load balancing
     /// - Cross-node communication
-    ChannelBackendRedis = 1,
+    ChannelProviderRedis = 1,
     /// Kafka for high-throughput distributed streaming
     /// - Durable, partitioned, replicated
     /// - Horizontal scalability
     /// - Cross-node, cross-datacenter
-    ChannelBackendKafka = 2,
+    ChannelProviderKafka = 2,
     /// SQLite for testing and single-node durability
     /// - Persistent, survives crashes
     /// - Good for testing recovery scenarios
     /// - Single-node only (not distributed)
-    ChannelBackendSqlite = 3,
+    ChannelProviderSqlite = 3,
     /// NATS for lightweight distributed messaging
     /// - High performance, low latency
     /// - Pub/sub and request/reply patterns
     /// - JetStream for persistence (optional)
     /// - Cross-node, cross-datacenter
-    ChannelBackendNats = 4,
+    ChannelProviderNats = 4,
     /// UDP multicast for lightweight pub/sub within a cluster
     /// - Very low latency, high throughput
     /// - Multicast pub/sub for cluster-wide messaging
     /// - Unicast point-to-point messaging
     /// - No persistence, best-effort delivery
     /// - Requires nodes to share same cluster_name
-    ChannelBackendUdp = 5,
+    ChannelProviderUdp = 5,
     /// AWS SQS for managed message queuing
     /// - Fully managed, serverless
     /// - Dead Letter Queue (DLQ) support
     /// - At-least-once delivery with visibility timeout
     /// - Auto-scaling, no infrastructure management
-    ChannelBackendSqs = 6,
+    ChannelProviderSqs = 6,
     /// Process Group for Erlang pg/pg2-style pub/sub
     /// - Uses ProcessGroupService via ServiceLocator
     /// - Distributed across cluster nodes
     /// - Pub/sub with topic filtering
     /// - No external dependencies
-    ChannelBackendProcessGroup = 7,
+    ChannelProviderProcessGroup = 7,
     /// PostgreSQL for durable distributed messaging
     /// - Uses FOR UPDATE SKIP LOCKED for queue semantics
     /// - LISTEN/NOTIFY for pub/sub notifications
     /// - Transactional message processing
     /// - Durable, survives crashes
     /// - Good for existing Postgres deployments
-    ChannelBackendPostgres = 8,
+    ChannelProviderPostgres = 8,
     /// Custom backend (user-provided implementation)
-    ChannelBackendCustom = 99,
+    ChannelProviderCustom = 99,
 }
-impl ChannelBackend {
+impl ChannelProvider {
     /// String value of the enum field names used in the ProtoBuf definition.
     ///
     /// The values are not transformed in any way and thus are considered stable
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            ChannelBackend::ChannelBackendInMemory => "CHANNEL_BACKEND_IN_MEMORY",
-            ChannelBackend::ChannelBackendRedis => "CHANNEL_BACKEND_REDIS",
-            ChannelBackend::ChannelBackendKafka => "CHANNEL_BACKEND_KAFKA",
-            ChannelBackend::ChannelBackendSqlite => "CHANNEL_BACKEND_SQLITE",
-            ChannelBackend::ChannelBackendNats => "CHANNEL_BACKEND_NATS",
-            ChannelBackend::ChannelBackendUdp => "CHANNEL_BACKEND_UDP",
-            ChannelBackend::ChannelBackendSqs => "CHANNEL_BACKEND_SQS",
-            ChannelBackend::ChannelBackendProcessGroup => "CHANNEL_BACKEND_PROCESS_GROUP",
-            ChannelBackend::ChannelBackendPostgres => "CHANNEL_BACKEND_POSTGRES",
-            ChannelBackend::ChannelBackendCustom => "CHANNEL_BACKEND_CUSTOM",
+            ChannelProvider::ChannelProviderInMemory => "CHANNEL_PROVIDER_IN_MEMORY",
+            ChannelProvider::ChannelProviderRedis => "CHANNEL_PROVIDER_REDIS",
+            ChannelProvider::ChannelProviderKafka => "CHANNEL_PROVIDER_KAFKA",
+            ChannelProvider::ChannelProviderSqlite => "CHANNEL_PROVIDER_SQLITE",
+            ChannelProvider::ChannelProviderNats => "CHANNEL_PROVIDER_NATS",
+            ChannelProvider::ChannelProviderUdp => "CHANNEL_PROVIDER_UDP",
+            ChannelProvider::ChannelProviderSqs => "CHANNEL_PROVIDER_SQS",
+            ChannelProvider::ChannelProviderProcessGroup => "CHANNEL_PROVIDER_PROCESS_GROUP",
+            ChannelProvider::ChannelProviderPostgres => "CHANNEL_PROVIDER_POSTGRES",
+            ChannelProvider::ChannelProviderCustom => "CHANNEL_PROVIDER_CUSTOM",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
-            "CHANNEL_BACKEND_IN_MEMORY" => Some(Self::ChannelBackendInMemory),
-            "CHANNEL_BACKEND_REDIS" => Some(Self::ChannelBackendRedis),
-            "CHANNEL_BACKEND_KAFKA" => Some(Self::ChannelBackendKafka),
-            "CHANNEL_BACKEND_SQLITE" => Some(Self::ChannelBackendSqlite),
-            "CHANNEL_BACKEND_NATS" => Some(Self::ChannelBackendNats),
-            "CHANNEL_BACKEND_UDP" => Some(Self::ChannelBackendUdp),
-            "CHANNEL_BACKEND_SQS" => Some(Self::ChannelBackendSqs),
-            "CHANNEL_BACKEND_PROCESS_GROUP" => Some(Self::ChannelBackendProcessGroup),
-            "CHANNEL_BACKEND_POSTGRES" => Some(Self::ChannelBackendPostgres),
-            "CHANNEL_BACKEND_CUSTOM" => Some(Self::ChannelBackendCustom),
+            "CHANNEL_PROVIDER_IN_MEMORY" => Some(Self::ChannelProviderInMemory),
+            "CHANNEL_PROVIDER_REDIS" => Some(Self::ChannelProviderRedis),
+            "CHANNEL_PROVIDER_KAFKA" => Some(Self::ChannelProviderKafka),
+            "CHANNEL_PROVIDER_SQLITE" => Some(Self::ChannelProviderSqlite),
+            "CHANNEL_PROVIDER_NATS" => Some(Self::ChannelProviderNats),
+            "CHANNEL_PROVIDER_UDP" => Some(Self::ChannelProviderUdp),
+            "CHANNEL_PROVIDER_SQS" => Some(Self::ChannelProviderSqs),
+            "CHANNEL_PROVIDER_PROCESS_GROUP" => Some(Self::ChannelProviderProcessGroup),
+            "CHANNEL_PROVIDER_POSTGRES" => Some(Self::ChannelProviderPostgres),
+            "CHANNEL_PROVIDER_CUSTOM" => Some(Self::ChannelProviderCustom),
             _ => None,
         }
     }

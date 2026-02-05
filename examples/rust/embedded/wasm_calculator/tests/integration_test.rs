@@ -24,7 +24,6 @@
 //! 3. Deploy WASM applications
 //! 4. Access tuplespace
 
-use anyhow::Result;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::application::v1::{
     application_service_client::ApplicationServiceClient, DeployApplicationRequest,
@@ -98,7 +97,7 @@ async fn test_application_service_connection() {
     
     // ACT: Connect to ApplicationService
     let node_address = format!("http://{}", node_arc.config().listen_addr);
-    let channel = Channel::from_shared(node_address)
+    let _channel = Channel::from_shared(node_address)
         .expect("Invalid address")
         .connect()
         .await;
@@ -179,23 +178,31 @@ async fn test_deploy_wasm_application() {
         version_number: 1,
     };
     
+    // ApplicationSpec with all required fields (proto definition)
     let app_config = ApplicationSpec {
         name: "test-calculator-app".to_string(),
+        namespace: "test".to_string(),
         version: "1.0.0".to_string(),
         description: "Test calculator application".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
         dependencies: vec![],
         env: std::collections::HashMap::new(),
         supervisor: None,
+        // Deployment configuration fields
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: None,
+        shutdown_strategy: 0, // SHUTDOWN_STRATEGY_UNSPECIFIED (defaults to GRACEFUL)
+        metadata: None,
     };
     
+    // DeployApplicationRequest with updated field names
     let deploy_request = DeployApplicationRequest {
         application_id: "test-calc-app-1".to_string(),
         name: "test-calculator-app".to_string(),
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: Some(app_config),
-        release_config: None,
         initial_state: vec![],
     };
     
@@ -238,4 +245,3 @@ async fn test_tuplespace_access() {
     // Cleanup
     node_arc.shutdown(Duration::from_secs(2)).await.ok();
 }
-

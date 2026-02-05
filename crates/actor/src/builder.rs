@@ -770,6 +770,7 @@ impl ActorBuilder {
             Some(actor_type),
             actor.context().config.clone(),
             Some(std::sync::Arc::new(actor) as std::sync::Arc<dyn std::any::Any + Send + Sync>),
+            None, // behavior_kind not available from builder (actor registers with kind in start())
         ).await;
         
         // Return ActorRef

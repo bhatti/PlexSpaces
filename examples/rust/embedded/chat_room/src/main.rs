@@ -5,21 +5,23 @@
 //
 // Demonstrates process groups for broadcast messaging:
 // - Users join/leave chat rooms
-// - Messages broadcast to all room members
+// - Messages broadcast to all room members via publish_to_group
+// - list_groups for room discovery
 // - Real-time group coordination
 //
 // Use Case: Chat application, live notifications, collaborative editing
 
-use plexspaces_keyvalue::InMemoryKVStore;
+use plexspaces_keyvalue::SqliteKVStore;
 use plexspaces_process_groups::ProcessGroupRegistry;
 use plexspaces_core::{ActorId, RequestContext};
+use serde::Serialize;
 use std::sync::Arc;
 
 // =============================================================================
-// Chat Message (would be serialized in real app)
+// Chat Message (serialized for publish_to_group)
 // =============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 struct ChatMessage {
     from: String,
     text: String,
@@ -31,6 +33,10 @@ impl ChatMessage {
             from: from.to_string(),
             text: text.to_string(),
         }
+    }
+
+    fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec(self)
     }
 }
 
@@ -47,8 +53,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Use Case: Real-time chat with broadcast messaging");
     println!();
 
-    // Create backend (in-memory for demo, use Redis for production)
-    let kv_store = Arc::new(InMemoryKVStore::new());
+    // Create backend (SQLite :memory: for demo, use Redis/PostgreSQL for production)
+    let kv_store = Arc::new(SqliteKVStore::new(":memory:").await?);
     let registry = ProcessGroupRegistry::new("chat-server", kv_store);
 
     let tenant_id = "acme-corp";
@@ -59,6 +65,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     // =========================================================================
+    // Step 0: list_groups (empty before any rooms)
+    // =========================================================================
+    println!("Step 0: List rooms (before create)");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    let groups_before = registry.list_groups(&ctx).await?;
+    println!("  Rooms: {:?}", groups_before);
+    assert!(groups_before.is_empty(), "Expected no rooms yet");
+    println!();
+
+    // =========================================================================
     // Step 1: Create chat room (process group)
     // =========================================================================
     println!("Step 1: Create chat room");
@@ -67,6 +83,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let room = registry.create_group(&ctx, room_name).await?;
     println!("  Room created: #{}", room.group_name);
     println!("  Tenant: {}", room.tenant_id);
+
+    let groups_after_create = registry.list_groups(&ctx).await?;
+    println!("  list_groups: {:?}", groups_after_create);
+    assert_eq!(groups_after_create.len(), 1);
+    assert_eq!(groups_after_create[0], room_name);
     println!();
 
     // =========================================================================
@@ -92,40 +113,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // =========================================================================
-    // Step 3: Alice sends a message (broadcast to all)
+    // Step 3: Alice sends a message (publish_to_group broadcast)
     // =========================================================================
     println!("Step 3: Alice sends a message");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     let msg = ChatMessage::new("alice", "Hey everyone! How's it going?");
-    
-    // Broadcast to all room members
+    let payload = msg.to_bytes()?;
+
+    // Broadcast to all room members via publish_to_group
+    let recipients = registry
+        .publish_to_group(&ctx, room_name, None, payload)
+        .await?;
     println!("  [alice]: {}", msg.text);
-    println!();
-    println!("  Delivered to:");
-    for member in &members {
-        if !member.as_str().starts_with("alice") {
-            println!("    -> {}", member);
-        }
-    }
+    println!("  publish_to_group -> {} recipients: {:?}", recipients.len(), recipients);
     println!();
 
     // =========================================================================
-    // Step 4: Bob replies
+    // Step 4: Bob replies (publish_to_group)
     // =========================================================================
     println!("Step 4: Bob replies");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     let msg = ChatMessage::new("bob", "Great! Working on the new feature.");
-    
+    let payload = msg.to_bytes()?;
+    let recipients_bob = registry
+        .publish_to_group(&ctx, room_name, None, payload)
+        .await?;
     println!("  [bob]: {}", msg.text);
-    println!();
-    println!("  Delivered to:");
-    for member in &members {
-        if !member.as_str().starts_with("bob") {
-            println!("    -> {}", member);
-        }
-    }
+    println!("  publish_to_group -> {} recipients", recipients_bob.len());
     println!();
 
     // =========================================================================
@@ -143,32 +159,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // =========================================================================
-    // Step 6: Alice sends another message (Charlie doesn't receive)
+    // Step 6: Alice sends another message (publish_to_group; Charlie left)
     // =========================================================================
     println!("Step 6: Alice sends another message");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     let msg = ChatMessage::new("alice", "Charlie left, it's just us now!");
-    
+    let payload = msg.to_bytes()?;
+    let recipients_final = registry
+        .publish_to_group(&ctx, room_name, None, payload)
+        .await?;
     println!("  [alice]: {}", msg.text);
-    println!();
-    println!("  Delivered to:");
-    for member in &remaining {
-        if !member.as_str().starts_with("alice") {
-            println!("    -> {}", member);
-        }
-    }
-    println!("  (charlie did NOT receive - left room)");
+    println!("  publish_to_group -> {} recipients (charlie left, so only alice & bob)", recipients_final.len());
+    assert_eq!(recipients_final.len(), 2, "Only alice and bob should receive");
     println!();
 
     // =========================================================================
-    // Step 7: Cleanup
+    // Step 7: Cleanup and list_groups (empty after delete)
     // =========================================================================
     println!("Step 7: Close room");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     registry.delete_group(&ctx, room_name).await?;
     println!("  Room #general closed");
+
+    let groups_after_delete = registry.list_groups(&ctx).await?;
+    println!("  list_groups after delete: {:?}", groups_after_delete);
+    assert!(groups_after_delete.is_empty(), "Expected no rooms after delete");
     println!();
 
     // =========================================================================
@@ -183,10 +200,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  - Dynamic membership: Join/leave at runtime");
     println!();
     println!("PlexSpaces Integration:");
-    println!("  - ProcessGroupRegistry: Manages groups");
-    println!("  - create_group(name, tenant, namespace)");
-    println!("  - join_group / leave_group");
-    println!("  - get_members / publish_to_group");
+    println!("  - ProcessGroupRegistry: create_group, delete_group");
+    println!("  - join_group / leave_group / get_members");
+    println!("  - publish_to_group (broadcast) / list_groups");
     println!();
     println!("Use Cases:");
     println!("  - Chat rooms / channels");

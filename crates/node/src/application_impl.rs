@@ -206,10 +206,12 @@ impl SpecApplication {
             
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
             // Use ActorFactory::spawn_actor() which supports facets directly.
-            // Tenant/namespace: from node config default if available, else blank (no "internal").
+            // Tenant/namespace: use explicit namespace from ApplicationSpec.
             use plexspaces_core::{RequestContext, ActorFactory};
-            // Tenant comes from auth, not config - use app name as namespace
-            let (tenant_id, namespace) = (String::new(), self.spec.name.clone());
+            // Tenant comes from auth, not config
+            // Namespace: must be set explicitly in ApplicationSpec during deployment
+            let tenant_id = String::new();
+            let namespace = self.spec.namespace.clone();
             let ctx = RequestContext::new_without_auth(tenant_id, namespace);
             
             // Get ActorFactory from ServiceLocator
@@ -960,6 +962,7 @@ mod tests {
     fn create_test_spec_with_supervisor() -> ApplicationSpec {
         ApplicationSpec {
             name: "test-app".to_string(),
+            namespace: "test-namespace".to_string(),
             version: "0.1.0".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeActive as i32,
@@ -1006,12 +1009,14 @@ mod tests {
     fn create_test_spec_no_supervisor() -> ApplicationSpec {
         ApplicationSpec {
             name: "test-app".to_string(),
+            namespace: "test-namespace".to_string(),
             version: "0.1.0".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeLibrary as i32,
             dependencies: vec![],
             env: std::collections::HashMap::new(),
             supervisor: None,
+            ..Default::default()
         }
     }
 

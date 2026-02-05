@@ -50,38 +50,38 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
 
-// Channel backend type determines the underlying transport
-enum ChannelBackend {
+// Channel provider type determines the underlying transport
+enum ChannelProvider {
   // In-process multi-producer single-consumer channel (Go-like)
   // - Fastest for same-node communication
   // - No persistence, lost on crash
   // - Bounded or unbounded capacity
-  CHANNEL_BACKEND_IN_MEMORY = 0;
+  CHANNEL_PROVIDER_IN_MEMORY = 0;
 
   // Redis Streams for distributed messaging
   // - Persistent, survives crashes
   // - Consumer groups for load balancing
   // - Cross-node communication
-  CHANNEL_BACKEND_REDIS = 1;
+  CHANNEL_PROVIDER_REDIS = 1;
 
   // Kafka for high-throughput distributed streaming
   // - Durable, partitioned, replicated
   // - Horizontal scalability
   // - Cross-node, cross-datacenter
-  CHANNEL_BACKEND_KAFKA = 2;
+  CHANNEL_PROVIDER_KAFKA = 2;
 
   // SQLite for testing and single-node durability
   // - Persistent, survives crashes
   // - Good for testing recovery scenarios
   // - Single-node only (not distributed)
-  CHANNEL_BACKEND_SQLITE = 3;
+  CHANNEL_PROVIDER_SQLITE = 3;
 
   // NATS for lightweight distributed messaging
   // - High performance, low latency
   // - Pub/sub and request/reply patterns
   // - JetStream for persistence (optional)
   // - Cross-node, cross-datacenter
-  CHANNEL_BACKEND_NATS = 4;
+  CHANNEL_PROVIDER_NATS = 4;
 
   // UDP multicast for lightweight pub/sub within a cluster
   // - Very low latency, high throughput
@@ -89,21 +89,21 @@ enum ChannelBackend {
   // - Unicast point-to-point messaging
   // - No persistence, best-effort delivery
   // - Requires nodes to share same cluster_name
-  CHANNEL_BACKEND_UDP = 5;
+  CHANNEL_PROVIDER_UDP = 5;
 
   // AWS SQS for managed message queuing
   // - Fully managed, serverless
   // - Dead Letter Queue (DLQ) support
   // - At-least-once delivery with visibility timeout
   // - Auto-scaling, no infrastructure management
-  CHANNEL_BACKEND_SQS = 6;
+  CHANNEL_PROVIDER_SQS = 6;
 
   // Process Group for Erlang pg/pg2-style pub/sub
   // - Uses ProcessGroupService via ServiceLocator
   // - Distributed across cluster nodes
   // - Pub/sub with topic filtering
   // - No external dependencies
-  CHANNEL_BACKEND_PROCESS_GROUP = 7;
+  CHANNEL_PROVIDER_PROCESS_GROUP = 7;
 
   // PostgreSQL for durable distributed messaging
   // - Uses FOR UPDATE SKIP LOCKED for queue semantics
@@ -111,10 +111,10 @@ enum ChannelBackend {
   // - Transactional message processing
   // - Durable, survives crashes
   // - Good for existing Postgres deployments
-  CHANNEL_BACKEND_POSTGRES = 8;
+  CHANNEL_PROVIDER_POSTGRES = 8;
 
   // Custom backend (user-provided implementation)
-  CHANNEL_BACKEND_CUSTOM = 99;
+  CHANNEL_PROVIDER_CUSTOM = 99;
 }
 
 // Channel delivery semantics
@@ -146,8 +146,8 @@ message ChannelConfig {
   // Unique channel name/topic
   string name = 1;
 
-  // Backend type (in-memory, Redis, Kafka)
-  ChannelBackend backend = 2;
+  // Provider type (in-memory, Redis, Kafka, etc.)
+  ChannelProvider provider = 2;
 
   // Capacity (0 = unbounded, >0 = bounded)
   // - In-memory: buffer size
@@ -408,8 +408,8 @@ message ChannelStats {
   // Channel name
   string name = 1;
 
-  // Backend type
-  ChannelBackend backend = 2;
+  // Provider type
+  ChannelProvider provider = 2;
 
   // Total messages sent
   uint64 messages_sent = 3;

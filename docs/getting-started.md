@@ -135,36 +135,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Python Actor (WASM)
+### Python Actor (WASM with SDK)
+
+The [PlexSpaces Python SDK](sdk.md) provides decorator-based actor development with minimal boilerplate:
 
 ```python
 # counter_actor.py
-from plexspaces import Actor, tell, ask
+from plexspaces import actor, state, handler
 
-class CounterActor(Actor):
-    def __init__(self):
-        self.count = 0
+@actor
+class CounterActor:
+    count: int = state(default=0)
     
-    async def handle_increment(self, amount: int) -> int:
+    @handler("increment")
+    def increment(self, amount: int = 1) -> dict:
         self.count += amount
-        return self.count
+        return {"count": self.count}
     
-    async def handle_get(self) -> int:
-        return self.count
-
-# Deploy and use
-async def main():
-    actor = CounterActor()
-    await actor.start("counter@node1")
-    
-    result = await ask(actor, "increment", 5)
-    print(f"Count: {result}")
-    
-    count = await ask(actor, "get")
-    print(f"Current count: {count}")
+    @handler("get")
+    def get(self) -> dict:
+        return {"count": self.count}
 ```
 
-See [WASM Examples](../examples/wasm_showcase/) for more Python/JavaScript actor examples.
+Build and deploy:
+
+```bash
+# Build to WASM
+plexspaces-py build counter_actor.py -o counter_actor.wasm
+
+# Deploy (via HTTP API)
+curl -X POST http://localhost:8094/api/v1/deploy \
+  -F "namespace=default" \
+  -F "actor_type=counter" \
+  -F "wasm=@counter_actor.wasm"
+```
+
+### TypeScript Actor (WASM with SDK)
+
+The [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) uses inheritance: extend `PlexSpacesActor<TState>` and implement `on<Op>(payload)` handlers. Same WIT world as Python (`plexspaces-simple-actor`). Build with `jco componentize ... --disable all`. See [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a full example and E2E test.
+
+See [SDK Guide](sdk.md) for complete Python and TypeScript SDK documentation.
+See [WASM Deployment](wasm-deployment.md) and [Examples](examples.md) for Python, TypeScript, and other WASM actor examples.
 
 ## Key Concepts
 
@@ -221,7 +232,7 @@ Facets add dynamic capabilities to actors:
 3. **Usage Patterns**: Learn practical usage patterns with [Usage Guide](usage.md)
 4. **Explore Examples**: Check out the [examples directory](../examples/) for more patterns
 5. **Read Architecture**: Understand the [system design](architecture.md)
-6. **FaaS Invocation**: Learn how to invoke actors via HTTP (GET/POST) for serverless patterns - see [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation)
+6. **FaaS Invocation**: Learn how to invoke actors via HTTP: GET uses request-reply (ask); POST/PUT/DELETE use fire-and-forget (tell) by default. Use query param `invocation=call` to force request-reply. Valid `invocation` values: **call**, **cast**, **info** (Erlang-style). Use `msg_type` in query for handler name (e.g. GET `?msg_type=count`) - see [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation)
 7. **Deploy to Production**: Follow the [installation guide](installation.md)
 8. **Learn Use Cases**: See [real-world applications](use-cases.md)
 

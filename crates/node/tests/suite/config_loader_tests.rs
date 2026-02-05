@@ -287,7 +287,9 @@ shutdown:
     let path = file.path().to_str().unwrap().to_string();
 
     let loader = ConfigLoader::new();
-    let spec = loader.load_release_spec_with_env_precedence(&path).await.unwrap();
+    let mut spec = loader.load_release_spec(&path).await.unwrap();
+    // Apply env overrides through config_manager
+    plexspaces_common::config_manager::initialize(&mut spec);
 
     // Env var should override file config
     assert_eq!(spec.node.as_ref().unwrap().id, "env-override-node");

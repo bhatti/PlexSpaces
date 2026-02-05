@@ -27,7 +27,7 @@
 mod distributed_lock_tests {
     use plexspaces_core::{ActorId, ActorRef, ActorService, Message};
     use plexspaces_journaling::{TimerFacet, TimerRegistration};
-    use plexspaces_locks::{LockManager, memory::MemoryLockManager};
+    use plexspaces_locks::{LockManager, sql::SqliteLockManager};
     use plexspaces_mailbox::{Mailbox, MailboxConfig};
     use plexspaces_facet::Facet;
     use plexspaces_proto::prost_types;
@@ -94,7 +94,7 @@ mod distributed_lock_tests {
     #[tokio::test]
     async fn test_timer_registration_with_locks() {
         // Test that timers can be registered with lock manager
-        let lock_manager: Arc<dyn LockManager> = Arc::new(MemoryLockManager::new());
+        let lock_manager: Arc<dyn LockManager + Send + Sync> = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         let facet = create_timer_facet_with_locks(lock_manager, "node-1".to_string());
         let (mut facet_mut, _mailbox) = setup_facet(facet, "test-actor").await;
         
@@ -160,7 +160,7 @@ mod distributed_lock_tests {
     async fn test_timer_multi_node_lock_isolation() {
         // Test that multiple nodes with same actor_id compete for lock
         // Only the node that holds the lock should have its timer fire
-        let lock_manager: Arc<dyn LockManager> = Arc::new(MemoryLockManager::new());
+        let lock_manager: Arc<dyn LockManager + Send + Sync> = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         
         // Node 1: Register timer with lock
         let facet1 = create_timer_facet_with_locks(lock_manager.clone(), "node-1".to_string());
@@ -221,7 +221,7 @@ mod distributed_lock_tests {
     #[tokio::test]
     async fn test_timer_cleanup_on_detach() {
         // Test that all timers are properly cleaned up on detach
-        let lock_manager: Arc<dyn LockManager> = Arc::new(MemoryLockManager::new());
+        let lock_manager: Arc<dyn LockManager + Send + Sync> = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         let facet = create_timer_facet_with_locks(lock_manager, "node-1".to_string());
         let (mut facet_mut, _mailbox) = setup_facet(facet, "test-actor").await;
         

@@ -28,7 +28,7 @@
 mod tests {
     use plexspaces_channel::create_channel;
     use plexspaces_proto::channel::v1::{
-        ChannelBackend, ChannelConfig, SqliteConfig,
+        ChannelProvider, ChannelConfig, SqliteConfig,
     };
     use plexspaces_proto::common::v1::Message;
     use std::time::Duration;
@@ -46,7 +46,7 @@ mod tests {
 
         ChannelConfig {
             name: channel_name.to_string(),
-            backend: ChannelBackend::ChannelBackendSqlite as i32,
+            provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: 1000,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,

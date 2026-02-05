@@ -211,6 +211,14 @@ pub fn parse_app_config_toml(toml_str: &str, app_name: &str) -> Result<Applicati
         .unwrap_or("1.0.0")
         .to_string();
 
+    // Extract namespace (explicit property for multi-tenancy)
+    // If not specified in config, will be set to application_id during deployment
+    let namespace = parsed
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
     // Extract supervisor configuration
     let supervisor = if let Some(sup_table) = parsed.get("supervisor") {
         Some(parse_supervisor_spec(sup_table)?)
@@ -220,6 +228,7 @@ pub fn parse_app_config_toml(toml_str: &str, app_name: &str) -> Result<Applicati
 
     Ok(ApplicationSpec {
         name: app_name.to_string(),
+        namespace,
         version,
         supervisor,
         ..Default::default()
@@ -524,7 +533,7 @@ async fn deploy_wasm_app(
 
     // Use config from file or create default
     let config = app.config.clone().unwrap_or_else(|| {
-        plexspaces_services::create_default_application_spec(&app.name, &app.version)
+        plexspaces_services::create_default_application_spec(&app.name, &app.version, None)
     });
 
     // Create deploy request

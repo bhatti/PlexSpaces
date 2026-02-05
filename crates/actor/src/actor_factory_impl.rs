@@ -498,6 +498,7 @@ impl ActorFactory for ActorFactoryImpl {
                 None, // actor_type already set
                 actor_arc.context().config.clone(), // Config for resource tracking
                 Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
+                None, // behavior_kind already set at registration
             ).await;
             
             // Watch termination
@@ -739,6 +740,7 @@ impl ActorFactory for ActorFactoryImpl {
                             Some(actor_type.clone()),
                             actor_arc.context().config.clone(),
                             Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>),
+                            None, // behavior_kind already set at registration
                         ).await;
                         
                         // Store facets
@@ -1238,6 +1240,7 @@ impl ActorFactoryImpl {
                     actor_type.clone(),
                     actor_config.clone(), // Config for resource tracking
                     Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
+                    None, // behavior_kind already set at registration
                 ).await;
                 
                 // Watch termination (with exit_reason for proper propagation)
@@ -1298,6 +1301,7 @@ impl ActorFactoryImpl {
                     actor_type.clone(),
                     actor_config.clone(), // Config for resource tracking
                     Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for lazy activation
+                    None, // behavior_kind already set at registration
                 ).await;
             }
             
@@ -1371,6 +1375,7 @@ impl ActorFactoryImpl {
             actor_type.clone(),
             actor_config.clone(), // Config for resource tracking
             Some(actor_arc.clone() as Arc<dyn std::any::Any + Send + Sync>), // Instance for ask() to get mailbox
+            None, // behavior_kind already set at registration
         ).await;
         
         // Emit Activated event

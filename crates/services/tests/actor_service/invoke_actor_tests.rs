@@ -19,8 +19,7 @@ use plexspaces_core::{ActorRegistry, ServiceLocator as ServiceLocatorTrait, Repl
 use plexspaces_services::ServiceLocatorImpl;
 use plexspaces_node::create_default_service_locator;
 use plexspaces_mailbox::Message;
-use plexspaces_keyvalue::InMemoryKVStore;
-use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService,
     InvokeActorRequest,
@@ -120,11 +119,11 @@ async fn create_test_registry_with_actors(
     actor_type: &str,
     tenant_id: &str,
     num_actors: usize,
-) -> (Arc<ActorRegistry>, Arc<dyn ServiceLocatorTrait>) {
+) -> (Arc<ActorRegistry>, Arc<ServiceLocatorImpl>) {
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
     
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
+    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
     
     // Simple adapter
     struct ObjectRegistryAdapter {
@@ -285,6 +284,8 @@ async fn test_invoke_actor_get_success() {
         },
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     // Actor registration is synchronous - no wait needed
@@ -342,13 +343,15 @@ async fn test_invoke_actor_post_success() {
         query_params: HashMap::new(),
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     // Actor registration is synchronous - no wait needed
     
     let result = service.invoke_actor(Request::new(request)).await;
     
-    // Should succeed (fire-and-forget)
+    // Should succeed (fire-and-forget); POST without invocation=call uses tell (cast)
     match result {
         Ok(response) => {
             let resp = response.into_inner();
@@ -358,6 +361,44 @@ async fn test_invoke_actor_post_success() {
         Err(e) => {
             // Allow internal errors for now
             assert!(matches!(e.code(), tonic::Code::Internal | tonic::Code::Unavailable));
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_invoke_actor_post_invocation_call_uses_ask() {
+    // POST with msg_type_override=call (HTTP: invocation=call) must use ask pattern (request-reply)
+    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
+    let request = InvokeActorRequest {
+        namespace: "default".to_string(),
+        actor_type: "counter".to_string(),
+        http_method: "POST".to_string(),
+        payload: b"{\"action\":\"get\"}".to_vec(),
+        headers: HashMap::new(),
+        query_params: HashMap::new(),
+        path: String::new(),
+        subpath: String::new(),
+        ask: false,
+        msg_type_override: "call".to_string(),
+    };
+
+    let result = service.invoke_actor(Request::new(request)).await;
+
+    // Ask path: service waits for reply; counter responds to "get" with count
+    match result {
+        Ok(response) => {
+            let resp = response.into_inner();
+            assert!(resp.success, "POST with invocation=call should succeed (ask path)");
+            assert!(!resp.payload.is_empty(), "Ask path should return reply payload");
+        }
+        Err(e) => {
+            assert!(
+                matches!(e.code(), tonic::Code::Internal | tonic::Code::Unavailable | tonic::Code::DeadlineExceeded),
+                "Unexpected error: {:?}",
+                e.code()
+            );
         }
     }
 }
@@ -377,6 +418,8 @@ async fn test_invoke_actor_missing_actor_type() {
         query_params: HashMap::new(),
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     let result = service.invoke_actor(Request::new(request)).await;
@@ -399,6 +442,8 @@ async fn test_invoke_actor_not_found() {
         query_params: HashMap::new(),
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     let result = service.invoke_actor(Request::new(request)).await;
@@ -421,6 +466,8 @@ async fn test_invoke_actor_multiple_actors_random_selection() {
         query_params: HashMap::new(),
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     // Actor registration is synchronous - no wait needed
@@ -460,6 +507,8 @@ async fn test_invoke_actor_default_tenant_id() {
         query_params: HashMap::new(),
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     // Actor registration is synchronous - no wait needed
@@ -499,6 +548,8 @@ async fn test_invoke_actor_get_query_params_to_json() {
         query_params: query_params.clone(),
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     // Actor registration is synchronous - no wait needed
@@ -541,6 +592,8 @@ async fn test_invoke_actor_post_headers_preserved() {
         query_params: HashMap::new(),
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     // Actor registration is synchronous - no wait needed
@@ -579,6 +632,8 @@ async fn test_invoke_actor_with_namespace() {
         },
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     // Actor registration is synchronous - no wait needed
@@ -629,6 +684,8 @@ async fn test_invoke_actor_without_tenant_id_in_path() {
         },
         path: String::new(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     };
     
     // Actor registration is synchronous - no wait needed

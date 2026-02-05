@@ -81,7 +81,10 @@ bank_op() {
     local desc="$2"
     local payload="$3"
     
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/internal/system/$account" \
+    # Use the application ID as the namespace (bank-test)
+    # Don't hardcode tenant_id - use path format /api/v1/actors/{namespace}/{actor_type}
+    # This gets tenant from header/JWT (empty when auth disabled)
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$account" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || true
     

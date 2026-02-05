@@ -110,9 +110,8 @@ async fn test_actor_ref_remote_uses_service_locator() {
     // Test: Remote ActorRef should use ServiceLocator for gRPC client caching
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
         Arc::new(ObjectRegistryAdapter { inner: object_registry_impl });
     let actor_registry = Arc::new(ActorRegistry::new(
@@ -140,9 +139,8 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
     // Test: Remote ActorRef.tell() should use ServiceLocator to get gRPC client
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
     
     // Register node address in ObjectRegistry
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
@@ -202,9 +200,8 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     // Test: Remote ActorRef.ask() should use ServiceLocator to get gRPC client
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
     
     // Register node address in ObjectRegistry
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
@@ -277,7 +274,7 @@ async fn test_actor_ref_local_unchanged() {
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-        registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
     }
     
     // Send message should work

@@ -31,7 +31,7 @@ fi
 
 # Build the example
 echo -e "${YELLOW}📦 Building timeseries_forecasting...${NC}"
-if ! cargo build --release 2>&1 | grep -q "Finished"; then
+if ! cargo build 2>&1 | grep -q "Finished"; then
     echo -e "${RED}❌ Build failed${NC}"
     exit 1
 fi
@@ -45,7 +45,7 @@ echo ""
 OUTPUT_FILE=$(mktemp)
 
 # Run with timeout and capture output
-timeout 15s cargo run --release --bin timeseries_forecasting 2>&1 | tee "$OUTPUT_FILE" || {
+timeout 15s cargo run --bin timeseries_forecasting 2>&1 | tee "$OUTPUT_FILE" || {
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 124 ]; then
         echo -e "${YELLOW}⏱️  Test completed (timeout after 15s)${NC}"

@@ -31,10 +31,10 @@
 //!
 //! ## Storage Providers
 //! All providers defined in proto/plexspaces/v1/tuplespace_storage.proto:
-//! - `MEMORY`: In-memory HashMap (testing/development)
+//! - `SQLITE`: SQLite embedded (use `:memory:` for in-memory)
 //! - `REDIS`: Redis with pub/sub (distributed production)
 //! - `POSTGRES`: PostgreSQL with JSONB (ACID transactions)
-//! - `SQLITE`: SQLite embedded (edge deployments)
+//! - `DYNAMODB`: DynamoDB (AWS managed)
 //!
 //! ## Design Decisions
 //! - **Proto-First**: StorageProvider enum and configs defined in proto
@@ -47,23 +47,14 @@
 //! ```rust
 //! use plexspaces_tuplespace::storage::*;
 //! use plexspaces_tuplespace::TupleSpaceError;
-//! use plexspaces_proto::tuplespace::v1::*;
 //!
 //! # async fn example() -> Result<(), TupleSpaceError> {
-//! // Create storage from proto config
-//! let config = TupleSpaceStorageConfig {
-//!     provider: StorageProvider::StorageProviderMemory as i32,
-//!     config: Some(tuple_space_storage_config::Config::Memory(
-//!         MemoryStorageConfig {
-//!             initial_capacity: 1000,
-//!             cleanup_interval_ms: 60000,
-//!         }
-//!     )),
-//!     enable_metrics: true,
-//!     cleanup_interval: None,
+//! // Create in-memory storage with config
+//! let config = MemoryStorageConfig {
+//!     initial_capacity: 1000,
+//!     cleanup_interval_ms: 60000,
 //! };
-//!
-//! let storage = create_storage(config).await?;
+//! let storage = MemoryStorage::new(config);
 //!
 //! // Write tuple
 //! use plexspaces_tuplespace::Tuple;
@@ -78,8 +69,6 @@
 //! # }
 //! ```
 
-pub mod memory;
-
 #[cfg(feature = "redis-backend")]
 pub mod redis;
 
@@ -93,12 +82,20 @@ pub mod ddb;
 pub use ddb::DynamoDBStorage;
 
 use async_trait::async_trait;
-use plexspaces_proto::tuplespace::v1::{
-    MemoryStorageConfig, StorageProvider, StorageStats, TupleSpaceStorageConfig,
-};
+#[allow(unused_imports)]
+use plexspaces_proto::tuplespace::v1::{StorageProvider, StorageStats};
 
 #[allow(unused_imports)]
 use plexspaces_proto::tuplespace::v1::{PostgresStorageConfig, SqliteStorageConfig};
+
+/// Memory storage configuration (used for SQLite :memory: backend)
+#[derive(Debug, Clone)]
+pub struct MemoryStorageConfig {
+    /// Initial capacity for hash maps (affects pre-allocation)
+    pub initial_capacity: usize,
+    /// Interval for TTL cleanup in milliseconds
+    pub cleanup_interval_ms: u64,
+}
 
 use crate::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
@@ -302,14 +299,42 @@ pub trait TupleSpaceStorage: Send + Sync {
     }
 }
 
-/// Create storage backend from proto configuration
+/// Storage configuration enum for create_storage factory
+///
+/// Used to specify which storage backend to create and its configuration.
+/// This replaces the previous proto-based TupleSpaceStorageConfig.
+#[derive(Debug, Clone)]
+pub enum StorageConfig {
+    /// In-memory storage (default for single-process)
+    Memory(MemoryStorageConfig),
+    /// Redis storage (for distributed)
+    #[cfg(feature = "redis-backend")]
+    Redis(plexspaces_proto::tuplespace::v1::RedisStorageConfig),
+    /// PostgreSQL storage (for persistence)
+    #[cfg(feature = "sql-backend")]
+    Postgres(plexspaces_proto::tuplespace::v1::PostgresStorageConfig),
+    /// SQLite storage (for embedded persistence)
+    #[cfg(feature = "sql-backend")]
+    Sqlite(plexspaces_proto::tuplespace::v1::SqliteStorageConfig),
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        StorageConfig::Memory(MemoryStorageConfig {
+            initial_capacity: 1000,
+            cleanup_interval_ms: 60000,
+        })
+    }
+}
+
+/// Create storage backend from configuration
 ///
 /// ## Purpose
 /// Factory function that creates appropriate storage backend based on
-/// StorageProvider enum from proto.
+/// StorageConfig enum.
 ///
 /// ## Arguments
-/// - `config`: TupleSpaceStorageConfig from proto
+/// - `config`: StorageConfig specifying backend type and configuration
 ///
 /// ## Returns
 /// Boxed storage backend implementing TupleSpaceStorage trait
@@ -319,308 +344,124 @@ pub trait TupleSpaceStorage: Send + Sync {
 /// - ConnectionError if backend can't connect (Redis, PostgreSQL)
 ///
 /// ## Example
-/// ```rust,no_run
+/// ```rust
 /// use plexspaces_tuplespace::storage::*;
 /// use plexspaces_tuplespace::TupleSpaceError;
-/// use plexspaces_proto::tuplespace::v1::*;
 ///
 /// # async fn example() -> Result<(), TupleSpaceError> {
-/// let config = TupleSpaceStorageConfig {
-///     provider: StorageProvider::StorageProviderMemory as i32,
-///     config: Some(tuple_space_storage_config::Config::Memory(
-///         MemoryStorageConfig {
-///             initial_capacity: 1000,
-///             cleanup_interval_ms: 60000,
-///         }
-///     )),
-///     enable_metrics: true,
-///     cleanup_interval: None,
-/// };
+/// let config = StorageConfig::Memory(MemoryStorageConfig {
+///     initial_capacity: 1000,
+///     cleanup_interval_ms: 60000,
+/// });
 ///
 /// let storage = create_storage(config).await?;
 /// # Ok(())
 /// # }
 /// ```
 pub async fn create_storage(
-    config: TupleSpaceStorageConfig,
+    config: StorageConfig,
 ) -> Result<Box<dyn TupleSpaceStorage>, TupleSpaceError> {
-    let provider = StorageProvider::try_from(config.provider).map_err(|_| {
-        TupleSpaceError::InvalidConfiguration(format!(
-            "Invalid storage provider: {}",
-            config.provider
-        ))
-    })?;
-
-    match provider {
-        StorageProvider::StorageProviderUnspecified => Err(TupleSpaceError::InvalidConfiguration(
-            "Storage provider not specified".to_string(),
-        )),
-        StorageProvider::StorageProviderMemory => {
-            // Extract memory config
-            let memory_config = match config.config {
-                Some(plexspaces_proto::tuplespace::v1::tuple_space_storage_config::Config::Memory(cfg)) => cfg,
-                _ => MemoryStorageConfig {
-                    initial_capacity: 1000,
-                    cleanup_interval_ms: 60000,
-                },
-            };
-
-            // Create memory storage
-            Ok(Box::new(memory::MemoryStorage::new(memory_config)))
-        }
-        StorageProvider::StorageProviderRedis => {
-            #[cfg(feature = "redis-backend")]
-            {
-                // Extract redis config
-                let redis_config = match config.config {
-                    Some(plexspaces_proto::tuplespace::v1::tuple_space_storage_config::Config::Redis(cfg)) => {
-                        cfg
-                    }
-                    _ => {
-                        return Err(TupleSpaceError::InvalidConfiguration(
-                            "Redis config required for Redis storage".to_string(),
-                        ));
-                    }
-                };
-
-                // Create Redis storage
-                let storage = redis::RedisStorage::new(redis_config).await?;
-                Ok(Box::new(storage))
-            }
-
-            #[cfg(not(feature = "redis-backend"))]
-            {
-                Err(TupleSpaceError::NotSupported(
-                    "Redis storage requires 'redis-backend' feature to be enabled".to_string(),
-                ))
-            }
-        }
-        StorageProvider::StorageProviderPostgres => {
+    match config {
+        // Memory maps to SQLite :memory:
+        StorageConfig::Memory(_memory_config) => {
             #[cfg(feature = "sql-backend")]
             {
-                // Extract postgres config
-                let postgres_config = match config.config {
-                    Some(plexspaces_proto::tuplespace::v1::tuple_space_storage_config::Config::Postgres(
-                        cfg,
-                    )) => cfg,
-                    _ => {
-                        return Err(TupleSpaceError::InvalidConfiguration(
-                            "PostgreSQL config required for Postgres storage".to_string(),
-                        ));
-                    }
+                let sqlite_config = SqliteStorageConfig {
+                    database_path: ":memory:".to_string(),
+                    enable_wal: false,
+                    cache_size_kb: 2000,
                 };
-
-                // Create PostgreSQL storage
-                let storage = sql::SqlStorage::new_postgres(postgres_config).await?;
-                Ok(Box::new(storage))
-            }
-
-            #[cfg(not(feature = "sql-backend"))]
-            {
-                Err(TupleSpaceError::NotSupported(
-                    "PostgreSQL storage requires 'sql-backend' feature to be enabled".to_string(),
-                ))
-            }
-        }
-        StorageProvider::StorageProviderSqlite => {
-            #[cfg(feature = "sql-backend")]
-            {
-                // Extract sqlite config
-                let sqlite_config = match config.config {
-                    Some(plexspaces_proto::tuplespace::v1::tuple_space_storage_config::Config::Sqlite(cfg)) => {
-                        cfg
-                    }
-                    _ => {
-                        return Err(TupleSpaceError::InvalidConfiguration(
-                            "SQLite config required for SQLite storage".to_string(),
-                        ));
-                    }
-                };
-
-                // Create SQLite storage
                 let storage = sql::SqlStorage::new_sqlite(sqlite_config).await?;
                 Ok(Box::new(storage))
             }
-
             #[cfg(not(feature = "sql-backend"))]
             {
                 Err(TupleSpaceError::NotSupported(
-                    "SQLite storage requires 'sql-backend' feature to be enabled".to_string(),
+                    "Memory backend requires 'sql-backend' feature (uses SQLite :memory:)".to_string(),
                 ))
             }
         }
+        #[cfg(feature = "redis-backend")]
+        StorageConfig::Redis(redis_config) => {
+            // Create Redis storage
+            let storage = redis::RedisStorage::new(redis_config).await?;
+            Ok(Box::new(storage))
+        }
+        #[cfg(feature = "sql-backend")]
+        StorageConfig::Postgres(postgres_config) => {
+            // Create PostgreSQL storage
+            let storage = sql::SqlStorage::new_postgres(postgres_config).await?;
+            Ok(Box::new(storage))
+        }
+        #[cfg(feature = "sql-backend")]
+        StorageConfig::Sqlite(sqlite_config) => {
+            // Create SQLite storage
+            let storage = sql::SqlStorage::new_sqlite(sqlite_config).await?;
+            Ok(Box::new(storage))
+        }
     }
+}
+
+/// Create default in-memory storage using SQLite :memory:
+/// 
+/// Convenience function for tests and simple use cases
+#[cfg(feature = "sql-backend")]
+pub async fn create_memory_storage() -> Result<Box<dyn TupleSpaceStorage>, TupleSpaceError> {
+    let sqlite_config = SqliteStorageConfig {
+        database_path: ":memory:".to_string(),
+        enable_wal: false,
+        cache_size_kb: 2000,
+    };
+    let storage = sql::SqlStorage::new_sqlite(sqlite_config).await?;
+    Ok(Box::new(storage))
+}
+
+/// Create default in-memory storage - requires sql-backend feature
+#[cfg(not(feature = "sql-backend"))]
+pub async fn create_memory_storage() -> Result<Box<dyn TupleSpaceStorage>, TupleSpaceError> {
+    Err(TupleSpaceError::NotSupported(
+        "Memory storage requires 'sql-backend' feature (uses SQLite :memory:)".to_string(),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_create_storage_unspecified() {
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderUnspecified as i32,
-            config: None,
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
-
-        let result = create_storage(config).await;
-        assert!(result.is_err());
-        match result {
-            Err(TupleSpaceError::InvalidConfiguration(_)) => {} // Expected
-            _ => panic!("Expected InvalidConfiguration error"),
-        }
-    }
-
+    #[cfg(feature = "sql-backend")]
     #[tokio::test]
     async fn test_create_storage_memory() {
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderMemory as i32,
-            config: Some(
-                plexspaces_proto::tuplespace::v1::tuple_space_storage_config::Config::Memory(
-                    MemoryStorageConfig {
-                        initial_capacity: 1000,
-                        cleanup_interval_ms: 60000,
-                    },
-                ),
-            ),
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
+        let config = StorageConfig::Memory(MemoryStorageConfig {
+            initial_capacity: 1000,
+            cleanup_interval_ms: 60000,
+        });
 
         let result = create_storage(config).await;
-        assert!(result.is_ok(), "Memory storage should be implemented");
+        assert!(result.is_ok(), "Memory storage (via SQLite :memory:) should work");
     }
 
+    #[cfg(feature = "sql-backend")]
     #[tokio::test]
-    async fn test_create_storage_memory_with_defaults() {
-        // Test memory storage with missing config (should use defaults)
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderMemory as i32,
-            config: None, // Will use default memory config
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
-
-        let result = create_storage(config).await;
-        assert!(
-            result.is_ok(),
-            "Memory storage should use defaults when config missing"
-        );
+    async fn test_create_storage_memory_default() {
+        // Test default memory storage using helper
+        let storage = create_memory_storage().await.unwrap();
+        // Verify storage is working by counting with empty pattern
+        let pattern = crate::Pattern::new(vec![]);
+        assert!(storage.count(pattern).await.is_ok());
     }
 
     #[cfg(feature = "sql-backend")]
     #[tokio::test]
     async fn test_create_storage_sqlite() {
-        use plexspaces_proto::tuplespace::v1::{tuple_space_storage_config, SqliteStorageConfig};
+        use plexspaces_proto::tuplespace::v1::SqliteStorageConfig;
 
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderSqlite as i32,
-            config: Some(tuple_space_storage_config::Config::Sqlite(
-                SqliteStorageConfig {
-                    database_path: ":memory:".to_string(),
-                    enable_wal: false,
-                    cache_size_kb: 2000,
-                },
-            )),
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
+        let config = StorageConfig::Sqlite(SqliteStorageConfig {
+            database_path: ":memory:".to_string(),
+            enable_wal: false,
+            cache_size_kb: 2000,
+        });
 
         let result = create_storage(config).await;
         assert!(result.is_ok(), "SQLite storage should be created");
-    }
-
-    #[cfg(feature = "sql-backend")]
-    #[tokio::test]
-    async fn test_create_storage_sqlite_missing_config() {
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderSqlite as i32,
-            config: None, // Missing required config
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
-
-        let result = create_storage(config).await;
-        assert!(result.is_err());
-        match result {
-            Err(TupleSpaceError::InvalidConfiguration(_)) => {} // Expected
-            _ => panic!("Expected InvalidConfiguration error"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_create_storage_invalid_provider() {
-        let config = TupleSpaceStorageConfig {
-            provider: 9999, // Invalid provider value
-            config: None,
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
-
-        let result = create_storage(config).await;
-        assert!(result.is_err());
-        match result {
-            Err(TupleSpaceError::InvalidConfiguration(_)) => {} // Expected
-            _ => panic!("Expected InvalidConfiguration error"),
-        }
-    }
-
-    #[cfg(not(feature = "redis-backend"))]
-    #[tokio::test]
-    async fn test_create_storage_redis_not_enabled() {
-        use plexspaces_proto::tuplespace::v1::RedisStorageConfig;
-
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderRedis as i32,
-            config: Some(
-                plexspaces_proto::tuplespace::v1::tuple_space_storage_config::Config::Redis(
-                    RedisStorageConfig {
-                        connection_string: "redis://localhost".to_string(),
-                        pool_size: 10,
-                        key_prefix: "test".to_string(),
-                        enable_pubsub: false,
-                    },
-                ),
-            ),
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
-
-        let result = create_storage(config).await;
-        assert!(result.is_err());
-        match result {
-            Err(TupleSpaceError::NotSupported(_)) => {} // Expected
-            _ => panic!("Expected NotSupported error"),
-        }
-    }
-
-    #[cfg(not(feature = "sql-backend"))]
-    #[tokio::test]
-    async fn test_create_storage_postgres_not_enabled() {
-        use plexspaces_proto::tuplespace::v1::PostgresStorageConfig;
-
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderPostgres as i32,
-            config: Some(
-                plexspaces_proto::tuplespace::v1::tuple_space_storage_config::Config::Postgres(
-                    PostgresStorageConfig {
-                        connection_string: "postgres://localhost".to_string(),
-                        pool_size: 10,
-                        table_name: "tuples".to_string(),
-                    },
-                ),
-            ),
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
-
-        let result = create_storage(config).await;
-        assert!(result.is_err());
-        match result {
-            Err(TupleSpaceError::NotSupported(_)) => {} // Expected
-            _ => panic!("Expected NotSupported error"),
-        }
     }
 }

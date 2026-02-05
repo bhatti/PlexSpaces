@@ -33,9 +33,10 @@ use plexspaces_node::{NodeBuilder, Node};
 use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, DeployApplicationRequest,
-    ApplicationSpec, ApplicationType, SupervisorSpec, ChildSpec, ChildType,
+    ApplicationSpec, ApplicationType, ShutdownStrategy, SupervisorSpec, ChildSpec, ChildType,
     SupervisionStrategy, RestartPolicy,
 };
+use prost_types::Duration as ProstDuration;
 use plexspaces_proto::v1::common::Facet;
 use plexspaces_proto::wasm::v1::WasmModule;
 use plexspaces_core::{ActorRegistry, RequestContext, service_names};
@@ -54,7 +55,7 @@ use wat;
 use async_trait::async_trait;
 
 
-use super::test_helpers::{lookup_actor_ref, get_or_activate_actor_helper};
+use super::test_helpers::{app_request_with_tenant, lookup_actor_ref, get_or_activate_actor_helper};
 
 /// Helper to create a test message
 fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
@@ -538,12 +539,18 @@ async fn test_application_deployment_with_eager_virtual_actors() {
         
         let app_spec = ApplicationSpec {
             name: "eager-virtual-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with eager virtual actors".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
         
         // Deploy application
@@ -562,7 +569,6 @@ async fn test_application_deployment_with_eager_virtual_actors() {
             version: "1.0.0".to_string(),
             wasm_module: Some(wasm_module_proto),
             config: Some(app_spec),
-            release_config: None,
             initial_state: vec![],
         };
         
@@ -570,7 +576,7 @@ async fn test_application_deployment_with_eager_virtual_actors() {
         let deploy_start = std::time::Instant::now();
         let response = tokio::time::timeout(
             Duration::from_secs(20),
-            service.deploy_application(Request::new(request))
+            service.deploy_application(app_request_with_tenant(request))
         ).await;
         
         match response {

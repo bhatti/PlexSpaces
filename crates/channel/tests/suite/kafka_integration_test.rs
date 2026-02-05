@@ -56,7 +56,7 @@ use rdkafka::config::ClientConfig;
 fn create_test_config(name: &str) -> ChannelConfig {
     ChannelConfig {
         name: name.to_string(),
-        backend: ChannelBackend::ChannelBackendKafka as i32,
+        provider: ChannelProvider::ChannelProviderKafka as i32,
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -396,7 +396,7 @@ async fn test_kafka_get_stats() {
     // Get stats
     let stats = channel.get_stats().await.expect("Failed to get stats");
     assert_eq!(stats.messages_sent, 5);
-    assert_eq!(stats.backend, ChannelBackend::ChannelBackendKafka as i32);
+    assert_eq!(stats.provider, ChannelProvider::ChannelProviderKafka as i32);
 
     cleanup_kafka_topic(topic_name).await;
 }

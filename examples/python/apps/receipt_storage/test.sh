@@ -123,7 +123,8 @@ send_receipt_op() {
     local description="$1"
     local payload="$2"
     
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/internal/system/receipt-store" \
+    # Use path format /api/v1/actors/{namespace}/{actor_type}
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/receipt-store" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || true
     

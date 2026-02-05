@@ -4,11 +4,13 @@
 // Integration test for WASM application deployment with facets from TOML config
 
 use plexspaces_node::{Node, NodeBuilder};
+use plexspaces_core::ApplicationManager;
 use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::application_service_server::ApplicationService;
 use plexspaces_proto::application::v1::DeployApplicationRequest;
 use plexspaces_proto::wasm::v1::WasmModule;
 use std::sync::Arc;
+use super::test_helpers::app_request_with_tenant;
 use tokio::time::{sleep, Duration};
 use tonic::Request;
 
@@ -71,7 +73,6 @@ facets = [
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: None, // Will be parsed from TOML
-        release_config: None,
         initial_state: vec![],
     };
     
@@ -85,7 +86,7 @@ facets = [
     
     // Deploy
     let response = service
-        .deploy_application(Request::new(request_with_config))
+        .deploy_application(app_request_with_tenant(request_with_config))
         .await;
     
     assert!(response.is_ok(), "Deployment should succeed");
@@ -95,9 +96,9 @@ facets = [
     // Wait for application to start and actors to spawn
     sleep(Duration::from_millis(1000)).await;
     
-    // ASSERT: Verify application is running
+    // ASSERT: Verify application is running (ApplicationManager stores by application_id from deploy)
     let app_manager = node.application_manager();
-    let app_state = app_manager.get_state("test-app").await;
+    let app_state = app_manager.get_state("test-app-facets").await;
     assert!(app_state.is_some(), "Application should be registered");
     assert_eq!(
         app_state.unwrap(),

@@ -68,14 +68,21 @@ This example showcases:
 - Handles concurrent prediction requests
 - Maintains model state for fast inference
 
+## Spawning pattern: ActorFactory vs SDK
+
+This example uses **ActorFactory::spawn_actor** with **type names** (e.g. `"DataLoader"`, `"Preprocessor"`) so that a pipeline of actors can be spawned from config or code without holding concrete behavior instances. For **single-actor apps** or when you have a concrete behavior instance and optional facets, use the **Rust SDK** instead:
+
+- **SDK**: `plexspaces_sdk::spawn_actor(ctx, service_locator, actor_id, namespace, behavior_instance, facets)` — see `webhook_handler` and `session_manager` under `examples/rust/`.
+- **Factory**: `actor_factory.spawn_actor(ctx, &actor_id, "TypeName", ...)` — used here for pipeline-style multi-actor setup.
+
 ## Usage
 
 ### Prerequisites
 
 ```bash
 # Build the example
-cd examples/simple/timeseries_forecasting
-cargo build --release
+cd examples/rust/embedded/timeseries_forecasting
+cargo build
 ```
 
 ### Run the Example

@@ -95,7 +95,8 @@ send_op() {
     local description="$1"
     local payload="$2"
     
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/internal/system/flags" \
+    # Don't hardcode tenant_id - use path format /api/v1/actors/{namespace}/{actor_type}
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/flags" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || true
     

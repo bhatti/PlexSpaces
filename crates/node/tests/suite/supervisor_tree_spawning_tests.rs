@@ -30,7 +30,7 @@ use plexspaces_node::{NodeBuilder, Node};
 use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, DeployApplicationRequest,
-    ApplicationSpec, ApplicationType, SupervisorSpec, ChildSpec, ChildType,
+    ApplicationSpec, ApplicationType, ShutdownStrategy, SupervisorSpec, ChildSpec, ChildType,
     SupervisionStrategy, RestartPolicy,
 };
 use plexspaces_proto::wasm::v1::WasmModule;
@@ -42,6 +42,7 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration, timeout};
 use tokio::task::yield_now;
 use tokio::sync::mpsc;
+use super::test_helpers::app_request_with_tenant;
 use tonic::Request;
 use wat;
 use plexspaces_proto::ActorLifecycleEvent;
@@ -509,12 +510,11 @@ async fn deploy_application_with_wasm(
         version: app_spec.version.clone(),
         wasm_module: Some(wasm_module),
         config: Some(app_spec),
-        release_config: None,
         initial_state: vec![],
     };
     
     // Call deploy_application directly (bypasses gRPC layer)
-    let response = service.deploy_application(Request::new(request)).await
+    let response = service.deploy_application(app_request_with_tenant(request)).await
         .map_err(|e| format!("DeployApplication failed: {}", e))?;
     
     let res = response.into_inner();
@@ -545,12 +545,18 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "test-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with simple supervisor tree".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         // Deploy using mock/simulated setup (no WASM runtime needed)
@@ -621,12 +627,18 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
         let supervisor_spec = create_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "nested-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with nested supervisor tree".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         deploy_application_mock(&node, "nested-app", app_spec).await
@@ -714,7 +726,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
         ],
     };
 
@@ -732,7 +745,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(level3_supervisor),
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
             ChildSpec {
                 id: "level2-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
@@ -741,7 +755,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
         ],
     };
 
@@ -759,7 +774,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
             ChildSpec {
                 id: "level1-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
@@ -768,7 +784,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(level2_supervisor),
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
         ],
     }
 }
@@ -789,7 +806,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
             ChildSpec {
                 id: "supervisor-a-worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
@@ -798,7 +816,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
         ],
     };
 
@@ -816,7 +835,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
         ],
     };
 
@@ -834,7 +854,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(supervisor_a),
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
             ChildSpec {
                 id: "supervisor-b".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
@@ -843,7 +864,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(supervisor_b),
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
             ChildSpec {
                 id: "root-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
@@ -852,7 +874,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
         ],
     }
 }
@@ -867,12 +890,18 @@ async fn test_deeply_nested_supervisor_tree() {
         let supervisor_spec = create_deeply_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "test-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         // Deploy using mock/simulated setup (no WASM runtime needed)
@@ -945,12 +974,18 @@ async fn test_actors_tracked_in_application() {
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         deploy_application_mock(&node, "actors_tracked_in_-app", app_spec).await
@@ -991,12 +1026,18 @@ async fn test_complex_supervisor_hierarchy() {
         let supervisor_spec = create_complex_supervisor_hierarchy_spec();
         let app_spec = ApplicationSpec {
             name: "complex-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with complex supervisor hierarchy".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         deploy_application_mock(&node, "complex-app", app_spec).await
@@ -1129,12 +1170,18 @@ async fn test_multiple_sibling_supervisors() {
         let supervisor_spec = create_multiple_sibling_supervisors_spec();
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         deploy_application_mock(&node, "actors_tracked_in_-app", app_spec).await
@@ -1212,12 +1259,18 @@ async fn test_auto_generated_supervisor_tree() {
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "auto-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with auto-generated supervisor".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         deploy_application_mock(&node, "auto-app", app_spec).await
@@ -1270,12 +1323,18 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
         let supervisor_spec = create_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "shutdown-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app for graceful shutdown".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         deploy_application_mock(&node, "shutdown-app", app_spec).await
@@ -1330,12 +1389,18 @@ async fn test_actor_type_tracking_complex_tree() {
         let supervisor_spec = create_complex_supervisor_hierarchy_spec();
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         deploy_application_mock(&node, "actors_tracked_in_-app", app_spec).await
@@ -1390,7 +1455,8 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
             ChildSpec {
                 id: "worker_c".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
@@ -1399,7 +1465,8 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
         ],
     };
 
@@ -1417,7 +1484,8 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
             ChildSpec {
                 id: "sub_sup".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
@@ -1426,7 +1494,8 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(sub_sup),
                 facets: vec![],
-            },
+            behavior_kind: None,
+        },
         ],
     }
 }
@@ -1453,12 +1522,18 @@ async fn test_erlang_style_supervision_structure() {
         let supervisor_spec = create_erlang_style_supervision_structure();
         let app_spec = ApplicationSpec {
             name: "my_app".to_string(),
+            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Erlang-style supervision structure test".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: HashMap::new(),
             supervisor: Some(supervisor_spec),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         };
 
         deploy_application_mock(&node, "my_app", app_spec).await

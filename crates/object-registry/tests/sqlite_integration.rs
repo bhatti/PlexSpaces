@@ -6,16 +6,15 @@
 
 #[cfg(feature = "sql-backend")]
 mod tests {
-    use plexspaces_object_registry::ObjectRegistry;
-    use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    use plexspaces_keyvalue::SqliteKVStore;
-    use plexspaces_core::RequestContext;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+    use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
+    use plexspaces_common::RequestContext;
     use std::sync::Arc;
 
-    /// Helper to create a SQLite database for testing
+    /// Helper to create a SQLite repository for testing
     /// Uses in-memory database for simplicity (all tests share same DB instance)
-    async fn create_test_db() -> Arc<SqliteKVStore> {
-        Arc::new(SqliteKVStore::new(":memory:").await.unwrap())
+    async fn create_test_repo() -> Arc<SqliteObjectRegistryRepository> {
+        Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap())
     }
 
     /// Helper to create test registration
@@ -29,6 +28,8 @@ mod tests {
             object_type: object_type as i32,
             grpc_address: format!("http://{}:8000", node_id),
             object_category: "GenServer".to_string(),
+            node_id: node_id.to_string(),
+            health_status: HealthStatus::HealthStatusHealthy as i32,
             ..Default::default()
         }
     }
@@ -41,21 +42,21 @@ mod tests {
     #[tokio::test]
     async fn test_multi_node_registration() {
         // Simulate multiple nodes sharing the same SQLite database
-        let kv = create_test_db().await;
+        let repo = create_test_repo().await;
         let ctx = default_ctx();
 
         // Node 1 registers an actor
-        let registry1 = ObjectRegistry::new(kv.clone());
+        let registry1 = ObjectRegistryImpl::new(repo.clone());
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
         registry1.register(&ctx, reg1).await.unwrap();
 
         // Node 2 registers an actor
-        let registry2 = ObjectRegistry::new(kv.clone());
+        let registry2 = ObjectRegistryImpl::new(repo.clone());
         let reg2 = create_test_registration("actor2@node2", ObjectType::ObjectTypeActor, "node2");
         registry2.register(&ctx, reg2).await.unwrap();
 
         // Node 3 registers a tuplespace
-        let registry3 = ObjectRegistry::new(kv.clone());
+        let registry3 = ObjectRegistryImpl::new(repo.clone());
         let reg3 = create_test_registration("ts1", ObjectType::ObjectTypeTuplespace, "node3");
         registry3.register(&ctx, reg3).await.unwrap();
 
@@ -80,16 +81,16 @@ mod tests {
     #[tokio::test]
     async fn test_cross_node_lookup() {
         // Test that nodes can look up objects registered by other nodes
-        let kv = create_test_db().await;
+        let repo = create_test_repo().await;
         let ctx = default_ctx();
 
         // Node 1 registers an actor
-        let registry1 = ObjectRegistry::new(kv.clone());
+        let registry1 = ObjectRegistryImpl::new(repo.clone());
         let reg1 = create_test_registration("counter@node1", ObjectType::ObjectTypeActor, "node1");
         registry1.register(&ctx, reg1).await.unwrap();
 
         // Node 2 looks up the actor registered by Node 1
-        let registry2 = ObjectRegistry::new(kv.clone());
+        let registry2 = ObjectRegistryImpl::new(repo.clone());
         let found = registry2
             .lookup(&ctx, ObjectType::ObjectTypeActor, "counter@node1")
             .await
@@ -104,16 +105,16 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_registration() {
         // Test concurrent registration from multiple nodes
-        let kv = create_test_db().await;
+        let repo = create_test_repo().await;
         let ctx = default_ctx();
 
         // Simulate concurrent registration from 3 nodes
         let mut handles = Vec::new();
         for i in 1..=3 {
-            let kv_clone = kv.clone();
+            let repo_clone = repo.clone();
             let ctx_clone = ctx.clone();
             let handle = tokio::spawn(async move {
-                let registry = ObjectRegistry::new(kv_clone);
+                let registry = ObjectRegistryImpl::new(repo_clone);
                 let reg = create_test_registration(
                     &format!("actor{}@node{}", i, i),
                     ObjectType::ObjectTypeActor,
@@ -130,7 +131,7 @@ mod tests {
         }
 
         // Verify all were registered
-        let registry = ObjectRegistry::new(kv.clone());
+        let registry = ObjectRegistryImpl::new(repo.clone());
         let actors = registry
             .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
             .await
@@ -141,11 +142,11 @@ mod tests {
     #[tokio::test]
     async fn test_heartbeat_across_nodes() {
         // Test that heartbeat updates are visible across nodes
-        let kv = create_test_db().await;
+        let repo = create_test_repo().await;
         let ctx = default_ctx();
 
         // Node 1 registers an actor
-        let registry1 = ObjectRegistry::new(kv.clone());
+        let registry1 = ObjectRegistryImpl::new(repo.clone());
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
         registry1.register(&ctx, reg1).await.unwrap();
 
@@ -153,7 +154,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         // Node 2 updates heartbeat
-        let registry2 = ObjectRegistry::new(kv.clone());
+        let registry2 = ObjectRegistryImpl::new(repo.clone());
         registry2
             .heartbeat(&ctx, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
@@ -171,16 +172,16 @@ mod tests {
     #[tokio::test]
     async fn test_unregister_from_different_node() {
         // Test that one node can unregister an object registered by another node
-        let kv = create_test_db().await;
+        let repo = create_test_repo().await;
         let ctx = default_ctx();
 
         // Node 1 registers an actor
-        let registry1 = ObjectRegistry::new(kv.clone());
+        let registry1 = ObjectRegistryImpl::new(repo.clone());
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
         registry1.register(&ctx, reg1).await.unwrap();
 
         // Node 2 unregisters it
-        let registry2 = ObjectRegistry::new(kv.clone());
+        let registry2 = ObjectRegistryImpl::new(repo.clone());
         registry2
             .unregister(&ctx, ObjectType::ObjectTypeActor, "actor1@node1")
             .await
@@ -197,11 +198,11 @@ mod tests {
     #[tokio::test]
     async fn test_discover_by_capability() {
         // Test discovering objects by capabilities (using capabilities field, not metadata)
-        let kv = create_test_db().await;
+        let repo = create_test_repo().await;
         let ctx = default_ctx();
 
         // Register actors with different capabilities
-        let registry = ObjectRegistry::new(kv.clone());
+        let registry = ObjectRegistryImpl::new(repo.clone());
 
         let mut reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
         reg1.capabilities.push("wasm".to_string());
@@ -230,9 +231,9 @@ mod tests {
     #[tokio::test]
     async fn test_tenant_namespace_isolation() {
         // Test that different tenants/namespaces are isolated
-        let kv = create_test_db().await;
+        let repo = create_test_repo().await;
 
-        let registry = ObjectRegistry::new(kv.clone());
+        let registry = ObjectRegistryImpl::new(repo.clone());
 
         // Register in tenant1:namespace1
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "namespace1".to_string());
@@ -247,7 +248,7 @@ mod tests {
         // Discover in default namespace (should not find either)
         let default_ctx = default_ctx();
         let default_actors = registry
-            .discover(&default_ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 100, 0)
+            .discover(&default_ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
             .await
             .unwrap();
         assert_eq!(default_actors.len(), 0);
@@ -273,5 +274,112 @@ mod tests {
             .unwrap();
         assert!(not_found.is_none());
     }
-}
 
+    #[tokio::test]
+    async fn test_find_stale_registrations() {
+        // Test finding stale registrations using the indexed last_heartbeat column
+        let repo = create_test_repo().await;
+        let ctx = default_ctx();
+
+        let registry = ObjectRegistryImpl::new(repo.clone());
+
+        // Register an actor
+        let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
+        registry.register(&ctx, reg1).await.unwrap();
+
+        // Update heartbeat to a known time (makes it "recent")
+        registry
+            .heartbeat(&ctx, ObjectType::ObjectTypeActor, "actor1@node1")
+            .await
+            .unwrap();
+
+        // Find stale (threshold 0 seconds - everything should be stale immediately)
+        // This won't find anything since we just updated heartbeat
+        let stale = registry.find_stale(&ctx, 0, None, 100).await.unwrap();
+        // The actor should NOT be in stale list since we just heartbeat'd it
+        assert!(!stale.iter().any(|s| s.object_id == "actor1@node1"));
+    }
+
+    #[tokio::test]
+    async fn test_update_health_status() {
+        // Test updating health status
+        let repo = create_test_repo().await;
+        let ctx = default_ctx();
+
+        let registry = ObjectRegistryImpl::new(repo.clone());
+
+        // Register an actor
+        let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
+        registry.register(&ctx, reg1).await.unwrap();
+
+        // Update health status
+        registry
+            .update_health_status(&ctx, "actor1@node1", HealthStatus::HealthStatusUnhealthy)
+            .await
+            .unwrap();
+
+        // Discover by health status
+        let unhealthy = registry
+            .discover(
+                &ctx,
+                None,
+                None,
+                None,
+                None,
+                Some(HealthStatus::HealthStatusUnhealthy),
+                0,
+                100,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(unhealthy.len(), 1);
+        assert_eq!(unhealthy[0].object_id, "actor1@node1");
+    }
+
+    #[tokio::test]
+    async fn test_count_by_type() {
+        // Test counting objects by type
+        let repo = create_test_repo().await;
+        let ctx = default_ctx();
+
+        let registry = ObjectRegistryImpl::new(repo.clone());
+
+        // Register actors and services
+        for i in 1..=5 {
+            let reg = create_test_registration(
+                &format!("actor{}@node1", i),
+                ObjectType::ObjectTypeActor,
+                "node1",
+            );
+            registry.register(&ctx, reg).await.unwrap();
+        }
+
+        for i in 1..=3 {
+            let reg = create_test_registration(
+                &format!("service{}", i),
+                ObjectType::ObjectTypeService,
+                "node1",
+            );
+            registry.register(&ctx, reg).await.unwrap();
+        }
+
+        // Count actors
+        let actor_count = registry
+            .count(&ctx, Some(ObjectType::ObjectTypeActor))
+            .await
+            .unwrap();
+        assert_eq!(actor_count, 5);
+
+        // Count services
+        let service_count = registry
+            .count(&ctx, Some(ObjectType::ObjectTypeService))
+            .await
+            .unwrap();
+        assert_eq!(service_count, 3);
+
+        // Count all
+        let total = registry.count(&ctx, None).await.unwrap();
+        assert_eq!(total, 8);
+    }
+}

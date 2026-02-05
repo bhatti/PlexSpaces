@@ -46,15 +46,19 @@ option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/storage;p
 option java_package = "com.bhatti.plexspaces.storage.v1";
 option java_multiple_files = true;
 
-// Shared relational database configuration
+// Shared database configuration
 //
 // ## Purpose
-// Configuration for components that always use relational database:
+// Configuration for components that use a shared relational database:
 // - scheduler (crates/scheduler/migrations)
 // - workflow (crates/workflow/migrations)
 // - object-registry (via KeyValueStore SQL backend)
 // - journaling (crates/journaling/migrations)
 // - blob (crates/blob/migrations)
+// - locks (crates/locks/migrations)
+// - channel (crates/channel/migrations)
+// - keyvalue (crates/keyvalue/migrations)
+// - tuplespace (crates/tuplespace/migrations)
 //
 // ## Convention
 // All these components share the same database connection by default.
@@ -64,7 +68,7 @@ option java_multiple_files = true;
 // - PLEXSPACES_DATABASE_URL: Connection string (can use ${VAR} syntax)
 // - PLEXSPACES_DATABASE_POOL_SIZE: Connection pool size (default: 10)
 // - PLEXSPACES_DATABASE_AUTO_MIGRATE: Auto-migrate on startup (default: true)
-message SharedRelationalDbConfig {
+message SharedDbConfig {
   // Connection string (can use environment variable: ${DATABASE_URL})
   // Format: postgres://user:password@host:port/database
   //         sqlite:///path/to/database.db
@@ -150,8 +154,9 @@ message DynamoDbBackendConfig {
 // Storage provider type
 //
 // ## Purpose
-// Defines the storage provider type using industry-standard naming.
+// Defines the storage provider type for database backends.
 // Follows Kubernetes-style provider pattern for consistency.
+// Note: Message queue providers (Kafka, NATS) are defined in channel.proto.
 enum StorageProvider {
   STORAGE_PROVIDER_UNSPECIFIED = 0;
   
@@ -162,13 +167,6 @@ enum StorageProvider {
   // NoSQL providers
   STORAGE_PROVIDER_REDIS = 3;     // Redis
   STORAGE_PROVIDER_DYNAMODB = 4;  // AWS DynamoDB
-  
-  // Message queue providers (for channel)
-  STORAGE_PROVIDER_KAFKA = 5;     // Apache Kafka
-  STORAGE_PROVIDER_NATS = 6;      // NATS
-  
-  // In-memory (testing/development only)
-  STORAGE_PROVIDER_MEMORY = 7;    // In-memory (no persistence)
 }
 
 // Storage provider configuration
@@ -184,10 +182,8 @@ enum StorageProvider {
 //
 // ## Backend Selection Logic
 // 1. Provider must be explicitly specified (no auto-detection)
-// 2. If provider is UNSPECIFIED, use default based on component:
-//    - locks: REDIS (if available), else POSTGRES
-//    - channel: REDIS (if available), else MEMORY
-//    - tuplespace: POSTGRES (if available), else MEMORY
+// 2. If provider is UNSPECIFIED, config_manager sets defaults:
+//    - locks: REDIS (if available), else use shared db
 // 3. Validation: Fail if provider not available (feature flags)
 //
 // ## Environment Variables
@@ -199,8 +195,8 @@ message StorageProviderConfig {
 
   // Provider-specific configuration (oneof for type safety)
   oneof config {
-    // PostgreSQL configuration
-    SharedRelationalDbConfig postgres = 2;
+    // PostgreSQL configuration (uses shared db config)
+    SharedDbConfig postgres = 2;
     
     // SQLite configuration
     SqliteBackendConfig sqlite = 3;
@@ -210,117 +206,7 @@ message StorageProviderConfig {
     
     // DynamoDB configuration
     DynamoDbBackendConfig dynamodb = 5;
-    
-    // Kafka configuration (for channel)
-    KafkaBackendConfig kafka = 6;
-    
-    // NATS configuration (for channel)
-    NatsBackendConfig nats = 7;
-    
-    // Memory configuration (no-op, just a marker)
-    MemoryBackendConfig memory = 8;
   }
-}
-
-// Kafka backend configuration (for channel)
-message KafkaBackendConfig {
-  // Kafka broker addresses
-  repeated string brokers = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).repeated = {min_items: 1}
-  ];
-
-  // Topic name
-  string topic = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1}
-  ];
-
-  // Consumer group ID
-  string consumer_group = 3 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1}
-  ];
-
-  // Number of partitions (for topic creation)
-  uint32 partitions = 4;
-
-  // Replication factor
-  uint32 replication_factor = 5;
-
-  // Compression type
-  enum CompressionType {
-    COMPRESSION_TYPE_NONE = 0;
-    COMPRESSION_TYPE_GZIP = 1;
-    COMPRESSION_TYPE_SNAPPY = 2;
-    COMPRESSION_TYPE_LZ4 = 3;
-    COMPRESSION_TYPE_ZSTD = 4;
-  }
-
-  CompressionType compression = 6;
-
-  // Producer acks
-  enum ProducerAcks {
-    PRODUCER_ACKS_NONE = 0;
-    PRODUCER_ACKS_LEADER = 1;
-    PRODUCER_ACKS_ALL = 2;
-  }
-
-  ProducerAcks acks = 7;
-
-  // Batch size for producers
-  uint64 batch_size = 8;
-
-  // Linger time for batching
-  google.protobuf.Duration linger_ms = 9;
-}
-
-// NATS backend configuration (for channel)
-message NatsBackendConfig {
-  // NATS server URLs (comma-separated for clustering)
-  string servers = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1}
-  ];
-
-  // Subject/topic name
-  string subject = 2;
-
-  // Queue group for load-balanced consumption
-  string queue_group = 3;
-
-  // Enable JetStream for persistence
-  bool jetstream_enabled = 4;
-
-  // JetStream stream name
-  string jetstream_stream = 5;
-
-  // JetStream consumer name
-  string jetstream_consumer = 6;
-
-  // Connection timeout
-  google.protobuf.Duration connect_timeout = 7;
-
-  // Reconnect attempts (-1 for unlimited)
-  int32 reconnect_attempts = 8;
-
-  // Enable TLS
-  bool tls_enabled = 9;
-
-  // TLS certificate path
-  string tls_cert_path = 10;
-
-  // TLS key path
-  string tls_key_path = 11;
-
-  // TLS CA certificate path
-  string tls_ca_path = 12;
-}
-
-// Memory backend configuration (testing/development only)
-message MemoryBackendConfig {
-  // Initial capacity (for HashMap pre-allocation)
-  uint32 initial_capacity = 1;
 }
 
 // SQLite backend configuration

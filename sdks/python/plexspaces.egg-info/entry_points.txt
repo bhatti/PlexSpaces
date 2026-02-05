@@ -1,0 +1,2 @@
+[console_scripts]
+plexspaces-py = plexspaces_cli.build:main

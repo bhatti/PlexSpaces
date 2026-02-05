@@ -295,12 +295,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         let mut env = HashMap::new();
@@ -320,12 +320,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         let ctx = ApplicationContext::from_config(config, HashMap::new());
@@ -346,12 +346,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         let ctx = ApplicationContext::from_config(config, HashMap::new());
@@ -387,12 +387,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         let mut env = HashMap::new();

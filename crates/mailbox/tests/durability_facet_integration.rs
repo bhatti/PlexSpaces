@@ -225,7 +225,7 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         // Phase 1: Create mailbox and facet, send messages, simulate crash
         {
             let mut config = plexspaces_mailbox::mailbox_config_default();
-            config.channel_backend = plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendSqlite as i32;
+            config.channel_provider = plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderSqlite as i32;
             
             let sqlite_config = SqliteConfig {
                 database_path: mailbox_db_str.clone(),
@@ -237,7 +237,7 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
             
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
-                backend: plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendSqlite as i32,
+                provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
                 backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
                 ..Default::default()
@@ -286,7 +286,7 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
             std::fs::create_dir_all(&test_dir).unwrap();
             
             let mut config = plexspaces_mailbox::mailbox_config_default();
-            config.channel_backend = plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendSqlite as i32;
+            config.channel_provider = plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderSqlite as i32;
             
             let sqlite_config = SqliteConfig {
                 database_path: mailbox_db_str.clone(),
@@ -298,7 +298,7 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
             
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
-                backend: plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendSqlite as i32,
+                provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
                 backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
                 ..Default::default()

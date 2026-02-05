@@ -126,10 +126,10 @@ impl ChannelServiceWrapper {
 
         // Create a new in-memory channel (default)
         // TODO: Use ServiceLocator::create_default_channel() when ServiceLocator is available
-        use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+        use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
         let config = ChannelConfig {
             name: name.to_string(),
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 1000, // Default capacity
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

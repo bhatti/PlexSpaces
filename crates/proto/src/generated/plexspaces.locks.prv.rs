@@ -7,7 +7,7 @@ pub struct Lock {
     /// Lock key (unique identifier)
     #[prost(string, tag="1")]
     pub lock_key: ::prost::alloc::string::String,
-    /// Node/process ID holding the lock
+    /// Node/process ID holding the lock (only this identity can renew/release)
     #[prost(string, tag="2")]
     pub holder_id: ::prost::alloc::string::String,
     /// Lock version (for optimistic locking)
@@ -37,7 +37,7 @@ pub struct AcquireLockOptions {
     /// Lock key (unique identifier)
     #[prost(string, tag="1")]
     pub lock_key: ::prost::alloc::string::String,
-    /// Holder ID (node/process ID requesting the lock)
+    /// Holder ID (node/process ID requesting the lock; only this identity can renew/release)
     #[prost(string, tag="2")]
     pub holder_id: ::prost::alloc::string::String,
     /// Lease duration (seconds)
@@ -62,7 +62,7 @@ pub struct RenewLockOptions {
     /// Lock key (unique identifier)
     #[prost(string, tag="1")]
     pub lock_key: ::prost::alloc::string::String,
-    /// Holder ID (must match current holder)
+    /// Holder ID (must match current holder to renew)
     #[prost(string, tag="2")]
     pub holder_id: ::prost::alloc::string::String,
     /// Current version (must match for optimistic locking)
@@ -82,7 +82,7 @@ pub struct ReleaseLockOptions {
     /// Lock key (unique identifier)
     #[prost(string, tag="1")]
     pub lock_key: ::prost::alloc::string::String,
-    /// Holder ID (must match current holder)
+    /// Holder ID (must match current holder to release)
     #[prost(string, tag="2")]
     pub holder_id: ::prost::alloc::string::String,
     /// Current version (must match for optimistic locking)

@@ -45,7 +45,7 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelStats, KafkaConfig,
+    channel_config, ChannelProvider, ChannelConfig, ChannelStats, KafkaConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use rdkafka::config::ClientConfig;
@@ -374,7 +374,7 @@ impl Channel for KafkaChannel {
         
         self.stats.messages_acked.fetch_add(1, Ordering::Relaxed);
         
-        let backend = backend_name(self.config.backend);
+        let backend = backend_name(self.config.provider);
         record_channel_ack(&self.config.name, message_id, backend);
         
         Ok(())
@@ -396,7 +396,7 @@ impl Channel for KafkaChannel {
         
         use crate::observability::{backend_name, record_channel_nack, record_channel_dlq};
         
-        let backend = backend_name(self.config.backend);
+        let backend = backend_name(self.config.provider);
         
         if requeue {
             // Don't commit offset - message will be redelivered on next poll
@@ -436,7 +436,7 @@ impl Channel for KafkaChannel {
     async fn get_stats(&self) -> ChannelResult<ChannelStats> {
         Ok(ChannelStats {
             name: self.config.name.clone(),
-            backend: ChannelBackend::ChannelBackendKafka as i32,
+            provider: ChannelProvider::ChannelProviderKafka as i32,
             messages_sent: self.stats.messages_sent.load(Ordering::Relaxed),
             messages_received: self.stats.messages_received.load(Ordering::Relaxed),
             messages_pending: 0, // Would need Kafka admin API
@@ -468,7 +468,7 @@ mod tests {
         // Unit test for config validation
         let config = ChannelConfig {
             name: "test".to_string(),
-            backend: ChannelBackend::ChannelBackendKafka as i32,
+            provider: ChannelProvider::ChannelProviderKafka as i32,
             ..Default::default()
         };
 

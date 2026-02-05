@@ -643,7 +643,9 @@ impl Actor {
             "actor_id" => self.id.clone()
         ).increment(1);
         
-        tracing::debug!(actor_id = %self.id, "Actor created");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(actor_id = %self.id, "Actor created");
+        }
 
         // Step 1: State → Activating
         *self.state.write().await = ActorState::Activating;
@@ -655,10 +657,6 @@ impl Actor {
             "to" => "Activating"
         ).increment(1);
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(actor_id = %self.id, "Actor activating - starting unified lifecycle");
-        }
-
         // Step 2: Actor initialization
         // Note: Facets are already attached before start() is called (via attach_facet() in actor_factory)
         // Supervisor waits for init() to complete before starting next child
@@ -677,13 +675,6 @@ impl Actor {
                     metrics::histogram!("plexspaces_actor_init_duration_seconds",
                         "actor_id" => self.id.clone()
                     ).record(init_duration.as_secs_f64());
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                        actor_id = %self.id,
-                        duration_ms = init_duration.as_millis(),
-                        "Actor init() completed successfully"
-                    );
-                    }
                 }
                 Err(e) => {
                     // Set error state and message (sync operations only in error handler)
@@ -743,13 +734,13 @@ impl Actor {
             metrics::histogram!("plexspaces_facet_init_complete_duration_seconds",
                 "actor_id" => self.id.clone()
             ).record(facets_init_complete_duration.as_secs_f64());
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                actor_id = %self.id,
-                facet_count = facets.list_facets().len(),
-                duration_ms = facets_init_complete_duration.as_millis(),
-                "Facet on_init_complete() called for all facets"
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    actor_id = %self.id,
+                    facet_count = facets.list_facets().len(),
+                    duration_ms = facets_init_complete_duration.as_millis(),
+                    "Facet on_init_complete() called for all facets"
+                );
             }
         }
 
@@ -764,12 +755,12 @@ impl Actor {
                     metrics::histogram!("plexspaces_actor_facets_ready_duration_seconds",
                         "actor_id" => self.id.clone()
                     ).record(facets_ready_duration.as_secs_f64());
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                        actor_id = %self.id,
-                        duration_ms = facets_ready_duration.as_millis(),
-                        "Actor on_facets_ready() completed successfully"
-                    );
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(
+                            actor_id = %self.id,
+                            duration_ms = facets_ready_duration.as_millis(),
+                            "Actor on_facets_ready() completed successfully"
+                        );
                     }
                 }
                 Err(e) => {
@@ -852,16 +843,12 @@ impl Actor {
                     Some(mailbox_message) = mailbox.dequeue() => {
                         // Convert mailbox Message to proto Message at boundary
                         let message = mailbox_message.to_proto();
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!("[ACTOR::DEQUEUE] DEQUEUED MESSAGE: actor_id={}, message_id={}, sender={}, receiver={}, correlation_id={}, message_type={}, payload_len={}", 
-                                actor_id_for_logging, message.id, message.sender_id, message.receiver_id, message.correlation_id, message.message_type, message.payload.len());
-                        }
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(
-                            actor_id = %actor_id_for_logging,
-                            message_id = %message.id,
-                            "Actor message loop: ✅ Dequeued message, processing..."
-                        );
+                        if tracing::enabled!(tracing::Level::TRACE) {
+                            tracing::trace!(
+                                actor_id = %actor_id_for_logging,
+                                message_id = %message.id,
+                                "Dequeued message, processing"
+                            );
                         }
                         
                         // Check if this is an EXIT message (from linked actor death)
@@ -1133,10 +1120,29 @@ impl Actor {
                         }
 
                         if let Err(e) = &result {
-                            // OBSERVABILITY: Error already tracked in process_message
-                            // Log at error level for visibility
-                            tracing::error!(error = %e, "Error processing message (supervision should handle)");
-                            // TODO: Handle error based on supervision strategy
+                            if tracing::enabled!(tracing::Level::TRACE) {
+                                tracing::trace!("Error processing message (supervision should handle)");
+                            }
+                            // WASM instance poisoned (trap / "cannot enter component instance"): terminate actor
+                            // so supervisor can restart with a fresh instance; avoid processing further messages.
+                            let error_str = e.to_string();
+                            let is_wasm_poisoned = error_str.to_lowercase().contains("cannot enter")
+                                || error_str.to_lowercase().contains("trap")
+                                || error_str.to_lowercase().contains("cannotentercomponent");
+                            if is_wasm_poisoned {
+                                let exit_reason = plexspaces_core::ExitReason::Error(error_str.clone());
+                                {
+                                    let mut stored = exit_reason_arc.write().await;
+                                    *stored = Some(exit_reason.clone());
+                                }
+                                let mut behavior_guard = behavior.write().await;
+                                let _ = behavior_guard.terminate(&context, &exit_reason).await;
+                                tracing::error!(
+                                    actor_id = %actor_id_for_logging,
+                                    "WASM instance poisoned, terminating actor for restart"
+                                );
+                                break;
+                            }
                         }
                     }
                     _ = tokio::time::sleep(tokio::time::Duration::from_millis(1)) => {
@@ -1158,14 +1164,14 @@ impl Actor {
                         tokio::task::yield_now().await;
                         // After yield, check if we should continue (task might have been cancelled)
                         // The break will happen naturally when shutdown_rx.recv() returns None or when aborted
-                        // Log every 1000 iterations (roughly every second) to show loop is running
+                        // Log every 1000 iterations at TRACE only (avoid flooding debug logs)
                         if loop_iteration % 1000 == 0 {
-                            if tracing::enabled!(tracing::Level::DEBUG) {
-                                tracing::debug!(
-                                actor_id = %actor_id_for_logging,
-                                iteration = loop_iteration,
-                                "Actor message loop: Still running, waiting for messages..."
-                            );
+                            if tracing::enabled!(tracing::Level::TRACE) {
+                                tracing::trace!(
+                                    actor_id = %actor_id_for_logging,
+                                    iteration = loop_iteration,
+                                    "Actor message loop: Still running, waiting for messages..."
+                                );
                             }
                         }
                         // Continue loop (messages will wake us up via channel/Notify)
@@ -1755,15 +1761,29 @@ impl Actor {
     async fn on_activate(&mut self) -> Result<(), ActorError> {
         let actor_id = self.id.clone();
         
-        // OBSERVABILITY: Tracing span for activation
+        // Attached facets for observability (logged in span and message)
+        let facet_list: String = {
+            let facets = self.facets.read().await;
+            facets.list_facets().join(", ")
+        };
+        
+        // OBSERVABILITY: Tracing span for activation (includes facets when present)
         let span = tracing::span!(
             tracing::Level::DEBUG,
             "actor.activate",
-            actor_id = %actor_id
+            actor_id = %actor_id,
+            facet_count = facet_list.is_empty().then_some(0).unwrap_or_else(|| facet_list.split(", ").count()),
+            facets = %facet_list
         );
         let _guard = span.enter();
         
-        tracing::debug!("Actor activating");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            if facet_list.is_empty() {
+                tracing::trace!("Actor activating");
+            } else {
+                tracing::trace!(facets = %facet_list, "Actor activating");
+            }
+        }
         
         // 1. Set state to Activating
         *self.state.write().await = ActorState::Activating;
@@ -1797,7 +1817,9 @@ impl Actor {
             "actor_id" => actor_id.clone()
         ).increment(1.0);
         
-        tracing::info!("Actor activated successfully");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(actor_id = %actor_id, "Actor activated successfully");
+        }
 
         Ok(())
     }
@@ -1895,9 +1917,10 @@ impl Actor {
                 self.context.service_locator.clone(),
             );
 
-            // Extract actor_type from behavior for dashboard visibility
+            // Extract actor_type and behavior_kind from behavior for dashboard and logging
             let behavior_guard = self.behavior.read().await;
             let behavior_type = behavior_guard.behavior_type();
+            let behavior_kind = behavior_guard.behavior_kind();
             drop(behavior_guard);
             let actor_type = match behavior_type {
                 plexspaces_core::BehaviorType::GenServer => Some("GenServer".to_string()),
@@ -1916,15 +1939,9 @@ impl Actor {
                 actor_type,
                 None, // Config not available here (set during spawn, updated later)
                 None, // Instance not available here (stored separately in actor_factory_impl, updated later)
+                Some(behavior_kind),
             ).await;
 
-            // OBSERVABILITY: Log successful registration
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                actor_id = %self.id,
-                "Actor registered in ActorRegistry (after init() succeeded)"
-            );
-            }
         } else {
             // Registry not available - log warning but don't fail
             // This allows actors to be created in test environments without full service setup
@@ -1977,8 +1994,8 @@ impl Actor {
         last_message_time: &Arc<RwLock<std::time::Instant>>,
         facets: &Arc<RwLock<FacetContainer>>,
     ) -> Result<(), ActorError> {
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("[ACTOR::PROCESS_MESSAGE] START: actor_id={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("[ACTOR::PROCESS_MESSAGE] START: actor_id={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
                 actor_id, message.id, message.sender_id, message.receiver_id, message.correlation_id, message.message_type);
         }
         
@@ -2015,22 +2032,35 @@ impl Actor {
         let message_type = message.message_type.clone();
         let start = std::time::Instant::now();
         
-        // OBSERVABILITY: Tracing span for message processing
+        // Behavior kind for logging (OTP-inspired: GenServer, EventHandler, etc.; WASM uses spec'd kind)
+        let behavior_owned = {
+            let b = behavior.read().await;
+            match b.behavior_kind() {
+                plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
+                plexspaces_core::BehaviorType::GenEvent => "EventHandler".to_string(),
+                plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+                plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+                plexspaces_core::BehaviorType::Custom(ref s) => s.clone(),
+            }
+        };
+        
+        // OBSERVABILITY: Tracing span for message processing (TRACE to reduce log noise; use RUST_LOG=plexspaces_actor=trace to enable)
         let span = tracing::span!(
-            tracing::Level::DEBUG,
+            tracing::Level::TRACE,
             "actor.process_message",
             actor_id = %actor_id_owned,
             message_id = %message_id,
             message_type = %message_type,
+            behavior = %behavior_owned,
             depth = depth
         );
         let _guard = span.enter();
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-            "🔴 [PROCESS_MESSAGE] START: depth={}, actor_id={}, message_id={}, message_type={}, sender={:?}, receiver={}, correlation_id={:?}",
-            depth, actor_id_owned, message_id, message_type, message.sender_id, message.receiver_id, message.correlation_id
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "PROCESS_MESSAGE START: depth={}, actor_id={}, message_id={}, message_type={}",
+                depth, actor_id_owned, message_id, message_type
+            );
         }
         
         // OBSERVABILITY: Track message received
@@ -2047,8 +2077,8 @@ impl Actor {
         let facets = facets.read().await;
         let method_name = message.message_type.clone();
         let facet_count = facets.get_facet_count();
-        if facet_count > 0 {
-            info!(actor_id = %actor_id_owned, method = %method_name, facet_count = facet_count, "🎯 Actor: Checking facets for interception");
+        if tracing::enabled!(tracing::Level::TRACE) && facet_count > 0 {
+            tracing::trace!(actor_id = %actor_id_owned, method = %method_name, facet_count = facet_count, "Checking facets for interception");
         }
         use plexspaces_facet::BeforeInterceptOutcome;
         let intercept_outcome = facets
@@ -2101,16 +2131,16 @@ impl Actor {
                 // Process with behavior (Go-style: context first, then message)
                 // Note: ActorContext is now static - sender_id and correlation_id are in Message, not context
                 let mut behavior = behavior.write().await;
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        "[PROCESS_MESSAGE] CALLING handle_message: depth={}, actor_id={}, sender={:?}, receiver={}",
-                        depth, actor_id_owned, message.sender_id, message.receiver_id
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        "CALLING handle_message: depth={}, actor_id={}, message_id={}",
+                        depth, actor_id_owned, message_id
                     );
                 }
                 let result = behavior.handle_message(context, message.clone()).await;
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        "[PROCESS_MESSAGE] handle_message COMPLETED: depth={}, actor_id={}, result={:?}",
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        "handle_message COMPLETED: depth={}, actor_id={}, result={}",
                         depth, actor_id_owned, result.is_ok()
                     );
                 }
@@ -2149,9 +2179,6 @@ impl Actor {
                             "actor_id" => actor_id_owned.clone(),
                             "message_type" => message_type_owned2.clone()
                         ).record(duration.as_secs_f64());
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(duration_ms = duration.as_millis(), "Message processed successfully");
-                        }
                     }
                     Err(e) => {
                         let message_type_owned3 = message_type.clone();
@@ -2166,8 +2193,6 @@ impl Actor {
                             "message_type" => message_type_owned3.clone(),
                             "error_type" => error_type
                         ).increment(1);
-                        tracing::error!(error = %e, duration_ms = duration.as_millis(), "Message processing failed");
-                        
                         // Note: set_error_message() is available but not called here because:
                         // 1. process_message() is not a method (no self parameter)
                         // 2. Error handling should be done at the actor level, not in process_message

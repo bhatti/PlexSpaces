@@ -6,25 +6,23 @@ Demonstrates a state machine pattern for order processing:
 
 Real-world use case: E-commerce order tracking, payment processing, ticket workflows.
 
-## WASM/componentize-py Memory Workarounds
+## SDK Features Used
 
-This code applies workarounds for Python 3.14 WASM memory bugs:
-1. String literals for simple JSON (avoid json.dumps crashes)
-2. Flat control flow (avoid nested try-except)
-3. Simple return values (avoid complex dict crashes)
+- @fsm_actor: Marks class as FSM-style PlexSpaces actor (GenStateMachine behavior)
+- state(): Defines persistent state fields
+- @handler(): Routes messages to transition methods
 
-See examples/python/README.md for full documentation.
+## GenStateMachine Behavior
+
+@fsm_actor sets behavior_type = GenStateMachine, which:
+- Routes messages to handle_transition() WIT export (if defined)
+- Enables state tracking and transition validation
+- Supports event-driven state changes
 """
 
-import json
-from wit_world import exports
+from plexspaces import fsm_actor, state, handler, init_handler
 
-# FSM state
-_state = "idle"
-_order_id = ""
-_items = []
-
-# Valid transitions
+# Valid state transitions
 TRANSITIONS = {
     "idle": ["pending"],
     "pending": ["processing", "cancelled"],
@@ -35,93 +33,79 @@ TRANSITIONS = {
 }
 
 
-class Actor(exports.Actor):
-    """Order FSM actor."""
+@fsm_actor
+class OrderFSM:
+    """Order FSM actor with state machine pattern."""
     
-    def init(self, config_json: str) -> str:
-        """Initialize FSM."""
-        global _state, _order_id, _items
-        _state = "idle"
-        _order_id = ""
-        _items = []
-        return ""
+    # Persistent state fields
+    current_state: str = state(default="idle")
+    order_id: str = state(default="")
+    items: list = state(default_factory=list)
     
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
-        """Handle FSM transitions."""
-        global _state, _order_id, _items
-        
-        # Parse payload
-        payload = {}
-        if payload_json:
-            payload = json.loads(payload_json)
-        
-        op = payload.get("op", msg_type)
-        
-        # Get current state
-        if op == "get" or op == "status":
-            return '{"state":"' + _state + '","order_id":"' + _order_id + '"}'
-        
-        # Create order (idle -> pending)
-        if op == "create":
-            if _state != "idle":
-                return '{"error":"must_be_idle"}'
-            _order_id = payload.get("order_id", "order-1")
-            _items = payload.get("items", [])
-            _state = "pending"
-            return '{"status":"ok","state":"pending"}'
-        
-        # Start processing (pending -> processing)
-        if op == "process":
-            if _state != "pending":
-                return '{"error":"must_be_pending"}'
-            _state = "processing"
-            return '{"status":"ok","state":"processing"}'
-        
-        # Ship order (processing -> shipped)
-        if op == "ship":
-            if _state != "processing":
-                return '{"error":"must_be_processing"}'
-            _state = "shipped"
-            return '{"status":"ok","state":"shipped"}'
-        
-        # Deliver order (shipped -> delivered)
-        if op == "deliver":
-            if _state != "shipped":
-                return '{"error":"must_be_shipped"}'
-            _state = "delivered"
-            return '{"status":"ok","state":"delivered"}'
-        
-        # Cancel order (pending/processing -> cancelled)
-        if op == "cancel":
-            if _state not in ["pending", "processing"]:
-                return '{"error":"cannot_cancel"}'
-            _state = "cancelled"
-            return '{"status":"ok","state":"cancelled"}'
-        
-        # Reset (any -> idle)
-        if op == "reset":
-            _state = "idle"
-            _order_id = ""
-            _items = []
-            return '{"status":"ok","state":"idle"}'
-        
-        # Get valid transitions
-        if op == "transitions":
-            valid = TRANSITIONS.get(_state, [])
-            return '{"state":"' + _state + '","valid":' + json.dumps(valid) + '}'
-        
-        return '{"error":"unknown_op"}'
+    @init_handler
+    def on_init(self, config: dict):
+        """Initialize FSM to idle state."""
+        self.current_state = "idle"
+        self.order_id = ""
+        self.items = []
     
-    def get_state(self) -> str:
-        """Get FSM state."""
-        global _state, _order_id
-        return '{"state":"' + _state + '","order_id":"' + _order_id + '"}'
+    @handler("get", "status")
+    def get_status(self) -> dict:
+        """Get current state."""
+        return {"state": self.current_state, "order_id": self.order_id}
     
-    def set_state(self, state_json: str) -> str:
-        """Restore FSM state."""
-        global _state, _order_id, _items
-        data = json.loads(state_json)
-        _state = data.get("state", "idle")
-        _order_id = data.get("order_id", "")
-        _items = data.get("items", [])
-        return ""
+    @handler("create")
+    def create_order(self, order_id: str = "order-1", items: list = None) -> dict:
+        """Create order (idle -> pending)."""
+        if self.current_state != "idle":
+            return {"error": "must_be_idle"}
+        self.order_id = order_id
+        self.items = items or []
+        self.current_state = "pending"
+        return {"status": "ok", "state": "pending"}
+    
+    @handler("process")
+    def process_order(self) -> dict:
+        """Start processing (pending -> processing)."""
+        if self.current_state != "pending":
+            return {"error": "must_be_pending"}
+        self.current_state = "processing"
+        return {"status": "ok", "state": "processing"}
+    
+    @handler("ship")
+    def ship_order(self) -> dict:
+        """Ship order (processing -> shipped)."""
+        if self.current_state != "processing":
+            return {"error": "must_be_processing"}
+        self.current_state = "shipped"
+        return {"status": "ok", "state": "shipped"}
+    
+    @handler("deliver")
+    def deliver_order(self) -> dict:
+        """Deliver order (shipped -> delivered)."""
+        if self.current_state != "shipped":
+            return {"error": "must_be_shipped"}
+        self.current_state = "delivered"
+        return {"status": "ok", "state": "delivered"}
+    
+    @handler("cancel")
+    def cancel_order(self) -> dict:
+        """Cancel order (pending/processing -> cancelled)."""
+        if self.current_state not in ["pending", "processing"]:
+            return {"error": "cannot_cancel"}
+        self.current_state = "cancelled"
+        return {"status": "ok", "state": "cancelled"}
+    
+    @handler("reset")
+    def reset(self) -> dict:
+        """Reset to idle state."""
+        self.current_state = "idle"
+        self.order_id = ""
+        self.items = []
+        return {"status": "ok", "state": "idle"}
+    
+    @handler("transitions")
+    def get_transitions(self) -> dict:
+        """Get valid transitions from current state."""
+        valid = TRANSITIONS.get(self.current_state, [])
+        return {"state": self.current_state, "valid": valid}

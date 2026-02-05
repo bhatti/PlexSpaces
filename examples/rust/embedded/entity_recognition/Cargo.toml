@@ -22,8 +22,8 @@ plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
 plexspaces-node = { path = "../../../../crates/node" }
 plexspaces-channel = { path = "../../../../crates/channel", features = ["redis-backend"] }
-plexspaces-scheduler = { path = "../../../../crates/scheduler", features = ["memory-backend", "redis-backend"] }
-plexspaces-locks = { path = "../../../../crates/locks", features = ["memory-backend", "redis-backend"] }
+plexspaces-scheduler = { path = "../../../../crates/scheduler", features = ["sqlite-backend", "redis-backend"] }
+plexspaces-locks = { path = "../../../../crates/locks", features = ["sqlite-backend", "redis-backend"] }
 plexspaces-object-registry = { path = "../../../../crates/object-registry" }
 plexspaces-keyvalue = { path = "../../../../crates/keyvalue" }
 

@@ -1,0 +1,22 @@
+# PlexSpaces Rust SDK – high-level API and annotations (like Python SDK decorators)
+# Use: plexspaces_sdk::Actor, #[derive(PlexSpacesActor)], and re-exported types.
+# Part of root workspace (see Cargo.toml members).
+
+[package]
+name = "plexspaces-sdk"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Rust SDK for PlexSpaces (re-exports, helpers, and attribute macros)"
+
+[dependencies]
+plexspaces-sdk-macros = { path = "../plexspaces-sdk-macros" }
+plexspaces-core = { path = "../../../crates/core" }
+plexspaces-actor = { path = "../../../crates/actor" }
+plexspaces-node = { path = "../../../crates/node" }
+plexspaces-proto = { path = "../../../crates/proto" }
+plexspaces-facet = { path = "../../../crates/facet" }
+plexspaces-behavior = { path = "../../../crates/behavior" }
+plexspaces-journaling = { path = "../../../crates/journaling" }
+async-trait = "0.1"
+serde_json = "1.0"

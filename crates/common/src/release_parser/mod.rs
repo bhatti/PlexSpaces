@@ -461,7 +461,6 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             metadata: std::collections::HashMap::new(), // Default
             node_registry: None,
             grpc_address: String::new(),
-            wasm_apps_directory: String::new(), // Empty = no auto-deploy (use PLEXSPACES_WASM_APPS_DIR env var)
         }),
         runtime: Some(RuntimeConfig {
             grpc: Some(GrpcConfig {
@@ -493,13 +492,13 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             }),
             security: convert_security_config(&toml.runtime.security)?,
             blob: None,
-            shared_database: None,
+            db: None, // Set by config_manager::initialize
             locks_provider: None,
-            channel_provider: None,
-            tuplespace_provider: None,
-            mailbox_provider: None,
-            journaling_provider: None,
+            channel_provider: 0, // ChannelProvider::ChannelProviderInMemory - set by config_manager::initialize
+            mailbox_provider: 0, // ChannelProvider::ChannelProviderInMemory - set by config_manager::initialize
             framework_info: None,
+            base_dir: String::new(), // Set by config_manager::initialize
+            wasm_apps_directory: String::new(), // Set by config_manager::initialize
         }),
         system_applications: toml.system_applications.included,
         applications: toml
@@ -512,7 +511,8 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
                 };
 
                 ApplicationSpec {
-                    name: app.name,
+                    name: app.name.clone(),
+                    namespace: app.name, // Use app name as namespace by default
                     version: app.version,
                     description: String::new(), // Not in TOML
                     r#type: 0, // APPLICATION_TYPE_UNSPECIFIED
@@ -824,7 +824,10 @@ mod tests {
 
         assert_eq!(release.spec().applications.len(), 2);
         assert_eq!(release.spec().applications[0].name, "app1");
-        assert_eq!(release.spec().applications[0].shutdown_timeout_seconds, 30);
+        assert_eq!(
+            release.spec().applications[0].shutdown_timeout.as_ref().map(|d| d.seconds).unwrap_or(0),
+            30
+        );
         assert_eq!(
             release.spec().applications[0].shutdown_strategy,
             ShutdownStrategy::ShutdownStrategyGraceful as i32
@@ -834,7 +837,7 @@ mod tests {
         assert_eq!(release.spec().applications[1].auto_start, false);
         assert_eq!(
             release.spec().applications[1].shutdown_strategy,
-            ShutdownStrategy::ShutdownStrategyBrutalKill as i32
+            ShutdownStrategy::ShutdownStrategyImmediate as i32
         );
     }
 
@@ -1018,9 +1021,7 @@ mod tests {
     #[test]
     fn test_get_applications_in_shutdown_order() {
         // Test with dependencies to ensure deterministic order
-        use plexspaces_proto::node::v1::{
-            ApplicationSpec, NodeConfig, ReleaseSpec, RuntimeConfig,
-        };
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec, RuntimeConfig};
 
         let spec = ReleaseSpec {
             name: "test".to_string(),
@@ -1031,8 +1032,6 @@ mod tests {
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
-                default_tenant_id: String::new(), // Empty - use tenant_id from API request
-                default_namespace: String::new(), // Empty - use namespace from API request
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
                 heartbeat_interval_ms: 5000,
@@ -1040,42 +1039,51 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
-                wasm_apps_directory: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
                 health: None,
                 security: None,
                 blob: None,
-                shared_database: None,
+                db: None,
                 locks_provider: None,
-                channel_provider: None,
-                tuplespace_provider: None,
-                mailbox_provider: None,
-                journaling_provider: None,
+                channel_provider: 0,
+                mailbox_provider: 0,
                 framework_info: None,
+                base_dir: String::new(),
+                wasm_apps_directory: String::new(),
             }),
             system_applications: vec![],
             applications: vec![
                 ApplicationSpec {
                     name: "app-b".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/b.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec!["app-a".to_string()],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec!["app-a".to_string()],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/a.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec![],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec![],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1146,9 +1154,7 @@ mod tests {
     /// Test: Dependency resolution - simple chain
     #[test]
     fn test_dependency_resolution_simple_chain() {
-        use plexspaces_proto::node::v1::{
-            ApplicationSpec, NodeConfig, ReleaseSpec, RuntimeConfig,
-        };
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec, RuntimeConfig};
 
         // Create: app-c depends on app-b, app-b depends on app-a
         let spec = ReleaseSpec {
@@ -1160,8 +1166,6 @@ mod tests {
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
-                default_tenant_id: String::new(), // Empty - use tenant_id from API request
-                default_namespace: String::new(), // Empty - use namespace from API request
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
                 heartbeat_interval_ms: 5000,
@@ -1169,52 +1173,66 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
-                wasm_apps_directory: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
                 health: None,
                 security: None,
                 blob: None,
-                shared_database: None,
+                db: None,
                 locks_provider: None,
-                channel_provider: None,
-                tuplespace_provider: None,
-                mailbox_provider: None,
-                journaling_provider: None,
+                channel_provider: 0,
+                mailbox_provider: 0,
                 framework_info: None,
+                base_dir: String::new(),
+                wasm_apps_directory: String::new(),
             }),
             system_applications: vec![],
             applications: vec![
                 ApplicationSpec {
                     name: "app-c".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/c.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec!["app-b".to_string()],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec!["app-b".to_string()],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/a.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec![],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec![],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/b.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec!["app-a".to_string()],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec!["app-a".to_string()],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1234,9 +1252,7 @@ mod tests {
     /// Test: Dependency resolution - multiple dependencies
     #[test]
     fn test_dependency_resolution_multiple_deps() {
-        use plexspaces_proto::node::v1::{
-            ApplicationSpec, NodeConfig, ReleaseSpec, RuntimeConfig,
-        };
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec, RuntimeConfig};
 
         // Create: app-d depends on app-b AND app-c
         let spec = ReleaseSpec {
@@ -1248,8 +1264,6 @@ mod tests {
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
-                default_tenant_id: String::new(), // Empty - use tenant_id from API request
-                default_namespace: String::new(), // Empty - use namespace from API request
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
                 heartbeat_interval_ms: 5000,
@@ -1257,62 +1271,81 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
-                wasm_apps_directory: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
                 health: None,
                 security: None,
                 blob: None,
-                shared_database: None,
+                db: None,
                 locks_provider: None,
-                channel_provider: None,
-                tuplespace_provider: None,
-                mailbox_provider: None,
-                journaling_provider: None,
+                channel_provider: 0,
+                mailbox_provider: 0,
                 framework_info: None,
+                base_dir: String::new(),
+                wasm_apps_directory: String::new(),
             }),
             system_applications: vec![],
             applications: vec![
                 ApplicationSpec {
                     name: "app-d".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/d.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec!["app-b".to_string(), "app-c".to_string()],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec!["app-b".to_string(), "app-c".to_string()],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/a.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec![],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec![],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/b.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec!["app-a".to_string()],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec!["app-a".to_string()],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
                 ApplicationSpec {
                     name: "app-c".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/c.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec!["app-a".to_string()],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec!["app-a".to_string()],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1334,9 +1367,7 @@ mod tests {
     /// Test: Circular dependency detection
     #[test]
     fn test_circular_dependency_detection() {
-        use plexspaces_proto::node::v1::{
-            ApplicationSpec, NodeConfig, ReleaseSpec, RuntimeConfig,
-        };
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec, RuntimeConfig};
 
         // Create: app-a depends on app-b, app-b depends on app-a (circular!)
         let spec = ReleaseSpec {
@@ -1348,8 +1379,6 @@ mod tests {
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
-                default_tenant_id: String::new(), // Empty - use tenant_id from API request
-                default_namespace: String::new(), // Empty - use namespace from API request
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
                 heartbeat_interval_ms: 5000,
@@ -1357,42 +1386,51 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
-                wasm_apps_directory: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
                 health: None,
                 security: None,
                 blob: None,
-                shared_database: None,
+                db: None,
                 locks_provider: None,
-                channel_provider: None,
-                tuplespace_provider: None,
-                mailbox_provider: None,
-                journaling_provider: None,
+                channel_provider: 0,
+                mailbox_provider: 0,
                 framework_info: None,
+                base_dir: String::new(),
+                wasm_apps_directory: String::new(),
             }),
             system_applications: vec![],
             applications: vec![
                 ApplicationSpec {
                     name: "app-a".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/a.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec!["app-b".to_string()],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec!["app-b".to_string()],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/b.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec!["app-a".to_string()],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec!["app-a".to_string()],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1412,9 +1450,7 @@ mod tests {
     /// Test: Missing dependency detection
     #[test]
     fn test_missing_dependency_detection() {
-        use plexspaces_proto::node::v1::{
-            ApplicationSpec, NodeConfig, ReleaseSpec, RuntimeConfig,
-        };
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec, RuntimeConfig};
 
         // Create: app-a depends on "nonexistent" which doesn't exist
         let spec = ReleaseSpec {
@@ -1426,8 +1462,6 @@ mod tests {
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
-                default_tenant_id: String::new(), // Empty - use tenant_id from API request
-                default_namespace: String::new(), // Empty - use namespace from API request
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
                 heartbeat_interval_ms: 5000,
@@ -1435,31 +1469,35 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
-                wasm_apps_directory: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
                 health: None,
                 security: None,
                 blob: None,
-                shared_database: None,
+                db: None,
                 locks_provider: None,
-                channel_provider: None,
-                tuplespace_provider: None,
-                mailbox_provider: None,
-                journaling_provider: None,
+                channel_provider: 0,
+                mailbox_provider: 0,
                 framework_info: None,
+                base_dir: String::new(),
+                wasm_apps_directory: String::new(),
             }),
             system_applications: vec![],
             applications: vec![ApplicationSpec {
                 name: "app-a".to_string(),
+                namespace: String::new(),
                 version: "1.0.0".to_string(),
-                config_path: "apps/a.toml".to_string(),
+                description: String::new(),
+                r#type: 0,
+                dependencies: vec!["nonexistent".to_string()],
+                env: std::collections::HashMap::new(),
+                supervisor: None,
                 enabled: true,
                 auto_start: true,
-                shutdown_timeout_seconds: 30,
-                shutdown_strategy: 1,
-                dependencies: vec!["nonexistent".to_string()],
+                shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                metadata: None,
             }],
             env: std::collections::HashMap::new(),
             shutdown: None,
@@ -1484,9 +1522,7 @@ mod tests {
     /// Test: No dependencies (should return apps in original order)
     #[test]
     fn test_no_dependencies() {
-        use plexspaces_proto::node::v1::{
-            ApplicationSpec, NodeConfig, ReleaseSpec, RuntimeConfig,
-        };
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec, RuntimeConfig};
 
         let spec = ReleaseSpec {
             name: "test".to_string(),
@@ -1497,8 +1533,6 @@ mod tests {
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
-                default_tenant_id: String::new(), // Empty - use tenant_id from API request
-                default_namespace: String::new(), // Empty - use namespace from API request
                 grpc_connection_pool_size: 2,
                 max_connections: 100,
                 heartbeat_interval_ms: 5000,
@@ -1506,42 +1540,51 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
-                wasm_apps_directory: String::new(),
             }),
             runtime: Some(RuntimeConfig {
                 grpc: None,
                 health: None,
                 security: None,
                 blob: None,
-                shared_database: None,
+                db: None,
                 locks_provider: None,
-                channel_provider: None,
-                tuplespace_provider: None,
-                mailbox_provider: None,
-                journaling_provider: None,
+                channel_provider: 0,
+                mailbox_provider: 0,
                 framework_info: None,
+                base_dir: String::new(),
+                wasm_apps_directory: String::new(),
             }),
             system_applications: vec![],
             applications: vec![
                 ApplicationSpec {
                     name: "app-a".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/a.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec![],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec![],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
+                    namespace: String::new(),
                     version: "1.0.0".to_string(),
-                    config_path: "apps/b.toml".to_string(),
+                    description: String::new(),
+                    r#type: 0,
+                    dependencies: vec![],
+                    env: std::collections::HashMap::new(),
+                    supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout_seconds: 30,
-                    shutdown_strategy: 1,
-                    dependencies: vec![],
+                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
+                    metadata: None,
                 },
             ],
             env: std::collections::HashMap::new(),

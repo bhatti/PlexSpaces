@@ -1,30 +1,43 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Session Manager Example (TimerFacet)
+// Session Manager Example (TimerFacet) - SDK Annotations Demo
 //
 // Demonstrates in-memory timers using PlexSpaces TimerFacet:
 // - register_once(): One-shot timer (idle timeout)
 // - register_periodic(): Repeating timer (heartbeat)
 // - Timer fires message to actor.handle_message()
 //
+// ## SDK Annotations Used
+// - `#[actor(facets = ["timer"])]` - marks struct as actor with timer facet
+// - `#[plexspaces_handlers(custom)]` - generates Actor impl for custom behavior
+// - `#[handler("timer_fired", cast)]` - fire-and-forget handler for timers
+//
 // Use Case: Session timeout, heartbeat, retry with backoff
 
-use async_trait::async_trait;
-use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, RequestContext,
+use plexspaces_sdk::{
+    actor, plexspaces_handlers, handler,
+    ActorContext, BehaviorError, Message, RequestContext, spawn_actor, TimerFacet,
 };
-use plexspaces_journaling::TimerFacet;
 use plexspaces_node::NodeBuilder;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 
+// Required for macro-generated code
+extern crate plexspaces_core;
+
 // =============================================================================
-// Session Actor - handles session events and timer callbacks
+// Session Actor - SDK annotations style (like Python @actor, @handler)
 // =============================================================================
 
+/// Session actor with timer facet for idle timeout and heartbeat.
+/// 
+/// ## Annotations
+/// - `#[actor(facets = ["timer"])]` - declares timer facet (documentation)
+/// - `#[plexspaces_handlers(custom)]` - generates Actor impl dispatching to handlers
+/// - `#[handler("op", cast)]` - fire-and-forget handlers
+#[actor(facets = ["timer"])]
 struct SessionActor {
     user_id: String,
     is_active: bool,
@@ -41,44 +54,46 @@ impl SessionActor {
     }
 }
 
-#[async_trait]
-impl ActorTrait for SessionActor {
-    async fn handle_message(
+/// Handler implementations - SDK generates Actor impl with dispatch.
+/// 
+/// Using `#[handler("op", cast)]` for fire-and-forget semantics (no reply).
+#[plexspaces_handlers(custom)]
+impl SessionActor {
+    /// Handle timer_fired events (from TimerFacet)
+    #[handler("timer_fired", cast)]
+    async fn handle_timer_fired(
         &mut self,
         _ctx: &ActorContext,
-        message: plexspaces_proto::common::v1::Message,
+        msg: &Message,
     ) -> Result<(), BehaviorError> {
-        // Timer events have message_type = "timer_fired"
-        if message.message_type == "timer_fired" {
-            let timer_name = String::from_utf8_lossy(&message.payload).to_string();
-            
-            match timer_name.as_str() {
-                "idle_timeout" => {
-                    println!("  [TIMER] idle_timeout fired - session expired!");
-                    self.is_active = false;
-                }
-                "heartbeat" => {
-                    println!("  [TIMER] heartbeat fired - session still active");
-                }
-                _ => {
-                    println!("  [TIMER] {} fired", timer_name);
-                }
+        let timer_name = String::from_utf8_lossy(&msg.payload).to_string();
+        
+        match timer_name.as_str() {
+            "idle_timeout" => {
+                println!("  [TIMER] idle_timeout fired - session expired!");
+                self.is_active = false;
             }
-            return Ok(());
+            "heartbeat" => {
+                println!("  [TIMER] heartbeat fired - session still active");
+            }
+            _ => {
+                println!("  [TIMER] {} fired", timer_name);
+            }
         }
-
-        // Handle regular messages (activity, etc.)
-        if message.message_type == "activity" {
-            self.activity_count += 1;
-            println!("  Activity #{} from {} - would reset idle timer", 
-                self.activity_count, self.user_id);
-        }
-
         Ok(())
     }
 
-    fn behavior_type(&self) -> BehaviorType {
-        BehaviorType::Custom("SessionActor".to_string())
+    /// Handle activity events
+    #[handler("activity", cast)]
+    async fn handle_activity(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: &Message,
+    ) -> Result<(), BehaviorError> {
+        self.activity_count += 1;
+        println!("  Activity #{} from {} - would reset idle timer", 
+            self.activity_count, self.user_id);
+        Ok(())
     }
 }
 
@@ -119,22 +134,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // =========================================================================
-    // Step 3: Create actor WITH TimerFacet attached
+    // Step 3: Create actor WITH TimerFacet attached (using SDK spawn_actor)
     // =========================================================================
-    println!("Step 3: Create session actor with TimerFacet");
+    println!("Step 3: Create session actor with TimerFacet (SDK style)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // ActorBuilder.with_facet() attaches facet before spawning
-    let _actor_ref = ActorBuilder::new(Box::new(SessionActor::new("user-123")))
-        .with_id("session-user-123@session-node")
-        .with_namespace("sessions")
-        .with_facet(Box::new(timer_facet))  // <-- Attach TimerFacet
-        .spawn(&ctx, service_locator.clone())
-        .await
-        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    // Using SDK spawn_actor (like Python @actor(facets=["timer"]))
+    let _actor_ref = spawn_actor(
+        &ctx,
+        service_locator.clone(),
+        "session-user-123@session-node",
+        "sessions",
+        SessionActor::new("user-123"),
+        vec![Box::new(timer_facet)],  // <-- Attach TimerFacet
+    )
+    .await
+    .map_err(|e| format!("Failed to spawn actor: {}", e))?;
     
     println!("  Actor: session-user-123@session-node");
-    println!("  TimerFacet attached via ActorBuilder.with_facet()");
+    println!("  TimerFacet attached via spawn_actor(..., facets)");
+    println!("  Using SDK annotations: #[actor], #[plexspaces_handlers], #[handler]");
     println!();
 
     // =========================================================================

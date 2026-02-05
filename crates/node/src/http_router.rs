@@ -255,6 +255,38 @@ where
                         // Extract query parameters for GET requests (already extracted above, reuse)
                         let query_params: std::collections::HashMap<String, String> = query_params;
                         
+                        // Invocation pattern: use "invocation" query param (e.g. AWS Lambda InvocationType).
+                        // "msg_type" = handler name (count, readings) in payload; "invocation" = call/cast override (POST/PUT/DELETE only).
+                        // POST/PUT default to request-reply (call) so response includes handler result; use ?invocation=cast for fire-and-forget.
+                        let is_get = method == &hyper::Method::GET;
+                        let (ask, msg_type_override) = if is_get {
+                            (true, String::new())
+                        } else {
+                            // Erlang-style: only call, cast, info
+                            const ALLOWED_INVOCATION: [&str; 3] = ["call", "cast", "info"];
+                            let override_val = query_params.get("invocation").map(|v| v.as_str()).unwrap_or("");
+                            let normalized = override_val.trim().to_lowercase();
+                            if !override_val.is_empty() && !ALLOWED_INVOCATION.contains(&normalized.as_str()) {
+                                let err_json = serde_json::json!({
+                                    "code": 400,
+                                    "message": format!("Invalid invocation query param: '{}'. Valid values: call, cast, info", override_val)
+                                });
+                                let resp = Response::builder()
+                                    .status(HyperStatusCode::BAD_REQUEST)
+                                    .header("content-type", "application/json")
+                                    .body(hyper::body::Incoming::from(serde_json::to_string(&err_json).unwrap().into_bytes()))
+                                    .unwrap();
+                                return Ok(resp);
+                            }
+                            let default_ask = method == &hyper::Method::POST || method == &hyper::Method::PUT;
+                            let ask = if override_val.is_empty() {
+                                default_ask
+                            } else {
+                                normalized == "call"
+                            };
+                            (ask, normalized)
+                        };
+
                         // Create InvokeActorRequest (tenant_id comes from auth, not request)
                         use plexspaces_proto::actor::v1::InvokeActorRequest;
                         let mut invoke_req = InvokeActorRequest {
@@ -266,6 +298,8 @@ where
                             query_params,
                             path: path.to_string(),
                             subpath: String::new(),
+                            ask,
+                            msg_type_override,
                         };
                         
                         // For POST/PUT, read body as payload

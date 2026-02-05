@@ -28,34 +28,27 @@ pub struct MailboxConfig {
     /// Maximum cache size for message ID deduplication (default: 10000)
     /// LRU cache with fixed size - evicts least recently used when full
     /// Range: 100 to 1,000,000 entries
-    #[prost(uint32, tag="14")]
+    #[prost(uint32, tag="8")]
     pub message_id_cache_size: u32,
     /// Maximum cache size for idempotency key deduplication (default: 10000)
     /// LRU cache with fixed size - evicts least recently used when full
     /// Range: 100 to 1,000,000 entries
-    #[prost(uint32, tag="15")]
+    #[prost(uint32, tag="9")]
     pub idempotency_cache_size: u32,
-    /// Storage strategy (where messages are stored)
-    #[prost(enumeration="StorageStrategy", tag="8")]
-    pub storage_strategy: i32,
     /// Ordering strategy (how messages are ordered)
-    #[prost(enumeration="OrderingStrategy", tag="9")]
+    #[prost(enumeration="OrderingStrategy", tag="10")]
     pub ordering_strategy: i32,
-    /// Durability strategy (durability guarantees)
-    /// This is a hint/requirement - the actual implementation is determined by channel_backend
-    #[prost(enumeration="DurabilityStrategy", tag="10")]
-    pub durability_strategy: i32,
-    /// Channel backend implementation (defaults to IN_MEMORY if not specified)
-    /// This directly specifies which channel backend to use for the mailbox.
-    /// The backend must be available/configured, otherwise mailbox creation will fail.
-    #[prost(enumeration="super::super::channel::v1::ChannelBackend", tag="12")]
-    pub channel_backend: i32,
+    /// Channel provider implementation (defaults to IN_MEMORY if not specified)
+    /// This directly specifies which channel provider to use for the mailbox.
+    /// The provider must be available/configured, otherwise mailbox creation will fail.
+    #[prost(enumeration="super::super::channel::v1::ChannelProvider", tag="11")]
+    pub channel_provider: i32,
     /// Channel-specific configuration (optional, backend-specific)
-    /// Only used if channel_backend is specified. If not provided, backend uses defaults.
-    #[prost(message, optional, tag="13")]
+    /// Only used if channel_provider is specified. If not provided, provider uses defaults.
+    #[prost(message, optional, tag="12")]
     pub channel_config: ::core::option::Option<super::super::channel::v1::ChannelConfig>,
     /// Metadata
-    #[prost(map="string, string", tag="11")]
+    #[prost(map="string, string", tag="13")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// Mailbox statistics
@@ -92,40 +85,6 @@ pub struct MailboxStats {
     /// Last update timestamp
     #[prost(message, optional, tag="10")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CreateMailboxRequest {
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
-    pub config: ::core::option::Option<MailboxConfig>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CreateMailboxResponse {
-    #[prost(bool, tag="1")]
-    pub success: bool,
-    #[prost(string, tag="2")]
-    pub error_message: ::prost::alloc::string::String,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DeleteMailboxRequest {
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetMailboxStatsRequest {
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetMailboxStatsResponse {
-    #[prost(message, optional, tag="1")]
-    pub stats: ::core::option::Option<MailboxStats>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -293,46 +252,6 @@ impl BackpressureStrategy {
         }
     }
 }
-/// Storage strategy for mailbox messages
-///
-/// ## Purpose
-/// Defines where mailbox messages are stored (memory, disk, distributed).
-/// Composable strategy pattern for flexible mailbox implementations.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum StorageStrategy {
-    StorageStrategyUnspecified = 0,
-    /// In-memory only (fastest, lost on restart)
-    Memory = 1,
-    /// Disk-backed (spills to disk when full, survives restart)
-    Disk = 2,
-    /// Distributed (Redis, Kafka, etc. for multi-node)
-    Distributed = 3,
-}
-impl StorageStrategy {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            StorageStrategy::StorageStrategyUnspecified => "STORAGE_STRATEGY_UNSPECIFIED",
-            StorageStrategy::Memory => "MEMORY",
-            StorageStrategy::Disk => "DISK",
-            StorageStrategy::Distributed => "DISTRIBUTED",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "STORAGE_STRATEGY_UNSPECIFIED" => Some(Self::StorageStrategyUnspecified),
-            "MEMORY" => Some(Self::Memory),
-            "DISK" => Some(Self::Disk),
-            "DISTRIBUTED" => Some(Self::Distributed),
-            _ => None,
-        }
-    }
-}
 /// Ordering strategy for mailbox messages
 ///
 /// ## Purpose
@@ -373,50 +292,6 @@ impl OrderingStrategy {
             "ORDERING_PRIORITY" => Some(Self::OrderingPriority),
             "ORDERING_LIFO" => Some(Self::OrderingLifo),
             "ORDERING_RANDOM" => Some(Self::OrderingRandom),
-            _ => None,
-        }
-    }
-}
-/// Durability strategy for mailbox messages
-///
-/// ## Purpose
-/// Defines durability guarantees for mailbox messages.
-/// Composable strategy pattern for flexible mailbox implementations.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum DurabilityStrategy {
-    DurabilityStrategyUnspecified = 0,
-    /// No durability (messages lost on crash)
-    DurabilityNone = 1,
-    /// At-least-once delivery (journaled, may replay)
-    DurabilityAtLeastOnce = 2,
-    /// Exactly-once delivery (with deduplication)
-    DurabilityExactlyOnce = 3,
-    /// Fully durable (messages persisted immediately)
-    DurabilityDurable = 4,
-}
-impl DurabilityStrategy {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            DurabilityStrategy::DurabilityStrategyUnspecified => "DURABILITY_STRATEGY_UNSPECIFIED",
-            DurabilityStrategy::DurabilityNone => "DURABILITY_NONE",
-            DurabilityStrategy::DurabilityAtLeastOnce => "DURABILITY_AT_LEAST_ONCE",
-            DurabilityStrategy::DurabilityExactlyOnce => "DURABILITY_EXACTLY_ONCE",
-            DurabilityStrategy::DurabilityDurable => "DURABILITY_DURABLE",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "DURABILITY_STRATEGY_UNSPECIFIED" => Some(Self::DurabilityStrategyUnspecified),
-            "DURABILITY_NONE" => Some(Self::DurabilityNone),
-            "DURABILITY_AT_LEAST_ONCE" => Some(Self::DurabilityAtLeastOnce),
-            "DURABILITY_EXACTLY_ONCE" => Some(Self::DurabilityExactlyOnce),
-            "DURABILITY_DURABLE" => Some(Self::DurabilityDurable),
             _ => None,
         }
     }

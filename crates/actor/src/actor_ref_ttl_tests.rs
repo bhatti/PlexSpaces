@@ -120,7 +120,7 @@ mod tests {
         if let Some(registry) = service_locator.actor_registry().await {
             let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-            registry.register_actor(&ctx, "test@node1".to_string(), sender, None, None, None).await;
+            registry.register_actor(&ctx, "test@node1".to_string(), sender, None, None, None, None).await;
         }
         
         let ttl = Duration::from_millis(10);

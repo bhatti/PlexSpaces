@@ -28,7 +28,7 @@ help:
 	@echo "  make release          - Build release version"
 	@echo ""
 	@echo "🧪 Testing:"
-	@echo "  make test             - Run all tests"
+	@echo "  make test             - Run all tests (unit + integration)"
 	@echo "  make test-filter FILTER='pattern' - Run tests matching pattern"
 	@echo "  make test-package PACKAGE='name' - Run tests for specific package"
 	@echo "  make test-examples    - Run all example tests"
@@ -209,7 +209,7 @@ build-examples:
 	echo ""; \
 	echo "Building examples with shared target directory..."; \
 	PROJECT_ROOT=$$(pwd); \
-	EXAMPLES="advanced/byzantine advanced/nbody domains/finance-risk domains/genomic-workflow-pipeline domains/genomics-pipeline domains/order-processing intermediate/heat_diffusion intermediate/matrix_multiply intermediate/matrix_vector_mpi simple/durable_actor_example simple/firecracker_multi_tenant simple/faas_actor wasm-calculator"; \
+	EXAMPLES="advanced/byzantine advanced/nbody domains/finance-risk domains/genomic-workflow-pipeline domains/genomics-pipeline domains/order-processing intermediate/heat_diffusion intermediate/matrix_multiply intermediate/matrix_vector_mpi simple/durable_actor_example simple/firecracker_multi_tenant rust/embedded/webhook_handler wasm-calculator"; \
 	for example in $$EXAMPLES; do \
 		if [ -d "examples/$$example" ] && [ -f "examples/$$example/Cargo.toml" ]; then \
 			echo "Building $$example..."; \
@@ -241,7 +241,6 @@ run-examples: run-workspace-examples
 	@echo "  - genomic-workflow-pipeline"
 	@echo "  - matrix_multiply"
 	@echo "  - matrix_vector_mpi"
-	@echo "  - config-updates"
 	@echo "  - wasm_showcase"
 	@echo ""
 	@echo "✅ Workspace examples executed!"
@@ -284,7 +283,6 @@ run-standalone-examples:
 	@echo "  - genomic-workflow-pipeline"
 	@echo "  - matrix_multiply"
 	@echo "  - matrix_vector_mpi"
-	@echo "  - config-updates"
 	@echo "  - wasm_showcase"
 
 # Run specific standalone example
@@ -313,7 +311,7 @@ run-example-%:
 		echo "   Available standalone examples:"; \
 		echo "     byzantine, heat_diffusion, heat_diffusion_wasm, wasm-calculator,"; \
 		echo "     order-processing, finance-risk, genomics-pipeline, genomic-workflow-pipeline,"; \
-		echo "     matrix_multiply, matrix_vector_mpi, config-updates, wasm_showcase"; \
+		echo "     matrix_multiply, matrix_vector_mpi, wasm_showcase"; \
 	fi
 
 # Run all standalone examples (one by one)
@@ -331,7 +329,7 @@ run-all-standalone-examples:
 	echo "Pre-building workspace dependencies for faster example builds..."; \
 	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
-	for example in byzantine heat_diffusion heat_diffusion_wasm wasm-calculator order-processing finance-risk genomics-pipeline genomic-workflow-pipeline matrix_multiply matrix_vector_mpi config-updates wasm_showcase; do \
+	for example in byzantine heat_diffusion heat_diffusion_wasm wasm-calculator order-processing finance-risk genomics-pipeline genomic-workflow-pipeline matrix_multiply matrix_vector_mpi wasm_showcase; do \
 		if [ -d "examples/$$example" ] && [ -f "examples/$$example/Cargo.toml" ]; then \
 			echo "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
 			echo "Running: $$example"; \
@@ -354,7 +352,7 @@ run-all-standalone-examples:
 		fi; \
 	done
 
-# Run all unit tests (excludes integration tests)
+# Run all tests: unit tests (lib) + integration tests (tests/*.rs and [[test]] binaries)
 # Optimized for parallel execution - uses all available CPU cores by default
 # Only tuplespace tests need --test-threads=1, so we run them separately
 # Usage: make test                    # Uses all available cores (auto-detected)
@@ -362,7 +360,7 @@ run-all-standalone-examples:
 #        VERBOSE=1 make test          # Shows detailed build output
 # Output is piped to test-out file for review
 test:
-	@echo "Running all tests (unit + integration tests)..."
+	@echo "Running all tests (unit tests + integration tests)..."
 	@echo "Output will be saved to test-out"
 	@rm -f test-out; \
 	echo "Cleaning up any existing SQLite database files..." | tee test-out; \
@@ -402,11 +400,13 @@ test:
 	echo "" | tee -a test-out; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
 		echo "Using cargo-nextest for faster test execution (single run)..." | tee -a test-out; \
+		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
 		echo "Note: tuplespace tests run with single thread (configured in nextest.toml)" | tee -a test-out; \
 		echo "Running all tests including those marked #[ignore] (--run-ignored all)" | tee -a test-out; \
 		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all 2>&1 | tee -a test-out || exit 1; \
 	else \
 		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
+		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
 		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..." | tee -a test-out; \
 		echo "Running all tests including those marked #[ignore] (--include-ignored)" | tee -a test-out; \
 		TIMEOUT_CMD=""; \
@@ -504,7 +504,7 @@ test-examples:
 	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
 	PROJECT_ROOT=$$(pwd); \
-	EXAMPLES="advanced/byzantine advanced/nbody domains/finance-risk domains/genomic-workflow-pipeline domains/genomics-pipeline domains/order-processing intermediate/heat_diffusion intermediate/matrix_multiply intermediate/matrix_vector_mpi simple/durable_actor_example simple/firecracker_multi_tenant simple/faas_actor wasm-calculator"; \
+	EXAMPLES="advanced/byzantine advanced/nbody domains/finance-risk domains/genomic-workflow-pipeline domains/genomics-pipeline domains/order-processing intermediate/heat_diffusion intermediate/matrix_multiply intermediate/matrix_vector_mpi simple/durable_actor_example simple/firecracker_multi_tenant rust/embedded/webhook_handler wasm-calculator"; \
 	FAILED=0; \
 	PIDS=(); \
 	EXAMPLE_NAMES=(); \

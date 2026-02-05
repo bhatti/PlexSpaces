@@ -39,6 +39,12 @@ pub struct ApplicationSpec {
     /// Examples: "byzantine-generals", "genomics-coordinator"
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
+    /// Namespace for actor isolation and multi-tenancy.
+    /// All actors spawned by this application will be registered in this namespace.
+    /// If empty, defaults to application_id during deployment.
+    /// Examples: "bank-test", "genomics-prod", "dev-sandbox"
+    #[prost(string, tag="13")]
+    pub namespace: ::prost::alloc::string::String,
     /// Application version (semantic versioning)
     /// Examples: "0.1.0", "1.2.3"
     #[prost(string, tag="2")]
@@ -151,6 +157,10 @@ pub struct ChildSpec {
     /// Phase 1: Unified Lifecycle - Multiple facets support
     #[prost(message, repeated, tag="7")]
     pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
+    /// OTP-style behavior kind for logging and observability (e.g. "GenServer", "GenEvent", "GenStateMachine", "Workflow").
+    /// When set, process_message spans and actor registration logs show this instead of the child id.
+    #[prost(string, optional, tag="8")]
+    pub behavior_kind: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Application instance (runtime representation).
 ///

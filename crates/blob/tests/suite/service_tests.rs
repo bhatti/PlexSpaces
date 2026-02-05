@@ -433,3 +433,140 @@ fn test_error_display() {
     let err = BlobError::InvalidInput("empty data".to_string());
     assert!(format!("{}", err).contains("empty data"));
 }
+
+// =============================================================================
+// Tests for stale metadata cleanup (blob exists in DB but not in object store)
+// =============================================================================
+
+/// Test that stale metadata (blob in DB but not in object store) is detected
+/// and cleaned up during deduplication, allowing fresh upload to proceed.
+/// 
+/// This simulates the scenario where:
+/// 1. A blob is uploaded and exists in both DB and object store
+/// 2. The object store is cleared (e.g., MinIO restart) but DB metadata remains
+/// 3. A new upload with the same content should detect the stale metadata,
+///    clean it up, and proceed with a fresh upload
+#[tokio::test]
+async fn test_stale_metadata_cleanup_during_deduplication() {
+    let (service, temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
+    let data = b"Content for stale metadata test".to_vec();
+
+    // Step 1: Upload a blob
+    let metadata1 = service
+        .upload_blob(
+            &ctx,
+            "stale_test.txt",
+            data.clone(),
+            Some("text/plain".to_string()),
+            None,
+            None,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let original_blob_id = metadata1.blob_id.clone();
+
+    // Verify blob exists and can be downloaded
+    let downloaded = service.download_blob(&ctx, &original_blob_id).await.unwrap();
+    assert_eq!(downloaded, data);
+
+    // Step 2: Delete the blob file from object store DIRECTLY (simulating MinIO restart)
+    // The metadata still exists in the database (stale state)
+    let storage_path = format!(
+        "/plexspaces/{}/{}/{}",
+        metadata1.tenant_id, metadata1.namespace, metadata1.blob_id
+    );
+    let full_path = temp_dir.path().join(storage_path.trim_start_matches('/'));
+    if full_path.exists() {
+        std::fs::remove_file(&full_path).expect("Failed to delete blob file");
+    }
+
+    // Verify blob file is gone but metadata still exists
+    let metadata_exists = service.get_metadata(&ctx, &original_blob_id).await.is_ok();
+    assert!(metadata_exists, "Metadata should still exist in DB");
+
+    // Download should now fail (blob missing from object store)
+    let download_result = service.download_blob(&ctx, &original_blob_id).await;
+    assert!(download_result.is_err(), "Download should fail - blob missing from object store");
+
+    // Step 3: Upload same content again - should detect stale metadata and clean up
+    let metadata2 = service
+        .upload_blob(
+            &ctx,
+            "stale_test_new.txt",
+            data.clone(),
+            Some("text/plain".to_string()),
+            None,
+            None,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Should get a NEW blob_id (not the stale one)
+    assert_ne!(
+        metadata2.blob_id, original_blob_id,
+        "Should get new blob_id after stale metadata cleanup"
+    );
+
+    // Step 4: Verify the new blob works correctly
+    let downloaded2 = service.download_blob(&ctx, &metadata2.blob_id).await.unwrap();
+    assert_eq!(downloaded2, data);
+
+    // Step 5: Verify the stale metadata was cleaned up
+    let stale_metadata_result = service.get_metadata(&ctx, &original_blob_id).await;
+    assert!(
+        stale_metadata_result.is_err(),
+        "Stale metadata should have been cleaned up"
+    );
+}
+
+/// Test download_blob_by_name and delete_blob_by_name work correctly
+#[tokio::test]
+async fn test_blob_operations_by_name() {
+    let (service, _temp_dir) = create_test_service().await;
+    let ctx = create_test_context("tenant-1", "ns-1");
+
+    let data = b"Content for name-based test".to_vec();
+    let blob_name = "assets/images/logo.png";
+
+    // Upload blob
+    let metadata = service
+        .upload_blob(
+            &ctx,
+            blob_name,
+            data.clone(),
+            Some("image/png".to_string()),
+            None,
+            None,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(metadata.name, blob_name);
+
+    // Download by name
+    let downloaded = service.download_blob_by_name(&ctx, blob_name).await.unwrap();
+    assert_eq!(downloaded, data);
+
+    // Get metadata by name
+    let found_metadata = service.get_metadata_by_name(&ctx, blob_name).await.unwrap();
+    assert!(found_metadata.is_some());
+    assert_eq!(found_metadata.unwrap().blob_id, metadata.blob_id);
+
+    // Delete by name
+    service.delete_blob_by_name(&ctx, blob_name).await.unwrap();
+
+    // Verify deleted
+    let deleted_metadata = service.get_metadata_by_name(&ctx, blob_name).await.unwrap();
+    assert!(deleted_metadata.is_none());
+}

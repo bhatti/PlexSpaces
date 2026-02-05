@@ -28,7 +28,7 @@
 mod tests {
 use plexspaces_channel::{create_channel, Channel};
 use plexspaces_proto::channel::v1::{
-    ChannelBackend, ChannelConfig, UdpConfig,
+    ChannelProvider, ChannelConfig, UdpConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -59,7 +59,7 @@ use futures::StreamExt;
         let udp_config = create_udp_config(cluster_name, port);
         let channel_config = ChannelConfig {
             name: name.to_string(),
-            backend: ChannelBackend::ChannelBackendUdp as i32,
+            provider: ChannelProvider::ChannelProviderUdp as i32,
             capacity: 0,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone as i32,
@@ -91,7 +91,7 @@ use futures::StreamExt;
 
         let channel_config = ChannelConfig {
             name: "test-udp".to_string(),
-            backend: ChannelBackend::ChannelBackendUdp as i32,
+            provider: ChannelProvider::ChannelProviderUdp as i32,
             capacity: 0,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone as i32,
@@ -207,7 +207,7 @@ use futures::StreamExt;
         // Get stats
         let stats = channel.get_stats().await.unwrap();
         assert_eq!(stats.name, "test-udp-6");
-        assert_eq!(stats.backend, ChannelBackend::ChannelBackendUdp as i32);
+        assert_eq!(stats.provider, ChannelProvider::ChannelProviderUdp as i32);
         assert!(stats.messages_sent >= 5);
         
         // Check backend stats (cluster_name is no longer in stats, removed from UdpConfig)
@@ -226,7 +226,7 @@ use futures::StreamExt;
 
         let channel_config = ChannelConfig {
             name: "test-udp".to_string(),
-            backend: ChannelBackend::ChannelBackendUdp as i32,
+            provider: ChannelProvider::ChannelProviderUdp as i32,
             capacity: 0,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone as i32,

@@ -28,8 +28,7 @@
 //! - Edge cases (multiple children, nested supervisors, etc.)
 
 use plexspaces_core::{ActorRegistry, RequestContext};
-use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
-use plexspaces_keyvalue::InMemoryKVStore;
+use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use std::sync::Arc;
 
 // Helper to wrap ObjectRegistry for ActorRegistry
@@ -116,8 +115,8 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
 }
 
 async fn create_test_registry() -> Arc<ActorRegistry> {
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
+    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
     let object_registry: Arc<dyn plexspaces_core::actor_context::ObjectRegistry> = 
         Arc::new(ObjectRegistryAdapter {
             inner: object_registry_impl,

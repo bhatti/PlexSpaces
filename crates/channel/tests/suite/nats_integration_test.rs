@@ -53,7 +53,7 @@ use std::time::Duration;
 fn create_test_config(name: &str) -> ChannelConfig {
     ChannelConfig {
         name: name.to_string(),
-        backend: ChannelBackend::ChannelBackendNats as i32,
+        provider: ChannelProvider::ChannelProviderNats as i32,
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -71,7 +71,7 @@ fn create_test_config(name: &str) -> ChannelConfig {
 fn create_queue_config(name: &str) -> ChannelConfig {
     ChannelConfig {
         name: name.to_string(),
-        backend: ChannelBackend::ChannelBackendNats as i32,
+        provider: ChannelProvider::ChannelProviderNats as i32,
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -354,7 +354,7 @@ async fn test_nats_get_stats() {
     // Initial stats
     let stats = channel.get_stats().await.expect("Failed to get stats");
     assert_eq!(stats.name, "stats");
-    assert_eq!(stats.backend, ChannelBackend::ChannelBackendNats as i32);
+    assert_eq!(stats.provider, ChannelProvider::ChannelProviderNats as i32);
     assert_eq!(stats.messages_sent, 0);
     assert_eq!(stats.messages_received, 0);
 
@@ -427,7 +427,7 @@ async fn test_nats_channel_creation_with_defaults() {
     // Test with minimal config (should use defaults)
     let config = ChannelConfig {
         name: "defaults".to_string(),
-        backend: ChannelBackend::ChannelBackendNats as i32,
+        provider: ChannelProvider::ChannelProviderNats as i32,
         backend_config: Some(channel_config::BackendConfig::Nats(NatsConfig {
             servers: "nats://localhost:4222".to_string(),
             // Empty subject should default to channel name
@@ -452,7 +452,7 @@ async fn test_nats_channel_creation_with_queue_group() {
 
     let config = ChannelConfig {
         name: "queue_test".to_string(),
-        backend: ChannelBackend::ChannelBackendNats as i32,
+        provider: ChannelProvider::ChannelProviderNats as i32,
         backend_config: Some(channel_config::BackendConfig::Nats(NatsConfig {
             servers: "nats://localhost:4222".to_string(),
             subject: "test.queue".to_string(),

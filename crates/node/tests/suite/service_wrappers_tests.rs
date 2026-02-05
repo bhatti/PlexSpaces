@@ -102,8 +102,7 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
     );
 
     use plexspaces_services::actor_service::ActorServiceImpl;
-    let service_locator = node.service_locator();
-    let actor_service = Arc::new(ActorServiceImpl::new(service_locator, node.id().as_str().to_string()));
+    let actor_service = Arc::new(ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string()));
 
     // Try to send to remote actor (will fail because actor doesn't exist or remote not implemented)
     let message = create_test_message(b"hello".to_vec());
@@ -121,15 +120,14 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
 
 #[tokio::test]
 async fn test_object_registry_wrapper() {
-    use plexspaces_keyvalue::InMemoryKVStore;
-    use plexspaces_object_registry::ObjectRegistry;
+    use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
     use std::sync::Arc;
 
 
-    // Create ObjectRegistry with in-memory backend
-    let kv_store = Arc::new(InMemoryKVStore::new());
-    let registry = Arc::new(ObjectRegistry::new(kv_store));
+    // Create ObjectRegistry with SQLite :memory: backend
+    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let registry = Arc::new(ObjectRegistry::new(object_repo));
     
     // Register an actor
     use plexspaces_core::RequestContext;

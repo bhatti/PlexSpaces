@@ -93,6 +93,12 @@ message ApplicationSpec {
   // Examples: "byzantine-generals", "genomics-coordinator"
   string name = 1;
 
+  // Namespace for actor isolation and multi-tenancy.
+  // All actors spawned by this application will be registered in this namespace.
+  // If empty, defaults to application_id during deployment.
+  // Examples: "bank-test", "genomics-prod", "dev-sandbox"
+  string namespace = 13;
+
   // Application version (semantic versioning)
   // Examples: "0.1.0", "1.2.3"
   string version = 2;
@@ -232,6 +238,10 @@ message ChildSpec {
   // All facets are automatically restored during supervisor restart
   // Phase 1: Unified Lifecycle - Multiple facets support
   repeated plexspaces.common.v1.Facet facets = 7;
+
+  // OTP-style behavior kind for logging and observability (e.g. "GenServer", "GenEvent", "GenStateMachine", "Workflow").
+  // When set, process_message spans and actor registration logs show this instead of the child id.
+  optional string behavior_kind = 8;
 }
 
 // Child type

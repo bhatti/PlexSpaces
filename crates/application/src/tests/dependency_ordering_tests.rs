@@ -172,12 +172,12 @@ async fn test_dependency_chain_startup() {
     let config_c = ApplicationSpec {
         name: "app-c".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-c.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec![],
+        ..Default::default()
     };
     controller.load(app_c, config_c).await.unwrap();
 
@@ -186,12 +186,12 @@ async fn test_dependency_chain_startup() {
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-b.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-c".to_string()],
+        ..Default::default()
     };
     controller.load(app_b, config_b).await.unwrap();
 
@@ -200,12 +200,12 @@ async fn test_dependency_chain_startup() {
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-a.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-b".to_string()],
+        ..Default::default()
     };
     controller.load(app_a, config_a).await.unwrap();
 
@@ -239,12 +239,12 @@ async fn test_multiple_dependencies_startup() {
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-b.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec![],
+        ..Default::default()
     };
     controller.load(app_b, config_b).await.unwrap();
 
@@ -252,12 +252,12 @@ async fn test_multiple_dependencies_startup() {
     let config_c = ApplicationSpec {
         name: "app-c".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-c.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec![],
+        ..Default::default()
     };
     controller.load(app_c, config_c).await.unwrap();
 
@@ -266,12 +266,12 @@ async fn test_multiple_dependencies_startup() {
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-a.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-b".to_string(), "app-c".to_string()],
+        ..Default::default()
     };
     controller.load(app_a, config_a).await.unwrap();
 
@@ -306,12 +306,12 @@ async fn test_missing_dependency() {
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-a.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-b".to_string()],
+        ..Default::default()
     };
     controller.load(app_a, config_a).await.unwrap();
 
@@ -342,12 +342,12 @@ async fn test_circular_dependency() {
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-a.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-b".to_string()],
+        ..Default::default()
     };
     controller.load(app_a, config_a).await.unwrap();
 
@@ -356,12 +356,12 @@ async fn test_circular_dependency() {
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-b.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-a".to_string()],
+        ..Default::default()
     };
     controller.load(app_b, config_b).await.unwrap();
 
@@ -393,12 +393,12 @@ async fn test_rollback_on_dependency_failure() {
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-b.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec![],
+        ..Default::default()
     };
     controller.load(app_b, config_b).await.unwrap();
 
@@ -407,12 +407,12 @@ async fn test_rollback_on_dependency_failure() {
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-a.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-b".to_string()],
+        ..Default::default()
     };
     controller.load(app_a, config_a).await.unwrap();
 
@@ -445,12 +445,12 @@ async fn test_reverse_dependency_shutdown() {
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-b.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec![],
+        ..Default::default()
     };
     controller.load(app_b, config_b).await.unwrap();
 
@@ -459,12 +459,12 @@ async fn test_reverse_dependency_shutdown() {
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-a.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-b".to_string()],
+        ..Default::default()
     };
     controller.load(app_a, config_a).await.unwrap();
 
@@ -504,12 +504,12 @@ async fn test_no_dependencies() {
     let config = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-a.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec![],
+        ..Default::default()
     };
     controller.load(app, config).await.unwrap();
 
@@ -536,12 +536,12 @@ async fn test_already_running_dependency() {
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-b.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec![],
+        ..Default::default()
     };
     controller.load(app_b, config_b).await.unwrap();
     controller.start("app-b", HashMap::new()).await.unwrap();
@@ -551,12 +551,12 @@ async fn test_already_running_dependency() {
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
-        config_path: "app-a.toml".to_string(),
         enabled: true,
         auto_start: true,
-        shutdown_timeout_seconds: 30,
+        shutdown_timeout: None,
         shutdown_strategy: 0,
         dependencies: vec!["app-b".to_string()],
+        ..Default::default()
     };
     controller.load(app_a, config_a).await.unwrap();
 

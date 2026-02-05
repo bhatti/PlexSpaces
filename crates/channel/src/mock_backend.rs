@@ -42,7 +42,7 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    ChannelBackend, ChannelConfig, ChannelStats,
+    ChannelProvider, ChannelConfig, ChannelStats,
 };
 use plexspaces_proto::common::v1::Message;
 use std::collections::{HashMap, VecDeque};
@@ -278,7 +278,7 @@ impl Channel for MockChannel {
             crate::observability::record_channel_ack(
                 &self.config.name,
                 message_id,
-                crate::observability::backend_name(self.config.backend),
+                crate::observability::backend_name(self.config.provider),
             );
             
             Ok(())
@@ -322,7 +322,7 @@ impl Channel for MockChannel {
                     message_id,
                     true,
                     delivery_count,
-                    crate::observability::backend_name(self.config.backend),
+                    crate::observability::backend_name(self.config.provider),
                 );
             } else if send_to_dlq {
                 // Send to DLQ
@@ -342,7 +342,7 @@ impl Channel for MockChannel {
                         message_id,
                         delivery_count,
                         reason,
-                        crate::observability::backend_name(self.config.backend),
+                        crate::observability::backend_name(self.config.provider),
                     );
                 }
             } else {
@@ -352,7 +352,7 @@ impl Channel for MockChannel {
                     message_id,
                     false,
                     delivery_count,
-                    crate::observability::backend_name(self.config.backend),
+                    crate::observability::backend_name(self.config.provider),
                 );
             }
 
@@ -372,7 +372,7 @@ impl Channel for MockChannel {
 
         Ok(ChannelStats {
             name: self.config.name.clone(),
-            backend: ChannelBackend::ChannelBackendCustom as i32,
+            provider: ChannelProvider::ChannelProviderCustom as i32,
             messages_sent: stats.messages_sent.load(Ordering::Relaxed),
             messages_received: stats.messages_received.load(Ordering::Relaxed),
             messages_pending: (messages.len() + pending.len()) as u64,

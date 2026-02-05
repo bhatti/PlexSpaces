@@ -265,6 +265,6 @@ npm run build
 ## References
 
 - [Javy - JavaScript/TypeScript to WASM](https://github.com/bytecodealliance/javy)
-- [WASM Application Deployment](../simple/polyglot_wasm_deployment/README.md)
+- [WASM Deployment Guide](../../../../docs/wasm-deployment.md)
 - Native N-Body Example: [`../nbody/README.md`](../nbody/README.md)
 

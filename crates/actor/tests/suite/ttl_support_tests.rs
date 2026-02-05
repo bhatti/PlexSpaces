@@ -126,7 +126,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-        registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
     }
     
     // Create message with TTL

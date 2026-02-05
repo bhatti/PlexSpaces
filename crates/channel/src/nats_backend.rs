@@ -46,7 +46,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelStats, NatsConfig,
+    channel_config, ChannelProvider, ChannelConfig, ChannelStats, NatsConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -344,7 +344,7 @@ impl Channel for NatsChannel {
         
         self.stats.messages_acked.fetch_add(1, Ordering::Relaxed);
         
-        let backend = backend_name(self.config.backend);
+        let backend = backend_name(self.config.provider);
         record_channel_ack(&self.config.name, message_id, backend);
         
         Ok(())
@@ -360,7 +360,7 @@ impl Channel for NatsChannel {
             3 // Default: 3 retries
         };
         let dlq_enabled = self.config.dlq_enabled;
-        let backend = backend_name(self.config.backend);
+        let backend = backend_name(self.config.provider);
 
         if requeue {
             // NATS doesn't support requeue without JetStream
@@ -400,7 +400,7 @@ impl Channel for NatsChannel {
     async fn get_stats(&self) -> ChannelResult<ChannelStats> {
         Ok(ChannelStats {
             name: self.config.name.clone(),
-            backend: ChannelBackend::ChannelBackendNats as i32,
+            provider: ChannelProvider::ChannelProviderNats as i32,
             messages_sent: self.stats.messages_sent.load(Ordering::Relaxed),
             messages_received: self.stats.messages_received.load(Ordering::Relaxed),
             messages_pending: 0, // NATS doesn't track pending messages without JetStream
@@ -437,7 +437,7 @@ mod tests {
     async fn test_nats_channel_missing_config() {
         let config = ChannelConfig {
             name: "test-nats".to_string(),
-            backend: ChannelBackend::ChannelBackendNats as i32,
+            provider: ChannelProvider::ChannelProviderNats as i32,
             ..Default::default()
         };
 
@@ -450,7 +450,7 @@ mod tests {
         // Test with wrong backend config type
         let config = ChannelConfig {
             name: "test-nats".to_string(),
-            backend: ChannelBackend::ChannelBackendNats as i32,
+            provider: ChannelProvider::ChannelProviderNats as i32,
             backend_config: Some(channel_config::BackendConfig::Redis(
                 plexspaces_proto::channel::v1::RedisConfig::default(),
             )),

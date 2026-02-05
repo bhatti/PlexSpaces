@@ -47,7 +47,7 @@
 //! ## Key Components
 //!
 //! - [`KeyValueStore`]: Main trait defining all operations
-//! - [`InMemoryKVStore`]: HashMap-based implementation for testing
+//! - [`SqliteKVStore`]: SQLite implementation (use `:memory:` for in-memory)
 //! - [`KVError`]: Error types for all operations
 //! - [`KVEvent`]: Watch notification events
 //! - [`KVStats`]: Storage statistics
@@ -60,20 +60,20 @@
 //!
 //! ## Backend Support
 //!
-//! - **InMemory**: HashMap-based (always available)
-//! - **SQLite**: Persistent, single-node (feature: `sql-backend`)
+//! - **SQLite**: Persistent, single-node (feature: `sql-backend`) - use `:memory:` for in-memory
 //! - **PostgreSQL**: Distributed, multi-node (feature: `sql-backend`)
 //! - **Redis**: Distributed with native TTL (feature: `redis-backend`)
+//! - **DynamoDB**: AWS managed (feature: `ddb-backend`)
 //!
 //! ## Examples
 //!
-//! ### Basic Usage
-//! ```rust
-//! use plexspaces_keyvalue::{KeyValueStore, InMemoryKVStore};
+//! ### Basic Usage with SQLite :memory:
+//! ```rust,no_run
+//! use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
 //! use plexspaces_common::RequestContext;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let kv = InMemoryKVStore::new();
+//! let kv = SqliteKVStore::new(":memory:").await?;
 //! let ctx = RequestContext::new("tenant".to_string()).with_namespace("default".to_string());
 //!
 //! // Basic operations
@@ -88,52 +88,58 @@
 //! ```
 //!
 //! ### With TTL (Time-To-Live)
-//! ```rust
-//! use plexspaces_keyvalue::{KeyValueStore, InMemoryKVStore};
+//! ```rust,no_run
+//! use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
 //! use std::time::Duration;
+//! use plexspaces_common::RequestContext;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let kv = InMemoryKVStore::new();
+//! let kv = SqliteKVStore::new(":memory:").await?;
+//! let ctx = RequestContext::new("tenant".to_string()).with_namespace("default".to_string());
 //!
 //! // Lease with automatic expiry
-//! kv.put_with_ttl("session:123", b"data".to_vec(), Duration::from_secs(30)).await?;
+//! kv.put_with_ttl(&ctx, "session:123", b"data".to_vec(), Duration::from_secs(30)).await?;
 //!
 //! // Renew lease
-//! kv.refresh_ttl("session:123", Duration::from_secs(60)).await?;
+//! kv.refresh_ttl(&ctx, "session:123", Duration::from_secs(60)).await?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! ### Atomic Operations
-//! ```rust
-//! use plexspaces_keyvalue::{KeyValueStore, InMemoryKVStore};
+//! ```rust,no_run
+//! use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
+//! use plexspaces_common::RequestContext;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let kv = InMemoryKVStore::new();
+//! let kv = SqliteKVStore::new(":memory:").await?;
+//! let ctx = RequestContext::new("tenant".to_string()).with_namespace("default".to_string());
 //!
 //! // Compare-and-swap (distributed lock acquisition)
-//! let acquired = kv.cas("lock:resource", None, b"node1".to_vec()).await?;
+//! let acquired = kv.cas(&ctx, "lock:resource", None, b"node1".to_vec()).await?;
 //! assert!(acquired);
 //!
 //! // Atomic counter
-//! let count = kv.increment("metrics:requests", 1).await?;
+//! let count = kv.increment(&ctx, "metrics:requests", 1).await?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! ### Hierarchical Queries
-//! ```rust
-//! use plexspaces_keyvalue::{KeyValueStore, InMemoryKVStore};
+//! ```rust,no_run
+//! use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
+//! use plexspaces_common::RequestContext;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let kv = InMemoryKVStore::new();
+//! let kv = SqliteKVStore::new(":memory:").await?;
+//! let ctx = RequestContext::new("tenant".to_string()).with_namespace("default".to_string());
 //!
-//! kv.put("config:actor.timeout", b"30s".to_vec()).await?;
-//! kv.put("config:actor.max_size", b"10000".to_vec()).await?;
-//! kv.put("config:mailbox.type", b"fifo".to_vec()).await?;
+//! kv.put(&ctx, "config:actor.timeout", b"30s".to_vec()).await?;
+//! kv.put(&ctx, "config:actor.max_size", b"10000".to_vec()).await?;
+//! kv.put(&ctx, "config:mailbox.type", b"fifo".to_vec()).await?;
 //!
 //! // List all actor configs
-//! let actor_configs = kv.list("config:actor.").await?;
+//! let actor_configs = kv.list(&ctx, "config:actor.").await?;
 //! assert_eq!(actor_configs.len(), 2);
 //! # Ok(())
 //! # }
@@ -178,7 +184,6 @@ use tokio::sync::mpsc::Receiver;
 
 pub mod config;
 pub mod error;
-pub mod memory;
 
 #[cfg(feature = "sql-backend")]
 pub mod sql;
@@ -194,7 +199,6 @@ pub mod ddb;
 
 pub use config::{create_keyvalue_from_config, create_keyvalue_from_env, BackendType, KVConfig};
 pub use error::{KVError, KVResult};
-pub use memory::InMemoryKVStore;
 
 #[cfg(feature = "sql-backend")]
 pub use sql::{PostgreSQLKVStore, SqliteKVStore};

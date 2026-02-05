@@ -45,6 +45,18 @@ use plexspaces_wasm_runtime::{deployment_service::WasmDeploymentService, WasmIns
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Parses optional behavior_kind string from ChildSpec to BehaviorType for logging.
+/// When set, process_message spans and actor registration logs show GenEvent/GenServer etc. instead of actor id.
+fn parse_behavior_kind(s: Option<&str>) -> plexspaces_core::BehaviorType {
+    match s.map(str::trim) {
+        Some("GenEvent") | Some("EventHandler") | Some("eventhandler") | Some("event") => plexspaces_core::BehaviorType::GenEvent,
+        Some("GenServer") | Some("genserver") => plexspaces_core::BehaviorType::GenServer,
+        Some("GenStateMachine") | Some("fsm") => plexspaces_core::BehaviorType::GenStateMachine,
+        Some("Workflow") | Some("workflow") => plexspaces_core::BehaviorType::Workflow,
+        _ => plexspaces_core::BehaviorType::GenServer,
+    }
+}
+
 /// WASM actor behavior that wraps a WasmInstance
 ///
 /// ## Purpose
@@ -54,10 +66,33 @@ use tokio::sync::RwLock;
 /// ## Design
 /// - Wraps a WasmInstance (which holds the WASM module and state)
 /// - Forwards handle_message calls to WASM instance
-/// - Handles serialization/deserialization of messages
+/// - actor_type: for dashboard/index (e.g. child_spec.id "SensorStream")
+/// - behavior_kind: for logging spans (e.g. GenEvent so logs show behavior=GenEvent not behavior=SensorStream)
 struct WasmActorBehavior {
     instance: Arc<WasmInstance>,
     actor_type: String, // Actor type for dashboard grouping (e.g., application name or child spec id)
+    behavior_kind: plexspaces_core::BehaviorType, // OTP-style kind for logging (GenServer, GenEvent, etc.)
+}
+
+/// Detects WASM instance poisoned state (trap or "cannot enter component instance").
+///
+/// When a trap or re-entrancy violation occurs, wasmtime leaves the component instance
+/// in an invalid state; subsequent calls fail with "cannot enter component instance".
+/// Callers should terminate the actor so a new instance can be created (e.g. via supervisor restart).
+fn is_wasm_instance_poisoned(error_str: &str) -> bool {
+    let lower = error_str.to_lowercase();
+    lower.contains("cannot enter") || lower.contains("trap") || lower.contains("cannotentercomponent")
+}
+
+/// Tries to get application-level msg_type (handler name) from JSON payload, e.g. {"msg_type":"ingest","payload":{...}}.
+/// Returns None if payload is not valid JSON or has no msg_type, or msg_type is transport-only ("call"/"cast").
+fn try_msg_type_from_payload(payload: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    let s = value.get("msg_type")?.as_str()?.trim();
+    if s.is_empty() || s.eq_ignore_ascii_case("call") || s.eq_ignore_ascii_case("cast") {
+        return None;
+    }
+    Some(s.to_string())
 }
 
 #[async_trait]
@@ -67,39 +102,58 @@ impl Actor for WasmActorBehavior {
         ctx: &plexspaces_core::ActorContext,
         message: Message,
     ) -> Result<(), BehaviorError> {
-        // Extract message details
-        let from = message.sender.as_deref().unwrap_or("unknown");
-        // For now, use a default message type - in the future, this could come from metadata
-        let message_type = "call";
-        
+        // Extract message details. "from" is only for WASM actor context (who sent the message).
+        // Reply is sent only when message.sender_id is non-empty (see below); we never default sender_id for reply.
+        let from = message.sender_id.as_str();
+        let from = if from.is_empty() { "" } else { from };
+        // Pass handler name to WASM so SDK can dispatch: prefer application msg_type from payload (e.g. "ingest"), else envelope message_type ("cast"/"call")
+        let from_payload = try_msg_type_from_payload(&message.payload);
+        let message_type: String = from_payload
+            .clone()
+            .unwrap_or_else(|| message.message_type.clone());
+        let message_type = if message_type.is_empty() { "cast".to_string() } else { message_type };
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                message_id = %message.id,
+                resolved_msg_type = %message_type,
+                envelope_message_type = %message.message_type,
+                "WasmActorBehavior: resolved message_type for WASM handle()"
+            );
+        }
         // Use message payload directly
         let payload = message.payload.clone();
+        let message_id = message.id.clone();
 
         // Clone Arc before await to ensure Send
         let instance = self.instance.clone();
         
-        // Call WASM instance's handle_message
-        match instance.handle_message(from, message_type, payload).await {
+        tracing::debug!(
+            message_id = %message_id,
+            msg_type = %message_type,
+            "🟦 [WasmActorBehavior::handle_message] ENTRY (for tell, INVOKE_ACTOR SUCCESS already returned)"
+        );
+        // Call WASM instance's handle_message (message_id for correlation with INVOKE_ACTOR logs)
+        let result = instance.handle_message_with_id(from, message_type.as_str(), payload, &message_id).await;
+        tracing::debug!(
+            message_id = %message_id,
+            ok = result.is_ok(),
+            "🟦 [WasmActorBehavior::handle_message] END (after instance.handle_message_with_id)"
+        );
+        match result {
             Ok(response) => {
-                // Handle response for request-reply patterns
-                // If message has sender_id, send reply using ActorRef::send_reply()
-                if let Some(sender_id) = &message.sender {
-                    let mut reply_message = Message::new(response)
-                        .with_sender(message.receiver.clone()) // Use receiver as sender of reply
-                        .with_message_type("reply".to_string());
-                    // Preserve correlation_id if present
-                    if let Some(corr_id) = &message.correlation_id {
-                        reply_message = reply_message.with_correlation_id(corr_id.clone());
-                    }
-                    // Use ActorService::send() to send reply (handles local/remote automatically)
-                    // ActorService::send() will route via ActorRef::tell() which handles temporary sender IDs and correlation_id routing
+                // Handle response for request-reply patterns (ask/call)
+                if !message.sender_id.is_empty() {
+                    let reply_message = Message {
+                        id: ulid::Ulid::new().to_string(),
+                        payload: response,
+                        sender_id: message.receiver_id.clone(),
+                        receiver_id: message.sender_id.clone(),
+                        message_type: "reply".to_string(),
+                        correlation_id: message.correlation_id.clone(),
+                        ..Default::default()
+                    };
                     if let Some(actor_service) = ctx.service_locator.get_actor_service().await {
-                        // Set receiver to sender_id (the actor that called ask())
-                        reply_message.receiver = sender_id.clone();
-                        // Set sender to this actor's ID
-                        reply_message.sender = Some(message.receiver.clone());
-                        
-                        if let Err(e) = actor_service.send(sender_id, reply_message).await {
+                        if let Err(e) = actor_service.send(&message.sender_id, reply_message).await {
                             tracing::warn!(error = %e, "Failed to send reply via ActorService::send()");
                         }
                     } else {
@@ -109,10 +163,45 @@ impl Actor for WasmActorBehavior {
                 Ok(())
             }
             Err(e) => {
-                Err(BehaviorError::ProcessingError(format!(
-                    "WASM handle_message failed: {}",
-                    e
-                )))
+                let error_str = e.to_string();
+                let is_poisoned = is_wasm_instance_poisoned(&error_str);
+                let error_msg = format!("WASM handle_message failed: {}", e);
+                // Log first line only to avoid duplicate backtrace (full backtrace already in wasm-runtime log)
+                let error_first_line = error_str.lines().next().unwrap_or("");
+                tracing::error!(
+                    message_id = %message.id,
+                    error_first_line = %error_first_line,
+                    "WasmActorBehavior: handle_message failed (correlate with INVOKE_ACTOR message_id)"
+                );
+                if !message.sender_id.is_empty() {
+                    let error_payload = serde_json::json!({
+                        "error": error_msg,
+                        "success": false,
+                        "wasm_poisoned": is_poisoned
+                    });
+                    let reply_payload = serde_json::to_vec(&error_payload).unwrap_or_else(|_| error_msg.as_bytes().to_vec());
+                    let reply_message = Message {
+                        id: ulid::Ulid::new().to_string(),
+                        payload: reply_payload,
+                        sender_id: message.receiver_id.clone(),
+                        receiver_id: message.sender_id.clone(),
+                        message_type: "reply".to_string(),
+                        correlation_id: message.correlation_id.clone(),
+                        ..Default::default()
+                    };
+                    if let Some(actor_service) = ctx.service_locator.get_actor_service().await {
+                        if let Err(send_e) = actor_service.send(&message.sender_id, reply_message).await {
+                            tracing::warn!(error = %send_e, "Failed to send error reply via ActorService::send()");
+                        }
+                    }
+                }
+                if is_poisoned {
+                    tracing::error!(
+                        error = %error_str,
+                        "WASM instance poisoned (trap or cannot enter); actor should terminate for restart"
+                    );
+                }
+                Err(BehaviorError::ProcessingError(error_msg))
             }
         }
     }
@@ -430,31 +519,33 @@ impl WasmApplication {
             .get_tuplespace_provider()
             .await;
 
-        // Get KeyValueStore from service locator if available
-        // Note: KeyValueStore may not be registered directly - it's used by ObjectRegistry
-        // For now, we'll pass None and implement KeyValue operations via ObjectRegistry if needed
-        let keyvalue_store: Option<Arc<dyn plexspaces_keyvalue::KeyValueStore>> = None;
+        // KeyValue store for WASM actors (simple-actor kv_get/kv_put).
+        // Use in-memory SQLite store so Python/WASM actors can persist sensor data etc. per actor.
+        let keyvalue_store: Option<Arc<dyn plexspaces_keyvalue::KeyValueStore>> = match plexspaces_keyvalue::SqliteKVStore::new(":memory:").await {
+            Ok(store) => Some(Arc::new(store)),
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to create SQLite :memory: KV store for WASM actors");
+                None
+            }
+        };
 
         // Get ProcessGroupRegistry from service locator if available
         // Note: get_service_by_name requires Sized, so we can't call it on trait object
         // For now, pass None - ProcessGroupRegistry is optional for WASM actors
         let process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>> = None;
 
-        // Get LockManager from service locator if available
-        // Note: LockManager may not be registered - for now pass None
-        let lock_manager: Option<Arc<dyn plexspaces_locks::LockManager>> = None;
+        // Get LockManager from service locator so WASM actors can use host.lock_acquire/renew/release
+        let lock_manager = service_locator.get_lock_manager().await;
 
         // Get ObjectRegistry from service locator if available
         let object_registry: Option<Arc<dyn plexspaces_core::ObjectRegistry>> = service_locator.get_object_registry().await;
 
         // Get JournalStorage - use SQLite file-based storage for durability
         //
-        // Database URL priority:
-        // 1. PLEXSPACES_DATABASE_URL env var (shared database for all components)
-        // 2. PLEXSPACES_JOURNAL_DB env var (journal-specific, for backward compat)
-        // 3. Default: /tmp/plexspaces-{node_id}.db (file-based for durability)
-        //
-        // For in-memory (testing only): set PLEXSPACES_DATABASE_URL=:memory:
+        // Note: Env var handling is centralized in config_manager::initialize()
+        // TODO: Get database URL from ReleaseSpec instead of env vars
+        // For now, keeping env var fallback for backward compatibility until
+        // this function receives the initialized ReleaseSpec
         use plexspaces_journaling::JournalStorage;
         let journal_storage: Option<Arc<dyn JournalStorage>> = {
             let journal_db_path = std::env::var("PLEXSPACES_DATABASE_URL")
@@ -475,25 +566,45 @@ impl WasmApplication {
                     Some(Arc::new(storage) as Arc<dyn JournalStorage>)
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        db_path = %journal_db_path,
-                        "Failed to create SQLite journal storage, falling back to in-memory (no durability)"
-                    );
-                    Some(Arc::new(plexspaces_journaling::MemoryJournalStorage::new()) as Arc<dyn JournalStorage>)
+                    match plexspaces_journaling::SqliteJournalStorage::new(":memory:").await {
+                        Ok(fallback_storage) => {
+                            tracing::warn!(
+                                error = %e,
+                                db_path = %journal_db_path,
+                                "Failed to create SQLite journal storage, falling back to SQLite :memory: (no durability)"
+                            );
+                            Some(Arc::new(fallback_storage) as Arc<dyn JournalStorage>)
+                        }
+                        Err(e2) => {
+                            tracing::error!(
+                                error = %e2,
+                                "Failed to create SQLite :memory: fallback journal storage"
+                            );
+                            None
+                        }
+                    }
                 }
             }
         };
 
-        // Get BlobService from service locator if available
-        // BlobService is not available via trait methods, so we'll pass None for now
-        let blob_service: Option<Arc<plexspaces_blob::BlobService>> = None;
+        // Get BlobService from node if available (using trait-based access)
+        let blob_service = node.blob_service().await;
 
         // Create WASM instance with all available services
+        // TODO(instance-pool): When config.use_instance_pool is true, checkout from per-module InstancePool
+        // instead of runtime.instantiate() for faster spawn. Fits lightweight actors and worker pools.
+        // See PROJECT_TRACKER.md.
+        // Include namespace in actor_id so multiple apps (e.g. leader-election-term1, leader-election-term2)
+        // get distinct actors that can contend for the same lock (e.g. leader election).
+        let actor_id = if namespace.is_empty() {
+            format!("{}@{}", child_spec.id, node.id())
+        } else {
+            format!("{}:{}@{}", child_spec.id, namespace, node.id())
+        };
         let wasm_instance = runtime
             .instantiate(
                 module,
-                format!("{}@{}", child_spec.id, node.id()),
+                actor_id.clone(),
                 &[], // No initial state
                 plexspaces_wasm_runtime::WasmConfig::default(),
                 Some(channel_service),
@@ -514,18 +625,15 @@ impl WasmApplication {
                 ))
             })?;
 
-        // Format actor ID as "actor@node" for ActorRef compatibility
-        let node_id = node.id();
-        let actor_id = format!("{}@{}", child_spec.id, node_id);
-        
         // Use child_spec.id as actor_type for better dashboard visibility
-        // This allows actors to be grouped by actor name in the dashboard
         let actor_type = child_spec.id.clone();
+        let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
 
-        // Create behavior that wraps WASM instance with actor_type
+        // Create behavior that wraps WASM instance with actor_type and behavior_kind for logging
         let behavior: Box<dyn Actor> = Box::new(WasmActorBehavior {
             instance: Arc::new(wasm_instance),
             actor_type: actor_type.clone(),
+            behavior_kind,
         });
 
         // Get ServiceLocator from node
@@ -811,7 +919,7 @@ impl Application for WasmApplication {
         // Mark as running
         *is_running = true;
         
-        tracing::info!(
+        tracing::trace!(
             application = %self.name,
             actor_count = actor_count,
             "WASM application started successfully"
@@ -959,6 +1067,10 @@ impl Application for WasmApplication {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn module_hash_for_cleanup(&self) -> Option<String> {
+        Some(self.module_hash().to_string())
+    }
 }
 
 #[cfg(test)]
@@ -1007,12 +1119,14 @@ mod tests {
         let runtime = create_test_runtime().await;
         let spec = ApplicationSpec {
             name: "test-app".to_string(),
+            namespace: "test-namespace".to_string(),
             version: "1.0.0".to_string(),
             description: "Test application".to_string(),
             r#type: plexspaces_proto::application::v1::ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: std::collections::HashMap::new(),
             supervisor: None,
+            ..Default::default()
         };
 
         let app = WasmApplication::new(
@@ -1253,12 +1367,14 @@ mod tests {
 
         let spec = ApplicationSpec {
             name: "test-app".to_string(),
+            namespace: "test-namespace".to_string(),
             version: "1.0.0".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: std::collections::HashMap::new(),
             supervisor: Some(supervisor_spec),
+            ..Default::default()
         };
 
         let app = WasmApplication::new(

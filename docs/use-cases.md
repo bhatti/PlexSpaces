@@ -123,7 +123,7 @@ Build serverless platforms with durable execution:
 - Random load balancing when multiple actors exist
 - Tenant isolation with JWT authentication
 
-**Example**: See [FaaS Actor](../examples/simple/faas_actor/) example.
+**Example**: See [Webhook Handler](../examples/rust/embedded/webhook_handler/) example.
 
 **Documentation**:
 - [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) - Core concepts

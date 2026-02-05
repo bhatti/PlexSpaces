@@ -761,6 +761,38 @@ sequenceDiagram
 | **Complexity** | Higher (replay logic) | Lower (simple snapshots) |
 | **Best For** | Audit requirements, complex workflows | Simple state, high performance |
 
+### Durability Facet Parameter (Python SDK)
+
+Python WASM actors declare durability expectation via the **`facets`** parameter on the `@actor` decorator. This does **not** enable durability by itself; it documents that the actor expects checkpoint-based persistence and can be used by tooling to validate configuration.
+
+| Layer | Role |
+|-------|------|
+| **Python code** | `@actor(facets=["durability"])` — declares "this actor expects durability" |
+| **Runtime** | `WasmConfig.durability_enabled` — when `true`, framework calls `get_state()`/`set_state()` for checkpoints |
+| **Configuration** | Set `durability_enabled: true` in release.yaml, app-config.toml, or node config |
+
+**How to enable WASM durability:**
+
+1. **Release config (release.yaml):**
+   ```yaml
+   wasm:
+     durability_enabled: true
+   ```
+
+2. **Application config (app-config.toml):**
+   ```toml
+   [wasm]
+   durability_enabled = true
+   ```
+
+3. **Node config (config/default.yaml):**
+   ```yaml
+   wasm:
+     durability_enabled: true
+   ```
+
+When durability is enabled, the framework uses the same checkpoint storage (e.g. SQLite) as for Rust actors; the only difference is that WASM actors expose state via `get_state()`/`set_state()` instead of journal replay. See [Bank Account example](../../examples/python/apps/bank_account/README.md) and [SDK Guide](sdk.md#facets).
+
 ### Implementation in Python WASM
 
 ```python

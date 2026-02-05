@@ -618,6 +618,8 @@ impl GenEvent for EventHandler {
 }
 ```
 
+**WASM**: Event-handler actors deploy with `behavior_kind=GenEvent` and appear in logs as `EventHandler`. See [WASM Deployment](wasm-deployment.md).
+
 ---
 
 ## Facets

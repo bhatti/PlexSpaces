@@ -45,7 +45,7 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelStats, RedisConfig,
+    channel_config, ChannelProvider, ChannelConfig, ChannelStats, RedisConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use redis::aio::Connection;
@@ -119,7 +119,7 @@ impl RedisChannel {
     /// # async fn example() -> ChannelResult<()> {
     /// let config = ChannelConfig {
     ///     name: "my-stream".to_string(),
-    ///     backend: ChannelBackend::ChannelBackendRedis as i32,
+    ///     provider: ChannelProvider::ChannelProviderRedis as i32,
     ///     backend_config: Some(channel_config::BackendConfig::RedisConfig(
     ///         RedisConfig {
     ///             url: "redis://localhost:6379".to_string(),
@@ -477,7 +477,7 @@ impl Channel for RedisChannel {
         use std::time::Instant;
         
         let start = Instant::now();
-        let backend = backend_name(self.config.backend);
+        let backend = backend_name(self.config.provider);
 
         if self.consumer_group.is_empty() {
             record_channel_ack(&self.config.name, message_id, backend);
@@ -569,7 +569,7 @@ impl Channel for RedisChannel {
                 message_id,
                 true,
                 delivery_count,
-                crate::observability::backend_name(self.config.backend),
+                crate::observability::backend_name(self.config.provider),
             );
         } else if !requeue || delivery_count >= max_retries {
             // Send to DLQ if enabled, otherwise just don't ACK (will be redelivered after timeout)
@@ -622,7 +622,7 @@ impl Channel for RedisChannel {
                             message_id,
                             delivery_count,
                             "max_retries_exceeded",
-                            crate::observability::backend_name(self.config.backend),
+                            crate::observability::backend_name(self.config.provider),
                         );
                         
                         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -684,7 +684,7 @@ impl Channel for RedisChannel {
 
         Ok(ChannelStats {
             name: self.config.name.clone(),
-            backend: ChannelBackend::ChannelBackendRedis as i32,
+            provider: ChannelProvider::ChannelProviderRedis as i32,
             messages_sent: self.stats.messages_sent.load(Ordering::Relaxed),
             messages_received: self.stats.messages_received.load(Ordering::Relaxed),
             messages_pending: pending_count,

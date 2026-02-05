@@ -32,6 +32,14 @@
 //! - Regular actors: No reminders (simple, predictable)
 //! - Actors with ReminderFacet: Can register reminders (for billing, SLA, cron jobs)
 //!
+//! ## Design Notes
+//! ReminderFacet uses `Arc<dyn JournalStorage>` (trait object) instead of generics.
+//! This design choice:
+//! - Enables SDK annotation support (`facets = ["reminder"]`)
+//! - Is consistent with DurabilityFacet and other facets
+//! - Uses standard Rust trait object pattern for runtime polymorphism
+//! - Allows storage backend to be configured at runtime
+//!
 //! ## How It Works
 //! ```text
 //! 1. Actor attaches ReminderFacet
@@ -41,20 +49,40 @@
 //! 5. If actor deactivated → Auto-activate (via VirtualActorFacet integration)
 //! 6. Actor deactivates → Reminders persist (survive deactivation)
 //! ```
+//!
+//! ## Example
+//! ```rust,no_run
+//! use plexspaces_journaling::*;
+//! use plexspaces_core::JournalStorage;
+//! use std::sync::Arc;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // Create storage backend (trait object)
+//! let storage: Arc<dyn JournalStorage> = Arc::new(
+//!     SqliteJournalStorage::new(":memory:").await?
+//! );
+//!
+//! // Create reminder facet with trait object storage
+//! let facet = ReminderFacet::new(storage, serde_json::json!({}), 50);
+//!
+//! // Attach to actor via spawn_actor(..., facets)
+//! # Ok(())
+//! # }
+//! ```
 
-use crate::storage::{JournalStorage, ReminderRegistration, ReminderState};
 use async_trait::async_trait;
-use plexspaces_core::{ActorId, ActorRef, ActorService};
+use metrics;
+use plexspaces_core::{ActorId, ActorRef, ActorService, JournalStorage};
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
+use plexspaces_proto::timer::v1::{ReminderRegistration, ReminderState};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use metrics;
 use tracing;
 
 /// Trait for activating virtual actors (used by ReminderFacet)
@@ -79,36 +107,57 @@ pub use plexspaces_proto::timer::v1::ReminderFired;
 /// Implements Orleans-inspired durable reminders. Reminders are persisted to
 /// storage and survive actor deactivation and crashes.
 ///
+/// ## Design
+/// Uses `Arc<dyn JournalStorage>` (trait object) for storage backend, enabling:
+/// - SDK annotation support (`facets = ["reminder"]`)
+/// - Runtime storage backend configuration
+/// - Consistency with DurabilityFacet pattern
+///
 /// ## Thread Safety
 /// Uses Arc<RwLock<>> for concurrent access to reminder state.
-pub struct ReminderFacet<S: JournalStorage> {
+///
+/// ## Example
+/// ```rust,no_run
+/// use plexspaces_journaling::*;
+/// use plexspaces_core::JournalStorage;
+/// use std::sync::Arc;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let storage: Arc<dyn JournalStorage> = Arc::new(
+///     SqliteJournalStorage::new(":memory:").await?
+/// );
+/// let facet = ReminderFacet::new(storage, serde_json::json!({}), 50);
+/// # Ok(())
+/// # }
+/// ```
+pub struct ReminderFacet {
     /// Facet configuration (immutable)
     config: Value,
-    
+
     /// Facet priority (immutable)
     priority: i32,
-    
+
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
-    
+
     /// Actor reference for sending reminder fired messages
     actor_ref: Arc<RwLock<Option<ActorRef>>>,
-    
+
     /// ActorService for sending messages (required since ActorRef is now pure data)
     actor_service: Arc<RwLock<Option<Arc<dyn ActorService>>>>,
-    
-    /// Journal storage backend (for persistence)
-    storage: Arc<S>,
-    
+
+    /// Journal storage backend (trait object for runtime polymorphism)
+    storage: Arc<dyn JournalStorage>,
+
     /// Active reminders: reminder_name -> ReminderState
     reminders: Arc<RwLock<HashMap<String, ReminderState>>>,
-    
+
     /// Background task handle for checking due reminders
     background_task: Arc<RwLock<Option<JoinHandle<()>>>>,
-    
+
     /// Shutdown signal for background task
     shutdown_tx: Arc<RwLock<Option<tokio::sync::oneshot::Sender<()>>>>,
-    
+
     /// Optional activation provider for virtual actor integration
     activation_provider: Option<Arc<dyn ActivationProvider>>,
 }
@@ -116,17 +165,31 @@ pub struct ReminderFacet<S: JournalStorage> {
 /// Default priority for ReminderFacet
 pub const REMINDER_FACET_DEFAULT_PRIORITY: i32 = 50;
 
-impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
+impl ReminderFacet {
     /// Create a new reminder facet
     ///
     /// ## Arguments
-    /// * `storage` - Journal storage backend for persistence
+    /// * `storage` - Journal storage backend as trait object
     /// * `config` - Facet configuration (can be empty object `{}` for defaults)
     /// * `priority` - Facet priority (default: 50)
     ///
     /// ## Returns
     /// New ReminderFacet ready to attach to an actor
-    pub fn new(storage: Arc<S>, config: Value, priority: i32) -> Self {
+    ///
+    /// ## Example
+    /// ```rust,no_run
+    /// # use plexspaces_journaling::*;
+    /// # use plexspaces_core::JournalStorage;
+    /// # use std::sync::Arc;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let storage: Arc<dyn JournalStorage> = Arc::new(
+    ///     SqliteJournalStorage::new(":memory:").await?
+    /// );
+    /// let facet = ReminderFacet::new(storage, serde_json::json!({}), 50);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new(storage: Arc<dyn JournalStorage>, config: Value, priority: i32) -> Self {
         ReminderFacet {
             config,
             priority,
@@ -140,11 +203,22 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
             activation_provider: None,
         }
     }
-    
+
+    /// Create a new reminder facet with default configuration
+    ///
+    /// ## Arguments
+    /// * `storage` - Journal storage backend as trait object
+    ///
+    /// ## Returns
+    /// New ReminderFacet with default priority (50) and empty config
+    pub fn with_storage(storage: Arc<dyn JournalStorage>) -> Self {
+        Self::new(storage, serde_json::json!({}), REMINDER_FACET_DEFAULT_PRIORITY)
+    }
+
     /// Create a new reminder facet with activation provider
     ///
     /// ## Arguments
-    /// * `storage` - Journal storage backend for persistence
+    /// * `storage` - Journal storage backend as trait object
     /// * `activation_provider` - Provider for activating virtual actors
     /// * `config` - Facet configuration
     /// * `priority` - Facet priority
@@ -156,7 +230,7 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
     /// When activation_provider is provided, reminders will trigger
     /// actor activation if the actor is deactivated (VirtualActorFacet integration).
     pub fn with_activation_provider(
-        storage: Arc<S>,
+        storage: Arc<dyn JournalStorage>,
         activation_provider: Arc<dyn ActivationProvider>,
         config: Value,
         priority: i32,
@@ -174,7 +248,7 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
             activation_provider: Some(activation_provider),
         }
     }
-    
+
     /// Set actor reference (called during attachment)
     ///
     /// ## Arguments
@@ -183,7 +257,7 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
         let mut ref_guard = self.actor_ref.write().await;
         *ref_guard = Some(actor_ref);
     }
-    
+
     /// Set ActorService (called during attachment)
     ///
     /// ## Arguments
@@ -192,7 +266,7 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
         let mut service_guard = self.actor_service.write().await;
         *service_guard = Some(actor_service);
     }
-    
+
     /// Register a reminder
     ///
     /// ## Arguments
@@ -204,44 +278,54 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
         &self,
         registration: ReminderRegistration,
     ) -> Result<String, ReminderError> {
-        let _actor_id = self.actor_id.read().await
+        let _actor_id = self
+            .actor_id
+            .read()
+            .await
             .clone()
             .ok_or_else(|| ReminderError::NotAttached)?;
-        
+
         // Validate registration
         if registration.reminder_name.is_empty() {
-            return Err(ReminderError::InvalidRegistration("reminder_name cannot be empty".to_string()));
+            return Err(ReminderError::InvalidRegistration(
+                "reminder_name cannot be empty".to_string(),
+            ));
         }
-        
+
         // Check if reminder already exists
         let mut reminders = self.reminders.write().await;
         if reminders.contains_key(&registration.reminder_name) {
-            return Err(ReminderError::ReminderExists(registration.reminder_name.clone()));
+            return Err(ReminderError::ReminderExists(
+                registration.reminder_name.clone(),
+            ));
         }
-        
+
         // Convert proto Duration to std::time::Duration
         let interval = proto_duration_to_std(&registration.interval)
             .ok_or_else(|| ReminderError::InvalidRegistration("invalid interval".to_string()))?;
-        
+
         // Validate interval (must be > 0)
         if interval.is_zero() {
-            return Err(ReminderError::InvalidRegistration("interval must be > 0".to_string()));
+            return Err(ReminderError::InvalidRegistration(
+                "interval must be > 0".to_string(),
+            ));
         }
-        
+
         // Calculate next fire time
         let now = SystemTime::now();
-        let first_fire_time = registration.first_fire_time
+        let first_fire_time = registration
+            .first_fire_time
             .as_ref()
             .map(|t| proto_timestamp_to_system_time(t))
             .unwrap_or(now);
-        
+
         // If first_fire_time is in the past, fire immediately
         let next_fire_time = if first_fire_time <= now {
             now
         } else {
             first_fire_time
         };
-        
+
         // Create reminder state
         let reminder_state = ReminderState {
             registration: Some(registration.clone()),
@@ -250,20 +334,22 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
             fire_count: 0,
             is_active: true,
         };
-        
+
         // Persist to storage
-        self.storage.register_reminder(&reminder_state).await
+        self.storage
+            .register_reminder(&reminder_state)
+            .await
             .map_err(|e| ReminderError::Storage(e.to_string()))?;
-        
+
         // Store in memory
         reminders.insert(registration.reminder_name.clone(), reminder_state);
-        
+
         // Start background task if not already running
         self.start_background_task_if_needed().await?;
-        
+
         Ok(registration.reminder_name)
     }
-    
+
     /// Unregister a reminder
     ///
     /// ## Arguments
@@ -273,25 +359,30 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
     /// Success or error
     pub async fn unregister_reminder(&self, reminder_name: &str) -> Result<(), ReminderError> {
         let mut reminders = self.reminders.write().await;
-        
+
         if reminders.contains_key(reminder_name) {
             // Remove from storage
-            let actor_id = self.actor_id.read().await
+            let actor_id = self
+                .actor_id
+                .read()
+                .await
                 .clone()
                 .ok_or_else(|| ReminderError::NotAttached)?;
-            
-            self.storage.unregister_reminder(&actor_id, reminder_name).await
+
+            self.storage
+                .unregister_reminder(&actor_id, reminder_name)
+                .await
                 .map_err(|e| ReminderError::Storage(e.to_string()))?;
-            
+
             // Remove from memory
             reminders.remove(reminder_name);
-            
+
             Ok(())
         } else {
             Err(ReminderError::ReminderNotFound(reminder_name.to_string()))
         }
     }
-    
+
     /// List all reminders for this actor
     ///
     /// ## Returns
@@ -300,46 +391,45 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
         let reminders = self.reminders.read().await;
         reminders.values().cloned().collect()
     }
-    
+
     /// Start background task for checking due reminders
     async fn start_background_task_if_needed(&self) -> Result<(), ReminderError> {
         let mut task_guard = self.background_task.write().await;
-        
+
         if task_guard.is_some() {
             // Already running
             return Ok(());
         }
-        
+
         let reminders = self.reminders.clone();
         let storage = self.storage.clone();
         let actor_ref = self.actor_ref.clone();
         let actor_service = self.actor_service.clone();
         let shutdown_tx = self.shutdown_tx.clone();
         let activation_provider_clone = self.activation_provider.clone();
-        
+
         let (tx, mut rx) = tokio::sync::oneshot::channel::<()>();
         *shutdown_tx.write().await = Some(tx);
-        
+
         let handle = tokio::spawn(async move {
             loop {
                 // Check for shutdown signal
                 if rx.try_recv().is_ok() {
                     break;
                 }
-                
+
                 let now = SystemTime::now();
-                
+
                 // Get due reminders from storage (more efficient than checking all in memory)
-                let due_reminders = storage.query_due_reminders(now).await
-                    .unwrap_or_default();
-                
+                let due_reminders = storage.query_due_reminders(now).await.unwrap_or_default();
+
                 // Debug: Log if we found due reminders (only in debug mode)
                 if !due_reminders.is_empty() {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("Found {} due reminders", due_reminders.len());
+                        tracing::debug!("Found {} due reminders", due_reminders.len());
                     }
                 }
-                
+
                 // Fire due reminders
                 for reminder in due_reminders {
                     // Get registration (unwrap since it should always be Some for active reminders)
@@ -350,17 +440,17 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
                             continue;
                         }
                     };
-                    
+
                     let actor_id_str = reg.actor_id.clone();
                     let actor_id = ActorId::from(actor_id_str.clone());
-                    
+
                     // Check if actor is active (VirtualActorFacet integration)
                     let should_activate = if let Some(provider) = &activation_provider_clone {
                         !provider.is_actor_active(&actor_id).await
                     } else {
                         false
                     };
-                    
+
                     // If actor is deactivated and we have an activation provider, activate it
                     if should_activate {
                         if let Some(provider) = &activation_provider_clone {
@@ -370,13 +460,15 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
                             }
                         }
                     }
-                    
+
                     // Fire reminder
                     let actor_ref_opt = actor_ref.read().await.clone();
                     let actor_service_opt = actor_service.read().await.clone();
-                    if let (Some(ref_guard), Some(service_guard)) = (actor_ref_opt.as_ref(), actor_service_opt.as_ref()) {
+                    if let (Some(ref_guard), Some(service_guard)) =
+                        (actor_ref_opt.as_ref(), actor_service_opt.as_ref())
+                    {
                         if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!("Firing reminder: {}", reg.reminder_name);
+                            tracing::debug!("Firing reminder: {}", reg.reminder_name);
                         }
                         let reminder_fired = ReminderFired {
                             actor_id: reg.actor_id.clone(),
@@ -384,10 +476,10 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
                             fired_at: Some(prost_types::Timestamp::from(now)),
                             callback_data: reg.callback_data.clone(),
                         };
-                        
+
                         // Encode ReminderFired using prost
                         let payload = prost::Message::encode_to_vec(&reminder_fired);
-                        
+
                         // Create message with reminder type
                         let mut headers = std::collections::HashMap::new();
                         headers.insert("type".to_string(), "ReminderFired".to_string());
@@ -399,63 +491,74 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
                             headers,
                             ..Default::default()
                         };
-                        
+
                         // Use ActorService to send message (handles local/remote routing)
                         if let Err(e) = service_guard.send(ref_guard.id.as_str(), message).await {
                             tracing::warn!("Failed to send reminder message: {}", e);
                         }
                     } else {
-                        tracing::warn!("Skipping reminder {}: actor_ref or actor_service not set", reg.reminder_name);
+                        tracing::warn!(
+                            "Skipping reminder {}: actor_ref or actor_service not set",
+                            reg.reminder_name
+                        );
                     }
-                    
+
                     // Update reminder state
                     let mut updated_reminder = reminder.clone();
                     updated_reminder.fire_count += 1;
                     updated_reminder.last_fired = Some(prost_types::Timestamp::from(now));
-                    
+
                     // Check if max_occurrences reached
                     if let Some(reg) = updated_reminder.registration.as_ref() {
-                        if reg.max_occurrences > 0 && updated_reminder.fire_count >= reg.max_occurrences as i32 {
+                        if reg.max_occurrences > 0
+                            && updated_reminder.fire_count >= reg.max_occurrences as i32
+                        {
                             // Auto-delete reminder
                             updated_reminder.is_active = false;
-                            storage.unregister_reminder(&reg.actor_id, &reg.reminder_name).await
+                            storage
+                                .unregister_reminder(&reg.actor_id, &reg.reminder_name)
+                                .await
                                 .unwrap_or_default();
-                            
+
                             // Remove from memory
                             let mut reminders_guard = reminders.write().await;
                             reminders_guard.remove(&reg.reminder_name);
                         } else {
                             // Schedule next fire
-                            let interval = proto_duration_to_std(&reg.interval).unwrap_or(Duration::from_secs(1));
-                            updated_reminder.next_fire_time = Some(prost_types::Timestamp::from(now + interval));
-                            
+                            let interval = proto_duration_to_std(&reg.interval)
+                                .unwrap_or(Duration::from_secs(1));
+                            updated_reminder.next_fire_time =
+                                Some(prost_types::Timestamp::from(now + interval));
+
                             // Update in storage
-                            storage.update_reminder(&updated_reminder).await
+                            storage
+                                .update_reminder(&updated_reminder)
+                                .await
                                 .unwrap_or_default();
-                            
+
                             // Update in memory
                             let mut reminders_guard = reminders.write().await;
                             reminders_guard.insert(reg.reminder_name.clone(), updated_reminder);
                         }
                     }
                 }
-                
+
                 // Sleep for a short duration before next check
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
-        
+
         *task_guard = Some(handle);
         Ok(())
     }
-    
+
     /// Stop background task
     async fn stop_background_task(&self) {
         // Send shutdown signal
         if let Some(tx) = self.shutdown_tx.write().await.take() {
             let _ = tx.send(());
         }
-        
+
         // Wait for task to complete
         if let Some(handle) = self.background_task.write().await.take() {
             let _ = handle.await;
@@ -464,28 +567,27 @@ impl<S: JournalStorage + Clone + 'static> ReminderFacet<S> {
 }
 
 #[async_trait]
-impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
+impl Facet for ReminderFacet {
     fn facet_type(&self) -> &str {
         "reminder"
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    
+
     async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
         let mut id = self.actor_id.write().await;
         *id = Some(actor_id.to_string());
         drop(id);
-        
+
         // Load existing reminders from storage
-        let loaded_reminders = self.storage.load_reminders(actor_id).await
-            .unwrap_or_default();
-        
+        let loaded_reminders = self.storage.load_reminders(actor_id).await.unwrap_or_default();
+
         // Restore reminders to memory
         let mut reminders = self.reminders.write().await;
         for reminder in loaded_reminders {
@@ -495,43 +597,51 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
                 }
             }
         }
-        
+
         // Start background task
-        self.start_background_task_if_needed().await
+        self.start_background_task_if_needed()
+            .await
             .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
-        
+
         Ok(())
     }
-    
+
     async fn on_detach(&mut self, _actor_id: &str) -> Result<(), FacetError> {
         // Stop background task
         self.stop_background_task().await;
-        
+
         // Persist reminders to storage (save all active reminders)
         let reminders_to_save = {
             let reminders_guard = self.reminders.read().await;
-            reminders_guard.values()
-                .filter(|r| r.is_active && r.registration.as_ref().map(|reg| reg.persist_across_activations).unwrap_or(false))
+            reminders_guard
+                .values()
+                .filter(|r| {
+                    r.is_active
+                        && r.registration
+                            .as_ref()
+                            .map(|reg| reg.persist_across_activations)
+                            .unwrap_or(false)
+                })
                 .cloned()
                 .collect::<Vec<_>>()
         };
-        
+
         for reminder in reminders_to_save {
             let _ = self.storage.update_reminder(&reminder).await;
         }
-        
+
         // Clear reminders
         let mut reminders = self.reminders.write().await;
         reminders.clear();
-        
+
         // Clear actor ID and reference
         let mut id = self.actor_id.write().await;
         *id = None;
         drop(id);
-        
+
         let mut ref_guard = self.actor_ref.write().await;
         *ref_guard = None;
-        
+
         Ok(())
     }
 
@@ -555,12 +665,12 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
         // Pause all reminders on EXIT (mark as inactive)
         let mut reminders = self.reminders.write().await;
         let mut paused_count = 0;
-        
+
         for (reminder_name, reminder_state) in reminders.iter_mut() {
             if reminder_state.is_active {
                 reminder_state.is_active = false;
                 paused_count += 1;
-                
+
                 // Persist paused state to storage
                 if let Err(e) = self.storage.update_reminder(reminder_state).await {
                     tracing::warn!(
@@ -571,28 +681,30 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
                     );
                 } else {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        actor_id = %actor_id,
-                        reminder_name = %reminder_name,
-                        "Paused reminder on EXIT signal"
-                    );
+                        tracing::debug!(
+                            actor_id = %actor_id,
+                            reminder_name = %reminder_name,
+                            "Paused reminder on EXIT signal"
+                        );
                     }
                 }
             }
         }
-        
+
         if paused_count > 0 {
-            metrics::counter!("plexspaces_reminder_facet_exit_paused_total",
+            metrics::counter!(
+                "plexspaces_reminder_facet_exit_paused_total",
                 "actor_id" => actor_id.to_string(),
                 "reminder_count" => paused_count.to_string()
-            ).increment(paused_count as u64);
+            )
+            .increment(paused_count as u64);
             tracing::info!(
                 actor_id = %actor_id,
                 reminder_count = paused_count,
                 "Paused all reminders on EXIT signal"
             );
         }
-        
+
         Ok(())
     }
 
@@ -613,32 +725,34 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
     ) -> Result<(), FacetError> {
         // Log DOWN notification for observability
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            actor_id = %actor_id,
-            monitored_id = %monitored_id,
-            reason = ?reason,
-            "ReminderFacet received DOWN notification (no action needed)"
-        );
+            tracing::debug!(
+                actor_id = %actor_id,
+                monitored_id = %monitored_id,
+                reason = ?reason,
+                "ReminderFacet received DOWN notification (no action needed)"
+            );
         }
-        
-        metrics::counter!("plexspaces_reminder_facet_down_total",
+
+        metrics::counter!(
+            "plexspaces_reminder_facet_down_total",
             "actor_id" => actor_id.to_string(),
             "monitored_id" => monitored_id.to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         Ok(())
     }
-    
+
     fn get_state(&self) -> Result<Value, FacetError> {
         let _reminders = self.reminders.read();
         // TODO: Serialize reminder state for persistence (if needed)
         Ok(Value::Null)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }
@@ -647,18 +761,23 @@ impl<S: JournalStorage + Clone + 'static> Facet for ReminderFacet<S> {
 /// Reminder errors
 #[derive(Debug, thiserror::Error)]
 pub enum ReminderError {
+    /// Facet not attached to an actor
     #[error("Reminder facet not attached to actor")]
     NotAttached,
-    
+
+    /// Reminder with this name already exists
     #[error("Reminder already exists: {0}")]
     ReminderExists(String),
-    
+
+    /// Reminder not found
     #[error("Reminder not found: {0}")]
     ReminderNotFound(String),
-    
+
+    /// Invalid registration parameters
     #[error("Invalid registration: {0}")]
     InvalidRegistration(String),
-    
+
+    /// Storage backend error
     #[error("Storage error: {0}")]
     Storage(String),
 }
@@ -672,27 +791,31 @@ fn proto_duration_to_std(duration: &Option<prost_types::Duration>) -> Option<Dur
 
 /// Convert proto Timestamp to SystemTime
 fn proto_timestamp_to_system_time(timestamp: &prost_types::Timestamp) -> SystemTime {
-    SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp.seconds as u64) + Duration::from_nanos(timestamp.nanos as u64)
+    SystemTime::UNIX_EPOCH
+        + Duration::from_secs(timestamp.seconds as u64)
+        + Duration::from_nanos(timestamp.nanos as u64)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite-backend"))]
 mod tests {
     use super::*;
-    use crate::storage::MemoryJournalStorage;
+    use crate::SqliteJournalStorage;
     use plexspaces_core::ActorRef;
-    use plexspaces_mailbox::{Mailbox, MailboxConfig};
     use prost_types;
     use std::sync::Arc;
-    
-    fn create_test_facet() -> (ReminderFacet<MemoryJournalStorage>, ActorRef) {
-        let storage = Arc::new(MemoryJournalStorage::new());
+
+    /// Creates a test facet with SQLite :memory: backend.
+    /// Uses in-memory SQLite for fast, isolated test execution.
+    async fn create_test_facet() -> (ReminderFacet, ActorRef) {
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let facet = ReminderFacet::new(storage, serde_json::json!({}), 75);
-        
+
         let actor_ref = ActorRef::new("test-actor@test-node".to_string()).unwrap();
-        
+
         (facet, actor_ref)
     }
-    
+
     fn create_test_reminder_registration(
         reminder_name: &str,
         interval_secs: u64,
@@ -701,7 +824,7 @@ mod tests {
     ) -> ReminderRegistration {
         let now = SystemTime::now();
         let first_fire_time = now + Duration::from_secs(first_fire_secs);
-        
+
         ReminderRegistration {
             actor_id: "test-actor".to_string(),
             reminder_name: reminder_name.to_string(),
@@ -715,155 +838,205 @@ mod tests {
             max_occurrences,
         }
     }
-    
+
     #[tokio::test]
     async fn test_reminder_facet_creation() {
-        let (facet, _actor_ref) = create_test_facet();
+        let (facet, _actor_ref) = create_test_facet().await;
         assert_eq!(facet.facet_type(), "reminder");
     }
-    
+
+    #[tokio::test]
+    async fn test_reminder_facet_with_storage() {
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let facet = ReminderFacet::with_storage(storage);
+        assert_eq!(facet.facet_type(), "reminder");
+        assert_eq!(facet.get_priority(), REMINDER_FACET_DEFAULT_PRIORITY);
+    }
+
     #[tokio::test]
     async fn test_reminder_facet_attach() {
-        let (mut facet, actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        let (mut facet, actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let actor_id = facet.actor_id.read().await.clone();
         assert_eq!(actor_id, Some("actor-1".to_string()));
     }
-    
+
     #[tokio::test]
     async fn test_register_reminder_before_attach_fails() {
-        let (facet, _actor_ref) = create_test_facet();
-        
+        let (facet, _actor_ref) = create_test_facet().await;
+
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 0);
         let result = facet.register_reminder(registration).await;
-        
+
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ReminderError::NotAttached));
     }
-    
+
     #[tokio::test]
     async fn test_register_reminder_after_attach() {
-        let (mut facet, actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        let (mut facet, actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 0);
         let reminder_id = facet.register_reminder(registration).await.unwrap();
-        
+
         assert_eq!(reminder_id, "reminder-1");
-        
+
         let reminders = facet.list_reminders().await;
         assert_eq!(reminders.len(), 1);
-        assert_eq!(reminders[0].registration.as_ref().unwrap().reminder_name, "reminder-1");
+        assert_eq!(
+            reminders[0].registration.as_ref().unwrap().reminder_name,
+            "reminder-1"
+        );
     }
-    
+
     #[tokio::test]
     async fn test_register_duplicate_reminder_fails() {
-        let (mut facet, actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        let (mut facet, actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref.clone()).await;
-        
+
         let registration1 = create_test_reminder_registration("reminder-1", 1, 0, 0);
         facet.register_reminder(registration1).await.unwrap();
-        
+
         let registration2 = create_test_reminder_registration("reminder-1", 2, 0, 0);
         let result = facet.register_reminder(registration2).await;
-        
+
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ReminderError::ReminderExists(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            ReminderError::ReminderExists(_)
+        ));
     }
-    
+
     #[tokio::test]
     async fn test_unregister_reminder() {
-        let (mut facet, actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        let (mut facet, actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 0);
         facet.register_reminder(registration).await.unwrap();
-        
+
         facet.unregister_reminder("reminder-1").await.unwrap();
-        
+
         let reminders = facet.list_reminders().await;
         assert_eq!(reminders.len(), 0);
     }
-    
+
     #[tokio::test]
     async fn test_unregister_nonexistent_reminder_fails() {
-        let (mut facet, _actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
-        
+        let (mut facet, _actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
+
         let result = facet.unregister_reminder("nonexistent").await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ReminderError::ReminderNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            ReminderError::ReminderNotFound(_)
+        ));
     }
-    
+
     #[tokio::test]
     async fn test_reminder_with_max_occurrences() {
-        let (mut facet, actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        let (mut facet, actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 3);
         facet.register_reminder(registration).await.unwrap();
-        
+
         // Wait for reminders to fire (background task will fire them)
         tokio::time::sleep(Duration::from_secs(4)).await;
-        
+
         // Reminder should be auto-deleted after 3 fires
         let reminders = facet.list_reminders().await;
         assert_eq!(reminders.len(), 0);
     }
-    
+
     #[tokio::test]
     async fn test_multiple_reminders() {
-        let (mut facet, actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        let (mut facet, actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let registration1 = create_test_reminder_registration("reminder-1", 1, 0, 0);
         let registration2 = create_test_reminder_registration("reminder-2", 2, 0, 0);
         let registration3 = create_test_reminder_registration("reminder-3", 3, 0, 0);
-        
+
         facet.register_reminder(registration1).await.unwrap();
         facet.register_reminder(registration2).await.unwrap();
         facet.register_reminder(registration3).await.unwrap();
-        
+
         let reminders = facet.list_reminders().await;
         assert_eq!(reminders.len(), 3);
     }
-    
+
     #[tokio::test]
     async fn test_reminder_zero_interval_fails() {
-        let (mut facet, actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        let (mut facet, actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let mut registration = create_test_reminder_registration("reminder-1", 0, 0, 0);
-        registration.interval = Some(prost_types::Duration { seconds: 0, nanos: 0 });
+        registration.interval = Some(prost_types::Duration {
+            seconds: 0,
+            nanos: 0,
+        });
         let result = facet.register_reminder(registration).await;
-        
+
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ReminderError::InvalidRegistration(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            ReminderError::InvalidRegistration(_)
+        ));
     }
-    
+
     #[tokio::test]
     async fn test_reminder_detach_stops_background_task() {
-        let (mut facet, actor_ref) = create_test_facet();
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        let (mut facet, actor_ref) = create_test_facet().await;
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 0);
         facet.register_reminder(registration).await.unwrap();
-        
+
         // Detach should stop background task
         facet.on_detach("actor-1").await.unwrap();
-        
+
         // Reminders should be cleared
         let reminders = facet.list_reminders().await;
         assert_eq!(reminders.len(), 0);
     }
 }
-

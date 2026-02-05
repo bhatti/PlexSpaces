@@ -415,8 +415,14 @@ pub trait Actor: Send + Sync {
         Ok(())
     }
 
-    /// Get the behavior type
+    /// Get the behavior type (used for dashboard/actor_type index; Custom(name) for WASM actors).
     fn behavior_type(&self) -> BehaviorType;
+
+    /// Get the OTP-style behavior kind for logging (GenServer, GenEvent, etc.).
+    /// Defaults to behavior_type(); WASM actors override to report spec'd kind so spans show "GenEvent" not "SensorStream".
+    fn behavior_kind(&self) -> BehaviorType {
+        self.behavior_type()
+    }
 }
 
 // ActorBehavior has been renamed to Actor for clarity

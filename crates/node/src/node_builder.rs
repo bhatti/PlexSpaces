@@ -190,7 +190,7 @@ impl NodeBuilder {
     /// This is the proper way to configure tests - no environment variables needed.
     ///
     /// ## How it works
-    /// Sets `RuntimeConfig.shared_database.connection_string = "sqlite::memory:"`
+    /// Sets `RuntimeConfig.db.connection_string = "sqlite::memory:"`
     /// which triggers in-memory backend selection in service initialization.
     ///
     /// ## Example
@@ -202,7 +202,7 @@ impl NodeBuilder {
     /// ```
     pub fn with_in_memory_backends(mut self) -> Self {
         use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
-        use plexspaces_proto::storage::v1::SharedRelationalDbConfig;
+        use plexspaces_proto::storage::v1::SharedDbConfig;
         
         // Create or update release_spec with in-memory database configuration
         let release_spec = self.release_spec.take().unwrap_or_else(|| ReleaseSpec {
@@ -213,7 +213,7 @@ impl NodeBuilder {
         
         // Create RuntimeConfig with in-memory database
         let runtime = RuntimeConfig {
-            shared_database: Some(SharedRelationalDbConfig {
+            db: Some(SharedDbConfig {
                 connection_string: "sqlite::memory:".to_string(),
                 pool_size: 1,
                 auto_migrate: true,

@@ -3,7 +3,7 @@ name = "plexspaces-object-registry"
 version = "0.1.0"
 edition = "2021"
 authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
-description = "Unified object registry for PlexSpaces (actors, tuplespaces, services)"
+description = "Unified object registry for PlexSpaces (actors, tuplespaces, services) with multi-backend support"
 license = "LGPL-2.1-or-later"
 
 [dependencies]
@@ -11,9 +11,8 @@ license = "LGPL-2.1-or-later"
 plexspaces-core = { path = "../core" }
 # Core proto definitions
 plexspaces-proto = { path = "../proto" }
-
-# Key-value storage backend (with SQLite support for integration tests)
-plexspaces-keyvalue = { path = "../keyvalue", features = ["sql-backend"] }
+# Common utilities (RequestContext)
+plexspaces-common = { path = "../common" }
 
 # Serialization (use workspace version to match proto crate)
 prost = { workspace = true }
@@ -27,16 +26,29 @@ async-trait = "0.1"
 thiserror = "2.0"
 
 # Time handling
-chrono = "0.4"
+chrono = { workspace = true }
 
-# Logging
-log = "0.4"
+# Logging and tracing
+tracing = "0.1"
+
+# Optional SQL backend support (SQLite + PostgreSQL)
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "migrate", "chrono"], optional = true }
+
+# Optional DynamoDB backend support
+aws-sdk-dynamodb = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
 
 [dev-dependencies]
 # Testing
 tokio-test = "0.4"
 env_logger = "0.11"
+tempfile = "3.10"
 
 [features]
-default = []
-sql-backend = ["plexspaces-keyvalue/sql-backend"]
+default = ["sql-backend"]
+sql-backend = ["sqlx"]
+ddb-backend = ["aws-sdk-dynamodb", "aws-config"]
+all-backends = ["sql-backend", "ddb-backend"]
+
+[lib]
+doctest = false

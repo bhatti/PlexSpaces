@@ -44,8 +44,7 @@ use std::error::Error;
 /// All operations MUST filter by tenant_id and namespace to prevent data leakage between tenants.
 ///
 /// ## Backend Support
-/// - InMemory: For testing
-/// - SQL: PostgreSQL/SQLite for persistence (RECOMMENDED)
+/// - SQL: PostgreSQL/SQLite for persistence (use `:memory:` for in-memory testing)
 /// - DynamoDB: AWS DynamoDB for distributed persistence
 #[async_trait]
 pub trait SchedulingStateStore: Send + Sync {
@@ -110,9 +109,6 @@ pub trait SchedulingStateStore: Send + Sync {
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 pub mod sql;
-
-#[cfg(feature = "memory-backend")]
-pub mod memory;
 
 #[cfg(feature = "ddb-backend")]
 pub mod ddb;

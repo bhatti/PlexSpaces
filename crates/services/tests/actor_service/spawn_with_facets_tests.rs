@@ -24,16 +24,15 @@ async fn create_test_service_locator_with_facets() -> Arc<dyn ServiceLocator> {
     use plexspaces_core::{FacetManager, FacetManagerServiceWrapper, FacetRegistryServiceWrapper, VirtualActorManager, ActorRegistry};
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_facet::FacetRegistry;
-    use plexspaces_object_registry::ObjectRegistry;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     
-    // Create object registry adapter
-    let object_registry_impl = Arc::new(ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    // Create object registry adapter (using SQLite :memory:)
+    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
     
     // Create an adapter struct inline
     struct ObjectRegistryAdapter {
-        inner: Arc<ObjectRegistry>,
+        inner: Arc<ObjectRegistryImpl>,
     }
     
     #[async_trait::async_trait]
@@ -135,10 +134,9 @@ async fn create_test_service_locator_with_facets() -> Arc<dyn ServiceLocator> {
         fn metadata(&self) -> plexspaces_facet::FacetMetadata {
             plexspaces_facet::FacetMetadata {
                 facet_type: "virtual_actor".to_string(),
-                description: "Makes actor virtual".to_string(),
-                category: "virtual_actor".to_string(),
-                config_options: vec![],
-                dependencies: vec![],
+                priority: 100,
+                attached_at: std::time::Instant::now(),
+                config: serde_json::Value::Null,
             }
         }
     }

@@ -717,12 +717,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         controller
@@ -748,12 +748,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         controller.load(app1, config.clone()).await.unwrap();
@@ -784,12 +784,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         controller.load(Box::new(app), config).await.unwrap();
@@ -834,12 +834,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         controller.load(Box::new(app), config).await.unwrap();
@@ -906,12 +906,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "slow-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 1,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         controller.load(app, config).await.unwrap();
@@ -942,12 +942,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         controller.load(app, config).await.unwrap();
@@ -973,23 +973,23 @@ mod tests {
         let config1 = ApplicationSpec {
             name: "app1".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "app1.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         let config2 = ApplicationSpec {
             name: "app2".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "app2.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         controller.load(app1, config1).await.unwrap();
@@ -1012,12 +1012,12 @@ mod tests {
         let config = ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            config_path: "test.toml".to_string(),
             enabled: true,
             auto_start: true,
-            shutdown_timeout_seconds: 30,
+            shutdown_timeout: None,
             shutdown_strategy: 0,
             dependencies: vec![],
+            ..Default::default()
         };
 
         controller.load(app, config).await.unwrap();

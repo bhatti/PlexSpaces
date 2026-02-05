@@ -204,9 +204,13 @@ impl SpecApplication {
             
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
             // Use ActorFactory::spawn_actor() which supports facets directly.
-            // No request here: tenant/namespace come from auth, not config
+            // Tenant/namespace: use explicit namespace from ApplicationSpec.
             use plexspaces_core::RequestContext;
-            let ctx = RequestContext::new_without_auth(String::new(), self.spec.name.clone());
+            // Tenant comes from auth, not config
+            // Namespace: must be set explicitly in ApplicationSpec during deployment
+            let tenant_id = String::new();
+            let namespace = self.spec.namespace.clone();
+            let ctx = RequestContext::new_without_auth(tenant_id, namespace);
             
             // Get ActorFactory from ApplicationNode (avoids circular dependency - application can't depend on services)
             let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = node.actor_factory().await
@@ -966,6 +970,7 @@ mod tests {
     fn create_test_spec_with_supervisor() -> ApplicationSpec {
         ApplicationSpec {
             name: "test-app".to_string(),
+            namespace: "test".to_string(),
             version: "0.1.0".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeActive as i32,
@@ -989,7 +994,8 @@ mod tests {
                             nanos: 0,
                         }),
                         supervisor: None,
-                        facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                        facets: vec![],
+                        behavior_kind: None,
                     },
                     ChildSpec {
                         id: "worker2".to_string(),
@@ -1001,10 +1007,16 @@ mod tests {
                             nanos: 0,
                         }),
                         supervisor: None,
-                        facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                        facets: vec![],
+                        behavior_kind: None,
                     },
                 ],
             }),
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProtoDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: 0, // Default graceful
+            metadata: None,
         }
     }
 
@@ -1012,12 +1024,18 @@ mod tests {
     fn create_test_spec_no_supervisor() -> ApplicationSpec {
         ApplicationSpec {
             name: "test-app".to_string(),
+            namespace: "test".to_string(),
             version: "0.1.0".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeLibrary as i32,
             dependencies: vec![],
             env: std::collections::HashMap::new(),
             supervisor: None,
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: Some(ProtoDuration { seconds: 60, nanos: 0 }),
+            shutdown_strategy: 0,
+            metadata: None,
         }
     }
 

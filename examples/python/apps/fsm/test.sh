@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/fsm_actor.wasm"
-HTTP_PORT="${1:-8091}"
+HTTP_PORT="${1:-8092}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -87,7 +87,8 @@ send_op() {
     local msg_type="$2"
     local payload="$3"
     
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/internal/system/fsm" \
+    # Don't hardcode tenant_id - use path format /api/v1/actors/{namespace}/{actor_type}
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/fsm" \
         -H "Content-Type: application/json" \
         -H "X-Message-Type: $msg_type" \
         -d "$payload" 2>/dev/null) || true

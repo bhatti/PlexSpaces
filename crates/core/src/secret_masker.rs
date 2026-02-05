@@ -173,7 +173,7 @@ impl SecretMasker {
 /// - `runtime.security.api_keys[*].key_hash` (already hashed, but mask anyway)
 /// - `runtime.security.jwt.secret`
 /// - `runtime.security.service_identity.private_key`
-/// - `runtime.shared_database.connection_string` (password portion)
+/// - `runtime.db.connection_string` (password portion)
 ///
 /// ## Arguments
 /// * `spec` - The ReleaseSpec to mask
@@ -225,9 +225,9 @@ pub fn mask_release_spec(spec: plexspaces_proto::node::v1::ReleaseSpec) -> plexs
             }
         }
         
-        // Mask database passwords in shared_database config
-        if let Some(ref mut shared_db) = runtime.shared_database {
-            mask_database_url(&mut shared_db.connection_string);
+        // Mask database passwords in db config
+        if let Some(ref mut db_config) = runtime.db {
+            mask_database_url(&mut db_config.connection_string);
         }
     }
     

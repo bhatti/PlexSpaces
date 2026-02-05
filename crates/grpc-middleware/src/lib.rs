@@ -105,6 +105,7 @@ pub mod auth;
 pub mod cert_gen;
 pub mod chain;
 pub mod compression;
+pub mod jwt;
 pub mod metrics;
 pub mod observability;
 pub mod rate_limit;
@@ -113,6 +114,7 @@ pub mod security_validation;
 pub mod tracing_interceptor;
 
 pub use auth::AuthInterceptor;
+pub use jwt::{JwtClaims, validate_bearer_token, validate_jwt_token, resolve_tenant_id, AUTH_REQUIRED_HINT};
 pub use cert_gen::{CertificateGenerator, CertificatePaths, CertGenError};
 pub use chain::{Interceptor, InterceptorChain, InterceptorError};
 pub use compression::CompressionInterceptor;

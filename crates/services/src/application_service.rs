@@ -34,6 +34,7 @@
 //! Uses ServiceLocator for dependency injection instead of direct Node references.
 //! This enables clean separation and avoids circular dependencies.
 
+use plexspaces_application::ApplicationError as AppError;
 use plexspaces_core::{ServiceLocator, ApplicationManager as ApplicationManagerTrait, object_registry_helpers};
 use plexspaces_proto::v1::application::ApplicationState as CoreApplicationState;
 use plexspaces_proto::application::v1::{
@@ -60,10 +61,15 @@ use tonic::{Request, Response, Status};
 /// ## Arguments
 /// * `name` - Application/actor name
 /// * `version` - Application version
+/// * `behavior_kind` - Optional OTP-style behavior for logging (e.g. "GenEvent" for event-handler actors)
 ///
 /// ## Returns
 /// ApplicationSpec with default supervisor tree
-pub fn create_default_application_spec(name: &str, version: &str) -> ApplicationSpec {
+pub fn create_default_application_spec(
+    name: &str,
+    version: &str,
+    behavior_kind: Option<&str>,
+) -> ApplicationSpec {
     let default_supervisor = SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
         max_restarts: 5,
@@ -77,12 +83,14 @@ pub fn create_default_application_spec(name: &str, version: &str) -> Application
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
+                behavior_kind: behavior_kind.map(String::from),
             }
         ],
     };
     
     ApplicationSpec {
         name: name.to_string(),
+        namespace: String::new(), // Set by deployment code
         version: version.to_string(),
         description: format!("WASM application: {}", name),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -166,6 +174,8 @@ impl ApplicationService for ApplicationServiceImpl {
         tracing::info!(
             application_id = %req.application_id,
             application_name = %req.name,
+            tenant_id = %tenant_id,
+            namespace = %namespace,
             version = %req.version,
             has_wasm_module = req.wasm_module.is_some(),
             has_config = req.config.is_some(),
@@ -197,7 +207,15 @@ impl ApplicationService for ApplicationServiceImpl {
                     &wasm_module.module_bytes,
                 )
                 .await
-                .map_err(|e| Status::internal(format!("Failed to deploy WASM module: {}", e)))?;
+                .map_err(|e| {
+                    tracing::error!(
+                        tenant_id = %tenant_id,
+                        application_id = %req.application_id,
+                        error = %e,
+                        "Deploy failed: WASM module deployment"
+                    );
+                    Status::internal(format!("Failed to deploy WASM module: {}", e))
+                })?;
 
             // Create WASM application
             // Use application_id as the app name for consistent lookup in undeploy
@@ -215,7 +233,7 @@ impl ApplicationService for ApplicationServiceImpl {
                     application_name = %req.name,
                     "No ApplicationSpec provided - creating default with supervisor tree"
                 );
-                create_default_application_spec(&req.name, &req.version)
+                create_default_application_spec(&req.name, &req.version, None)
             });
             
             // If config was provided but has no supervisor, add default supervisor
@@ -226,14 +244,23 @@ impl ApplicationService for ApplicationServiceImpl {
                     application_name = %req.name,
                     "ApplicationSpec has no supervisor - adding default supervisor tree"
                 );
-                let default_spec = create_default_application_spec(&req.name, &req.version);
+                let default_spec = create_default_application_spec(&req.name, &req.version, None);
                 merged_config.supervisor = default_spec.supervisor;
             }
             
-            // Tenant comes from auth, not config - use provided value or empty string
-            // Namespace: must come from user request explicitly; never fall back to config.
+            // Tenant comes from auth, not config
             let final_tenant_id = tenant_id.clone();
-            let final_namespace = namespace.clone(); // Must come from request; do not substitute with config
+            
+            // Set namespace in ApplicationSpec for actor registration
+            // Priority: 1) spec.namespace from config, 2) namespace from request, 3) application_id
+            if merged_config.namespace.is_empty() {
+                merged_config.namespace = if !namespace.is_empty() {
+                    namespace.clone()
+                } else {
+                    req.application_id.clone()
+                };
+            }
+            let final_namespace = merged_config.namespace.clone();
             
             // Clone values for observability logging before moving them
             let module_hash_for_log = module_hash.clone();
@@ -313,6 +340,8 @@ impl ApplicationService for ApplicationServiceImpl {
                 application_name = %app_name,
                 "Starting WASM application"
             );
+            // No rollback on failure: we return the first error so the client always sees the
+            // original deploy/start failure, not any subsequent cleanup error.
             application_manager
                 .start(&app_name)
                 .await
@@ -449,8 +478,19 @@ impl ApplicationService for ApplicationServiceImpl {
         &self,
         request: Request<UndeployApplicationRequest>,
     ) -> Result<Response<UndeployApplicationResponse>, Status> {
+        // Extract RequestContext for observability (tenant_id in logs)
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let tenant_id = ctx.tenant_id().to_string();
+
         let req = request.into_inner();
-        
+
         // OBSERVABILITY: Record metrics and log undeployment attempt
         metrics::counter!("plexspaces_node_application_undeploy_attempts_total",
             "application_id" => req.application_id.clone()
@@ -458,6 +498,7 @@ impl ApplicationService for ApplicationServiceImpl {
         let timeout_seconds = req.timeout.as_ref().map(|d| d.seconds).unwrap_or(30);
         tracing::info!(
             application_id = %req.application_id,
+            tenant_id = %tenant_id,
             timeout_seconds = timeout_seconds,
             "Undeploying application"
         );
@@ -468,19 +509,59 @@ impl ApplicationService for ApplicationServiceImpl {
 
         // Get ApplicationManager from ServiceLocator
         let application_manager = self.get_application_manager().await?;
-        
+
         // Stop application gracefully using ApplicationManager directly
         let timeout = Duration::from_secs(req.timeout.as_ref().map(|d| d.seconds as u64).unwrap_or(30));
         application_manager
             .stop(&req.application_id, timeout)
             .await
-            .map_err(|e| Status::internal(format!("Failed to stop application: {}", e)))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                let is_not_found = matches!(e, AppError::NotFound(_))
+                    || msg.to_lowercase().contains("not found");
+                if is_not_found {
+                    tracing::info!(
+                        application_id = %req.application_id,
+                        "Undeploy: application not found (returning 404)"
+                    );
+                    Status::not_found(msg)
+                } else {
+                    tracing::error!(
+                        tenant_id = %tenant_id,
+                        application_id = %req.application_id,
+                        error = %e,
+                        "Undeploy failed: Failed to stop application"
+                    );
+                    Status::internal(format!("Failed to stop application: {}", e))
+                }
+            })?;
 
-        // Unregister application after successful stop
-        application_manager
+        // Unregister application after successful stop (returns module hash for WASM apps)
+        let module_hash = application_manager
             .unregister(&req.application_id)
             .await
-            .map_err(|e| Status::internal(format!("Failed to unregister application: {}", e)))?;
+            .map_err(|e| {
+                tracing::error!(
+                    tenant_id = %tenant_id,
+                    application_id = %req.application_id,
+                    error = %e,
+                    "Undeploy failed: Failed to unregister application"
+                );
+                Status::internal(format!("Failed to unregister application: {}", e))
+            })?;
+
+        // Evict WASM module from cache to avoid memory leaks
+        if let Some(ref hash) = module_hash {
+            if let Ok(wasm_runtime) = self.get_wasm_runtime().await {
+                if wasm_runtime.evict_module(hash).await {
+                    tracing::debug!(
+                        application_id = %req.application_id,
+                        module_hash = %hash,
+                        "WASM module evicted from cache on undeploy"
+                    );
+                }
+            }
+        }
 
         // OBSERVABILITY: Log successful undeployment
         metrics::counter!("plexspaces_node_application_undeploy_success_total",

@@ -31,13 +31,14 @@ use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
     ChildSpec, ChildType, DeployApplicationRequest, GetApplicationStatusRequest,
-    ListApplicationsRequest, RestartPolicy, SupervisorSpec, SupervisionStrategy,
+    ListApplicationsRequest, RestartPolicy, ShutdownStrategy, SupervisorSpec, SupervisionStrategy,
 };
 use plexspaces_proto::common::v1::Metadata;
 use plexspaces_proto::wasm::v1::WasmModule;
 use prost_types::Duration as ProstDuration;
 use std::collections::HashMap;
 use std::sync::Arc;
+use super::test_helpers::app_request_with_tenant;
 use tokio::time::{sleep, Duration};
 use tonic::Request;
 
@@ -60,19 +61,12 @@ async fn create_test_node() -> Arc<Node> {
 }
 
 async fn create_test_node_with_service() -> (Arc<Node>, String) {
+    // build() calls initialize_services() which registers WASM runtime; set_node_context so start() can spawn actors
     let node = create_test_node().await;
-    let node_clone = node.clone();
-    
-    // Start node in background
-    let _handle = tokio::spawn(async move {
-        let _ = node_clone.start().await;
-    });
-
-    // Wait for node to start and get actual listen address
-    sleep(Duration::from_millis(500)).await;
-    
-    // For now, we'll test directly via ApplicationServiceImpl instead of gRPC
-    // This avoids port binding issues in tests
+    node.application_manager()
+        .set_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
+        .await;
+    // For now, we test directly via ApplicationServiceImpl instead of gRPC (avoids port binding issues)
     (node, String::new())
 }
 
@@ -116,12 +110,18 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
 
     let app_spec = ApplicationSpec {
         name: "test-app".to_string(),
+        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "Test application with supervisor tree".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
         dependencies: vec![],
         env: HashMap::new(),
         supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        metadata: None,
     };
 
     let wasm_module = WasmModule {
@@ -150,13 +150,6 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
 #[tokio::test]
 async fn test_deploy_wasm_application_success() {
     let (node, _) = create_test_node_with_service().await;
-    
-    // Start node to initialize WASM runtime
-    let node_clone = node.clone();
-    tokio::spawn(async move {
-        let _ = node_clone.start().await;
-    });
-    sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService - gets ApplicationManager from ServiceLocator
     use plexspaces_services::application_service::ApplicationServiceImpl;
@@ -183,12 +176,11 @@ async fn test_deploy_wasm_application_success() {
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: None,
-        release_config: None,
         initial_state: vec![],
     };
 
     let response = service
-        .deploy_application(Request::new(request))
+        .deploy_application(app_request_with_tenant(request))
         .await
         .expect("Deploy application should succeed");
 
@@ -203,13 +195,6 @@ async fn test_deploy_wasm_application_success() {
 #[tokio::test]
 async fn test_deploy_wasm_application_invalid_module() {
     let (node, _) = create_test_node_with_service().await;
-    
-    // Start node to initialize WASM runtime
-    let node_clone = node.clone();
-    tokio::spawn(async move {
-        let _ = node_clone.start().await;
-    });
-    sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService - gets ApplicationManager from ServiceLocator
     use plexspaces_services::application_service::ApplicationServiceImpl;
@@ -236,11 +221,10 @@ async fn test_deploy_wasm_application_invalid_module() {
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: None,
-        release_config: None,
         initial_state: vec![],
     };
 
-    let response = service.deploy_application(Request::new(request)).await;
+    let response = service.deploy_application(app_request_with_tenant(request)).await;
 
     // Should fail with error
     assert!(response.is_err(), "Deployment should fail with invalid WASM");
@@ -255,13 +239,6 @@ async fn test_deploy_wasm_application_invalid_module() {
 #[tokio::test]
 async fn test_deploy_wasm_application_missing_fields() {
     let (node, _) = create_test_node_with_service().await;
-    
-    // Start node to initialize WASM runtime
-    let node_clone = node.clone();
-    tokio::spawn(async move {
-        let _ = node_clone.start().await;
-    });
-    sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService - gets ApplicationManager from ServiceLocator
     use plexspaces_services::application_service::ApplicationServiceImpl;
@@ -285,11 +262,10 @@ async fn test_deploy_wasm_application_missing_fields() {
             size_bytes: SIMPLE_WASM.len() as u64,
         }),
         config: None,
-        release_config: None,
         initial_state: vec![],
     };
 
-    let response = service.deploy_application(Request::new(request)).await;
+    let response = service.deploy_application(app_request_with_tenant(request)).await;
     assert!(response.is_err(), "Should fail with missing application_id");
     let status = response.unwrap_err();
     assert_eq!(
@@ -303,13 +279,6 @@ async fn test_deploy_wasm_application_missing_fields() {
 #[tokio::test]
 async fn test_get_wasm_application_status() {
     let (node, _) = create_test_node_with_service().await;
-    
-    // Start node to initialize WASM runtime
-    let node_clone = node.clone();
-    tokio::spawn(async move {
-        let _ = node_clone.start().await;
-    });
-    sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService - use same instance for deploy and status
     use plexspaces_services::application_service::ApplicationServiceImpl;
@@ -335,24 +304,21 @@ async fn test_get_wasm_application_status() {
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: None,
-        release_config: None,
         initial_state: vec![],
     };
 
     service
-        .deploy_application(Request::new(deploy_request))
+        .deploy_application(app_request_with_tenant(deploy_request))
         .await
         .expect("Deploy should succeed");
 
     // Wait a bit for application to start
     sleep(Duration::from_millis(200)).await;
 
-    // Get application status - ApplicationManager stores by name, not application_id
-    // For now, we use the application name for lookup
-    // TODO: Enhance ApplicationManager to support multiple instances per application name
+    // Get application status - ApplicationManager stores by application_id
     let status_service = ApplicationServiceImpl::new(node.service_locator().clone());
     let status_request = GetApplicationStatusRequest {
-        application_id: "test-app".to_string(), // Use name for lookup
+        application_id: "test-app-003".to_string(),
     };
 
     let response = status_service
@@ -367,19 +333,12 @@ async fn test_get_wasm_application_status() {
         status_response.error
     );
     let app = status_response.application.unwrap();
-    assert_eq!(app.name, "test-app");
+    assert_eq!(app.application_id, "test-app-003");
 }
 
 #[tokio::test]
 async fn test_list_wasm_applications() {
     let (node, _) = create_test_node_with_service().await;
-    
-    // Start node to initialize WASM runtime
-    let node_clone = node.clone();
-    tokio::spawn(async move {
-        let _ = node_clone.start().await;
-    });
-    sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService
     let application_manager = node.application_manager();
@@ -406,12 +365,11 @@ async fn test_list_wasm_applications() {
             version: "1.0.0".to_string(),
             wasm_module: Some(wasm_module),
             config: None,
-            release_config: None,
             initial_state: vec![],
         };
 
         service
-            .deploy_application(Request::new(deploy_request))
+            .deploy_application(app_request_with_tenant(deploy_request))
             .await
             .expect("Deploy should succeed");
     }
@@ -439,13 +397,6 @@ async fn test_list_wasm_applications() {
 #[tokio::test]
 async fn test_get_nonexistent_wasm_application_status() {
     let (node, _) = create_test_node_with_service().await;
-    
-    // Start node to initialize WASM runtime
-    let node_clone = node.clone();
-    tokio::spawn(async move {
-        let _ = node_clone.start().await;
-    });
-    sleep(Duration::from_millis(500)).await;
 
     // Create ApplicationService - gets ApplicationManager from ServiceLocator
     use plexspaces_services::application_service::ApplicationServiceImpl;
@@ -490,12 +441,11 @@ async fn test_deploy_wasm_application_with_supervisor_tree() {
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: Some(app_spec),
-        release_config: None,
         initial_state: vec![],
     };
 
     // Deploy
-    let response = service.deploy_application(Request::new(request)).await;
+    let response = service.deploy_application(app_request_with_tenant(request)).await;
     assert!(response.is_ok(), "Deployment should succeed: {:?}", response.err());
     let res = response.unwrap().into_inner();
     assert!(res.success);
@@ -504,9 +454,9 @@ async fn test_deploy_wasm_application_with_supervisor_tree() {
     // Wait for application to start and actors to spawn
     sleep(Duration::from_millis(500)).await;
 
-    // Verify application is running
+    // Verify application is running (ApplicationManager stores by application_id)
     let app_manager = node.application_manager();
-    let app_state = app_manager.get_state("test-app").await;
+    let app_state = app_manager.get_state("supervisor-app-001").await;
     assert!(app_state.is_some());
     assert_eq!(
         app_state.unwrap(),
@@ -530,27 +480,25 @@ async fn test_undeploy_wasm_application_with_supervisor_tree() {
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: Some(app_spec),
-        release_config: None,
         initial_state: vec![],
     };
 
     service
-        .deploy_application(Request::new(deploy_request))
+        .deploy_application(app_request_with_tenant(deploy_request))
         .await
         .expect("Deploy should succeed");
 
     // Wait for application to start
     sleep(Duration::from_millis(500)).await;
 
-    // Undeploy application (should gracefully shutdown all actors)
-    // Note: ApplicationManager stores by name, not application_id
+    // Undeploy application (ApplicationManager stores by application_id)
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
-        application_id: "shutdown-app".to_string(), // Use name, not application_id
-        timeout: None, // Use default timeout
+        application_id: "shutdown-app-001".to_string(),
+        timeout: None,
     };
 
     let response = service
-        .undeploy_application(Request::new(undeploy_request))
+        .undeploy_application(app_request_with_tenant(undeploy_request))
         .await;
     assert!(response.is_ok(), "Undeploy should succeed: {:?}", response.err());
     let res = response.unwrap().into_inner();
@@ -559,14 +507,83 @@ async fn test_undeploy_wasm_application_with_supervisor_tree() {
     // Wait for shutdown to complete
     sleep(Duration::from_millis(500)).await;
 
-    // Verify application is stopped
+    // Verify application is unregistered (undeploy stops then unregisters)
     let app_manager = node.application_manager();
-    let app_state: Option<plexspaces_proto::v1::application::ApplicationState> = app_manager.get_state("shutdown-app").await;
-    assert!(app_state.is_some());
+    let app_state: Option<plexspaces_proto::v1::application::ApplicationState> = app_manager.get_state("shutdown-app-001").await;
+    assert!(app_state.is_none(), "Application should be unregistered after undeploy");
+}
+
+/// Integration test: WASM undeploy cleans up instances and evicts module from cache.
+///
+/// Verifies that on undeploy:
+/// 1. Application is stopped and unregistered (get_state returns None, not in list).
+/// 2. WASM instances are dropped (Drop decrements plexspaces_wasm_active_instances).
+/// 3. Compiled module is evicted from runtime cache (no memory leak).
+///
+/// When a WASM actor handle() fails, the runtime logs SIMPLE_ACTOR_HANDLE_FAILED_LOG_MESSAGE
+/// (error_first_line only; full backtrace only at DEBUG). Instance cleanup (Drop) still runs
+/// after such errors and on undeploy.
+#[tokio::test]
+async fn test_wasm_undeploy_cleanup_instances_and_module() {
+    // Test checks for the canonical "Simple actor handle() call failed" message: integration
+    // tests and log parsing can rely on this constant.
     assert_eq!(
-        app_state.unwrap(),
-        plexspaces_proto::v1::application::ApplicationState::ApplicationStateStopped
+        plexspaces_wasm_runtime::SIMPLE_ACTOR_HANDLE_FAILED_LOG_MESSAGE,
+        "Simple actor handle() call failed"
     );
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone());
+    let app_name = "cleanup-test-app";
+
+    // Deploy WASM application (ApplicationManager stores by application_id)
+    let app_id = format!("{}-001", app_name);
+    let (wasm_module, app_spec) = create_wasm_module_with_supervisor_spec();
+    let wasm_bytes = wasm_module.module_bytes.clone();
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.clone(),
+        name: app_name.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+
+    service
+        .deploy_application(app_request_with_tenant(deploy_request))
+        .await
+        .expect("Deploy should succeed");
+
+    sleep(Duration::from_millis(500)).await;
+
+    // Compute module hash (same as deployment service) to verify eviction later
+    let module_hash = plexspaces_wasm_runtime::deployment_service::WasmDeploymentService::compute_hash(&wasm_bytes);
+
+    // Verify module is in cache after deploy
+    let wasm_runtime = node.service_locator().get_wasm_runtime().await.expect("WASM runtime");
+    let cached_before = wasm_runtime.get_module(&module_hash).await;
+    assert!(cached_before.is_some(), "Module should be in cache after deploy");
+
+    // Undeploy (use application_id = app_id, same as deploy)
+    let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        application_id: app_id.clone(),
+        timeout: None,
+    };
+    let response = service.undeploy_application(app_request_with_tenant(undeploy_request)).await;
+    assert!(response.is_ok(), "Undeploy should succeed: {:?}", response.err());
+    assert!(response.unwrap().into_inner().success);
+
+    sleep(Duration::from_millis(500)).await;
+
+    // 1. Application must be unregistered (not in list, get_state None)
+    let app_manager = node.application_manager();
+    let app_state = app_manager.get_state(&app_id).await;
+    assert!(app_state.is_none(), "Application should be unregistered after undeploy");
+    let list = app_manager.list_applications().await;
+    assert!(!list.contains(&app_id), "Application should not be in list after undeploy");
+
+    // 2. Module must be evicted from cache (no leak)
+    let cached_after = wasm_runtime.get_module(&module_hash).await;
+    assert!(cached_after.is_none(), "Module should be evicted from cache after undeploy (cleanup)");
 }
 
 // ============================================================================
@@ -625,12 +642,18 @@ fn create_wasm_module_from_fixture_with_supervisor(
     
     let app_spec = ApplicationSpec {
         name: actor_name.to_string(),
+        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: format!("WASM application with supervisor: {}", actor_name),
         r#type: ApplicationType::ApplicationTypeActive.into(),
         dependencies: vec![],
         env: HashMap::new(),
         supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        metadata: None,
     };
     
     (wasm_module, app_spec)
@@ -654,12 +677,11 @@ async fn test_deploy_real_wasm_with_supervisor_tree() {
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: Some(app_spec),
-        release_config: None,
         initial_state: vec![],
     };
 
     // Deploy should succeed
-    let response = service.deploy_application(Request::new(deploy_request)).await;
+    let response = service.deploy_application(app_request_with_tenant(deploy_request)).await;
     assert!(response.is_ok(), "Deploy should succeed: {:?}", response.err());
     let res = response.unwrap().into_inner();
     assert!(res.success, "Deployment should be successful");
@@ -667,9 +689,9 @@ async fn test_deploy_real_wasm_with_supervisor_tree() {
     // Wait for application to start
     sleep(Duration::from_millis(1000)).await;
 
-    // Verify application is running with supervisor
+    // Verify application is running (ApplicationManager stores by application_id)
     let app_manager = node.application_manager();
-    let app_state = app_manager.get_state("calculator").await;
+    let app_state = app_manager.get_state("calculator-supervisor-test").await;
     assert!(app_state.is_some(), "Application should be registered");
     assert_eq!(
         app_state.unwrap(),
@@ -678,10 +700,10 @@ async fn test_deploy_real_wasm_with_supervisor_tree() {
 
     // Cleanup
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
-        application_id: "calculator".to_string(),
+        application_id: "calculator-supervisor-test".to_string(),
         timeout: None,
     };
-    let _ = service.undeploy_application(Request::new(undeploy_request)).await;
+    let _ = service.undeploy_application(app_request_with_tenant(undeploy_request)).await;
 }
 
 /// Test: Supervisor properly adds WASM actors as children
@@ -729,12 +751,18 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
     
     let app_spec = ApplicationSpec {
         name: "multi-worker-app".to_string(),
+        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "App with multiple supervised workers".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
         dependencies: vec![],
         env: HashMap::new(),
         supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        metadata: None,
     };
 
     let deploy_request = DeployApplicationRequest {
@@ -743,11 +771,10 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: Some(app_spec),
-        release_config: None,
         initial_state: vec![],
     };
 
-    let response = service.deploy_application(Request::new(deploy_request)).await;
+    let response = service.deploy_application(app_request_with_tenant(deploy_request)).await;
     assert!(response.is_ok(), "Deploy should succeed: {:?}", response.err());
     
     // Wait for actors to spawn
@@ -763,7 +790,7 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
         application_id: "multi-worker-app".to_string(),
         timeout: None,
     };
-    let _ = service.undeploy_application(Request::new(undeploy_request)).await;
+    let _ = service.undeploy_application(app_request_with_tenant(undeploy_request)).await;
 }
 
 /// Test: Verify supervisor is created with correct strategy
@@ -783,11 +810,10 @@ async fn test_supervisor_created_with_correct_strategy() {
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: Some(app_spec),
-        release_config: None,
         initial_state: vec![],
     };
 
-    let response = service.deploy_application(Request::new(deploy_request)).await;
+    let response = service.deploy_application(app_request_with_tenant(deploy_request)).await;
     assert!(response.is_ok(), "Deploy should succeed");
     
     sleep(Duration::from_millis(500)).await;
@@ -805,6 +831,6 @@ async fn test_supervisor_created_with_correct_strategy() {
         application_id: "strategy-test-app".to_string(),
         timeout: None,
     };
-    let _ = service.undeploy_application(Request::new(undeploy_request)).await;
+    let _ = service.undeploy_application(app_request_with_tenant(undeploy_request)).await;
 }
 

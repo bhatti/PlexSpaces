@@ -37,23 +37,24 @@
 //!
 //! ## Backend Support
 //!
-//! - **InMemory**: HashMap-based (always available, for testing)
-//! - **SQLite**: Persistent, single-node (feature: `sqlite-backend`)
+//! - **SQLite**: Persistent, single-node (feature: `sqlite-backend`) - use `:memory:` for in-memory
 //! - **PostgreSQL**: Distributed, multi-node (feature: `postgres-backend`)
 //! - **Redis**: Distributed with native TTL (feature: `redis-backend`)
+//! - **DynamoDB**: AWS managed (feature: `ddb-backend`)
 //!
 //! ## Examples
 //!
-//! ### Basic Usage
+//! ### Basic Usage with SQLite :memory:
 //! ```rust,no_run
-//! use plexspaces_locks::{LockManager, memory::MemoryLockManager};
-//! use plexspaces_proto::locks::prv::{AcquireLockOptions, RenewLockOptions, ReleaseLockOptions};
+//! use plexspaces_common::RequestContext;
+//! use plexspaces_locks::{LockManager, sql::SqliteLockManager, AcquireLockOptions, RenewLockOptions, ReleaseLockOptions};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let manager = MemoryLockManager::new();
+//! let ctx = RequestContext::new_without_auth("tenant".to_string(), "namespace".to_string());
+//! let manager = SqliteLockManager::new(":memory:").await?;
 //!
 //! // Acquire lock
-//! let lock = manager.acquire_lock(AcquireLockOptions {
+//! let lock = manager.acquire_lock(&ctx, AcquireLockOptions {
 //!     lock_key: "scheduler:background:lease".to_string(),
 //!     holder_id: "node-1".to_string(),
 //!     lease_duration_secs: 30,
@@ -63,7 +64,7 @@
 //! }).await?;
 //!
 //! // Renew lock (heartbeat)
-//! let renewed = manager.renew_lock(RenewLockOptions {
+//! let renewed = manager.renew_lock(&ctx, RenewLockOptions {
 //!     lock_key: "scheduler:background:lease".to_string(),
 //!     holder_id: "node-1".to_string(),
 //!     version: lock.version.clone(),
@@ -72,7 +73,7 @@
 //! }).await?;
 //!
 //! // Release lock
-//! manager.release_lock(ReleaseLockOptions {
+//! manager.release_lock(&ctx, ReleaseLockOptions {
 //!     lock_key: "scheduler:background:lease".to_string(),
 //!     holder_id: "node-1".to_string(),
 //!     version: renewed.version,
@@ -84,9 +85,6 @@
 
 pub mod error;
 pub mod manager;
-
-#[cfg(feature = "memory-backend")]
-pub mod memory;
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 pub mod sql;

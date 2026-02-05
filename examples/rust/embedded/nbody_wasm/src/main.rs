@@ -115,7 +115,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     version_number: 1,
                 }),
                 config: None,
-                release_config: None,
                 initial_state: Vec::new(),
             };
 

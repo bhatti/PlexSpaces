@@ -60,7 +60,7 @@ use aws_sdk_sqs::{
 use futures::stream::BoxStream;
 use plexspaces_common::AWSConfig;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelStats,
+    channel_config, ChannelProvider, ChannelConfig, ChannelStats,
 };
 use plexspaces_proto::common::v1::Message as ChannelMessage;
 use std::collections::HashMap;
@@ -83,7 +83,7 @@ use base64::{engine::general_purpose, Engine as _};
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ChannelConfig {
 ///     name: "my-channel".to_string(),
-///     backend: ChannelBackend::ChannelBackendSqs as i32,
+///     provider: ChannelProvider::ChannelProviderSqs as i32,
 ///     backend_config: Some(channel_config::BackendConfig::SqsConfig(
 ///         channel_config::SqsConfig {
 ///             region: "us-east-1".to_string(),
@@ -908,7 +908,7 @@ impl Channel for SQSChannel {
     async fn get_stats(&self) -> ChannelResult<ChannelStats> {
         Ok(ChannelStats {
             name: self.config.name.clone(),
-            backend: 6, // ChannelBackendSqs - TODO: use enum once proto regenerated
+            provider: 6, // ChannelProviderSqs - TODO: use enum once proto regenerated
             messages_sent: self.stats.messages_sent.load(Ordering::Relaxed),
             messages_received: self.stats.messages_received.load(Ordering::Relaxed),
             messages_pending: 0, // Would need to query queue attributes

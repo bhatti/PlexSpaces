@@ -47,6 +47,9 @@ pub mod blob_http_router;
 // JWT validation for HTTP gateway (tenant_id from claims when auth enabled)
 pub mod http_jwt;
 
+// HTTP gateway module (types, helpers, middleware for actor invocation via HTTP)
+pub mod http_gateway;
+
 // HTTP router for gRPC-Gateway routes (actor invocation, etc.)
 // TODO: Implement HTTP gateway for InvokeActor routes
 // pub mod http_router;

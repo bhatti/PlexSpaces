@@ -394,7 +394,7 @@ Linda-style coordination for decoupled communication:
 - **Subscriptions**: Event notifications on tuple changes
 - **Transactions**: Atomic tuple operations
 
-**Backends**: InMemory (testing), Redis (production), PostgreSQL (transactional)
+**Backends**: SQLite with `:memory:` (testing), Redis (production), PostgreSQL (transactional)
 
 See [Detailed Design - TupleSpace](detailed-design.md#tuplespace) for comprehensive documentation.
 
@@ -812,9 +812,9 @@ DELETE /api/v1/actors/{namespace}/{actor_type}
 
 ### HTTP Method Handling
 
-- **GET**: Query parameters → JSON payload → `ask()` pattern (request-reply)
-- **POST/PUT**: Request body → payload, headers → metadata → `tell()` pattern (fire-and-forget)
-- **DELETE**: Query parameters → JSON payload → `ask()` pattern (request-reply)
+- **GET**: Query parameters (including `msg_type` for handler name, e.g. count, readings) → JSON payload → `ask()` pattern (request-reply).
+- **POST/PUT/DELETE**: Request body or query params → `tell()` pattern (fire-and-forget) by default.
+- **Explicit request-reply**: Add query param **`invocation=call`** (e.g. `POST ...?invocation=call`). Valid **`invocation`** values (Erlang-style): **call**, **cast**, **info** only.
 
 ### Actor Discovery
 
@@ -868,7 +868,7 @@ graph TB
 3. **gRPC Request Construction**: Build `InvokeActorRequest` with:
    - Path parameters → `tenant_id`, `namespace`, `actor_type`
    - Query params or body → `payload` (JSON bytes)
-   - HTTP method → `message_type` ("call" for GET/DELETE, "cast" for POST/PUT)
+   - HTTP method and optional `invocation` (call/cast/info) → `message_type` ("call" for GET or invocation=call, "cast" for POST/PUT/DELETE by default)
 4. **Service Invocation**: Call `ActorServiceImpl::invoke_actor` directly (not via gRPC)
 5. **Response Conversion**: Convert `InvokeActorResponse` to HTTP/JSON:
    - `payload` (bytes) → JSON value (UTF-8 decode or base64 encode)
@@ -899,10 +899,9 @@ HTTP methods map to actor message patterns:
 
 | HTTP Method | Message Type | Pattern | Reply Expected |
 |------------|--------------|---------|----------------|
-| GET | `Call` | Ask | Yes |
-| DELETE | `Call` | Ask | Yes |
-| POST | `Cast` | Tell | No |
-| PUT | `Cast` | Tell | No |
+| GET | `Call` | Ask | Yes (request-reply) |
+| POST/PUT/DELETE | `Cast` | Tell | No (fire-and-forget) |
+| Any with `?invocation=call` | `Call` | Ask | Yes (request-reply) |
 
 **Behavior Routing**:
 - `GenServer::route_message` handles both `Call` and `Cast`
@@ -1029,6 +1028,30 @@ The `NodeService` gRPC service provides comprehensive node management operations
 | `SendHeartbeat` | Heartbeat with capacity info |
 
 **Security Feature**: The `GetReleaseSpec` RPC automatically masks all secrets (passwords, API keys, tokens) before returning the configuration via the `SecretMasker` utility.
+
+#### ObjectRegistry
+
+The `ObjectRegistry` provides unified service discovery for actors, services, nodes, workflows, and other distributed objects. It uses a dedicated repository backend with indexed columns for fast queries.
+
+**Storage Architecture**:
+- **Repository Pattern**: Dedicated `ObjectRegistryRepository` trait with multiple backend implementations
+- **Indexed Columns**: `object_type`, `node_id`, `health_status`, `last_heartbeat`, `object_category` for fast queries
+- **Blob Storage**: Full `ObjectRegistration` protobuf preserved in `registration_blob` column
+- **Multi-Backend**: SQLite with `:memory:` (tests), SQLite (embedded), PostgreSQL (production), DynamoDB (AWS)
+
+**Performance Characteristics**:
+- `heartbeat()` - O(1) single column UPDATE (no blob read/write)
+- `discover()` - O(log n + k) using indexed columns
+- `lookup()` - O(1) primary key lookup
+- `find_stale()` - Fast query using `last_heartbeat` index
+
+**Environment Variables**:
+- `PLEXSPACES_OBJECT_REGISTRY_BACKEND`: `memory`, `sqlite`, `postgres`, `dynamodb`
+- `PLEXSPACES_OBJECT_REGISTRY_SQLITE_PATH`: SQLite database path
+- `PLEXSPACES_OBJECT_REGISTRY_POSTGRES_URL`: PostgreSQL connection string
+- `PLEXSPACES_OBJECT_REGISTRY_DDB_TABLE`: DynamoDB table name
+
+See [Database Models and ER Diagram](detailed-design.md#database-models-and-er-diagram) for schema details.
 
 #### NodeRegistry
 

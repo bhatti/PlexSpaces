@@ -263,7 +263,7 @@ impl CapacityTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_keyvalue::InMemoryKVStore;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::object_registry::v1::ObjectRegistration;
 
     fn create_test_registration(
@@ -357,10 +357,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_node_capacity() {
         use plexspaces_core::RequestContext;
-        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
-        let registry: Arc<dyn ObjectRegistry> = registry_impl;
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
 
         // Register a node
         let mut metrics = HashMap::new();
@@ -383,10 +381,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_node_capacity_not_found() {
-        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
-        let registry: Arc<dyn ObjectRegistry> = registry_impl;
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let tracker = CapacityTracker::new(registry);
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
 
@@ -397,10 +393,8 @@ mod tests {
     #[tokio::test]
     async fn test_list_node_capacities() {
         use plexspaces_core::RequestContext;
-        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
-        let registry: Arc<dyn ObjectRegistry> = registry_impl;
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
 
         // Register two nodes
         let mut metrics1 = HashMap::new();
@@ -442,10 +436,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_node_capacities_filter_by_labels() {
-        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
-        let registry: Arc<dyn ObjectRegistry> = registry_impl;
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
 
         // Register two nodes with different labels
         let mut metrics1 = HashMap::new();
@@ -489,10 +481,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_node_capacities_filter_by_min_resources() {
-        let kv = Arc::new(InMemoryKVStore::new());
-        use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
-        let registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
-        let registry: Arc<dyn ObjectRegistry> = registry_impl;
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
 
         // Register two nodes with different capacities
         let mut metrics1 = HashMap::new();

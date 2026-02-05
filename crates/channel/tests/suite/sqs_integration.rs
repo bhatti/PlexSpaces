@@ -35,7 +35,7 @@
 mod tests {
     use plexspaces_channel::{Channel, SQSChannel};
     use plexspaces_proto::channel::v1::{
-        ChannelBackend, ChannelConfig, DeliveryGuarantee,
+        ChannelProvider, ChannelConfig, DeliveryGuarantee,
         OrderingGuarantee,
     };
     use plexspaces_proto::common::v1::Message;
@@ -89,7 +89,7 @@ mod tests {
 
         let config = ChannelConfig {
             name: channel_name.to_string(),
-            backend: 6, // ChannelBackend::ChannelBackendSqs - TODO: use enum once proto regenerated
+            provider: 6, // ChannelProvider::ChannelProviderSqs - TODO: use enum once proto regenerated
             capacity: 0, // Unbounded for SQS
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

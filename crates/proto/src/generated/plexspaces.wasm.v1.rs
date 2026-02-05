@@ -256,6 +256,20 @@ pub struct WasmConfig {
     /// Trade-off: Deployment time vs execution speed.
     #[prost(bool, tag="5")]
     pub enable_aot: bool,
+    /// Enable checkpoint/restore durability (load on init, save on terminate).
+    ///
+    /// Off by default for performance. When true, actor state is loaded from
+    /// journal on init and saved on terminate (Cloudflare Durable Objects pattern).
+    #[prost(bool, tag="6")]
+    pub durability_enabled: bool,
+    /// Use pre-instantiated instance pool (InstancePool) when spawning actors.
+    ///
+    /// On by default. When true, runtime may checkout from a per-module pool instead
+    /// of instantiating each time (faster spawn when pool has capacity). Requires
+    /// deploy-path integration; until then, only engine-level pooling (enable_pooling)
+    /// is active for HTTP/deploy.
+    #[prost(bool, tag="7")]
+    pub use_instance_pool: bool,
 }
 /// Deploy WASM module request
 ///

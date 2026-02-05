@@ -266,7 +266,7 @@ mod tests {
             decision.decision,
             plexspaces_proto::grpc::v1::InterceptorDecision::InterceptorDecisionDeny as i32
         );
-        assert!(decision.error_message.contains("Missing authorization"));
+        assert!(decision.error_message.contains("Missing Authorization header"), "Expected 'Missing Authorization header' in error: {}", decision.error_message);
     }
 
     #[tokio::test]

@@ -126,7 +126,8 @@ test_calc() {
     # Use POST with payload that includes operation field
     # POST triggers tell (fire-and-forget) but we can verify success from server logs
     # The calculator parses operation from the payload JSON
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/internal/system/calculator" \
+    # Don't hardcode tenant_id - use path format /api/v1/actors/{namespace}/{actor_type}
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/calculator" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || true
     

@@ -11,12 +11,14 @@ PlexSpaces supports **polyglot development** - you can write actors, application
 - ✅ **Isolation**: Each WASM module runs in isolation with resource limits
 - ✅ **Dynamic Deployment**: Deploy applications at runtime without restarting nodes
 
+> **📦 SDKs Available!** For Python, use the [PlexSpaces Python SDK](sdk.md) (decorator-based: `@actor`, `@handler`, `state()`). For TypeScript, use the [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) (inheritance-based: extend `PlexSpacesActor`, implement `on<Op>()` handlers). Both target the same `plexspaces-simple-actor` WIT world.
+
 ## Supported Languages
 
 | Language | Compiler | WASM Size | Runtime Performance | Best For |
 |----------|----------|-----------|---------------------|----------|
 | **Python** | `componentize-py` | 30-40MB | Moderate | ML, data processing, rapid prototyping |
-| **TypeScript/JavaScript** | `javy` | 500KB-2MB | Good | Web integration, rapid development |
+| **TypeScript/JavaScript** | `jco componentize` | 500KB-2MB | Good | Web integration, rapid development (simple-actor WIT) |
 | **Rust** | `cargo` (wasm32-wasip2) | 100KB-1MB | Excellent | Production, performance-critical |
 | **Go** | `tinygo` | 2-5MB | Good | Good balance, fast iteration |
 
@@ -633,7 +635,7 @@ npx tsc greeter.ts --target ES2020 --module commonjs
 javy compile greeter.js -o greeter.wasm
 ```
 
-**See**: `examples/simple/polyglot_wasm_deployment/actors/typescript/` for complete TypeScript examples
+**See**: [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a complete TypeScript example (SDK + jco, E2E)
 
 ### Rust
 
@@ -680,7 +682,7 @@ pub extern "C" fn snapshot_state() -> *const u8 {
 cargo build --target wasm32-wasip2 --release
 ```
 
-**See**: `examples/simple/polyglot_wasm_deployment/actors/rust/` for complete Rust examples
+**See**: `examples/rust/embedded/nbody_wasm/wasm-actors/` for Rust WASM; [WASM Deployment](wasm-deployment.md) for deploy steps
 
 ### Go
 
@@ -788,9 +790,9 @@ ctx = {"tenant-id": "tenant-123", "namespace": "production"}
    - Python actors with durability and tuplespace
    - Demonstrates state persistence and coordination
 
-2. **Polyglot Deployment** (`examples/simple/polyglot_wasm_deployment/`)
-   - Multi-language actors (Rust, TypeScript, Go, Python)
-   - Firecracker VM deployment
+2. **TypeScript Bank Account** (`examples/typescript/apps/bank_account/`)
+   - TypeScript SDK + jco componentize (simple-actor WIT)
+   - Full E2E: node, build, deploy, HTTP ops
 
 3. **WASM Showcase** (`examples/wasm_showcase/`)
    - Comprehensive WASM capabilities demonstration

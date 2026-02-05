@@ -146,7 +146,6 @@ pub fn default_node_config() -> plexspaces_proto::node::v1::NodeConfig {
         metadata: HashMap::new(),
         node_registry: None, // Use defaults from NodeRegistryConfig
         grpc_address: String::new(), // Derived from listen_addr if empty
-        wasm_apps_directory: String::new(), // Empty = no auto-deploy
     }
 }
 
@@ -234,7 +233,6 @@ impl Node {
                         metadata: self.config.metadata.clone(),
                         node_registry: None,
                         grpc_address: String::new(),
-                        wasm_apps_directory: String::new(),
                     }
                 }
             } else {
@@ -251,7 +249,6 @@ impl Node {
                     metadata: self.config.metadata.clone(),
                     node_registry: None,
                     grpc_address: String::new(),
-                    wasm_apps_directory: String::new(),
                 }
             }
         };
@@ -269,6 +266,19 @@ impl Node {
         let app_manager: Arc<dyn plexspaces_core::ApplicationManager> = 
             self.application_manager.clone() as Arc<dyn plexspaces_core::ApplicationManager>;
         self.service_locator.register_application_manager(app_manager).await;
+
+        // Create and register WASM runtime so deploy_application works after build() (e.g. in tests)
+        // start() will skip re-creating if already registered (ServiceLocator is idempotent for this)
+        if self.service_locator.get_wasm_runtime().await.is_none() {
+            use plexspaces_wasm_runtime::WasmRuntime;
+            let wasm_runtime = Arc::new(WasmRuntime::new().await.map_err(|e| {
+                NodeError::ConfigError(format!("Failed to create WASM runtime: {}", e))
+            })?);
+            let wasm_runtime_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> = wasm_runtime.clone();
+            self.service_locator.register_wasm_runtime(wasm_runtime_trait).await;
+            let mut stored_runtime = self.wasm_runtime.write().await;
+            *stored_runtime = Some(wasm_runtime);
+        }
 
         // Update metrics with node_id and cluster_name from config
         {
@@ -356,8 +366,11 @@ impl Node {
         
         if let Some(path) = config_path {
             let loader = ConfigLoader::new(); // Enable security validation by default
-            loader.load_release_spec_with_env_precedence(&path).await
-                .map_err(|e| NodeError::ConfigError(format!("Failed to load release config from {}: {}", path, e)))
+            let mut spec = loader.load_release_spec(&path).await
+                .map_err(|e| NodeError::ConfigError(format!("Failed to load release config from {}: {}", path, e)))?;
+            // Apply env overrides and set defaults through config_manager
+            plexspaces_common::config_manager::initialize(&mut spec);
+            Ok(spec)
         } else {
             Err(NodeError::ConfigError("No release config file found and PLEXSPACES_RELEASE_CONFIG_PATH not set".to_string()))
         }
@@ -885,24 +898,18 @@ impl Node {
         Ok(())
     }
 
-    /// Get the shared database URL from ReleaseSpec config or environment
+    /// Get the shared database URL from ReleaseSpec config
     ///
-    /// Priority:
-    /// 1. Environment variable: PLEXSPACES_DATABASE_URL
-    /// 2. ReleaseSpec: runtime.shared_database.connection_string
-    /// 3. Default: /tmp/plexspaces-data.db (file-based SQLite for durability)
+    /// This reads from the spec that was already initialized by config_manager::initialize(),
+    /// which has applied env overrides and set defaults.
+    ///
+    /// Note: All env var handling is centralized in config_manager::initialize().
+    /// This function only reads from the already-initialized spec.
     async fn get_shared_database_url(&self) -> String {
-        use std::env;
-        
-        // Priority 1: Environment variable
-        if let Ok(url) = env::var("PLEXSPACES_DATABASE_URL") {
-            return url;
-        }
-        
-        // Priority 2: ReleaseSpec config
+        // Read from ReleaseSpec config (already initialized by config_manager with env overrides)
         if let Some(spec) = self.release_spec.read().await.as_ref() {
             if let Some(ref runtime) = spec.runtime {
-                if let Some(ref db_config) = runtime.shared_database {
+                if let Some(ref db_config) = runtime.db {
                     if !db_config.connection_string.is_empty() {
                         return db_config.connection_string.clone();
                     }
@@ -910,16 +917,14 @@ impl Node {
             }
         }
         
-        // Priority 3: Default - use file-based SQLite for durability
-        // Use node ID in filename to support multiple nodes on same machine
-        // mode=rwc creates the file if it doesn't exist
+        // Fallback default if spec not initialized (shouldn't happen in normal flow)
         let node_id = self.id.as_str().replace(['@', '/', '\\', ':'], "-");
         format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", node_id)
     }
 
     /// Initialize blob service
-    /// Returns Arc<BlobService> on success, NodeError on failure
-    /// Blob service initialization failures are fatal - node startup will fail
+    /// Returns Arc<BlobService> on success, NodeError on failure (e.g. MinIO/S3 unreachable).
+    /// Caller (start()) treats failure as optional: node starts without blob storage on error.
     async fn init_blob_service(&self) -> Result<Arc<plexspaces_blob::BlobService>, NodeError> {
         use plexspaces_blob::repository::sql::SqlBlobRepository;
         use std::env;
@@ -984,7 +989,6 @@ impl Node {
             let mut blob_service_guard = self.blob_service.write().await;
             *blob_service_guard = Some(service_arc.clone());
         }
-        
         Ok(service_arc)
     }
 
@@ -1213,10 +1217,12 @@ impl Node {
                 use plexspaces_proto::object_registry::v1::ObjectType;
                 match object_registry.lookup_full(&ctx_for_check, ObjectType::ObjectTypeNode, &node_id_for_check).await {
                     Ok(Some(_)) => {
-                        tracing::debug!(
-                            node_id = %node_id_for_check,
-                            "Node found in ObjectRegistry, starting heartbeat loop"
-                        );
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            tracing::debug!(
+                                node_id = %node_id_for_check,
+                                "Node found in ObjectRegistry, starting heartbeat loop"
+                            );
+                        }
                     }
                     Ok(None) => {
                         tracing::warn!(
@@ -1264,17 +1270,23 @@ impl Node {
         // Register Node in ServiceLocator so ActorServiceImpl can access it
         self.service_locator.register_service(self.clone()).await;
 
-        // Initialize blob service - failures are fatal
-        let blob_service = self.init_blob_service().await?;
+        // Initialize blob service - optional; node starts without blob storage if init fails (e.g. MinIO down)
+        let blob_service = match self.init_blob_service().await {
+            Ok(service) => Some(service),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Blob service unavailable (e.g. MinIO/S3 not running or bucket missing). Node will start without blob storage."
+                );
+                None
+            }
+        };
         
-        // Start blob HTTP server on separate task
-        // The blob HTTP server handles multipart upload and raw download endpoints
-        // For now, we run it on a separate port (grpc_port + 100) to avoid conflicts
-        // TODO: Integrate more cleanly with tonic server using a router layer
-        let _blob_http_handle: tokio::task::JoinHandle<()> = {
+        // Start blob HTTP server on separate task only when blob service is available
+        let _blob_http_handle: Option<tokio::task::JoinHandle<()>> = if let Some(ref blob_svc) = blob_service {
             // Create Axum router for blob HTTP endpoints
             use plexspaces_blob::server::http_axum::create_blob_router;
-            let router = create_blob_router(blob_service.clone());
+            let router = create_blob_router(blob_svc.clone());
             
             // Parse the listen address to get the port, then use port+100 for HTTP
             // Using +100 to avoid conflicts with MinIO console (which uses gRPC_PORT + 1)
@@ -1287,20 +1299,24 @@ impl Node {
             
             tracing::info!("🌐 Starting blob HTTP server on http://{}", http_addr);
             
-            // Bind port BEFORE spawning task - fail fast if port is in use
-            let listener = tokio::net::TcpListener::bind(http_addr).await
-                .map_err(|e| NodeError::NetworkError(format!(
-                    "Failed to bind blob HTTP server to {}: {}. Another process may be using this port. \
-                    Kill existing plexspaces processes with: pkill -9 -f 'plexspaces start'",
-                    http_addr, e
-                )))?;
-            
-            tokio::spawn(async move {
-                use axum::serve;
-                if let Err(e) = serve(listener, router).await {
-                    tracing::error!("Blob HTTP server error: {}", e);
+            // Bind port before spawning; skip blob HTTP server if bind fails (non-fatal)
+            match tokio::net::TcpListener::bind(http_addr).await {
+                Ok(listener) => Some(tokio::spawn(async move {
+                    use axum::serve;
+                    if let Err(e) = serve(listener, router).await {
+                        tracing::error!("Blob HTTP server error: {}", e);
+                    }
+                })),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Could not bind blob HTTP server. Blob HTTP endpoints will be unavailable."
+                    );
+                    None
                 }
-            })
+            }
+        } else {
+            None
         };
 
         // Create gRPC services
@@ -1341,35 +1357,22 @@ impl Node {
 
         // Create scheduling components (Phase 4 & 5)
         use plexspaces_scheduler::{
-            SchedulingServiceImpl, TaskRouter, MemorySchedulingStateStore,
+            SchedulingServiceImpl, TaskRouter, SqliteSchedulingStateStore,
             background::BackgroundScheduler,
             capacity_tracker::CapacityTracker,
             state_store::SchedulingStateStore,
         };
         use plexspaces_channel::InMemoryChannel;
-        use plexspaces_proto::channel::v1::{ChannelConfig, ChannelBackend, DeliveryGuarantee, OrderingGuarantee};
+        use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee};
         
-        // Get database URL with proper priority:
-        // 1. Environment variable (highest - runtime override)
-        // 2. RuntimeConfig.shared_database.connection_string
-        // 3. Default SQLite file-based
+        // Get database URL from RuntimeConfig.db (already initialized by config_manager)
         let db_url = {
-            // Check env var first (highest priority)
-            if let Ok(url) = std::env::var("PLEXSPACES_DATABASE_URL") {
-                if !url.is_empty() {
-                    Some(url)
-                } else {
-                    None
-                }
-            } else {
-                // Check RuntimeConfig
-                let release_spec = self.release_spec.read().await;
-                release_spec.as_ref()
-                    .and_then(|r| r.runtime.as_ref())
-                    .and_then(|rt| rt.shared_database.as_ref())
-                    .map(|db| db.connection_string.clone())
-                    .filter(|s| !s.is_empty())
-            }
+            let release_spec = self.release_spec.read().await;
+            release_spec.as_ref()
+                .and_then(|r| r.runtime.as_ref())
+                .and_then(|rt| rt.db.as_ref())
+                .map(|db| db.connection_string.clone())
+                .filter(|s| !s.is_empty())
         };
         
         // Use in-memory if URL contains ":memory:"
@@ -1377,9 +1380,27 @@ impl Node {
             .map(|s| s.contains(":memory:"))
             .unwrap_or(false);
         
-        // Create state store (in-memory for now - TODO: add SQLite state store)
-        // Note: SchedulingStateStore doesn't have a SQLite implementation yet
-        let state_store: Arc<dyn SchedulingStateStore> = Arc::new(MemorySchedulingStateStore::new());
+        // Create state store using SQLite (use :memory: for in-memory mode)
+        let state_store: Arc<dyn SchedulingStateStore> = {
+            let db_path = if use_memory { ":memory:".to_string() } else {
+                // Use the same SQLite database path as KV store but with different table
+                let node_id = self.id().as_str()
+                    .replace(['@', '/', '\\', ':'], "-");
+                format!("/tmp/plexspaces-scheduler-{}.db", node_id)
+            };
+            match SqliteSchedulingStateStore::new(&db_path).await {
+                Ok(store) => Arc::new(store),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to create SQLite scheduler state store, using in-memory");
+                    match SqliteSchedulingStateStore::new(":memory:").await {
+                        Ok(store) => Arc::new(store),
+                        Err(e2) => {
+                            return Err(NodeError::ConfigError(format!("Failed to create scheduler state store: {}", e2)));
+                        }
+                    }
+                }
+            }
+        };
         
         // Create capacity tracker
         // CapacityTracker needs ObjectRegistry, get it from ServiceLocator
@@ -1391,7 +1412,7 @@ impl Node {
         // Create scheduling:requests channel
         let request_channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 1000,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -1630,24 +1651,23 @@ impl Node {
         // Mark startup complete after services are registered
         plexspaces_health_reporter.mark_startup_complete(None).await;
 
-        // Create WASM runtime service for dynamic actor deployment
+        // Create WASM runtime service for dynamic actor deployment (if not already registered by initialize_services)
         use plexspaces_wasm_runtime::{WasmRuntime, grpc_service::WasmRuntimeServiceImpl};
         use plexspaces_proto::wasm::v1::wasm_runtime_service_server::WasmRuntimeServiceServer;
-        let wasm_runtime = Arc::new(WasmRuntime::new().await.map_err(|e| {
-            NodeError::ConfigError(format!("Failed to create WASM runtime: {}", e))
-        })?);
-        
-        // Register WASM runtime in ServiceLocator (as trait object)
-        let wasm_runtime_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> = wasm_runtime.clone();
-        self.service_locator.register_wasm_runtime(wasm_runtime_trait).await;
-        
-        // Store WASM runtime in Node for backward compatibility (if needed)
-        {
-            let mut stored_runtime = self.wasm_runtime.write().await;
-            *stored_runtime = Some(wasm_runtime.clone());
-        }
-        
-        let wasm_runtime_trait_for_service: Arc<dyn plexspaces_core::WasmRuntimeTrait> = wasm_runtime.clone();
+        let wasm_runtime_trait_for_service: Arc<dyn plexspaces_core::WasmRuntimeTrait> =
+            if let Some(rt) = self.service_locator.get_wasm_runtime().await {
+                // Already registered in initialize_services() (e.g. for tests that use build() only)
+                rt
+            } else {
+                let rt = Arc::new(WasmRuntime::new().await.map_err(|e| {
+                    NodeError::ConfigError(format!("Failed to create WASM runtime: {}", e))
+                })?);
+                let rt_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> = rt.clone();
+                self.service_locator.register_wasm_runtime(rt_trait.clone()).await;
+                let mut stored_runtime = self.wasm_runtime.write().await;
+                *stored_runtime = Some(rt);
+                rt_trait
+            };
         let wasm_runtime_service = WasmRuntimeServiceImpl::new(wasm_runtime_trait_for_service);
         
         // Create ApplicationService for application-level deployment
@@ -1659,18 +1679,13 @@ impl Node {
         ));
 
         // Auto-deploy WASM applications from configured directory (Tomcat-style webapps)
-        // Priority: 1) PLEXSPACES_WASM_APPS_DIR env var, 2) NodeConfig.wasm_apps_directory
-        let wasm_apps_directory = std::env::var("PLEXSPACES_WASM_APPS_DIR")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                // Fallback to NodeConfig if env var not set
-                futures::executor::block_on(async {
-                    self.service_locator.get_node_config().await
-                        .map(|c| c.wasm_apps_directory)
-                        .filter(|s| !s.is_empty())
-                })
-            });
+        // wasm_apps_directory is now in RuntimeConfig (set by config_manager::initialize)
+        let wasm_apps_directory: Option<String> = futures::executor::block_on(async {
+            self.release_spec.read().await.as_ref()
+                .and_then(|spec| spec.runtime.as_ref())
+                .map(|runtime| runtime.wasm_apps_directory.clone())
+                .filter(|s| !s.is_empty())
+        });
 
         if let Some(wasm_apps_dir_str) = wasm_apps_directory {
             let wasm_apps_dir = std::path::Path::new(&wasm_apps_dir_str);
@@ -1821,15 +1836,17 @@ impl Node {
             }
         };
         
-        // Add blob service
-        let server_builder = {
+        // Add blob gRPC service only when blob service is available
+        let server_builder = if let Some(ref blob_svc) = blob_service {
             use plexspaces_blob::server::grpc::BlobServiceImpl;
             use plexspaces_proto::storage::v1::blob_service_server::BlobServiceServer;
             server_builder.add_service(
-                BlobServiceServer::new(BlobServiceImpl::new(blob_service.clone()))
+                BlobServiceServer::new(BlobServiceImpl::new(blob_svc.clone()))
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
             )
+        } else {
+            server_builder
         };
         
         let grpc_server = server_builder.serve(addr);
@@ -1917,6 +1934,7 @@ impl Node {
                     headers: axum::http::HeaderMap,
                     actor_service: Arc<plexspaces_services::actor_service::ActorServiceImpl>,
                 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+                    let start = std::time::Instant::now();
                     // Parse path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
                     let path_parts: Vec<&str> = path
                         .strip_prefix("/api/v1/actors/")
@@ -1946,6 +1964,37 @@ impl Node {
                         .map(|q| q.0)
                         .unwrap_or_default();
 
+                    // Invocation pattern: use "invocation" query param (e.g. AWS Lambda InvocationType).
+                    // "msg_type" = handler name in payload; "invocation" = call/cast override (POST/PUT/DELETE only).
+                    // POST/PUT default to request-reply (call) so response includes handler result; use ?invocation=cast for fire-and-forget.
+                    let method_upper = method.as_str().to_uppercase();
+                    let is_get = method_upper.is_empty() || method_upper == "GET";
+                    // Erlang-style: only call (request-reply), cast (fire-and-forget), info (async message)
+                    const ALLOWED_INVOCATION: [&str; 3] = ["call", "cast", "info"];
+                    let (ask, msg_type_override) = if is_get {
+                        (true, String::new())
+                    } else {
+                        let override_val = query_params.get("invocation").map(|v| v.as_str()).unwrap_or("");
+                        let normalized = override_val.trim().to_lowercase();
+                        if !override_val.is_empty() && !ALLOWED_INVOCATION.contains(&normalized.as_str()) {
+                            return Err((
+                                axum::http::StatusCode::BAD_REQUEST,
+                                Json(serde_json::json!({
+                                    "code": 400,
+                                    "message": format!("Invalid invocation query param: '{}'. Valid values: call, cast, info", override_val)
+                                })),
+                            ));
+                        }
+                        // POST/PUT: default to request-reply so response body contains handler result; explicit cast/info = fire-and-forget
+                        let default_ask = method_upper == "POST" || method_upper == "PUT";
+                        let ask = if override_val.is_empty() {
+                            default_ask
+                        } else {
+                            normalized == "call"
+                        };
+                        (ask, normalized)
+                    };
+
                     // Create InvokeActorRequest
                     use plexspaces_proto::actor::v1::InvokeActorRequest;
                     let invoke_req = InvokeActorRequest {
@@ -1965,6 +2014,8 @@ impl Node {
                         query_params,
                         path: path.clone(),
                         subpath: String::new(),
+                        ask,
+                        msg_type_override,
                     };
                     
                     // Call InvokeActor via ActorService (tenant_id from JWT/middleware or path when auth disabled)
@@ -1986,6 +2037,7 @@ impl Node {
                     
                     match ActorServiceTrait::invoke_actor(&*actor_service, grpc_req).await {
                         Ok(grpc_resp) => {
+                            let duration_ms = start.elapsed().as_millis();
                             let resp_inner = grpc_resp.into_inner();
                             // Convert InvokeActorResponse to JSON
                             use base64::{Engine as _, engine::general_purpose};
@@ -2003,7 +2055,6 @@ impl Node {
                                     }
                                 }
                             };
-                            
                             let json_resp = serde_json::json!({
                                 "success": resp_inner.success,
                                 "payload": payload_json,
@@ -2030,7 +2081,35 @@ impl Node {
                     }
                 }
                 
-                // JWT auth middleware: when auth enabled, validate Bearer token and set Extension(HttpJwtClaims)
+                /// Resolve tenant_id from JWT extension, or validate Authorization header when auth enabled (fallback if extension missing).
+                fn effective_tenant_id_from_jwt_or_headers(
+                    jwt: &Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                    auth_disabled: bool,
+                    jwt_secret: Option<&str>,
+                    headers: &axum::http::HeaderMap,
+                ) -> String {
+                    if let Some(ref ext) = jwt {
+                        return ext.tenant_id.clone();
+                    }
+                    if !auth_disabled {
+                        if let Some(secret) = jwt_secret {
+                            let auth_header = headers
+                                .get("authorization")
+                                .and_then(|v| v.to_str().ok())
+                                .map(|s| s.to_string());
+                            if let Ok(claims) = crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
+                                return claims.tenant_id;
+                            }
+                        }
+                    }
+                    headers
+                        .get("x-tenant-id")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("")
+                        .to_string()
+                }
+
+                // JWT auth middleware: when auth enabled, validate Bearer token and set Extension(JwtClaims)
                 async fn http_auth_middleware(
                     axum::extract::State((_svc, auth_disabled, jwt_secret, _sl, _ds)): axum::extract::State<HttpGatewayState>,
                     mut req: axum::extract::Request,
@@ -2064,13 +2143,12 @@ impl Node {
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
                     let has_bearer = auth_header.as_ref().map(|h| h.starts_with("Bearer ")).unwrap_or(false);
-                    match crate::http_jwt::validate_http_jwt(secret, auth_header.as_deref()) {
+                    match crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
                         Ok(claims) => {
                             req.extensions_mut().insert(claims);
                             next.run(req).await
                         }
                         Err(e) => {
-                            tracing::debug!(path = %path, has_bearer = %has_bearer, "HTTP auth: JWT validation failed (401)");
                             let body = serde_json::json!({ "code": 401, "message": e });
                             axum::response::Response::builder()
                                 .status(StatusCode::UNAUTHORIZED)
@@ -2093,7 +2171,7 @@ impl Node {
                         "/api/v1/actors/:tenant_id/:namespace/:actor_type",
                         get({
                             move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::HttpJwtClaims>>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap| async move {
@@ -2104,7 +2182,7 @@ impl Node {
                         })
                         .post({
                             move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::HttpJwtClaims>>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap,
@@ -2116,7 +2194,7 @@ impl Node {
                         })
                         .put({
                             move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::HttpJwtClaims>>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap,
@@ -2128,7 +2206,7 @@ impl Node {
                         })
                         .delete({
                             move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::HttpJwtClaims>>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap| async move {
@@ -2141,47 +2219,47 @@ impl Node {
                     .route(
                         "/api/v1/actors/:namespace/:actor_type",
                         get({
-                            move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::HttpJwtClaims>>,
+                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = jwt.as_ref().map(|c| c.tenant_id.clone()).unwrap_or_else(|| headers.get("x-tenant-id").and_then(|v| v.to_str().ok()).unwrap_or("").to_string());
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
                                 invoke_actor_http(effective_tenant_id, axum::http::Method::GET, path, query, None, headers, actor_service).await
                             }
                         })
                         .post({
-                            move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::HttpJwtClaims>>,
+                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap,
                                   body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = jwt.as_ref().map(|c| c.tenant_id.clone()).unwrap_or_else(|| headers.get("x-tenant-id").and_then(|v| v.to_str().ok()).unwrap_or("").to_string());
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
                                 invoke_actor_http(effective_tenant_id, axum::http::Method::POST, path, query, body, headers, actor_service).await
                             }
                         })
                         .put({
-                            move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::HttpJwtClaims>>,
+                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap,
                                   body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = jwt.as_ref().map(|c| c.tenant_id.clone()).unwrap_or_else(|| headers.get("x-tenant-id").and_then(|v| v.to_str().ok()).unwrap_or("").to_string());
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
                                 invoke_actor_http(effective_tenant_id, axum::http::Method::PUT, path, query, body, headers, actor_service).await
                             }
                         })
                         .delete({
-                            move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::HttpJwtClaims>>,
+                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = jwt.as_ref().map(|c| c.tenant_id.clone()).unwrap_or_else(|| headers.get("x-tenant-id").and_then(|v| v.to_str().ok()).unwrap_or("").to_string());
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
                                 invoke_actor_http(effective_tenant_id, axum::http::Method::DELETE, path, query, None, headers, actor_service).await
                             }
@@ -2201,10 +2279,13 @@ impl Node {
                 
                 let _node_clone = node_for_http.clone();
                 let _app_mgr_clone = application_manager_for_http.clone();
-                let wasm_deploy_handler = move |mut multipart: Multipart| async move {
+                let wasm_deploy_handler = move |axum::extract::State((_actor_svc, auth_disabled, jwt_secret, _sl, _ds)): axum::extract::State<HttpGatewayState>,
+                    headers: axum::http::HeaderMap,
+                    mut multipart: Multipart| async move {
                     let mut application_id = None;
                     let mut name = None;
                     let mut version = None;
+                    let mut behavior_kind = None;
                     let mut wasm_file_data: Option<Vec<u8>> = None;
                     let mut config_data: Option<String> = None;
                     
@@ -2228,6 +2309,11 @@ impl Node {
                             "version" => {
                                 version = Some(field.text().await.map_err(|e| {
                                     (StatusCode::BAD_REQUEST, format!("Failed to read version: {}", e))
+                                })?);
+                            }
+                            "behavior_kind" => {
+                                behavior_kind = Some(field.text().await.map_err(|e| {
+                                    (StatusCode::BAD_REQUEST, format!("Failed to read behavior_kind: {}", e))
                                 })?);
                             }
                             "wasm_file" => {
@@ -2299,11 +2385,6 @@ impl Node {
                                 first_bytes = format!("{:02x?}", bytes.iter().take(8).collect::<Vec<_>>()),
                                 "WASM file does not start with magic number"
                             );
-                        } else {
-                            tracing::debug!(
-                                wasm_size = bytes.len(),
-                                "WASM file has valid magic number"
-                            );
                         }
                         
                         WasmModule {
@@ -2343,12 +2424,12 @@ impl Node {
                                     error = %e,
                                     "Failed to parse TOML config, using defaults"
                                 );
-                                create_default_application_spec(&name, &version)
+                                create_default_application_spec(&name, &version, behavior_kind.as_deref())
                             }
                         }
                     } else {
-                        // No config provided - use shared helper to create default spec
-                        create_default_application_spec(&name, &version)
+                        // No config provided - use shared helper to create default spec (optional behavior_kind for event-handler actors)
+                        create_default_application_spec(&name, &version, behavior_kind.as_deref())
                     };
                     
                     let request = DeployApplicationRequest {
@@ -2360,18 +2441,8 @@ impl Node {
                         initial_state: vec![],
                     };
                     
-                    // Log request details before deployment
+                    // Verify WASM magic number one more time before deployment
                     if let Some(ref wasm_mod) = request.wasm_module {
-                        tracing::debug!(
-                            application_id = %request.application_id,
-                            name = %request.name,
-                            version = %request.version,
-                            wasm_size = wasm_mod.module_bytes.len(),
-                            wasm_first_bytes = format!("{:02x?}", wasm_mod.module_bytes.iter().take(8).collect::<Vec<_>>()),
-                            "Calling ApplicationService::deploy_application"
-                        );
-                        
-                        // Verify WASM magic number one more time
                         if wasm_mod.module_bytes.len() >= 4 {
                             if &wasm_mod.module_bytes[0..4] != b"\0asm" {
                                 tracing::error!(
@@ -2384,20 +2455,57 @@ impl Node {
                         }
                     }
                     
+                    // When auth enabled, extract tenant_id from JWT so deploy_application gets valid RequestContext
+                    let tenant_id_for_grpc = if auth_disabled {
+                        String::new()
+                    } else {
+                        let auth_header = headers
+                            .get("authorization")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string());
+                        let secret = match jwt_secret.as_deref() {
+                            Some(s) => s,
+                            None => {
+                                return Err((
+                                    StatusCode::SERVICE_UNAVAILABLE,
+                                    "Auth enabled but JWT secret not configured".to_string(),
+                                ));
+                            }
+                        };
+                        match crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
+                            Ok(claims) => claims.tenant_id,
+                            Err(e) => {
+                                return Err((
+                                    StatusCode::UNAUTHORIZED,
+                                    format!("Deploy requires valid JWT: {}", e),
+                                ));
+                            }
+                        }
+                    };
+
                     // Call ApplicationService directly (create instance same as gRPC service)
-                    // Set x-namespace to application_id so deployed actors use app namespace (source of truth from app)
+                    // Set x-tenant-id and x-namespace so deploy_application gets valid RequestContext
                     use plexspaces_services::application_service::ApplicationServiceImpl;
                     use plexspaces_proto::application::v1::application_service_server::ApplicationService;
                     use tonic::metadata::MetadataValue;
                     let app_service = ApplicationServiceImpl::new(service_locator_for_http.clone());
                     let mut grpc_request = tonic::Request::new(request);
                     grpc_request.metadata_mut().insert(
+                        "x-tenant-id",
+                        MetadataValue::try_from(tenant_id_for_grpc.as_str())
+                            .unwrap_or_else(|_| MetadataValue::from_static("")),
+                    );
+                    grpc_request.metadata_mut().insert(
                         "x-namespace",
                         MetadataValue::try_from(application_id.as_str())
                             .unwrap_or_else(|_| MetadataValue::from_static("")),
                     );
                     let response = app_service.deploy_application(grpc_request).await.map_err(|e| {
-                        tracing::error!(error = %e, "ApplicationService::deploy_application failed");
+                        tracing::error!(
+                            application_id = %application_id,
+                            error = %e,
+                            "ApplicationService::deploy_application failed"
+                        );
                         (StatusCode::INTERNAL_SERVER_ERROR, format!("Deployment failed: {}", e))
                     })?;
                     
@@ -2415,26 +2523,70 @@ impl Node {
                 // The route-specific limit below ensures it's definitely applied
                 let _app_mgr_for_undeploy = application_manager_for_http.clone();
                 let service_locator_for_undeploy = self.service_locator().clone();
-                let undeploy_handler = move |Path(application_id): Path<String>| async move {
+                let undeploy_handler = move |axum::extract::State((_actor_svc, auth_disabled, jwt_secret, _sl, _ds)): axum::extract::State<HttpGatewayState>,
+                    headers: axum::http::HeaderMap,
+                    Path(application_id): Path<String>| async move {
                     use plexspaces_services::application_service::ApplicationServiceImpl;
                     use plexspaces_proto::application::v1::{
                         application_service_server::ApplicationService,
                         UndeployApplicationRequest,
                     };
-                    
-                    tracing::info!(application_id = %application_id, "Undeploying application via HTTP");
-                    
-                    // Note: application_id in the path is used as the identifier
-                    // The ApplicationService will look up the application by this ID
+                    use tonic::metadata::MetadataValue;
+
+                    // When auth enabled, extract tenant_id from JWT for RequestContext in undeploy_application
+                    let tenant_id_for_grpc = if auth_disabled {
+                        String::new()
+                    } else {
+                        let auth_header = headers
+                            .get("authorization")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string());
+                        let secret = match jwt_secret.as_deref() {
+                            Some(s) => s,
+                            None => {
+                                return Err((
+                                    StatusCode::SERVICE_UNAVAILABLE,
+                                    "Auth enabled but JWT secret not configured".to_string(),
+                                ));
+                            }
+                        };
+                        match crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
+                            Ok(claims) => claims.tenant_id,
+                            Err(e) => {
+                                return Err((
+                                    StatusCode::UNAUTHORIZED,
+                                    format!("Undeploy requires valid JWT: {}", e),
+                                ));
+                            }
+                        }
+                    };
+
                     let app_service = ApplicationServiceImpl::new(service_locator_for_undeploy.clone());
-                    let grpc_request = tonic::Request::new(UndeployApplicationRequest {
+                    let mut grpc_request = tonic::Request::new(UndeployApplicationRequest {
                         application_id: application_id.clone(),
                         timeout: None, // Use default timeout from application config
                     });
-                    
+                    grpc_request.metadata_mut().insert(
+                        "x-tenant-id",
+                        MetadataValue::try_from(tenant_id_for_grpc.as_str())
+                            .unwrap_or_else(|_| MetadataValue::from_static("")),
+                    );
+
                     let response = app_service.undeploy_application(grpc_request).await.map_err(|e| {
-                        tracing::error!(error = %e, "ApplicationService::undeploy_application failed");
-                        (StatusCode::INTERNAL_SERVER_ERROR, format!("Undeployment failed: {}", e))
+                        if e.code() == tonic::Code::NotFound {
+                            tracing::info!(
+                                application_id = %application_id,
+                                "Undeploy: application not found (returning 404)"
+                            );
+                            (StatusCode::NOT_FOUND, e.message().to_string())
+                        } else {
+                            tracing::error!(
+                                application_id = %application_id,
+                                error = %e,
+                                "ApplicationService::undeploy_application failed"
+                            );
+                            (StatusCode::INTERNAL_SERVER_ERROR, format!("Undeployment failed: {}", e))
+                        }
                     })?;
                     
                     let inner = response.into_inner();
@@ -3484,6 +3636,7 @@ impl Node {
             None, // No actor type needed for re-registration
             None, // Config is preserved in VirtualActorManager
             None, // No instance - actor is deactivated
+            None, // behavior_kind preserved in registry
         ).await;
 
         Ok(())
@@ -3679,6 +3832,12 @@ impl ApplicationNode for Node {
     /// Get ActorFactory
     async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
         self.service_locator_impl().get_actor_factory().await
+    }
+    
+    /// Get BlobService for WASM actors
+    async fn blob_service(&self) -> Option<Arc<dyn plexspaces_core::BlobServiceTrait>> {
+        let guard = self.blob_service.read().await;
+        guard.clone().map(|bs| bs as Arc<dyn plexspaces_core::BlobServiceTrait>)
     }
 }
 
@@ -3947,7 +4106,7 @@ mod tests {
         ));
         let actor_registry = get_actor_registry(node).await;
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_id.to_string(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_id.to_string(), wrapper, None, None, None, None).await;
     }
 
     #[tokio::test]
@@ -3981,7 +4140,7 @@ mod tests {
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
         // Register actor (idempotent - can be called multiple times)
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
 
         // Should find local actor via ActorRegistry
         let internal_ctx2 = node.service_locator().request_context_for_system_operations().await;
@@ -4027,14 +4186,14 @@ mod tests {
         // Test code - registering test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
 
         // Update actor registration with config (idempotent - actor already registered)
         let actor_registry = get_actor_registry(&node).await;
         if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None).await;
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None, None).await;
         }
         // Test code - looking up test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
@@ -4069,7 +4228,7 @@ mod tests {
         if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None).await;
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None, None).await;
         }
 
         // Second registration should also succeed (idempotent - safe to call multiple times)
@@ -4079,7 +4238,7 @@ mod tests {
         if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None).await;
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None, None).await;
         }
     }
 
@@ -4105,7 +4264,7 @@ mod tests {
         let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 
         // Create message
         let message = Message {
@@ -4411,7 +4570,7 @@ mod tests {
         let ctx = node2.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
-        actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 
         // Register node2 in ObjectRegistry on node1 (so node1 can find it)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -4526,7 +4685,7 @@ mod tests {
         let ctx = node2.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
-        actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry2.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 
         // Register node2 in ObjectRegistry on node1 (so node1 can find it via lookup_routing)
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -4598,7 +4757,7 @@ mod tests {
         let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
-        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 
         // Create monitoring channel
         let (tx, mut rx) = mpsc::channel(1);
@@ -4715,7 +4874,7 @@ mod tests {
         let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
-        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 
         // Create 3 monitors
         let (tx1, mut rx1) = mpsc::channel(1);
@@ -4864,7 +5023,7 @@ mod tests {
         // Test code - registering test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
@@ -4873,7 +5032,7 @@ mod tests {
         let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
-        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 
         let (tx, mut rx) = mpsc::channel(1);
         node.monitor(
@@ -4933,7 +5092,7 @@ mod tests {
         // Test code - registering test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
 
         // Register with ActorRegistry first (using MessageSender)
         register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
@@ -4942,7 +5101,7 @@ mod tests {
         let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
-        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 
         let (tx, mut rx) = mpsc::channel(1);
         node.monitor(
@@ -5029,7 +5188,7 @@ mod tests {
         let ctx = node.service_locator().request_context_for_system_operations().await;
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 
         // active_actors is only updated when actors are spawned via ActorFactory, not when registered
         // So we check that the actor is registered instead
@@ -5139,7 +5298,7 @@ mod tests {
         // Test code - registering test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
 
         let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
 
@@ -5148,7 +5307,7 @@ mod tests {
         if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config.clone()), None).await;
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config.clone()), None, None).await;
         }
 
         // Verify config is stored
@@ -5183,7 +5342,7 @@ mod tests {
         // Test code - registering test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
 
         // Actor already registered - no need to update config
         let actor_registry = get_actor_registry(&node).await;
@@ -5215,7 +5374,7 @@ mod tests {
         // Test code - registering test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
 
         let config = create_actor_config_with_resources(1.0, 1024 * 1024 * 256, 0, 0);
 
@@ -5224,7 +5383,7 @@ mod tests {
         if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None).await;
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None, None).await;
         }
 
         // Verify config is stored
@@ -5265,13 +5424,13 @@ mod tests {
         ));
         let actor_registry = get_actor_registry(&node).await;
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor1_ref.id().clone(), wrapper1, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor1_ref.id().clone(), wrapper1, None, None, None, None).await;
         let config1 = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 1024 * 1024 * 1024, 0);
         let actor_registry = get_actor_registry(&node).await;
         if let Some(sender1) = actor_registry.lookup_actor(&actor1_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor1_ref.id().clone(), sender1, None, Some(config1), None).await;
+            actor_registry.register_actor(&ctx, actor1_ref.id().clone(), sender1, None, Some(config1), None, None).await;
         }
 
         // Register second actor with resources
@@ -5287,12 +5446,12 @@ mod tests {
         ));
         let actor_registry = get_actor_registry(&node).await;
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor2_ref.id().clone(), wrapper2, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor2_ref.id().clone(), wrapper2, None, None, None, None).await;
         let actor_registry = get_actor_registry(&node).await;
         if let Some(sender2) = actor_registry.lookup_actor(&actor2_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor2_ref.id().clone(), sender2, None, Some(config2), None).await;
+            actor_registry.register_actor(&ctx, actor2_ref.id().clone(), sender2, None, Some(config2), None, None).await;
         }
 
         // Calculate capacity
@@ -5365,7 +5524,7 @@ mod tests {
         // Test code - registering test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
         let mut config = plexspaces_proto::v1::actor::ActorConfig::default();
         config.resource_requirements = None; // No resource requirements
         config.config_schema_version = 1;
@@ -5373,7 +5532,7 @@ mod tests {
         if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None).await;
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None, None).await;
         }
 
         // Calculate capacity
@@ -5402,7 +5561,7 @@ mod tests {
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-        actor_registry.register_actor(&ctx, actor_id.clone(), sender.clone(), None, Some(config), None).await;
+        actor_registry.register_actor(&ctx, actor_id.clone(), sender.clone(), None, Some(config), None, None).await;
 
         // Verify allocated resources
         let capacity = node.calculate_node_capacity().await;
@@ -5466,12 +5625,12 @@ mod tests {
         // Test code - registering test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node.service_locator().request_context_for_system_operations().await;
-        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None).await;
+        actor_registry.register_actor(&internal_ctx, actor_ref.id().clone(), wrapper, None, None, None, None).await;
         let actor_registry = get_actor_registry(&node).await;
         if let Some(sender) = actor_registry.lookup_actor(&actor_ref.id().clone()).await {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None).await;
+            actor_registry.register_actor(&ctx, actor_ref.id().clone(), sender, None, Some(config), None, None).await;
         }
 
         // Calculate capacity

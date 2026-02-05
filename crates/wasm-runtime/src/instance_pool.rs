@@ -18,6 +18,12 @@
 //! - Checkout/checkin pattern for instance reuse
 //! - Automatic pool expansion if all instances busy
 //! - Metrics tracking (available, in-use, total checkouts)
+//!
+//! ## TODO(deploy-path integration)
+//! - Integrate InstancePool into application/node spawn path when `WasmConfig.use_instance_pool` is true.
+//! - Lightweight actors + worker pools: a pool of actors can use a pool of pre-instantiated instances
+//!   (checkout on spawn, checkin on terminate). Requires binding actor_id and services on checkout
+//!   or creating pool instances with node-level services. See PROJECT_TRACKER.md.
 
 use crate::{WasmCapabilities, WasmConfig, WasmError, WasmInstance, WasmModule, WasmResult};
 use std::sync::Arc;
@@ -141,8 +147,8 @@ impl InstancePool {
             None, // LockManager not available at pool level
             None, // ObjectRegistry not available at pool level
             None, // JournalStorage not available at pool level
-            
             None, // BlobService not available at pool level
+            self.config.durability_enabled,
         )
         .await
     }

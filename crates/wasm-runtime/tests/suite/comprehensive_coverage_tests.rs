@@ -267,6 +267,7 @@ async fn test_handle_request_error() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        false, // durability_enabled
     )
     .await
     .expect("Failed to create instance");
@@ -327,6 +328,7 @@ async fn test_handle_event_error() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        false, // durability_enabled
     )
     .await
     .expect("Failed to create instance");
@@ -410,6 +412,7 @@ async fn test_channel_host_function_error_handling() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        false, // durability_enabled
     )
     .await
     .expect("Failed to create instance");

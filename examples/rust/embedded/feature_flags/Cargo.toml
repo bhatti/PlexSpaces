@@ -11,9 +11,9 @@ name = "feature_flags"
 path = "src/main.rs"
 
 [dependencies]
-# PlexSpaces crates
+# PlexSpaces crates (sql-backend for SqliteKVStore :memory:)
 plexspaces-process-groups = { path = "../../../../crates/process-groups" }
-plexspaces-keyvalue = { path = "../../../../crates/keyvalue" }
+plexspaces-keyvalue = { path = "../../../../crates/keyvalue", features = ["sql-backend"] }
 plexspaces-core = { path = "../../../../crates/core" }
 
 # Async runtime

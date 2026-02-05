@@ -23,6 +23,9 @@
 //! - **Actors**: Stateful computation units (actor model)
 //! - **TupleSpaces**: Coordination primitives (Linda model)
 //! - **Services**: Microservices and gRPC endpoints
+//! - **Nodes**: PlexSpaces node instances
+//! - **Workflows**: Durable workflow definitions
+//! - **Applications**: Deployed applications
 //!
 //! ## Architecture Context
 //! This crate consolidates three separate registries (ActorRegistry, TupleSpaceRegistry,
@@ -31,27 +34,33 @@
 //! ### Component Diagram
 //! ```text
 //! ┌─────────────────────────────────────────────────────────┐
-//! │                 ObjectRegistry                           │
+//! │              ObjectRegistryImpl                          │
 //! │  register() / unregister() / lookup() / discover()      │
 //! └────────────────────┬────────────────────────────────────┘
 //!                      │
 //!                      ▼
 //! ┌─────────────────────────────────────────────────────────┐
-//! │              KeyValueStore Backend                       │
-//! │  (InMemory, SQLite, Redis, PostgreSQL)                  │
-//! │  Key: {tenant}:{namespace}:{type}:{object_id}           │
-//! │  Value: ObjectRegistration (proto serialized)           │
-//! └─────────────────────────────────────────────────────────┘
+//! │         ObjectRegistryRepository (trait)                │
+//! │  put() / get() / delete() / discover() / heartbeat()    │
+//! └────────────────────┬────────────────────────────────────┘
+//!                      │
+//!         ┌───────────┼───────────┬────────────┐
+//!         ▼           ▼           ▼            ▼
+//!    ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐
+//!    │ Memory │  │ SQLite │  │Postgres│  │DynamoDB│
+//!    └────────┘  └────────┘  └────────┘  └────────┘
 //! ```
 //!
 //! ## Key Components
-//! - [`ObjectRegistry`]: Main registry struct with KeyValueStore backend
+//! - [`ObjectRegistryImpl`]: Main registry with repository backend
+//! - [`ObjectRegistryRepository`]: Storage abstraction trait
 //! - [`ObjectRegistryError`]: Error types for registry operations
+//! - [`config`]: Backend configuration and factory functions
 //!
 //! ## Dependencies
 //! This crate depends on:
 //! - [`plexspaces_proto`]: Protocol buffer definitions (object_registry.proto)
-//! - [`plexspaces_keyvalue`]: Key-value storage backend
+//! - [`plexspaces_common`]: RequestContext for multi-tenancy
 //!
 //! ## Dependents
 //! This crate is used by:
@@ -63,15 +72,14 @@
 //!
 //! ### Basic Usage - Register Actor
 //! ```rust,no_run
-//! use plexspaces_object_registry::ObjectRegistryImpl;
+//! use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 //! use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-//! use plexspaces_keyvalue::InMemoryKVStore;
-//! use plexspaces_core::RequestContext;
+//! use plexspaces_common::RequestContext;
 //! use std::sync::Arc;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let kv = Arc::new(InMemoryKVStore::new());
-//! let registry = ObjectRegistryImpl::new(kv);
+//! let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await?);
+//! let registry = ObjectRegistryImpl::new(repo);
 //!
 //! // Create RequestContext for tenant isolation
 //! let ctx = RequestContext::new_without_auth("default".to_string(), "production".to_string());
@@ -90,20 +98,16 @@
 //! # }
 //! ```
 //!
-//! ### Discover Objects by Type
+//! ### Using Configuration
 //! ```rust,no_run
-//! # use plexspaces_object_registry::ObjectRegistryImpl;
-//! # use plexspaces_proto::object_registry::v1::ObjectType;
-//! # use plexspaces_keyvalue::InMemoryKVStore;
-//! # use plexspaces_core::RequestContext;
-//! # use std::sync::Arc;
+//! use plexspaces_object_registry::{ObjectRegistryImpl, config::{ObjectRegistryConfig, create_repository_from_config}};
+//! use plexspaces_common::RequestContext;
+//!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! # let kv = Arc::new(InMemoryKVStore::new());
-//! # let registry = ObjectRegistry::new(kv);
-//! # let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
-//! // Discover all actors
-//! let actors = registry.discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100).await?;
-//! println!("Found {} actors", actors.len());
+//! // Create repository from configuration
+//! let config = ObjectRegistryConfig::sqlite("/tmp/registry.db");
+//! let repo = create_repository_from_config(&config).await?;
+//! let registry = ObjectRegistryImpl::new(repo);
 //! # Ok(())
 //! # }
 //! ```
@@ -111,42 +115,45 @@
 //! ## Design Principles
 //!
 //! ### Proto-First
-//! All data models defined in `proto/plexspaces/v1/object_registry.proto`
+//! All data models defined in `proto/plexspaces/v1/registry/object_registry.proto`
 //!
-//! ### Static vs Dynamic
-//! - Static: Core registration/discovery logic (always present)
-//! - Dynamic: Filtering/pagination strategies (extensible)
+//! ### Repository Pattern
+//! - Storage abstraction via `ObjectRegistryRepository` trait
+//! - Multiple backends: InMemory (tests), SQLite (embedded), PostgreSQL (production), DynamoDB (AWS)
+//! - Indexed columns for fast queries (object_type, node_id, health_status, last_heartbeat)
+//! - Full ObjectRegistration preserved in blob column
 //!
 //! ### Test-Driven
 //! - Unit tests in this file (#[cfg(test)] mod tests)
 //! - Integration tests in tests/ directory
-//! - Target coverage: 90%+
-//!
-//! ## Testing
-//! ```bash
-//! # Run tests
-//! cargo test -p plexspaces-object-registry
-//!
-//! # Check coverage
-//! cargo tarpaulin -p plexspaces-object-registry
-//! ```
+//! - Target coverage: 95%+
 //!
 //! ## Performance Characteristics
-//! - Register: O(1) - single KeyValueStore write
-//! - Lookup: O(1) - single KeyValueStore read
-//! - Discover: O(n) - scan + filter (can use prefix for type filtering)
-//! - Heartbeat: O(1) - single KeyValueStore update
+//! - Register: O(1) - single repository write
+//! - Lookup: O(1) - single repository read
+//! - Discover: O(log n + k) - indexed query + filter
+//! - Heartbeat: O(1) - single column UPDATE (no blob read/write)
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-use plexspaces_core::RequestContext;
-use plexspaces_keyvalue::{KVError, KeyValueStore};
-use plexspaces_proto::object_registry::v1::{
-    HealthStatus, ObjectRegistration, ObjectType,
-};
-use prost::Message; // For encode_to_vec() and decode()
+pub mod config;
+pub mod repository;
+
+use plexspaces_common::RequestContext;
+use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
+use repository::{DiscoverFilter, ObjectRegistryRepository, RepositoryError};
 use std::sync::Arc;
+use tracing::instrument;
+
+// Re-export commonly used types
+pub use config::{create_repository_from_config, create_repository_from_env, ObjectRegistryConfig};
+
+#[cfg(feature = "sql-backend")]
+pub use repository::{PostgresObjectRegistryRepository, SqliteObjectRegistryRepository};
+
+#[cfg(feature = "ddb-backend")]
+pub use repository::DynamoDBObjectRegistryRepository;
 
 /// Error types for ObjectRegistry operations
 #[derive(Debug, thiserror::Error)]
@@ -172,9 +179,16 @@ pub enum ObjectRegistryError {
     InvalidInput(String),
 }
 
-impl From<KVError> for ObjectRegistryError {
-    fn from(err: KVError) -> Self {
-        ObjectRegistryError::StorageError(err.to_string())
+impl From<RepositoryError> for ObjectRegistryError {
+    fn from(err: RepositoryError) -> Self {
+        match err {
+            RepositoryError::NotFound(id) => ObjectRegistryError::ObjectNotFound(id),
+            RepositoryError::AlreadyExists(id) => ObjectRegistryError::ObjectAlreadyRegistered(id),
+            RepositoryError::Storage(msg) => ObjectRegistryError::StorageError(msg),
+            RepositoryError::Serialization(msg) => ObjectRegistryError::SerializationError(msg),
+            RepositoryError::InvalidInput(msg) => ObjectRegistryError::InvalidInput(msg),
+            RepositoryError::Connection(msg) => ObjectRegistryError::StorageError(msg),
+        }
     }
 }
 
@@ -182,106 +196,73 @@ impl From<KVError> for ObjectRegistryError {
 ///
 /// ## Purpose
 /// Provides centralized registration and discovery for all distributed objects
-/// in PlexSpaces using a KeyValueStore backend.
+/// in PlexSpaces using an ObjectRegistryRepository backend.
 ///
 /// ## Design
-/// - Uses KeyValueStore for persistence (InMemory, SQLite, Redis, PostgreSQL)
-/// - Key format: `{tenant_id}:{namespace}:{object_type}:{object_id}`
-/// - Value: ObjectRegistration (protobuf serialized bytes)
-/// - No external dependencies beyond KeyValueStore
+/// - Uses ObjectRegistryRepository for persistence with indexed columns
+/// - Indexed columns enable fast queries by object_type, node_id, health_status, last_heartbeat
+/// - Full ObjectRegistration blob preserved for complete data
+/// - No external dependencies beyond repository
 ///
 /// ## Examples
 /// ```rust,no_run
-/// # use plexspaces_object_registry::ObjectRegistryImpl;
-/// # use plexspaces_keyvalue::InMemoryKVStore;
+/// # use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 /// # use std::sync::Arc;
-/// let kv = Arc::new(InMemoryKVStore::new());
-/// let registry = ObjectRegistryImpl::new(kv);
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await?);
+/// let registry = ObjectRegistryImpl::new(repo);
+/// # Ok(())
+/// # }
 /// ```
 pub struct ObjectRegistryImpl {
-    kv_store: Arc<dyn KeyValueStore>,
+    repository: Arc<dyn ObjectRegistryRepository>,
 }
 
 impl ObjectRegistryImpl {
-    /// Create new ObjectRegistry with given KeyValueStore backend
+    /// Create new ObjectRegistry with given repository backend
     ///
     /// ## Arguments
-    /// * `kv_store` - KeyValueStore implementation (InMemory, SQLite, Redis, PostgreSQL)
+    /// * `repository` - ObjectRegistryRepository implementation
     ///
     /// ## Returns
-    /// New ObjectRegistry instance
+    /// New ObjectRegistryImpl instance
     ///
     /// ## Examples
-    /// ```rust
-    /// # use plexspaces_object_registry::ObjectRegistry;
-    /// # use plexspaces_keyvalue::InMemoryKVStore;
+    /// ```rust,no_run
+    /// # use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     /// # use std::sync::Arc;
-    /// let kv = Arc::new(InMemoryKVStore::new());
-    /// let registry = ObjectRegistry::new(kv);
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await?);
+    /// let registry = ObjectRegistryImpl::new(repo);
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn new(kv_store: Arc<dyn KeyValueStore>) -> Self {
-        Self { kv_store }
-    }
-
-    /// Generate KeyValueStore key for object
-    ///
-    /// ## Key Format
-    /// `{tenant_id}:{namespace}:{object_type}:{object_id}`
-    ///
-    /// Examples:
-    /// - `default:production:actor:counter@node1`
-    /// - `acme:staging:tuplespace:ts-redis-acme-staging`
-    /// - `default:default:service:order-svc-instance-1`
-    ///
-    /// ## Note
-    /// Empty tenant_id or namespace are used as-is (may be empty)
-    fn make_key(
-        tenant_id: &str,
-        namespace: &str,
-        object_type: ObjectType,
-        object_id: &str,
-    ) -> String {
-        let type_str = match object_type {
-            ObjectType::ObjectTypeActor => "actor",
-            ObjectType::ObjectTypeTuplespace => "tuplespace",
-            ObjectType::ObjectTypeService => "service",
-            ObjectType::ObjectTypeVm => "vm",
-            ObjectType::ObjectTypeApplication => "application",
-            ObjectType::ObjectTypeWorkflow => "workflow",
-            ObjectType::ObjectTypeNode => "node",
-            _ => "unknown",
-        };
-        // Use tenant_id and namespace as-is (may be empty)
-        // Empty values are valid and will be included in the key
-        let tenant = tenant_id;
-        let ns = namespace;
-        format!("{}:{}:{}:{}", tenant, ns, type_str, object_id)
+    pub fn new(repository: Arc<dyn ObjectRegistryRepository>) -> Self {
+        Self { repository }
     }
 
     /// Register object (actor, tuplespace, or service)
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext for tenant isolation (tenant_id comes from here)
-    /// * `registration` - ObjectRegistration with object details (namespace can be empty, will use ctx.namespace)
+    /// * `registration` - ObjectRegistration with object details
     ///
     /// ## Returns
     /// `Ok(())` on success
     ///
     /// ## Errors
     /// - [`ObjectRegistryError::InvalidInput`]: Missing required fields
-    /// - [`ObjectRegistryError::ObjectAlreadyRegistered`]: Object already exists
-    /// - [`ObjectRegistryError::StorageError`]: KeyValueStore failure
+    /// - [`ObjectRegistryError::StorageError`]: Repository failure
     ///
     /// ## Examples
     /// ```rust,no_run
-    /// # use plexspaces_object_registry::ObjectRegistry;
+    /// # use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     /// # use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    /// # use plexspaces_keyvalue::InMemoryKVStore;
-    /// # use plexspaces_core::RequestContext;
+    /// # use plexspaces_common::RequestContext;
     /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let kv = Arc::new(InMemoryKVStore::new());
-    /// # let registry = ObjectRegistry::new(kv);
+    /// # let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await?);
+    /// # let registry = ObjectRegistryImpl::new(repo);
     /// let ctx = RequestContext::new_without_auth("default".to_string(), "production".to_string());
     /// let registration = ObjectRegistration {
     ///     object_id: "counter@node1".to_string(),
@@ -293,6 +274,7 @@ impl ObjectRegistryImpl {
     /// # Ok(())
     /// # }
     /// ```
+    #[instrument(skip(self, ctx, registration), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %registration.object_id))]
     pub async fn register(
         &self,
         ctx: &RequestContext,
@@ -310,7 +292,7 @@ impl ObjectRegistryImpl {
             ));
         }
 
-        // Get tenant_id and namespace from RequestContext (not from registration)
+        // Get tenant_id and namespace from RequestContext
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
 
@@ -340,38 +322,8 @@ impl ObjectRegistryImpl {
         });
         registration.updated_at = registration.created_at.clone();
 
-        // Generate key (make_key uses tenant/namespace as-is, may be empty)
-        let object_type = ObjectType::try_from(registration.object_type)
-            .unwrap_or(ObjectType::ObjectTypeUnspecified);
-        let full_key = Self::make_key(
-            tenant_id,
-            namespace,
-            object_type,
-            &registration.object_id,
-        );
-        
-        // Extract just the key part (without tenant:namespace) since put() will add it via composite_key
-        // make_key returns "{tenant}:{namespace}:{type}:{id}", but put expects just "{type}:{id}"
-        let key_prefix = format!("{}:{}:", tenant_id, namespace);
-        let key = if full_key.starts_with(&key_prefix) {
-            full_key.strip_prefix(&key_prefix).unwrap_or(&full_key).to_string()
-        } else {
-            full_key
-        };
-
-        // Upsert semantics: Allow re-registration of existing objects
-        //
-        // This supports persistent storage scenarios where a node may restart
-        // and re-register with the same ID. The caller explicitly wants to
-        // register this object, so we allow overwriting existing entries.
-        //
-        // TODO: Consider adding explicit upsert vs insert API for more control
-        // if strict "insert only" semantics are needed in certain scenarios.
-
-        // Serialize and store (upsert - overwrites if exists)
-        let value = registration.encode_to_vec();
-
-        self.kv_store.put(ctx, &key, value).await?;
+        // Store via repository (upsert semantics)
+        self.repository.put(ctx, &registration).await?;
 
         Ok(())
     }
@@ -379,7 +331,7 @@ impl ObjectRegistryImpl {
     /// Unregister object
     ///
     /// ## Arguments
-    /// * `ctx` - RequestContext for tenant isolation (tenant_id comes from here)
+    /// * `ctx` - RequestContext for tenant isolation
     /// * `object_type` - Type of object (Actor, TupleSpace, Service)
     /// * `object_id` - Object identifier
     ///
@@ -388,44 +340,30 @@ impl ObjectRegistryImpl {
     ///
     /// ## Errors
     /// - [`ObjectRegistryError::ObjectNotFound`]: Object doesn't exist
-    /// - [`ObjectRegistryError::StorageError`]: KeyValueStore failure
+    /// - [`ObjectRegistryError::StorageError`]: Repository failure
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
     pub async fn unregister(
         &self,
         ctx: &RequestContext,
-        object_type: ObjectType,
+        _object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), ObjectRegistryError> {
-        // Get tenant_id and namespace from RequestContext
-        let full_key = Self::make_key(
-            ctx.tenant_id(),
-            ctx.namespace(),
-            object_type,
-            object_id,
-        );
-        
-        // Extract just the key part (without tenant:namespace) since get()/delete() will add it via composite_key
-        let key_prefix = format!("{}:{}:", ctx.tenant_id(), ctx.namespace());
-        let key = if full_key.starts_with(&key_prefix) {
-            full_key.strip_prefix(&key_prefix).unwrap_or(&full_key).to_string()
-        } else {
-            full_key
-        };
-
-        // Check if exists
-        if self.kv_store.get(ctx, &key).await?.is_none() {
-            return Err(ObjectRegistryError::ObjectNotFound(object_id.to_string()));
+        // Check if exists first
+        if !self.repository.exists(ctx, object_id).await? {
+            return Err(ObjectRegistryError::ObjectNotFound(format!(
+                "Object '{}' not found in tenant '{}', namespace '{}'",
+                object_id, ctx.tenant_id(), ctx.namespace()
+            )));
         }
 
-        self.kv_store.delete(ctx, &key).await?;
-
+        self.repository.delete(ctx, object_id).await?;
         Ok(())
     }
 
     /// Lookup specific object by ID
     ///
     /// ## Arguments
-    /// * `tenant_id` - Tenant identifier
-    /// * `namespace` - Namespace
+    /// * `ctx` - RequestContext for tenant isolation
     /// * `object_type` - Type of object
     /// * `object_id` - Object identifier
     ///
@@ -433,42 +371,40 @@ impl ObjectRegistryImpl {
     /// `Ok(Some(ObjectRegistration))` if found, `Ok(None)` if not found
     ///
     /// ## Errors
-    /// - [`ObjectRegistryError::SerializationError`]: Failed to deserialize
-    /// - [`ObjectRegistryError::StorageError`]: KeyValueStore failure
+    /// - [`ObjectRegistryError::StorageError`]: Repository failure
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
     pub async fn lookup(
         &self,
         ctx: &RequestContext,
-        object_type: ObjectType,
+        _object_type: ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, ObjectRegistryError> {
-        let full_key = Self::make_key(ctx.tenant_id(), ctx.namespace(), object_type, object_id);
-        
-        // Extract just the key part (without tenant:namespace) since get() will add it via composite_key
-        let key_prefix = format!("{}:{}:", ctx.tenant_id(), ctx.namespace());
-        let key = if full_key.starts_with(&key_prefix) {
-            full_key.strip_prefix(&key_prefix).unwrap_or(&full_key).to_string()
-        } else {
-            full_key
-        };
+        let result = self.repository.get(ctx, object_id).await?;
 
-        match self.kv_store.get(ctx, &key).await? {
-            Some(value) => {
-                let registration = ObjectRegistration::decode(&value[..])
-                    .map_err(|e| ObjectRegistryError::SerializationError(e.to_string()))?;
-                // If not admin, verify tenant matches
-                if !ctx.is_admin() && registration.tenant_id != ctx.tenant_id() {
-                    return Ok(None); // Tenant mismatch - return None
-                }
-                Ok(Some(registration))
+        // If not admin, verify tenant matches
+        if let Some(ref reg) = result {
+            if !ctx.is_admin() && reg.tenant_id != ctx.tenant_id() {
+                return Ok(None); // Tenant mismatch - return None
             }
-            None => Ok(None),
         }
+
+        Ok(result)
     }
 
     /// Lookup object by ID (full signature matching ObjectRegistry trait)
     ///
-    /// This wraps `lookup()` to match the ObjectRegistry trait signature.
-    /// Use this when implementing the ObjectRegistry trait.
+    /// ## Purpose
+    /// Wraps `lookup()` to match the ObjectRegistry trait signature.
+    /// This method converts errors to `Box<dyn Error>` for trait compatibility.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `object_type` - Type of object
+    /// * `object_id` - Object identifier
+    ///
+    /// ## Returns
+    /// `Ok(Some(ObjectRegistration))` if found, `Ok(None)` if not found
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
     pub async fn lookup_full(
         &self,
         ctx: &RequestContext,
@@ -482,7 +418,17 @@ impl ObjectRegistryImpl {
 
     /// Register an object (trait-compatible signature)
     ///
-    /// This wraps `register()` to match the ObjectRegistry trait signature.
+    /// ## Purpose
+    /// Wraps `register()` to match the ObjectRegistry trait signature.
+    /// This method converts errors to `Box<dyn Error>` for trait compatibility.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `registration` - ObjectRegistration with object details
+    ///
+    /// ## Returns
+    /// `Ok(())` on success
+    #[instrument(skip(self, ctx, registration), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %registration.object_id))]
     pub async fn register_trait(
         &self,
         ctx: &RequestContext,
@@ -496,25 +442,24 @@ impl ObjectRegistryImpl {
     /// Discover objects with filtering
     ///
     /// ## Arguments
-    /// * `ctx` - RequestContext for tenant isolation (first parameter)
+    /// * `ctx` - RequestContext for tenant isolation
     /// * `object_type` - Filter by type (None = all types)
     /// * `object_category` - Filter by category (None = all categories)
     /// * `capabilities` - Filter by capabilities (None = all)
     /// * `labels` - Filter by labels (None = all)
     /// * `health_status` - Filter by health status (None = all)
+    /// * `offset` - Number of results to skip
     /// * `limit` - Maximum results to return
     ///
     /// ## Returns
     /// List of matching ObjectRegistrations
     ///
     /// ## Errors
-    /// - [`ObjectRegistryError::StorageError`]: KeyValueStore failure
+    /// - [`ObjectRegistryError::StorageError`]: Repository failure
     ///
     /// ## Performance
-    /// O(n) scan with filtering - use prefixes for type filtering
-    ///
-    /// ## Note
-    /// If ctx.is_admin() is true, tenant filtering is bypassed for admin operations.
+    /// O(log n + k) using indexed columns for filtering
+    #[instrument(skip(self, ctx, capabilities, labels), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_type = ?object_type, offset = %offset, limit = %limit))]
     pub async fn discover(
         &self,
         ctx: &RequestContext,
@@ -526,106 +471,32 @@ impl ObjectRegistryImpl {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<ObjectRegistration>, ObjectRegistryError> {
-        // Build prefix for type filtering
-        // Key format in KV store: {tenant_id}:{namespace}:{object_type}:{object_id}
-        // But list() expects just the key part (without tenant:namespace) since it adds them via composite_key
-        // So prefix should be just: {type}: (or empty for all types)
-        let prefix = match object_type {
-            Some(obj_type) => {
-                let type_str = match obj_type {
-                    ObjectType::ObjectTypeActor => "actor",
-                    ObjectType::ObjectTypeTuplespace => "tuplespace",
-                    ObjectType::ObjectTypeService => "service",
-                    ObjectType::ObjectTypeVm => "vm",
-                    ObjectType::ObjectTypeApplication => "application",
-                    ObjectType::ObjectTypeWorkflow => "workflow",
-                    ObjectType::ObjectTypeNode => "node",
-                    _ => "",
-                };
-                if type_str.is_empty() {
-                    String::new() // Empty prefix = all types
-                } else {
-                    format!("{}:", type_str) // Just type: prefix
-                }
-            }
-            None => String::new(), // Empty prefix = all types
+        let filter = DiscoverFilter {
+            object_type,
+            object_category,
+            health_status,
+            labels,
+            capabilities,
+            ..Default::default()
         };
 
-        // List KeyValueStore with prefix (scoped to tenant/namespace via context)
-        // list() will add tenant:namespace via composite_key internally
-        let keys = self.kv_store.list(&ctx, &prefix).await?;
+        let results = self.repository.discover(ctx, &filter, offset, limit).await?;
 
-        let mut results = Vec::new();
-        let mut skipped = 0;
-
-        for key in keys {
-            // Skip items before offset
-            if skipped < offset {
-                skipped += 1;
-                continue;
-            }
-            
-            // Stop if we've reached the limit
-            if results.len() >= limit {
-                break;
-            }
-
-            if let Some(value) = self.kv_store.get(&ctx, &key).await? {
-                    if let Ok(registration) = ObjectRegistration::decode(&value[..]) {
-                        // If not admin, verify tenant matches
-                        if !ctx.is_admin() && registration.tenant_id != ctx.tenant_id() {
-                            continue; // Tenant mismatch - skip
-                        }
-
-                        // Apply filters
-                        if let Some(ref cat) = object_category {
-                            if registration.object_category != *cat {
-                                continue;
-                            }
-                        }
-
-                        if let Some(ref caps) = capabilities {
-                            if !caps
-                                .iter()
-                                .all(|c| registration.capabilities.contains(c))
-                            {
-                                continue;
-                            }
-                        }
-
-                        if let Some(ref lbls) = labels {
-                            if !lbls.iter().all(|l| registration.labels.contains(l)) {
-                                continue;
-                            }
-                        }
-
-                        if let Some(ref status) = health_status {
-                            // HealthStatus enum can be cast to i32 directly
-                            let status_value = match status {
-                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown => 0,
-                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy => 1,
-                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusDegraded => 2,
-                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy => 3,
-                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusStarting => 4,
-                                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusStopping => 5,
-                            };
-                            if registration.health_status != status_value {
-                                continue;
-                            }
-                        }
-
-                        results.push(registration);
-                    }
-            }
+        // Filter by tenant if not admin
+        if ctx.is_admin() {
+            Ok(results)
+        } else {
+            Ok(results
+                .into_iter()
+                .filter(|r| r.tenant_id == ctx.tenant_id())
+                .collect())
         }
-
-        Ok(results)
     }
 
     /// Update heartbeat for object
     ///
     /// ## Arguments
-    /// * `ctx` - RequestContext for tenant isolation (first parameter)
+    /// * `ctx` - RequestContext for tenant isolation
     /// * `object_type` - Type of object
     /// * `object_id` - Object identifier
     ///
@@ -634,57 +505,112 @@ impl ObjectRegistryImpl {
     ///
     /// ## Errors
     /// - [`ObjectRegistryError::ObjectNotFound`]: Object doesn't exist
-    /// - [`ObjectRegistryError::StorageError`]: KeyValueStore failure
+    /// - [`ObjectRegistryError::StorageError`]: Repository failure
+    ///
+    /// ## Performance
+    /// O(1) - single column UPDATE, no blob read/write required
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
     pub async fn heartbeat(
         &self,
         ctx: &RequestContext,
-        object_type: ObjectType,
+        _object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), ObjectRegistryError> {
-        let full_key = Self::make_key(ctx.tenant_id(), ctx.namespace(), object_type, object_id);
-        
-        // Extract just the key part (without tenant:namespace) since get() will add it via composite_key
-        let key_prefix = format!("{}:{}:", ctx.tenant_id(), ctx.namespace());
-        let key = if full_key.starts_with(&key_prefix) {
-            full_key.strip_prefix(&key_prefix).unwrap_or(&full_key).to_string()
-        } else {
-            full_key
+        let now = chrono::Utc::now().timestamp();
+        self.repository
+            .update_heartbeat(ctx, object_id, now)
+            .await?;
+        Ok(())
+    }
+
+    /// Find stale registrations (last heartbeat older than threshold)
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `threshold_seconds` - Age threshold in seconds
+    /// * `object_type` - Optional filter by type
+    /// * `limit` - Maximum results to return
+    ///
+    /// ## Returns
+    /// List of stale ObjectRegistrations
+    ///
+    /// ## Performance
+    /// O(log n + k) using last_heartbeat index
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), threshold_seconds = %threshold_seconds, object_type = ?object_type))]
+    pub async fn find_stale(
+        &self,
+        ctx: &RequestContext,
+        threshold_seconds: i64,
+        object_type: Option<ObjectType>,
+        limit: usize,
+    ) -> Result<Vec<ObjectRegistration>, ObjectRegistryError> {
+        let threshold_time = chrono::Utc::now().timestamp() - threshold_seconds;
+
+        let filter = DiscoverFilter {
+            object_type,
+            last_heartbeat_before: Some(threshold_time),
+            ..Default::default()
         };
 
-        // Use the provided RequestContext (no need to recreate)
+        let results = self.repository.discover(ctx, &filter, 0, limit).await?;
+        Ok(results)
+    }
 
-        // Get existing registration
-        let value = self
-            .kv_store
-            .get(&ctx, &key)
-            .await?
-            .ok_or_else(|| ObjectRegistryError::ObjectNotFound(object_id.to_string()))?;
-
-        let mut registration = ObjectRegistration::decode(&value[..])
-            .map_err(|e| ObjectRegistryError::SerializationError(e.to_string()))?;
-
-        // Update heartbeat timestamp
-        let now = chrono::Utc::now();
-        registration.last_heartbeat = Some(prost_types::Timestamp {
-            seconds: now.timestamp(),
-            nanos: now.timestamp_subsec_nanos() as i32,
-        });
-        registration.updated_at = Some(prost_types::Timestamp {
-            seconds: now.timestamp(),
-            nanos: now.timestamp_subsec_nanos() as i32,
-        });
-
-        // Re-serialize and store
-        let updated_value = registration.encode_to_vec();
-
-        // Use the provided RequestContext (no need to recreate)
-        self.kv_store.put(ctx, &key, updated_value).await?;
-
+    /// Update health status for an object
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `object_id` - Object identifier
+    /// * `status` - New health status
+    ///
+    /// ## Returns
+    /// `Ok(())` on success
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id, status = ?status))]
+    pub async fn update_health_status(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+        status: HealthStatus,
+    ) -> Result<(), ObjectRegistryError> {
+        self.repository
+            .update_health_status(ctx, object_id, status)
+            .await?;
         Ok(())
+    }
+
+    /// Count objects matching filter
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `object_type` - Optional filter by type
+    ///
+    /// ## Returns
+    /// Count of matching objects
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_type = ?object_type))]
+    pub async fn count(
+        &self,
+        ctx: &RequestContext,
+        object_type: Option<ObjectType>,
+    ) -> Result<usize, ObjectRegistryError> {
+        let filter = DiscoverFilter {
+            object_type,
+            ..Default::default()
+        };
+        let count = self.repository.count(ctx, &filter).await?;
+        Ok(count)
     }
 }
 
-// ObjectRegistryImpl implements the ObjectRegistry trait
+// Debug impl for ObjectRegistryImpl
+impl std::fmt::Debug for ObjectRegistryImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObjectRegistryImpl")
+            .field("repository", &"<dyn ObjectRegistryRepository>")
+            .finish()
+    }
+}
+
+// ObjectRegistryImpl implements the Service trait
 impl plexspaces_core::Service for ObjectRegistryImpl {
     fn service_name(&self) -> String {
         "ObjectRegistry".to_string()
@@ -698,11 +624,18 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         ctx: &RequestContext,
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-    ) -> Result<Option<plexspaces_core::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+    ) -> Result<
+        Option<plexspaces_core::actor_context::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let obj_type = object_type
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.lookup(ctx, obj_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn lookup_full(
@@ -710,9 +643,11 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         ctx: &RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
-    ) -> Result<Option<plexspaces_core::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        self.lookup_full(ctx, object_type, object_id)
-            .await
+    ) -> Result<
+        Option<plexspaces_core::actor_context::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        self.lookup_full(ctx, object_type, object_id).await
     }
 
     async fn register(
@@ -720,9 +655,7 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         ctx: &RequestContext,
         registration: plexspaces_core::actor_context::ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // ObjectRegistration in core is a type alias to proto::ObjectRegistration, so no conversion needed
-        self.register_trait(ctx, registration)
-            .await
+        self.register_trait(ctx, registration).await
     }
 
     async fn discover(
@@ -735,10 +668,25 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
         offset: usize,
         limit: usize,
-    ) -> Result<Vec<plexspaces_core::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        self.discover(ctx, object_type, object_category, capabilities, labels, health_status, offset, limit)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+    ) -> Result<
+        Vec<plexspaces_core::actor_context::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        self.discover(
+            ctx,
+            object_type,
+            object_category,
+            capabilities,
+            labels,
+            health_status,
+            offset,
+            limit,
+        )
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn unregister(
@@ -749,7 +697,10 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.unregister(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn heartbeat(
@@ -760,32 +711,38 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.heartbeat(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sql-backend"))]
 mod tests {
     use super::*;
-    use plexspaces_keyvalue::InMemoryKVStore;
+    use repository::SqliteObjectRegistryRepository;
 
     fn create_test_registration(object_id: &str, object_type: ObjectType) -> ObjectRegistration {
         ObjectRegistration {
             object_id: object_id.to_string(),
             object_type: object_type as i32,
-            grpc_address: format!("http://test-node:8000"),
-            // tenant_id and namespace are ignored - they come from RequestContext
+            grpc_address: "http://test-node:8000".to_string(),
             object_category: "GenServer".to_string(),
+            health_status: HealthStatus::HealthStatusHealthy as i32,
             ..Default::default()
         }
     }
 
     #[tokio::test]
     async fn test_register_and_lookup() {
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistryImpl::new(kv);
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = ObjectRegistryImpl::new(repo);
 
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, registration.clone()).await.unwrap();
 
@@ -801,29 +758,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_register_duplicate_fails() {
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistryImpl::new(kv);
+    async fn test_register_upsert() {
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = ObjectRegistryImpl::new(repo);
 
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-        let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
+        let mut registration =
+            create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, registration.clone()).await.unwrap();
 
-        // Try to register again - should fail
-        let result = registry.register(&ctx, registration).await;
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            ObjectRegistryError::ObjectAlreadyRegistered(_)
-        ));
+        // Re-register with updated address (upsert)
+        registration.grpc_address = "http://new-node:9000".to_string();
+        registry.register(&ctx, registration).await.unwrap();
+
+        let found = registry
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(found.grpc_address, "http://new-node:9000");
     }
 
     #[tokio::test]
     async fn test_unregister() {
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistryImpl::new(kv);
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = ObjectRegistryImpl::new(repo);
 
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, registration).await.unwrap();
 
@@ -842,15 +810,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_heartbeat() {
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistryImpl::new(kv);
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = ObjectRegistryImpl::new(repo);
 
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
         let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, registration).await.unwrap();
-
-        // Wait a bit
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         // Update heartbeat
         registry
@@ -869,11 +837,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_discover_by_type() {
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = ObjectRegistryImpl::new(kv);
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = ObjectRegistryImpl::new(repo);
 
-        // Note: discover() uses default:default prefix, so we need to register with default tenant/namespace
-        let ctx = RequestContext::new_without_auth(String::new(), String::new()); // Empty - use tenant_id/namespace from API request
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
+
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, reg1).await.unwrap();
 
@@ -884,13 +855,106 @@ mod tests {
         registry.register(&ctx, reg3).await.unwrap();
 
         let actors = registry
-            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
+            .discover(
+                &ctx,
+                Some(ObjectType::ObjectTypeActor),
+                None,
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .await
             .unwrap();
 
         assert_eq!(actors.len(), 2);
     }
+
+    #[tokio::test]
+    async fn test_tenant_isolation() {
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = ObjectRegistryImpl::new(repo);
+
+        let ctx1 =
+            RequestContext::new_without_auth("tenant-1".to_string(), "namespace-1".to_string());
+        let ctx2 =
+            RequestContext::new_without_auth("tenant-2".to_string(), "namespace-1".to_string());
+
+        let reg1 = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        registry.register(&ctx1, reg1).await.unwrap();
+
+        // Different tenant should not see the registration
+        let found = registry
+            .lookup(&ctx2, ObjectType::ObjectTypeActor, "actor-1")
+            .await
+            .unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_count() {
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = ObjectRegistryImpl::new(repo);
+
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
+
+        let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor);
+        registry.register(&ctx, reg1).await.unwrap();
+
+        let reg2 = create_test_registration("actor2@node1", ObjectType::ObjectTypeActor);
+        registry.register(&ctx, reg2).await.unwrap();
+
+        let count = registry
+            .count(&ctx, Some(ObjectType::ObjectTypeActor))
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+
+        let total = registry.count(&ctx, None).await.unwrap();
+        assert_eq!(total, 2);
+    }
+
+    #[tokio::test]
+    async fn test_update_health_status() {
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = ObjectRegistryImpl::new(repo);
+
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
+
+        let reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        registry.register(&ctx, reg).await.unwrap();
+
+        registry
+            .update_health_status(&ctx, "actor-1", HealthStatus::HealthStatusUnhealthy)
+            .await
+            .unwrap();
+
+        // Verify by discovering with health filter
+        let unhealthy = registry
+            .discover(
+                &ctx,
+                None,
+                None,
+                None,
+                None,
+                Some(HealthStatus::HealthStatusUnhealthy),
+                0,
+                100,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(unhealthy.len(), 1);
+        assert_eq!(unhealthy[0].object_id, "actor-1");
+    }
 }
 
-// Type alias for convenience (ObjectRegistryImpl implements ObjectRegistry trait)
+/// Type alias for convenience
 pub type ObjectRegistry = ObjectRegistryImpl;

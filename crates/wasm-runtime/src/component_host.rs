@@ -4215,6 +4215,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                     holder_id: lock.holder_id,
                     version: lock.version,
                     locked: lock.locked,
+                    lease_duration_secs: lock.lease_duration_secs,
                     expires_at: expires_at_ms,
                     last_heartbeat: last_heartbeat_ms,
                 };
@@ -4288,6 +4289,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                     holder_id: lock.holder_id,
                     version: lock.version,
                     locked: lock.locked,
+                    lease_duration_secs: lock.lease_duration_secs,
                     expires_at: expires_at_ms,
                     last_heartbeat: last_heartbeat_ms,
                 };
@@ -4426,6 +4428,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                     holder_id: lock.holder_id,
                     version: lock.version,
                     locked: lock.locked,
+                    lease_duration_secs: lock.lease_duration_secs,
                     expires_at: expires_at_ms,
                     last_heartbeat: last_heartbeat_ms,
                 };
@@ -4494,6 +4497,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
                     holder_id: lock.holder_id,
                     version: lock.version,
                     locked: lock.locked,
+                    lease_duration_secs: lock.lease_duration_secs,
                     expires_at: expires_at_ms,
                     last_heartbeat: last_heartbeat_ms,
                 };

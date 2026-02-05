@@ -1,30 +1,23 @@
 #!/bin/bash
-# Build Feature Flags Actor for PlexSpaces
-#
-# Prerequisites:
-#   python3.12 -m venv ~/venv
-#   source ~/venv/bin/activate
-#   pip install componentize-py
+# Build Feature Flags WASM actor using PlexSpaces Python SDK
+set -euo pipefail
 
-set -e
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+SDK_DIR="$PROJECT_ROOT/sdks/python"
+ACTOR_NAME="feature_flags_actor"
 
-# Activate venv if exists
-if [ -f ~/venv/bin/activate ]; then
-    source ~/venv/bin/activate
+source "$HOME/venv/bin/activate" 2>/dev/null || true
+
+cd "$SCRIPT_DIR"
+
+echo "Building $ACTOR_NAME using PlexSpaces SDK..."
+
+if ! python3 -c "import plexspaces" 2>/dev/null; then
+    echo "Installing PlexSpaces SDK..."
+    pip install -e "$SDK_DIR" --quiet
 fi
 
-ACTOR_NAME="feature_flags_actor"
-WIT_DIR="../../../../wit/plexspaces-simple-actor"
+plexspaces-py build "$ACTOR_NAME.py" -o "${ACTOR_NAME}.wasm" --wit-dir "$PROJECT_ROOT/wit/plexspaces-simple-actor"
 
-echo "Building $ACTOR_NAME..."
-
-componentize-py \
-    -d "$WIT_DIR" \
-    -w actor-world \
-    componentize \
-    "$ACTOR_NAME" \
-    -o "${ACTOR_NAME}.wasm"
-
-echo "Component built successfully"
-ls -lh "${ACTOR_NAME}.wasm" | awk '{print "✅ Built:", $9, "("$5")"}'
+echo "Built: ${ACTOR_NAME}.wasm ($(ls -lh ${ACTOR_NAME}.wasm | awk '{print $5}'))"

@@ -49,7 +49,7 @@ pub type ObjectRegistration = plexspaces_proto::object_registry::v1::ObjectRegis
 /// This is a Rust trait (not in proto), following proto-first principle.
 ///
 /// ## Proto-First Principle
-/// - Proto defines: ChannelConfig, Message (unified), ChannelBackend (structs/enums)
+/// - Proto defines: ChannelConfig, Message (unified), ChannelProvider (structs/enums)
 /// - Rust defines: ChannelService trait (implementation detail, flexible)
 ///
 /// ## Design

@@ -1,0 +1,25 @@
+# Bank Accounts Application Configuration (TypeScript)
+# Same layout as Python bank_account: 3 accounts under a supervisor.
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "account-alice"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[[supervisor.children]]
+id = "account-bob"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[[supervisor.children]]
+id = "account-charlie"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5

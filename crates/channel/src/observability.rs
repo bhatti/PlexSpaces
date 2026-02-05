@@ -255,19 +255,19 @@ pub fn record_channel_stats(
 /// Get backend name as string for observability
 ///
 /// ## Arguments
-/// * `backend` - ChannelBackend enum value
+/// * `backend` - ChannelProvider enum value
 ///
 /// ## Returns
 /// String representation of backend name
 pub fn backend_name(backend: i32) -> &'static str {
-    use plexspaces_proto::channel::v1::ChannelBackend;
-    match ChannelBackend::try_from(backend).ok() {
-        Some(ChannelBackend::ChannelBackendInMemory) => "in_memory",
-        Some(ChannelBackend::ChannelBackendRedis) => "redis",
-        Some(ChannelBackend::ChannelBackendKafka) => "kafka",
-        Some(ChannelBackend::ChannelBackendNats) => "nats",
-        Some(ChannelBackend::ChannelBackendSqlite) => "sqlite",
-        Some(ChannelBackend::ChannelBackendCustom) => "custom",
+    use plexspaces_proto::channel::v1::ChannelProvider;
+    match ChannelProvider::try_from(backend).ok() {
+        Some(ChannelProvider::ChannelProviderInMemory) => "in_memory",
+        Some(ChannelProvider::ChannelProviderRedis) => "redis",
+        Some(ChannelProvider::ChannelProviderKafka) => "kafka",
+        Some(ChannelProvider::ChannelProviderNats) => "nats",
+        Some(ChannelProvider::ChannelProviderSqlite) => "sqlite",
+        Some(ChannelProvider::ChannelProviderCustom) => "custom",
         _ => "unknown",
     }
 }

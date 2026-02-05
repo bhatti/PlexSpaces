@@ -1,97 +1,97 @@
-#!/usr/bin/env python3
 """
-Calculator Actor - Simple Actor Interface
+Calculator Actor - Simple Actor Interface (Python WASM with SDK)
 
 Demonstrates request-reply pattern with calculator operations.
-Uses the simplified string-only WIT interface for componentize-py compatibility.
+Uses PlexSpaces Python SDK for minimal boilerplate.
+
+## SDK Features Used
+
+- @actor: Marks class as PlexSpaces actor
+- state(): Defines persistent state fields
+- @handler(): Routes messages to methods
 """
 
-import json
-from wit_world import exports
-
-# Actor state
-_state = {
-    "last_operation": None,
-    "last_result": None,
-    "history": []
-}
+from plexspaces import actor, state, handler, init_handler
 
 
-class Actor(exports.Actor):
-    """Calculator actor implementing simple-actor interface."""
+@actor
+class Calculator:
+    """Calculator actor implementing basic math operations."""
     
-    def init(self, config_json: str) -> str:
+    # Persistent state fields
+    last_operation: str = state(default=None)
+    last_result: float = state(default=None)
+    history: list = state(default_factory=list)
+    
+    @init_handler
+    def on_init(self, config: dict):
         """Initialize calculator with optional config."""
-        global _state
-        if config_json:
-            try:
-                config = json.loads(config_json)
-                _state = config.get("state", _state)
-            except Exception as e:
-                return f"ERROR: Failed to parse config: {e}"
-        return ""  # Success
+        if "state" in config:
+            saved_state = config["state"]
+            self.last_operation = saved_state.get("last_operation")
+            self.last_result = saved_state.get("last_result")
+            self.history = saved_state.get("history", [])
     
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
-        """
-        Handle calculator requests.
-        
-        Message types:
-        - "add": Add operands
-        - "subtract": Subtract operands  
-        - "multiply": Multiply operands
-        - "divide": Divide operands
-        - "get_history": Get calculation history
-        """
-        global _state
-        
-        try:
-            request = json.loads(payload_json) if payload_json else {}
-            operation = request.get('operation', msg_type)
-            operands = request.get('operands', [])
-            
-            if operation == 'add':
-                result = sum(operands)
-            elif operation == 'subtract':
-                if len(operands) >= 2:
-                    result = operands[0] - sum(operands[1:])
-                else:
-                    return json.dumps({'error': 'Subtract requires at least 2 operands'})
-            elif operation == 'multiply':
-                result = 1
-                for op in operands:
-                    result *= op
-            elif operation == 'divide':
-                if len(operands) >= 2 and operands[1] != 0:
-                    result = operands[0] / operands[1]
-                else:
-                    return json.dumps({'error': 'Divide requires 2 operands, divisor must be non-zero'})
-            elif operation == 'get_history':
-                return json.dumps({'history': _state['history']})
-            elif msg_type == 'call' or msg_type == 'get_state':
-                return json.dumps(_state)
-            else:
-                return json.dumps({'error': f'Unknown operation: {operation}'})
-            
-            # Store result in state
-            _state['last_operation'] = operation
-            _state['last_result'] = result
-            _state['history'].append({'operation': operation, 'operands': operands, 'result': result})
-            
-            return json.dumps({'result': result, 'operation': operation})
-            
-        except Exception as e:
-            return f"ERROR: {e}"
+    @handler("add")
+    def add(self, operands: list = None) -> dict:
+        """Add operands."""
+        if operands is None:
+            operands = []
+        result = sum(operands)
+        self._record("add", operands, result)
+        return {"result": result, "operation": "add"}
     
-    def get_state(self) -> str:
-        """Get calculator state as JSON."""
-        global _state
-        return json.dumps(_state)
+    @handler("subtract")
+    def subtract(self, operands: list = None) -> dict:
+        """Subtract operands (first - rest)."""
+        if operands is None or len(operands) < 2:
+            return {"error": "Subtract requires at least 2 operands"}
+        result = operands[0] - sum(operands[1:])
+        self._record("subtract", operands, result)
+        return {"result": result, "operation": "subtract"}
     
-    def set_state(self, state_json: str) -> str:
-        """Restore calculator state from JSON."""
-        global _state
-        try:
-            _state = json.loads(state_json)
-            return ""
-        except Exception as e:
-            return f"ERROR: Failed to restore state: {e}"
+    @handler("multiply")
+    def multiply(self, operands: list = None) -> dict:
+        """Multiply operands."""
+        if operands is None:
+            operands = []
+        result = 1
+        for op in operands:
+            result *= op
+        self._record("multiply", operands, result)
+        return {"result": result, "operation": "multiply"}
+    
+    @handler("divide")
+    def divide(self, operands: list = None) -> dict:
+        """Divide first operand by second."""
+        if operands is None or len(operands) < 2:
+            return {"error": "Divide requires 2 operands"}
+        if operands[1] == 0:
+            return {"error": "Divide requires 2 operands, divisor must be non-zero"}
+        result = operands[0] / operands[1]
+        self._record("divide", operands, result)
+        return {"result": result, "operation": "divide"}
+    
+    @handler("get_history")
+    def get_history(self) -> dict:
+        """Get calculation history."""
+        return {"history": self.history}
+    
+    @handler("call", "get_state")
+    def get_state_handler(self) -> dict:
+        """Get current state."""
+        return {
+            "last_operation": self.last_operation,
+            "last_result": self.last_result,
+            "history": self.history
+        }
+    
+    def _record(self, operation: str, operands: list, result: float):
+        """Record operation in history."""
+        self.last_operation = operation
+        self.last_result = result
+        self.history.append({
+            "operation": operation,
+            "operands": operands,
+            "result": result
+        })

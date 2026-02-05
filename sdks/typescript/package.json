@@ -1,0 +1,23 @@
+{
+  "name": "@plexspaces/sdk",
+  "version": "0.1.0",
+  "description": "PlexSpaces TypeScript SDK - build actors with minimal boilerplate (inheritance-based)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p .",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "license": "LGPL-2.1-or-later"
+}

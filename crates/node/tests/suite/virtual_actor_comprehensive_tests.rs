@@ -4,7 +4,7 @@
 use plexspaces_actor::{Actor as ActorStruct, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait, ActorRegistry};
-use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, MemoryJournalStorage, StateLoader, JournalStorage};
+use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, SqliteJournalStorage, StateLoader, JournalStorage};
 use plexspaces_core::Message;
 use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_node::default_node_config;
@@ -1277,8 +1277,8 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
     let shared_state = Arc::new(tokio::sync::RwLock::new(None));
     let state_loader = Arc::new(DurableCounterStateLoader::new(shared_state.clone()));
     
-    // Create shared storage for DurabilityFacet
-    let storage = Arc::new(plexspaces_journaling::MemoryJournalStorage::new());
+    // Create shared storage for DurabilityFacet (SQLite :memory: for tests)
+    let storage = Arc::new(plexspaces_journaling::SqliteJournalStorage::new(":memory:").await.unwrap());
     
     // Register eager virtual actor with DurabilityFacet
     let _actor_ref = get_or_activate_actor_helper(&node, 
@@ -1367,7 +1367,7 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
         metadata: std::collections::HashMap::new(),
         state_schema_version: 1,
     };
-    <plexspaces_journaling::MemoryJournalStorage as JournalStorage>::save_checkpoint(&*storage, &checkpoint).await.unwrap();
+    JournalStorage::save_checkpoint(&*storage, &checkpoint).await.unwrap();
     eprintln!("🟢 [TEST] Created checkpoint with count=3");
     
     // Suspend the actor
@@ -1436,8 +1436,8 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     // Create shared state for StateLoader
     let shared_state = Arc::new(tokio::sync::RwLock::new(None));
     
-    // Create shared storage for DurabilityFacet
-    let storage = Arc::new(plexspaces_journaling::MemoryJournalStorage::new());
+    // Create shared storage for DurabilityFacet (SQLite :memory: for tests)
+    let storage = Arc::new(plexspaces_journaling::SqliteJournalStorage::new(":memory:").await.unwrap());
     
     // Register lazy virtual actor with DurabilityFacet
     let _actor_ref = get_or_activate_actor_helper(&node, 
@@ -1527,7 +1527,7 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
         metadata: std::collections::HashMap::new(),
         state_schema_version: 1,
     };
-    <plexspaces_journaling::MemoryJournalStorage as JournalStorage>::save_checkpoint(&*storage, &checkpoint).await.unwrap();
+    JournalStorage::save_checkpoint(&*storage, &checkpoint).await.unwrap();
     eprintln!("🟢 [TEST] Created checkpoint with count=5");
     
     // Suspend the actor

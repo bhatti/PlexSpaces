@@ -53,7 +53,7 @@ import "plexspaces/v1/application/application.proto";
 import "plexspaces/v1/security/security.proto";
 import "plexspaces/v1/storage/blob.proto";
 import "plexspaces/v1/storage/storage_config.proto";
-import "plexspaces/v1/journaling/journaling.proto";
+import "plexspaces/v1/channel/channel.proto";
 
 // Release specification (Erlang/OTP-inspired)
 //
@@ -148,24 +148,6 @@ message NodeConfig {
   // If not set, derived from listen_addr. Should be externally reachable.
   // Example: "http://node1.example.com:8000"
   string grpc_address = 21;
-
-  // ==================== WASM AUTO-DEPLOY CONFIGURATION ====================
-
-  // Directory containing WASM applications to auto-deploy on startup
-  //
-  // Structure: wasm_apps/<app-name>/app.wasm (required) + app-config.toml (optional)
-  // Each subdirectory is deployed as a separate application.
-  // If empty, no auto-deploy happens (default behavior).
-  //
-  // Environment variable: PLEXSPACES_WASM_APPS_DIR (takes precedence over config)
-  // Example: "./wasm_apps" or "/opt/plexspaces/apps"
-  string wasm_apps_directory = 22 [
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Directory containing WASM applications to auto-deploy on startup. Each subdirectory should contain app.wasm (required) and optionally app-config.toml. If empty, no auto-deploy happens. Can be overridden by PLEXSPACES_WASM_APPS_DIR env var."
-      default: ""
-      example: "\"./wasm_apps\""
-    }
-  ];
 }
 
 // Node registry configuration
@@ -489,51 +471,58 @@ message RuntimeConfig {
   // Blob storage configuration (S3-compatible object storage)
   plexspaces.storage.v1.BlobConfig blob = 4;
 
-  // Shared relational database configuration
+  // Shared database configuration
   //
-  // Used by components that always use relational database:
+  // Used by all components that use relational database:
   // - scheduler (crates/scheduler/migrations)
   // - workflow (crates/workflow/migrations)
   // - journaling (crates/journaling/migrations)
   // - blob (crates/blob/migrations)
-  // - keyvalue (crates/keyvalue/migrations) - now always SQL
+  // - keyvalue (crates/keyvalue/migrations)
+  // - locks (crates/locks/migrations)
+  // - channel (crates/channel/migrations)
+  // - tuplespace (crates/tuplespace/migrations)
   //
   // Convention: All these components share the same database by default.
-  // Can be overridden per-component if needed.
-  plexspaces.storage.v1.SharedRelationalDbConfig shared_database = 5;
+  plexspaces.storage.v1.SharedDbConfig db = 5;
 
   // Locks storage provider configuration
   //
   // Supports: postgres, sqlite, redis, dynamodb
-  // Default: redis (if available), else postgres
+  // Default (set by config_manager): redis (if available), else use shared db
   plexspaces.storage.v1.StorageProviderConfig locks_provider = 6;
 
-  // Channel storage provider configuration
+  // Channel provider type
   //
-  // Supports: redis, kafka, nats, sqlite, memory
-  // Default: redis (if available), else memory
-  plexspaces.storage.v1.StorageProviderConfig channel_provider = 7;
+  // Supports: IN_MEMORY, REDIS, KAFKA, NATS, SQLITE, SQS, POSTGRES, PROCESS_GROUP
+  // Default (set by config_manager): IN_MEMORY
+  plexspaces.channel.v1.ChannelProvider channel_provider = 7;
 
-  // TupleSpace storage provider configuration
+  // Mailbox provider type
   //
-  // Supports: postgres, sqlite, redis, dynamodb
-  // Default: postgres (if available), else memory
-  plexspaces.storage.v1.StorageProviderConfig tuplespace_provider = 8;
-
-  // Mailbox storage provider configuration
-  //
-  // Supports: memory, redis, sqlite, postgres
-  // Default: memory
-  plexspaces.storage.v1.StorageProviderConfig mailbox_provider = 9;
-
-  // Journaling provider configuration (for actor durability)
-  //
-  // Supports: memory, sqlite, postgres, redis
-  // Default: sqlite (if available), else memory
-  plexspaces.journaling.v1.DurabilityConfig journaling_provider = 10;
+  // Supports: IN_MEMORY, REDIS, SQLITE, POSTGRES
+  // Default (set by config_manager): IN_MEMORY
+  plexspaces.channel.v1.ChannelProvider mailbox_provider = 8;
 
   // Framework version information (auto-populated at build time)
-  plexspaces.storage.v1.FrameworkInfo framework_info = 11;
+  plexspaces.storage.v1.FrameworkInfo framework_info = 9;
+
+  // Base directory for PlexSpaces data
+  //
+  // Default (set by config_manager): $HOME/plexspaces
+  // Used for: SQLite databases ({base_dir}/db/), WASM apps, etc.
+  // Environment variable: PLEXSPACES_BASE_DIR
+  string base_dir = 10;
+
+  // Directory containing WASM applications to auto-deploy on startup
+  //
+  // Structure: wasm_apps/<app-name>/app.wasm (required) + app-config.toml (optional)
+  // Each subdirectory is deployed as a separate application.
+  // If empty, no auto-deploy happens (default behavior).
+  //
+  // Default (set by config_manager): {base_dir}/apps
+  // Environment variable: PLEXSPACES_WASM_APPS_DIR
+  string wasm_apps_directory = 11;
 }
 
 // gRPC server configuration

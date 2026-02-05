@@ -825,7 +825,7 @@ impl ProcessGroupRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_keyvalue::InMemoryKVStore;
+    use plexspaces_keyvalue::SqliteKVStore;
 
     // Test constants
     const TEST_TENANT: &str = "test-tenant";
@@ -837,16 +837,16 @@ mod tests {
         RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string())
     }
 
-    /// Helper function to create test registry
-    fn create_test_registry() -> ProcessGroupRegistry {
-        let kv_store = Arc::new(InMemoryKVStore::new());
+    /// Helper function to create test registry (async because SqliteKVStore::new is async)
+    async fn create_test_registry() -> ProcessGroupRegistry {
+        let kv_store = Arc::new(SqliteKVStore::new(":memory:").await.unwrap());
         ProcessGroupRegistry::new(TEST_NODE_ID, kv_store)
     }
 
     /// TEST 1: Can create empty group
     #[tokio::test]
     async fn test_create_empty_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         let group = registry
             .create_group(&test_ctx(), "test-group")
@@ -864,7 +864,7 @@ mod tests {
     /// TEST 2: Cannot create duplicate group
     #[tokio::test]
     async fn test_cannot_create_duplicate_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -883,7 +883,7 @@ mod tests {
     /// TEST 3: Can delete group
     #[tokio::test]
     async fn test_delete_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -903,7 +903,7 @@ mod tests {
     /// TEST 4: Delete is idempotent
     #[tokio::test]
     async fn test_delete_group_idempotent() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -923,7 +923,7 @@ mod tests {
     /// TEST 5: Can join group
     #[tokio::test]
     async fn test_join_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -946,7 +946,7 @@ mod tests {
     /// TEST 6: Cannot join non-existent group
     #[tokio::test]
     async fn test_cannot_join_nonexistent_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         let result = registry
             .join_group(&test_ctx(), "nonexistent", &"actor-1".to_string(), vec![])
@@ -957,7 +957,7 @@ mod tests {
     /// TEST 7: Can join same group multiple times (Erlang pg2 semantics)
     #[tokio::test]
     async fn test_multiple_joins() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -991,7 +991,7 @@ mod tests {
     /// TEST 8: Can leave group
     #[tokio::test]
     async fn test_leave_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -1018,7 +1018,7 @@ mod tests {
     /// TEST 9: Leave decrements join_count (must leave equal times to joined)
     #[tokio::test]
     async fn test_leave_decrements_join_count() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -1075,7 +1075,7 @@ mod tests {
     /// TEST 10: Cannot leave group not joined
     #[tokio::test]
     async fn test_cannot_leave_unjoined_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -1095,7 +1095,7 @@ mod tests {
     /// TEST 11: Can get all members
     #[tokio::test]
     async fn test_get_all_members() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -1128,7 +1128,7 @@ mod tests {
     /// TEST 12: Can get local members only
     #[tokio::test]
     async fn test_get_local_members() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1155,7 +1155,7 @@ mod tests {
     /// TEST 13: Can list all groups
     #[tokio::test]
     async fn test_list_groups() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1181,7 +1181,7 @@ mod tests {
     /// TEST 14: Delete group removes all members
     #[tokio::test]
     async fn test_delete_group_removes_members() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -1217,7 +1217,7 @@ mod tests {
     /// TEST 15: Member count updated on join/leave
     #[tokio::test]
     async fn test_member_count_tracking() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "test-group")
@@ -1258,7 +1258,7 @@ mod tests {
     /// TEST 16: Can publish message to group
     #[tokio::test]
     async fn test_publish_to_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1295,7 +1295,7 @@ mod tests {
     /// TEST 17: Cannot publish to non-existent group
     #[tokio::test]
     async fn test_cannot_publish_to_nonexistent_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         let message = b"Test message".to_vec();
@@ -1308,7 +1308,7 @@ mod tests {
     /// TEST 18: Publish to empty group returns empty list
     #[tokio::test]
     async fn test_publish_to_empty_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1329,7 +1329,7 @@ mod tests {
     /// TEST 19: Topic-based pub/sub - actors subscribe to specific topics
     #[tokio::test]
     async fn test_topic_based_pubsub() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1400,7 +1400,7 @@ mod tests {
     /// TEST 20: Topic merging on multiple joins
     #[tokio::test]
     async fn test_topic_merging_on_multiple_joins() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1439,7 +1439,7 @@ mod tests {
     /// TEST 21: Large cluster performance - many members
     #[tokio::test]
     async fn test_large_cluster_performance() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1474,7 +1474,7 @@ mod tests {
     /// TEST 22: Sequential operations (concurrent testing simplified)
     #[tokio::test]
     async fn test_sequential_operations() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
 
         registry
             .create_group(&test_ctx(), "sequential-group")
@@ -1516,7 +1516,7 @@ mod tests {
     /// TEST 23: Multi-tenant isolation
     #[tokio::test]
     async fn test_multi_tenant_isolation() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx1 = RequestContext::new_without_auth("tenant-1".to_string(), TEST_NAMESPACE.to_string());
         let ctx2 = RequestContext::new_without_auth("tenant-2".to_string(), TEST_NAMESPACE.to_string());
 
@@ -1559,7 +1559,7 @@ mod tests {
     /// TEST 24: Topic filtering edge cases
     #[tokio::test]
     async fn test_topic_filtering_edge_cases() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1602,7 +1602,7 @@ mod tests {
     /// TEST 25: Error paths - get_members on non-existent group
     #[tokio::test]
     async fn test_get_members_nonexistent_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         let result = registry.get_members(&ctx, "nonexistent").await;
@@ -1612,7 +1612,7 @@ mod tests {
     /// TEST 26: Error paths - get_local_members on non-existent group
     #[tokio::test]
     async fn test_get_local_members_nonexistent_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         let result = registry.get_local_members(&ctx, "nonexistent").await;
@@ -1622,7 +1622,7 @@ mod tests {
     /// TEST 27: Error paths - leave non-existent group
     #[tokio::test]
     async fn test_leave_nonexistent_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry
@@ -1639,7 +1639,7 @@ mod tests {
     /// TEST 28: Member count accuracy after multiple operations
     #[tokio::test]
     async fn test_member_count_accuracy() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
         use plexspaces_core::ActorId;
 
@@ -1674,7 +1674,7 @@ mod tests {
     /// TEST 29: List groups with multiple groups
     #[tokio::test]
     async fn test_list_groups_multiple() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         // Create multiple groups
@@ -1695,7 +1695,7 @@ mod tests {
     /// TEST 30: Publish with empty group (no members)
     #[tokio::test]
     async fn test_publish_empty_group() {
-        let registry = create_test_registry();
+        let registry = create_test_registry().await;
         let ctx = test_ctx();
 
         registry

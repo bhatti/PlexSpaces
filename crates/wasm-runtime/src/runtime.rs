@@ -216,14 +216,6 @@ impl WasmRuntime {
             )));
         }
         
-        tracing::debug!(
-            module_name = name,
-            module_version = version,
-            module_size = bytes.len(),
-            magic_number = format!("{:02x?}", magic),
-            "Attempting to compile WASM module"
-        );
-        
         // Try to parse as standard module first
         // If that fails and component-model is enabled, try as component
         let module = match Module::new(&self.engine, bytes) {
@@ -272,11 +264,13 @@ impl WasmRuntime {
                     match Component::new(&self.engine, bytes) {
                         Ok(component) => {
                             let compile_duration = compile_start.elapsed();
-                            tracing::debug!(
-                                module_name = name,
-                                module_version = version,
-                                "Successfully parsed as WASM component (WIT-based)"
-                            );
+                            if tracing::enabled!(tracing::Level::TRACE) {
+                                tracing::trace!(
+                                    module_name = name,
+                                    module_version = version,
+                                    "Successfully parsed as WASM component (WIT-based)"
+                                );
+                            }
                             // Store component - we'll handle instantiation in WasmInstance
                             let module_hash = hash.clone();
                             let wasm_module = WasmModule {
@@ -299,14 +293,16 @@ impl WasmRuntime {
                             metrics::counter!("plexspaces_wasm_modules_loaded_total").increment(1);
                             metrics::counter!("plexspaces_wasm_components_loaded_total").increment(1);
 
-                            tracing::debug!(
-                                module_name = name,
-                                module_version = version,
-                                module_hash = %module_hash,
-                                module_size = bytes.len(),
-                                load_duration_ms = total_duration.as_millis(),
-                                "WASM component loaded successfully"
-                            );
+                            if tracing::enabled!(tracing::Level::TRACE) {
+                                tracing::trace!(
+                                    module_name = name,
+                                    module_version = version,
+                                    module_hash = %module_hash,
+                                    module_size = bytes.len(),
+                                    load_duration_ms = total_duration.as_millis(),
+                                    "WASM component loaded successfully"
+                                );
+                            }
 
                             return Ok(wasm_module);
                         }
@@ -481,7 +477,7 @@ impl WasmRuntime {
         tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
         keyvalue_store: Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>>,
         process_group_registry: Option<std::sync::Arc<plexspaces_process_groups::ProcessGroupRegistry>>,
-        lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager + Send + Sync>>,
         object_registry: Option<std::sync::Arc<dyn plexspaces_core::actor_context::ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
         blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>>,
@@ -508,6 +504,7 @@ impl WasmRuntime {
             object_registry,
             journal_storage,
             blob_service,
+            config.durability_enabled,
         )
         .await
     }
@@ -645,10 +642,10 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
         tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
         keyvalue_store: Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>>,
         process_group_registry: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
-        lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager + Send + Sync>>,
         object_registry: Option<std::sync::Arc<dyn plexspaces_core::ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_core::JournalStorage>>,
-        blob_service: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+        blob_service: Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>>,
     ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>> {
         use wasmtime::StoreLimitsBuilder;
         
@@ -660,6 +657,10 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             .downcast::<WasmConfig>()
             .map(|c| (*c).clone())
             .unwrap_or_default();
+        
+        // TODO(instance-pool): When wasm_config.use_instance_pool is true, get or create per-module
+        // InstancePool and checkout instead of WasmInstance::new. Requires binding actor_id and
+        // services on checkout. See PROJECT_TRACKER.md and instance_pool.rs.
         
         // Convert config to capabilities (use default capabilities)
         let capabilities = crate::capabilities::profiles::default();
@@ -676,15 +677,18 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
                 .ok()
         });
         
-        // Downcast blob_service if provided
-        let blob_svc = blob_service.and_then(|bs| {
-            bs.downcast::<plexspaces_blob::BlobService>().ok()
-        });
-        
         // Note: We pass None for message_sender because plexspaces_core::MessageSender
         // is a different trait from host_functions::MessageSender. For full integration,
         // implement an adapter or use the concrete WasmRuntime methods directly.
         let _ = message_sender; // Acknowledge unused parameter
+        
+        // Convert BlobServiceTrait to concrete BlobService via as_any + downcast
+        let concrete_blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>> = blob_service
+            .map(|bs| {
+                use plexspaces_core::BlobServiceTrait;
+                bs.as_any()
+            })
+            .and_then(|any| any.downcast::<plexspaces_blob::BlobService>().ok());
         
         // Create the instance using WasmInstance::new
         let instance = crate::WasmInstance::new(
@@ -702,7 +706,8 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             lock_manager,
             object_registry,
             journal_storage,
-            blob_svc,
+            concrete_blob_service,
+            false, // durability_enabled - caller controls via config when using instantiate()
         ).await?;
         
         Ok(Arc::new(instance) as Arc<dyn std::any::Any + Send + Sync>)

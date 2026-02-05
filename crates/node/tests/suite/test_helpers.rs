@@ -23,6 +23,23 @@ use plexspaces_core::{ActorId, ActorRegistry, MessageSender};
 use plexspaces_node::Node;
 use std::sync::Arc;
 use std::time::Duration;
+use tonic::metadata::MetadataValue;
+use tonic::Request;
+
+/// Builds a gRPC Request with x-tenant-id and x-namespace metadata so ApplicationService
+/// (request_context_from_grpc_request) accepts the request when auth is enabled.
+pub fn app_request_with_tenant<T: Send>(body: T) -> Request<T> {
+    let mut req = Request::new(body);
+    req.metadata_mut().insert(
+        "x-tenant-id",
+        MetadataValue::try_from("test-tenant").unwrap(),
+    );
+    req.metadata_mut().insert(
+        "x-namespace",
+        MetadataValue::try_from("default").unwrap(),
+    );
+    req
+}
 
 /// Lookup ActorRef for an actor (replaces Node::lookup_actor_ref)
 pub async fn lookup_actor_ref(
@@ -128,6 +145,7 @@ pub async fn lookup_actor_ref(
                 // Remote actor
                 Ok(Some(ActorRef::remote(
                     actor_id.clone(),
+                    String::new(),
                     routing_info.node_id,
                     node.service_locator().clone(),
                 )))
@@ -275,6 +293,7 @@ where
                 // Remote actor
                 Ok(ActorRef::remote(
                     actor_id.clone(),
+                    String::new(),
                     routing_info.node_id,
                     node.service_locator().clone(),
                 ))
@@ -334,13 +353,14 @@ pub async fn register_actor_with_message_sender(
     use plexspaces_core::MessageSender;
     let wrapper = Arc::new(ActorRef::local(
         actor_id.to_string(),
+        String::new(),
         mailbox,
         node.service_locator().clone(),
     ));
     let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await
         .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())).unwrap();
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
-    actor_registry.register_actor(&ctx, actor_id.to_string(), wrapper, None, None, None).await;
+    actor_registry.register_actor(&ctx, actor_id.to_string(), wrapper, None, None, None, None).await;
 }
 
 /// Unregister an actor (replaces Node::unregister_actor)

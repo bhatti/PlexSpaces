@@ -210,7 +210,7 @@ async fn deploy_app_to_node(
 ) -> Result<()> {
     use plexspaces_proto::application::v1::{
         application_service_client::ApplicationServiceClient,
-        DeployApplicationRequest, ApplicationSpec, ApplicationType,
+        DeployApplicationRequest, ApplicationSpec, ApplicationType, ShutdownStrategy,
     };
     use plexspaces_proto::wasm::v1::WasmModule;
     use std::fs;
@@ -257,12 +257,18 @@ async fn deploy_app_to_node(
     // Create minimal application config
     let app_config = ApplicationSpec {
         name: app_name.clone(),
+        namespace: format!("{}-{}", vm_id, app_name), // Use app_id pattern as namespace
         version: "1.0.0".to_string(),
         description: format!("Application deployed to VM {}", vm_id),
         r#type: ApplicationType::ApplicationTypeActive.into(),
         dependencies: vec![],
         env: std::collections::HashMap::new(),
         supervisor: None,
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: None,
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        metadata: None,
     };
 
     // Create deployment request
@@ -272,7 +278,6 @@ async fn deploy_app_to_node(
         version: "1.0.0".to_string(),
         wasm_module: Some(wasm_module),
         config: Some(app_config),
-        release_config: None,
         initial_state: vec![],
     };
 

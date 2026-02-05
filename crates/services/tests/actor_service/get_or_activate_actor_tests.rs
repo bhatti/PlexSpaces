@@ -19,8 +19,8 @@ use plexspaces_core::{
     ActorContext, BehaviorError, BehaviorType, FacetManager, VirtualActorManager, RequestContext,
 };
 use plexspaces_mailbox::Message;
-use plexspaces_keyvalue::InMemoryKVStore;
-use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_keyvalue::SqliteKVStore;
+use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService, GetOrActivateActorRequest,
 };
@@ -73,12 +73,12 @@ async fn create_test_actor_service(
 ) -> (Arc<ActorServiceImpl>, Arc<ActorRegistry>, Arc<ServiceLocator>) {
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
 
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
+    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
 
     // Simple adapter
     struct ObjectRegistryAdapter {
-        inner: Arc<ObjectRegistry>,
+        inner: Arc<ObjectRegistryImpl>,
     }
 
     #[async_trait]
@@ -141,6 +141,36 @@ async fn create_test_actor_service(
             _offset: usize,
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
+        }
+
+        async fn unregister(
+            &self,
+            ctx: &RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner
+                .unregister(ctx, object_type, object_id)
+                .await
+                .map_err(|e| {
+                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                        as Box<dyn std::error::Error + Send + Sync>
+                })
+        }
+
+        async fn heartbeat(
+            &self,
+            ctx: &RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner
+                .heartbeat(ctx, object_type, object_id)
+                .await
+                .map_err(|e| {
+                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                        as Box<dyn std::error::Error + Send + Sync>
+                })
         }
     }
 

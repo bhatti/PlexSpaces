@@ -3,30 +3,31 @@
 //
 // This file is part of PlexSpaces.
 //
-// Order Processor Actor using hybrid behavior approach:
-// - GenServerBehavior for queries (GetOrder) - request/reply pattern
-// - ActorBehavior for commands (CreateOrder, CancelOrder) - fire-and-forget
-// - Typed messages (ActorMessage enum)
-// - ConfigBootstrap for configuration
-// - CoordinationComputeTracker for metrics
+// Order Processor Actor using SDK annotations:
+// - #[gen_server_actor] - generates Actor trait implementation
+// - #[plexspaces_handlers(gen_server)] - generates GenServer dispatch
+// - #[handler("op")] - routes messages to handler methods
 //
-// ## Behavior Selection Guide
-// - **GenServerBehavior**: Use for operations that need a reply (queries)
-//   - GetOrder: Returns order details synchronously
-//   - GetOrderStatus: Returns current state
-// - **ActorBehavior**: Use for operations that don't need a reply (commands/events)
-//   - CreateOrder: Creates order, publishes event
-//   - CancelOrder: Cancels order, publishes event
+// ## Message Routing
+// - "create_order" -> handle_create_order (creates new order)
+// - "get_order" -> handle_get_order (returns order details)
+// - "cancel_order" -> handle_cancel_order (cancels order)
+// - "list_orders" -> handle_list_orders (returns all orders)
 
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
-use plexspaces_behavior::GenServer;
-use plexspaces_mailbox::{ActorMessage, Message};
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    ActorContext, BehaviorError, Message, json, Value,
+};
 use plexspaces_node::{ConfigBootstrap, CoordinationComputeTracker};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
-use crate::types::{Order, OrderError, OrderItem};
+use crate::types::{Order, OrderItem};
+
+// Required for macro-generated code
+extern crate plexspaces_core;
+extern crate plexspaces_behavior;
 
 /// Order configuration (loaded from release.toml or environment)
 #[derive(Debug, Deserialize, Default)]
@@ -35,22 +36,12 @@ pub struct OrderConfig {
     pub enable_metrics: bool,
 }
 
-/// Order messages (will be serialized and sent via ActorMessage::User)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum OrderMessage {
-    CreateOrder {
-        customer_id: String,
-        items: Vec<OrderItem>,
-    },
-    GetOrder {
-        order_id: String,
-    },
-    CancelOrder {
-        order_id: String,
-    },
-}
-
-/// Order Processor Behavior
+/// Order Processor Actor using SDK annotations.
+/// 
+/// ## Annotations
+/// - `#[gen_server_actor]` - generates `impl Actor` with GenServer behavior
+/// - `#[plexspaces_handlers(gen_server)]` - generates `impl GenServer` dispatching to `#[handler]` methods
+#[gen_server_actor]
 pub struct OrderProcessorBehavior {
     orders: HashMap<String, Order>,
     config: OrderConfig,
@@ -74,183 +65,6 @@ impl OrderProcessorBehavior {
             },
         }
     }
-}
-
-// Hybrid approach: Use both ActorBehavior and GenServerBehavior
-// ActorBehavior handles commands (fire-and-forget)
-#[async_trait::async_trait]
-impl ActorTrait for OrderProcessorBehavior {
-    async fn handle_message(
-        &mut self,
-        ctx: &ActorContext,
-        message: Message,
-    ) -> Result<(), BehaviorError> {
-        // Handle commands (fire-and-forget) via ActorBehavior
-        // Queries are handled by GenServerBehavior below
-        if let Ok(typed_msg) = message.as_typed() {
-            match typed_msg {
-                ActorMessage::User { payload, .. } => {
-                    // Deserialize OrderMessage from payload
-                    match serde_json::from_slice::<OrderMessage>(&payload) {
-                        Ok(order_msg) => {
-                            match order_msg {
-                                // Commands: handled by ActorBehavior (fire-and-forget)
-                                OrderMessage::CreateOrder { customer_id, items } => {
-                                    self.handle_create_order(ctx, customer_id, items).await?;
-                                }
-                                OrderMessage::CancelOrder { order_id } => {
-                                    self.handle_cancel_order(ctx, order_id).await?;
-                                }
-                                // Queries: handled by GenServerBehavior (request/reply)
-                                OrderMessage::GetOrder { .. } => {
-                                    // This will be handled by GenServerBehavior::handle_request
-                                    // For now, just log that it's a query
-                                    info!("GetOrder query received - handled by GenServerBehavior");
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to deserialize OrderMessage: {}", e);
-                            return Err(BehaviorError::ProcessingError(format!("Deserialization error: {}", e)));
-                        }
-                    }
-                }
-                _ => {
-                    // Ignore other message types (TimerFired, ReminderFired, System)
-                }
-            }
-        }
-        
-        Ok(())
-    }
-    
-    fn behavior_type(&self) -> BehaviorType {
-        // Using GenServer for queries, but also support ActorBehavior for commands
-        BehaviorType::GenServer
-    }
-}
-
-// GenServerBehavior handles queries (request/reply)
-#[async_trait::async_trait]
-impl GenServer for OrderProcessorBehavior {
-    async fn handle_request(
-        &mut self,
-        ctx: &ActorContext,
-        msg: Message,
-    ) -> Result<(), BehaviorError> {
-        // Handle queries that need a reply
-        if let Ok(typed_msg) = msg.as_typed() {
-            match typed_msg {
-                ActorMessage::User { payload, .. } => {
-                    match serde_json::from_slice::<OrderMessage>(&payload) {
-                        Ok(OrderMessage::GetOrder { order_id }) => {
-                            match self.orders.get(&order_id) {
-                                Some(order) => {
-                                    info!(
-                                        order_id = %order.order_id,
-                                        state = ?order.state,
-                                        "Order retrieved via GenServer"
-                                    );
-                                    // Send order as reply
-                                    let reply_payload = serde_json::to_vec(order)
-                                        .map_err(|e| BehaviorError::ProcessingError(format!("Serialization error: {}", e)))?;
-                                    let reply = Message::new(reply_payload);
-                                    if let Some(sender_id) = &msg.sender {
-                                        ctx.send_reply(
-                                            msg.correlation_id.as_deref(),
-                                            sender_id,
-                                            msg.receiver.clone(),
-                                            reply,
-                                        ).await
-                                            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
-                                    }
-                                    Ok(())
-                                }
-                                None => {
-                                    warn!(order_id = %order_id, "Order not found");
-                                    Err(BehaviorError::ProcessingError(format!("Order not found: {}", order_id)))
-                                }
-                            }
-                        }
-                        _ => {
-                            // Other message types handled by ActorBehavior
-                            Err(BehaviorError::UnsupportedMessage)
-                        }
-                    }
-                }
-                _ => Err(BehaviorError::UnsupportedMessage),
-            }
-        } else {
-            Err(BehaviorError::ProcessingError("Invalid message format".to_string()))
-        }
-    }
-}
-
-impl OrderProcessorBehavior {
-    async fn handle_create_order(
-        &mut self,
-        _ctx: &ActorContext,
-        customer_id: String,
-        items: Vec<OrderItem>,
-    ) -> Result<(), BehaviorError> {
-        // Track coordination vs compute
-        if let Some(ref mut tracker) = self.metrics_tracker {
-            tracker.start_compute();
-        }
-        
-        let mut order = Order::new(customer_id, items);
-        
-        // Check max orders limit
-        if self.orders.len() >= self.config.max_orders {
-            return Err(BehaviorError::ProcessingError("Max orders limit reached".to_string()));
-        }
-        
-        order.start_payment_processing()
-            .map_err(|e| BehaviorError::ProcessingError(format!("State transition error: {:?}", e)))?;
-        
-        self.orders.insert(order.order_id.clone(), order.clone());
-        
-        if let Some(ref mut tracker) = self.metrics_tracker {
-            tracker.end_compute();
-            tracker.increment_message();
-        }
-        
-        info!(
-            order_id = %order.order_id,
-            customer_id = %order.customer_id,
-            total = order.total_amount,
-            "Order created"
-        );
-        
-        Ok(())
-    }
-    
-    // Note: handle_get_order is now handled by GenServerBehavior::handle_request
-    // This method is kept for reference but not used
-    
-    async fn handle_cancel_order(
-        &mut self,
-        _ctx: &ActorContext,
-        order_id: String,
-    ) -> Result<(), BehaviorError> {
-        match self.orders.get_mut(&order_id) {
-            Some(order) => {
-                order.cancel()
-                    .map_err(|e| BehaviorError::ProcessingError(format!("Cancel error: {:?}", e)))?;
-                
-                info!(
-                    order_id = %order_id,
-                    "Order cancelled"
-                );
-                
-                Ok(())
-            }
-            None => {
-                warn!(order_id = %order_id, "Order not found for cancellation");
-                Err(BehaviorError::ProcessingError(format!("Order not found: {}", order_id)))
-            }
-        }
-    }
     
     /// Get final metrics report (for testing/debugging)
     pub fn get_metrics(&mut self) -> Option<plexspaces_proto::metrics::v1::CoordinationComputeMetrics> {
@@ -258,3 +72,175 @@ impl OrderProcessorBehavior {
     }
 }
 
+/// Request/response types for order operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateOrderRequest {
+    pub customer_id: String,
+    pub items: Vec<OrderItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetOrderRequest {
+    pub order_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelOrderRequest {
+    pub order_id: String,
+}
+
+/// Handler implementations - SDK scans these and generates GenServer dispatch.
+/// 
+/// Each `#[handler("op")]` method is called when `payload.action == "op"`.
+/// For GenServer, all handlers default to "call" (request-reply).
+/// Return `Result<Value, BehaviorError>` - SDK serializes and sends reply automatically.
+#[plexspaces_handlers(gen_server)]
+impl OrderProcessorBehavior {
+    /// Handle "create_order" action - creates a new order
+    #[handler("create_order")]
+    async fn handle_create_order(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
+        // Track coordination vs compute
+        if let Some(ref mut tracker) = self.metrics_tracker {
+            tracker.start_compute();
+        }
+        
+        // Parse request from payload
+        let request: CreateOrderRequest = serde_json::from_slice(&msg.payload)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse request: {}", e)))?;
+        
+        // Check max orders limit
+        if self.orders.len() >= self.config.max_orders && self.config.max_orders > 0 {
+            return Err(BehaviorError::ProcessingError("Max orders limit reached".to_string()));
+        }
+        
+        let mut order = Order::new(request.customer_id.clone(), request.items);
+        
+        order.start_payment_processing()
+            .map_err(|e| BehaviorError::ProcessingError(format!("State transition error: {:?}", e)))?;
+        
+        let order_id = order.order_id.clone();
+        let total = order.total_amount;
+        
+        self.orders.insert(order.order_id.clone(), order);
+        
+        if let Some(ref mut tracker) = self.metrics_tracker {
+            tracker.end_compute();
+            tracker.increment_message();
+        }
+        
+        info!(
+            order_id = %order_id,
+            customer_id = %request.customer_id,
+            total = total,
+            "Order created"
+        );
+        
+        Ok(json!({
+            "success": true,
+            "order_id": order_id,
+            "total_amount": total,
+            "status": "payment_processing"
+        }))
+    }
+    
+    /// Handle "get_order" action - returns order details
+    #[handler("get_order")]
+    async fn handle_get_order(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
+        // Parse request from payload
+        let request: GetOrderRequest = serde_json::from_slice(&msg.payload)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse request: {}", e)))?;
+        
+        match self.orders.get(&request.order_id) {
+            Some(order) => {
+                info!(
+                    order_id = %order.order_id,
+                    state = ?order.state,
+                    "Order retrieved"
+                );
+                
+                Ok(json!({
+                    "success": true,
+                    "order": {
+                        "order_id": order.order_id,
+                        "customer_id": order.customer_id,
+                        "total_amount": order.total_amount,
+                        "state": format!("{:?}", order.state),
+                        "item_count": order.items.len()
+                    }
+                }))
+            }
+            None => {
+                warn!(order_id = %request.order_id, "Order not found");
+                Err(BehaviorError::ProcessingError(format!("Order not found: {}", request.order_id)))
+            }
+        }
+    }
+    
+    /// Handle "cancel_order" action - cancels an order
+    #[handler("cancel_order")]
+    async fn handle_cancel_order(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
+        // Parse request from payload
+        let request: CancelOrderRequest = serde_json::from_slice(&msg.payload)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse request: {}", e)))?;
+        
+        match self.orders.get_mut(&request.order_id) {
+            Some(order) => {
+                order.cancel()
+                    .map_err(|e| BehaviorError::ProcessingError(format!("Cancel error: {:?}", e)))?;
+                
+                info!(
+                    order_id = %request.order_id,
+                    "Order cancelled"
+                );
+                
+                Ok(json!({
+                    "success": true,
+                    "order_id": request.order_id,
+                    "status": "cancelled"
+                }))
+            }
+            None => {
+                warn!(order_id = %request.order_id, "Order not found for cancellation");
+                Err(BehaviorError::ProcessingError(format!("Order not found: {}", request.order_id)))
+            }
+        }
+    }
+    
+    /// Handle "list_orders" action - returns all orders
+    #[handler("list_orders")]
+    async fn handle_list_orders(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: &Message,
+    ) -> Result<Value, BehaviorError> {
+        let orders: Vec<Value> = self.orders.values()
+            .map(|order| json!({
+                "order_id": order.order_id,
+                "customer_id": order.customer_id,
+                "total_amount": order.total_amount,
+                "state": format!("{:?}", order.state),
+                "item_count": order.items.len()
+            }))
+            .collect();
+        
+        info!(count = orders.len(), "Listed orders");
+        
+        Ok(json!({
+            "success": true,
+            "orders": orders,
+            "count": orders.len()
+        }))
+    }
+}

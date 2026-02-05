@@ -9,7 +9,7 @@
 --
 -- ## Design
 -- - lock_key: Primary key (unique lock identifier)
--- - holder_id: Current lock holder (ULID)
+-- - holder_id: Current lock holder (only this identity can renew/release)
 -- - version: Optimistic locking version (incremented on each acquire)
 -- - expires_at: Lock expiration timestamp (TIMESTAMPTZ for PostgreSQL)
 -- - lease_duration_secs: Lease duration in seconds

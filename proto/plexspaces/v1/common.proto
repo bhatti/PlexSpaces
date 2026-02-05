@@ -673,7 +673,10 @@ message Message {
   // Message type discriminator
   // Common values: "call", "cast", "info", "signal", "event", "command", "query"
   // Example: "call" for request/reply, "cast" for fire-and-forget
-  string message_type = 5 [(buf.validate.field).string.max_len = 128];
+  // Empty = unset. Validated to allowed values only.
+  string message_type = 5 [
+    (buf.validate.field).string = {in: ["", "call", "cast", "info", "signal", "event", "command", "query"]}
+  ];
 
   // Message payload (opaque bytes)
   // Encoding is application-specific (JSON, protobuf, msgpack, etc.)

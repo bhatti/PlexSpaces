@@ -1,5 +1,7 @@
 # PlexSpaces Examples
 
+Each example’s README should **explain what the example does** and **which PlexSpaces APIs it uses** (e.g. ProcessGroupRegistry, TupleSpace, RequestContext, SqliteKVStore). See `rust/embedded/chat_room`, `rust/embedded/feature_flags`, and `rust/embedded/mpi_collectives` for the expected format (Purpose, What It Demonstrates, API mapping/code patterns, Quick Start).
+
 ## Structure
 
 ```
@@ -10,7 +12,7 @@ examples/
 ├── python/
 │   └── apps/               # 10 Python WASM actors
 ├── typescript/
-│   └── apps/               # 1 TypeScript WASM actor
+│   └── apps/               # 2 TypeScript WASM actors
 ├── go/
 │   └── apps/               # (empty - TODO)
 ├── native_references/      # Reference code from other frameworks
@@ -23,9 +25,9 @@ examples/
 |----------|----------|------|-------|
 | Rust | 50 | 2 | 52 |
 | Python | - | 10 | 10 |
-| TypeScript | - | 1 | 1 |
+| TypeScript | - | 2 | 2 |
 | Go | - | 0 | 0 |
-| **Total** | **50** | **13** | **63** |
+| **Total** | **50** | **14** | **64** |
 
 ---
 
@@ -40,8 +42,8 @@ examples/
 | `timers` | In-memory non-durable timers |
 | `reminders` | Durable persistent reminders |
 | `process_groups_pubsub` | Pub/Sub coordination |
-| `config_updates` | Distributed configuration |
-| `faas_actor` | HTTP invocation of actors |
+| `chat_room` | Process groups: join/leave, publish_to_group, list_groups |
+| `webhook_handler` | Webhook handler (HTTP deliver/list) |
 
 ### Scientific Computing
 | Example | Description |
@@ -68,7 +70,6 @@ examples/
 |---------|-------------|
 | `wasm_showcase` | Full WASM capability demo |
 | `wasm_calculator` | Python WASM calculator actors |
-| `polyglot_wasm_deployment` | Multi-language WASM actors |
 | `firecracker_multi_tenant` | VM isolation |
 
 ### Migration Guides (26)

@@ -10,17 +10,28 @@ description: "PlexSpaces release for node my-node"
 
 node:
   id: my-node
-  listen_addr: 0.0.0.0:8093
+  listen_addr: 0.0.0.0:8091
   cluster_seed_nodes: []
   wasm_apps_directory: "/app/wasm"
 
 runtime:
   grpc:
     enabled: true
-    address: 0.0.0.0:8093
+    address: 0.0.0.0:8091
     max_connections: 100
     keepalive_interval_seconds: 30
     middleware: []
+  
+  # Blob storage configuration (S3-compatible - MinIO for local dev)
+  blob:
+    storage_type: s3
+    bucket: plexspaces-blobs
+    endpoint: http://localhost:9000
+    region: us-east-1
+    access_key_id: minioadmin
+    secret_access_key: minioadmin
+    # For local MinIO, path style is required
+    force_path_style: true
   
   health:
     heartbeat_interval_seconds: 5

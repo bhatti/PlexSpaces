@@ -251,6 +251,10 @@ pub use instance_pool::{InstancePool, PoolStats, PooledInstance};
 pub use resource_limits::ResourceLimits;
 pub use runtime::{WasmModule, WasmRuntime};
 
+/// Canonical log message when a simple-actor handle() fails.
+/// Used so tests and logs can assert/check for this message; full backtrace is only at DEBUG.
+pub const SIMPLE_ACTOR_HANDLE_FAILED_LOG_MESSAGE: &str = "Simple actor handle() call failed";
+
 /// Helper functions to extract concrete types from WasmRuntimeTrait
 /// These functions handle downcasting internally, so user code doesn't need to.
 pub mod wasm_runtime_helpers {
@@ -293,6 +297,15 @@ pub struct WasmConfig {
 
     /// Enable ahead-of-time (AOT) compilation
     pub enable_aot: bool,
+
+    /// Enable checkpoint/restore durability (load on init, save on terminate).
+    /// Off by default for performance; enable when actor state must survive restarts.
+    pub durability_enabled: bool,
+
+    /// Use pre-instantiated instance pool (InstancePool) when spawning actors.
+    /// On by default. When true, runtime may checkout from a per-module pool for faster spawn.
+    /// Deploy-path integration is planned; until then, only engine-level pooling is active.
+    pub use_instance_pool: bool,
 }
 
 impl Default for WasmConfig {
@@ -310,6 +323,24 @@ impl Default for WasmConfig {
             profile_name: "default".to_string(),
             enable_pooling: true, // Warm starts by default
             enable_aot: false,    // JIT by default (faster deployment)
+            durability_enabled: false, // Off by default for performance
+            use_instance_pool: true,   // On by default; used when deploy-path integration is done
+        }
+    }
+}
+
+/// Convert proto WasmConfig to crate WasmConfig (keeps proto and crate in sync).
+impl From<plexspaces_proto::wasm::v1::WasmConfig> for WasmConfig {
+    fn from(p: plexspaces_proto::wasm::v1::WasmConfig) -> Self {
+        let default = WasmConfig::default();
+        Self {
+            limits: p.limits.unwrap_or(default.limits),
+            capabilities: p.capabilities.unwrap_or(default.capabilities),
+            profile_name: if p.profile_name.is_empty() { default.profile_name } else { p.profile_name },
+            enable_pooling: p.enable_pooling,
+            enable_aot: p.enable_aot,
+            durability_enabled: p.durability_enabled,
+            use_instance_pool: p.use_instance_pool,
         }
     }
 }
@@ -324,6 +355,7 @@ mod tests {
         assert_eq!(config.profile_name, "default");
         assert!(config.enable_pooling);
         assert!(!config.enable_aot);
+        assert!(config.use_instance_pool);
         assert_eq!(config.limits.max_memory_bytes, 64 * 1024 * 1024); // 64MB (for Python)
     }
 

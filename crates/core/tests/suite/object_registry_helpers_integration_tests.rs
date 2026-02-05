@@ -8,8 +8,7 @@
 mod tests {
 use plexspaces_core::RequestContext;
 use plexspaces_core::object_registry_helpers::*;
-use plexspaces_object_registry::ObjectRegistry;
-use plexspaces_keyvalue::SqliteKVStore;
+use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::object_registry::v1::ObjectType;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,16 +18,10 @@ use tokio::time::sleep;
 // Atomic counter for generating unique test IDs
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    /// Helper to create a SQLite database for testing
-    async fn create_test_db() -> Arc<SqliteKVStore> {
-        // Use in-memory database for each test
-        Arc::new(SqliteKVStore::new(":memory:").await.unwrap())
-    }
-
-    /// Helper to create test registry
-    async fn create_test_registry() -> Arc<ObjectRegistry> {
-        let kv = create_test_db().await;
-        Arc::new(ObjectRegistry::new(kv))
+    /// Helper to create test registry using SQLite :memory: backend
+    async fn create_test_registry() -> Arc<ObjectRegistryImpl> {
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        Arc::new(ObjectRegistryImpl::new(repo))
     }
     
     /// Helper to create test RequestContext with proper tenant/namespace isolation

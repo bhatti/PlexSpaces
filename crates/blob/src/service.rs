@@ -40,6 +40,122 @@ use crate::{
 use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 use plexspaces_core::RequestContext;
 
+/// Ensures the S3/MinIO bucket exists, creating it if necessary.
+/// This is called during BlobService initialization for s3/minio backends.
+#[cfg(feature = "s3-backend")]
+async fn ensure_bucket_exists(config: &BlobConfig) -> BlobResult<()> {
+    use aws_sdk_s3::config::{Credentials, Region};
+    use aws_sdk_s3::Client;
+    
+    let access_key = config.get_access_key_id()
+        .ok_or_else(|| BlobError::ConfigError("access_key_id required for bucket creation".to_string()))?;
+    let secret_key = config.get_secret_access_key()
+        .ok_or_else(|| BlobError::ConfigError("secret_access_key required for bucket creation".to_string()))?;
+    
+    let credentials = Credentials::new(
+        access_key,
+        secret_key,
+        None,
+        None,
+        "plexspaces-blob",
+    );
+    
+    let region = if config.region.is_empty() {
+        "us-east-1".to_string()
+    } else {
+        config.region.clone()
+    };
+    
+    let mut s3_config_builder = aws_sdk_s3::Config::builder()
+        .credentials_provider(credentials)
+        .region(Region::new(region.clone()))
+        .behavior_version_latest();
+    
+    // For MinIO or custom endpoints, set the endpoint URL
+    if !config.endpoint.is_empty() {
+        s3_config_builder = s3_config_builder
+            .endpoint_url(&config.endpoint)
+            .force_path_style(true);
+    }
+    
+    let s3_config = s3_config_builder.build();
+    let client = Client::from_conf(s3_config);
+    
+    // Check if bucket exists by trying to head it
+    match client.head_bucket().bucket(&config.bucket).send().await {
+        Ok(_) => {
+            tracing::debug!(bucket = %config.bucket, "Bucket already exists");
+            Ok(())
+        }
+        Err(e) => {
+            // Check if the error is "bucket not found" (404)
+            let is_not_found = e.raw_response()
+                .map(|r| r.status().as_u16() == 404)
+                .unwrap_or(false);
+            
+            if is_not_found {
+                tracing::info!(bucket = %config.bucket, "Bucket does not exist, creating it");
+                
+                // Create the bucket
+                let create_result = if region == "us-east-1" {
+                    // us-east-1 doesn't need location constraint
+                    client.create_bucket()
+                        .bucket(&config.bucket)
+                        .send()
+                        .await
+                } else {
+                    // Other regions need location constraint
+                    use aws_sdk_s3::types::{BucketLocationConstraint, CreateBucketConfiguration};
+                    let constraint = BucketLocationConstraint::from(region.as_str());
+                    let cfg = CreateBucketConfiguration::builder()
+                        .location_constraint(constraint)
+                        .build();
+                    client.create_bucket()
+                        .bucket(&config.bucket)
+                        .create_bucket_configuration(cfg)
+                        .send()
+                        .await
+                };
+                
+                match create_result {
+                    Ok(_) => {
+                        tracing::info!(bucket = %config.bucket, "Bucket created successfully");
+                        Ok(())
+                    }
+                    Err(create_err) => {
+                        // Check if bucket was created by another process (race condition)
+                        let already_exists = create_err.to_string().contains("BucketAlreadyOwnedByYou")
+                            || create_err.to_string().contains("BucketAlreadyExists");
+                        if already_exists {
+                            tracing::debug!(bucket = %config.bucket, "Bucket already exists (race condition)");
+                            Ok(())
+                        } else {
+                            Err(BlobError::StorageError(format!(
+                                "Failed to create bucket '{}': {}",
+                                config.bucket, create_err
+                            )))
+                        }
+                    }
+                }
+            } else {
+                // Some other error (permissions, etc.)
+                Err(BlobError::StorageError(format!(
+                    "Failed to check bucket '{}': {}",
+                    config.bucket, e
+                )))
+            }
+        }
+    }
+}
+
+/// No-op bucket creation when s3-backend feature is not enabled
+#[cfg(not(feature = "s3-backend"))]
+async fn ensure_bucket_exists(_config: &BlobConfig) -> BlobResult<()> {
+    // Without s3-backend feature, we can't create buckets programmatically
+    // The bucket must exist beforehand
+    Ok(())
+}
+
 /// Blob storage service
 pub struct BlobService {
     config: BlobConfig,
@@ -157,6 +273,11 @@ impl BlobService {
             _ => return Err(BlobError::ConfigError(format!("Unsupported backend: {}", config.backend))),
         };
 
+        // For S3/MinIO backends, ensure the bucket exists (auto-create if needed)
+        if config.backend == "s3" || config.backend == "minio" {
+            ensure_bucket_exists(&config).await?;
+        }
+
         // Log blob service configuration
         let endpoint_display = if config.endpoint.is_empty() {
             "(default)".to_string()
@@ -216,16 +337,49 @@ impl BlobService {
         hasher.update(&data);
         let sha256 = hex::encode(hasher.finalize());
 
-        // Check if blob with same SHA256 already exists
+        // Check if blob with same SHA256 already exists (content deduplication)
         if let Some(existing) = self.repository.get_by_sha256(ctx, &sha256).await? {
-            // Return existing metadata (deduplication)
-            return Ok(existing);
+            // Verify the blob still exists in object store before returning deduped metadata
+            let storage_path = get_storage_path(&existing, &self.config.prefix);
+            let path = ObjectPath::from(storage_path.clone());
+            match self.object_store.head(&path).await {
+                Ok(_) => {
+                    // Blob exists, return existing metadata (deduplication)
+                    tracing::debug!(
+                        blob_id = %existing.blob_id,
+                        sha256 = %sha256,
+                        storage_path = %storage_path,
+                        "Returning deduplicated blob"
+                    );
+                    return Ok(existing);
+                }
+                Err(_) => {
+                    // Blob doesn't exist in object store - stale metadata
+                    // Delete the stale metadata and proceed with new upload
+                    tracing::warn!(
+                        blob_id = %existing.blob_id,
+                        sha256 = %sha256,
+                        storage_path = %storage_path,
+                        "Stale blob metadata found (blob missing from object store), cleaning up"
+                    );
+                    // Delete stale metadata so we can upload fresh
+                    let _ = self.repository.delete(ctx, &existing.blob_id).await;
+                }
+            }
         }
 
-        // Generate blob ID (ULID)
+        // Check if a blob with the same name already exists
+        // If so, delete it first (upsert behavior for name-based access)
+        if let Some(existing) = self.get_metadata_by_name(ctx, name).await? {
+            // Delete the old blob to allow the new one with the same name
+            self.delete_blob(ctx, &existing.blob_id).await?;
+        }
+
+        // Generate blob ID (ULID) - this is the internal identifier
         let blob_id = Ulid::new().to_string();
 
         // Create metadata using proto type
+        // Note: blob_id is returned in the metadata for callers who need it
         let now = Utc::now();
         let expires_at = expires_after.map(|d| datetime_to_timestamp(now + d));
         
@@ -305,6 +459,72 @@ impl BlobService {
     ) -> BlobResult<BlobMetadata> {
         self.repository.get(ctx, blob_id).await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))
+    }
+
+    /// Get blob metadata by name (exact match)
+    ///
+    /// This function finds a blob by its user-friendly name (e.g., "assets/images/logo.png").
+    /// It's useful for WASM actors that use paths as blob identifiers.
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `name` - Blob name (exact match)
+    pub async fn get_metadata_by_name(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> BlobResult<Option<BlobMetadata>> {
+        // Use list with name_prefix filter to find exact match
+        let filters = ListFilters {
+            name_prefix: Some(name.to_string()),
+            ..Default::default()
+        };
+        let (blobs, _count) = self.repository.list(ctx, &filters, 100, 0).await?;
+        
+        // Find exact name match (prefix filter might return more)
+        Ok(blobs.into_iter().find(|b| b.name == name))
+    }
+
+    /// Download a blob by name (exact match)
+    ///
+    /// This function finds a blob by its user-friendly name and downloads it.
+    /// It's useful for WASM actors that use paths as blob identifiers.
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `name` - Blob name (exact match)
+    pub async fn download_blob_by_name(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> BlobResult<Vec<u8>> {
+        // Find the blob by name
+        let metadata = self.get_metadata_by_name(ctx, name).await?
+            .ok_or_else(|| BlobError::NotFound(name.to_string()))?;
+        
+        // Download using the actual blob_id
+        self.download_blob(ctx, &metadata.blob_id).await
+    }
+
+    /// Delete a blob by name (exact match)
+    ///
+    /// This function finds a blob by its user-friendly name and deletes it.
+    /// It's useful for WASM actors that use paths as blob identifiers.
+    ///
+    /// ## Arguments
+    /// * `ctx` - Request context (required for tenant isolation)
+    /// * `name` - Blob name (exact match)
+    pub async fn delete_blob_by_name(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> BlobResult<()> {
+        // Find the blob by name
+        let metadata = self.get_metadata_by_name(ctx, name).await?
+            .ok_or_else(|| BlobError::NotFound(name.to_string()))?;
+        
+        // Delete using the actual blob_id
+        self.delete_blob(ctx, &metadata.blob_id).await
     }
 
     /// List blobs
@@ -409,12 +629,12 @@ impl plexspaces_core::BlobServiceTrait for BlobService {
     async fn upload(
         &self,
         ctx: &RequestContext,
-        key: &str,
+        name: &str,
         data: Vec<u8>,
         content_type: Option<String>,
         metadata: std::collections::HashMap<String, String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let name = key.split('/').last().unwrap_or(key);
+        // Use the full name/path as provided
         let blob_metadata = self.upload_blob(
             ctx,
             name,
@@ -433,35 +653,75 @@ impl plexspaces_core::BlobServiceTrait for BlobService {
     async fn download(
         &self,
         ctx: &RequestContext,
-        key: &str,
+        blob_id: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        let data = self.download_blob(ctx, key).await
+        let data = self.download_blob(ctx, blob_id).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         Ok(data)
+    }
+
+    async fn download_by_name(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+        match self.download_blob_by_name(ctx, name).await {
+            Ok(data) => Ok(Some(data)),
+            Err(BlobError::NotFound(_)) => Ok(None),
+            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+        }
     }
 
     async fn delete(
         &self,
         ctx: &RequestContext,
-        key: &str,
+        blob_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.delete_blob(ctx, key).await
+        self.delete_blob(ctx, blob_id).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         Ok(())
+    }
+
+    async fn delete_by_name(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        match self.delete_blob_by_name(ctx, name).await {
+            Ok(()) => Ok(true),
+            Err(BlobError::NotFound(_)) => Ok(false),
+            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+        }
     }
 
     async fn exists(
         &self,
         ctx: &RequestContext,
-        key: &str,
+        blob_id: &str,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        match self.get_metadata(ctx, key).await {
+        match self.get_metadata(ctx, blob_id).await {
             Ok(_) => Ok(true),
             Err(BlobError::NotFound(_)) => Ok(false),
             Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
         }
     }
 
+    async fn list(
+        &self,
+        ctx: &RequestContext,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let filters = ListFilters {
+            name_prefix: Some(prefix.to_string()),
+            ..Default::default()
+        };
+        let (blobs, _total) = self.list_blobs(ctx, &filters, limit as i64, 1).await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        // Return names (paths), not blob_ids
+        Ok(blobs.into_iter().map(|b| b.name).collect())
+    }
+    
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync> {
         self
     }

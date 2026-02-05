@@ -104,18 +104,6 @@ pub struct NodeConfig {
     /// Example: "<http://node1.example.com:8000">
     #[prost(string, tag="21")]
     pub grpc_address: ::prost::alloc::string::String,
-    // ==================== WASM AUTO-DEPLOY CONFIGURATION ====================
-
-    /// Directory containing WASM applications to auto-deploy on startup
-    ///
-    /// Structure: wasm_apps/<app-name>/app.wasm (required) + app-config.toml (optional)
-    /// Each subdirectory is deployed as a separate application.
-    /// If empty, no auto-deploy happens (default behavior).
-    ///
-    /// Environment variable: PLEXSPACES_WASM_APPS_DIR (takes precedence over config)
-    /// Example: "./wasm_apps" or "/opt/plexspaces/apps"
-    #[prost(string, tag="22")]
-    pub wasm_apps_directory: ::prost::alloc::string::String,
 }
 /// Node registry configuration
 ///
@@ -310,52 +298,59 @@ pub struct RuntimeConfig {
     /// Blob storage configuration (S3-compatible object storage)
     #[prost(message, optional, tag="4")]
     pub blob: ::core::option::Option<super::super::storage::v1::BlobConfig>,
-    /// Shared relational database configuration
+    /// Shared database configuration
     ///
-    /// Used by components that always use relational database:
+    /// Used by all components that use relational database:
     /// - scheduler (crates/scheduler/migrations)
     /// - workflow (crates/workflow/migrations)
     /// - journaling (crates/journaling/migrations)
     /// - blob (crates/blob/migrations)
-    /// - keyvalue (crates/keyvalue/migrations) - now always SQL
+    /// - keyvalue (crates/keyvalue/migrations)
+    /// - locks (crates/locks/migrations)
+    /// - channel (crates/channel/migrations)
+    /// - tuplespace (crates/tuplespace/migrations)
     ///
     /// Convention: All these components share the same database by default.
-    /// Can be overridden per-component if needed.
     #[prost(message, optional, tag="5")]
-    pub shared_database: ::core::option::Option<super::super::storage::v1::SharedRelationalDbConfig>,
+    pub db: ::core::option::Option<super::super::storage::v1::SharedDbConfig>,
     /// Locks storage provider configuration
     ///
     /// Supports: postgres, sqlite, redis, dynamodb
-    /// Default: redis (if available), else postgres
+    /// Default (set by config_manager): redis (if available), else use shared db
     #[prost(message, optional, tag="6")]
     pub locks_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
-    /// Channel storage provider configuration
+    /// Channel provider type
     ///
-    /// Supports: redis, kafka, nats, sqlite, memory
-    /// Default: redis (if available), else memory
-    #[prost(message, optional, tag="7")]
-    pub channel_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
-    /// TupleSpace storage provider configuration
+    /// Supports: IN_MEMORY, REDIS, KAFKA, NATS, SQLITE, SQS, POSTGRES, PROCESS_GROUP
+    /// Default (set by config_manager): IN_MEMORY
+    #[prost(enumeration="super::super::channel::v1::ChannelProvider", tag="7")]
+    pub channel_provider: i32,
+    /// Mailbox provider type
     ///
-    /// Supports: postgres, sqlite, redis, dynamodb
-    /// Default: postgres (if available), else memory
-    #[prost(message, optional, tag="8")]
-    pub tuplespace_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
-    /// Mailbox storage provider configuration
-    ///
-    /// Supports: memory, redis, sqlite, postgres
-    /// Default: memory
-    #[prost(message, optional, tag="9")]
-    pub mailbox_provider: ::core::option::Option<super::super::storage::v1::StorageProviderConfig>,
-    /// Journaling provider configuration (for actor durability)
-    ///
-    /// Supports: memory, sqlite, postgres, redis
-    /// Default: sqlite (if available), else memory
-    #[prost(message, optional, tag="10")]
-    pub journaling_provider: ::core::option::Option<super::super::journaling::v1::DurabilityConfig>,
+    /// Supports: IN_MEMORY, REDIS, SQLITE, POSTGRES
+    /// Default (set by config_manager): IN_MEMORY
+    #[prost(enumeration="super::super::channel::v1::ChannelProvider", tag="8")]
+    pub mailbox_provider: i32,
     /// Framework version information (auto-populated at build time)
-    #[prost(message, optional, tag="11")]
+    #[prost(message, optional, tag="9")]
     pub framework_info: ::core::option::Option<super::super::storage::v1::FrameworkInfo>,
+    /// Base directory for PlexSpaces data
+    ///
+    /// Default (set by config_manager): $HOME/plexspaces
+    /// Used for: SQLite databases ({base_dir}/db/), WASM apps, etc.
+    /// Environment variable: PLEXSPACES_BASE_DIR
+    #[prost(string, tag="10")]
+    pub base_dir: ::prost::alloc::string::String,
+    /// Directory containing WASM applications to auto-deploy on startup
+    ///
+    /// Structure: wasm_apps/<app-name>/app.wasm (required) + app-config.toml (optional)
+    /// Each subdirectory is deployed as a separate application.
+    /// If empty, no auto-deploy happens (default behavior).
+    ///
+    /// Default (set by config_manager): {base_dir}/apps
+    /// Environment variable: PLEXSPACES_WASM_APPS_DIR
+    #[prost(string, tag="11")]
+    pub wasm_apps_directory: ::prost::alloc::string::String,
 }
 /// gRPC server configuration
 #[allow(clippy::derive_partial_eq_without_eq)]

@@ -1315,6 +1315,17 @@ pub struct InvokeActorRequest {
     /// This will be used in future for advanced per-actor routing capabilities.
     #[prost(string, tag="8")]
     pub subpath: ::prost::alloc::string::String,
+    /// When true, use request-reply (ask pattern, message_type "call") regardless of HTTP method.
+    /// When false or unset: only GET uses ask (request-reply); POST/PUT/DELETE use tell (fire-and-forget, message_type "cast").
+    /// HTTP gateway sets this when query param invocation=call (e.g. POST ...?invocation=call). "msg_type" in query is handler name (payload).
+    /// Consistent with actor message_type: "call" = ask, "cast" = tell.
+    #[prost(bool, tag="9")]
+    pub ask: bool,
+    /// Optional message type override from HTTP query param "invocation" (not "msg_type"; msg_type is handler name in payload).
+    /// When set: "call" = request-reply (ask), "cast" = fire-and-forget (tell). Empty/unset = use method default (GET=call, POST/PUT/DELETE=cast).
+    /// Allowed values (Erlang-style): call, cast, info only. Others not supported at this time.
+    #[prost(string, tag="10")]
+    pub msg_type_override: ::prost::alloc::string::String,
 }
 /// Response from invoking an actor
 ///

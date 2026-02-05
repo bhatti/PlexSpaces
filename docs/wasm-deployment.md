@@ -6,6 +6,8 @@ PlexSpaces supports deploying WebAssembly (WASM) applications from multiple lang
 
 **📖 For comprehensive polyglot development guide covering all languages, WIT abstractions, and examples, see [Polyglot WASM Development Guide](polyglot.md)**
 
+**Native Rust actors** (embedded in the node, not compiled to WASM) use the [Rust SDK](sdk.md#rust-sdk): `plexspaces_impl_handlers!`, `spawn_actor` with facets, and GenServer. For WASM deployment of Rust actors, the same WIT world as Python/TypeScript applies.
+
 **Quick Start**: See [DEPLOY_EMPTY_NODE_GUIDE.md](../DEPLOY_EMPTY_NODE_GUIDE.md) for a complete workflow showing how to start an empty node, deploy a WASM application, and verify deployment via the dashboard.
 
 ## Architecture
@@ -14,7 +16,7 @@ PlexSpaces supports deploying WebAssembly (WASM) applications from multiple lang
 
 **✅ WASM actors only use WIT (WebAssembly Interface Types) APIs** - they do NOT include framework dependencies:
 
-- ✅ **WIT Interfaces**: Actors import host functions via WIT (e.g., `host::send_message`, `host::tuplespace_write`)
+- ✅ **WIT Interfaces**: Actors import host functions via WIT (e.g., `host::send_message`, `host::tuplespace_write`, simple-actor `host.ts_write` for TupleSpace)
 - ✅ **Standard Library**: Actors can use their language's standard library (e.g., Python's `json`, Rust's `std`)
 - ❌ **No Framework Code**: WASM modules do NOT include PlexSpaces framework code - the framework is provided by the runtime
 
@@ -100,6 +102,7 @@ pub extern "C" fn handle_request(
 - `application_id` (required): Unique application identifier (for tracking/debugging)
 - `name` (required): **Application name - used by ApplicationManager for storage and lookup** (use this for undeployment, not application_id)
 - `version` (required): Application version (e.g., "1.0.0")
+- `behavior_kind` (optional): OTP-style behavior for logging (e.g. `GenEvent` for event-handler actors; logs show `EventHandler`)
 - `wasm_file` (required): WASM file (multipart file upload, max 100MB)
 - `config` (optional): Application config TOML file (if not provided, ApplicationSpec is auto-generated)
 
@@ -154,8 +157,8 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 **Rust WASM - Small (<5MB):**
 ```bash
-# Build Rust WASM first
-cd examples/simple/polyglot_wasm_deployment/actors/rust
+# Build Rust WASM (e.g. from nbody_wasm wasm-actors or your crate)
+cd examples/rust/embedded/nbody_wasm/wasm-actors
 cargo build --target wasm32-wasip2 --release
 
 # CLI uses gRPC for small files
@@ -173,19 +176,22 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "wasm_file=@target/wasm32-wasip2/release/rust_actor.wasm"
 ```
 
-**TypeScript/JavaScript WASM:**
+**TypeScript WASM (simple-actor WIT, recommended):**
+
+Use the [TypeScript SDK](sdk.md#typescript-sdk): extend `PlexSpacesActor`, bundle with esbuild, then build with jco:
+
 ```bash
-# Build TypeScript to WASM (using Javy)
-cd examples/simple/polyglot_wasm_deployment/actors/typescript
-npx tsc greeter.ts --target ES2020 --module commonjs
-javy compile greeter.js -o greeter.wasm
+# From examples/typescript/apps/bank_account
+npm run build          # tsc + esbuild bundle
+jco componentize account_actor_bundle.mjs --wit wit/plexspaces-simple-actor -o account_actor.wasm --disable all
 
 # Deploy via HTTP
 curl -X POST http://localhost:8001/api/v1/applications/deploy \
-  -F "application_id=typescript-app" \
-  -F "name=greeter" \
+  -F "application_id=bank-test-ts" \
+  -F "name=account" \
   -F "version=1.0.0" \
-  -F "wasm_file=@greeter.wasm"
+  -F "wasm_file=@account_actor.wasm" \
+  -F "config=@app-config.toml"
 ```
 
 **Why HTTP over gRPC?**
@@ -317,11 +323,11 @@ curl -X DELETE http://localhost:8001/api/v1/applications/calculator
 
 ### Rust Actor
 
-**Location**: `examples/simple/polyglot_wasm_deployment/actors/rust/`
+**Location**: `examples/rust/embedded/nbody_wasm/wasm-actors/` (or any crate with `wasm32-wasip2` target)
 
 **Build**:
 ```bash
-cd examples/simple/polyglot_wasm_deployment/actors/rust
+cd examples/rust/embedded/nbody_wasm/wasm-actors
 cargo build --target wasm32-wasip2 --release
 ```
 
@@ -344,32 +350,32 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 ### TypeScript/JavaScript Actor
 
-**Location**: `examples/simple/polyglot_wasm_deployment/actors/typescript/`
+**Location**: `examples/typescript/apps/bank_account/`
+
+Uses the [TypeScript SDK](sdk.md#typescript-sdk) and the same `plexspaces-simple-actor` WIT as Python. Build with jco (not Javy) so the component imports only `plexspaces:simple-actor/host`.
 
 **Build**:
 ```bash
-cd examples/simple/polyglot_wasm_deployment/actors/typescript
-npx tsc greeter.ts --target ES2020 --module commonjs
-javy compile greeter.js -o greeter.wasm
+cd examples/typescript/apps/bank_account
+./scripts/build.sh     # tsc → esbuild bundle → jco componentize --disable all
 ```
 
 **Deploy**:
 ```bash
-# HTTP (recommended)
 curl -X POST http://localhost:8001/api/v1/applications/deploy \
-  -F "application_id=typescript-app" \
-  -F "name=greeter" \
+  -F "application_id=bank-test-ts" \
+  -F "name=account" \
   -F "version=1.0.0" \
-  -F "wasm_file=@greeter.wasm"
+  -F "wasm_file=@account_actor.wasm" \
+  -F "config=@app-config.toml"
 ```
 
 ### Go Actor
 
-**Location**: `examples/simple/polyglot_wasm_deployment/actors/go/` (if exists)
+**Location**: Use tinygo with `wasip2` target; example layout TBD.
 
 **Build**:
 ```bash
-cd examples/simple/polyglot_wasm_deployment/actors/go
 tinygo build -target=wasip2 -o go_actor.wasm go_actor.go
 ```
 
@@ -514,6 +520,69 @@ For production deployments, consider language choice:
 | JavaScript | 500KB-2MB | Fast | Good | Web integration, rapid prototyping |
 | Python | 30-40MB | Medium | Moderate | ML, data processing, rapid prototyping |
 
+## Performance, Concurrency, and Scalability
+
+PlexSpaces uses the **WASM Component Model** (latest and recommended): WIT-based components, wasmtime with component-model support, and polyglot actors (Python, Rust, TypeScript, Go). This section summarizes performance characteristics and how to get the most out of the system for highly performant deployments.
+
+### Component Model vs Traditional Modules
+
+| Path | Cost per message | When to use |
+|------|------------------|-------------|
+| **Component model** (SimpleActor, PlexspacesActor — Python, WIT) | Per-message re-instantiation (new Store + instance per handle). Component is not recompiled; instantiation + init per message. | Polyglot (Python, etc.), WIT interfaces, latest tooling. **Recommended for most apps.** |
+| **Traditional WASM modules** (non-component) | One instantiation per actor lifetime; same Store/instance reused. | Maximum throughput per actor, hot paths, Rust/Go JS without WIT. |
+
+The runtime replaces component state after each successful `handle()` for component-model actors to avoid wasmtime’s “cannot enter component instance” trap on the second call. That keeps behavior correct and allows multiple sequential messages per actor.
+
+### Concurrency and Scalability
+
+- **Per-actor locking**: One lock per WASM instance (one message at a time per actor). This is the normal actor model.
+- **Across actors**: Different actors use different instances and locks. **Many actors can handle messages concurrently**; there is no global lock.
+- **Horizontal scaling**: Adding more actors increases parallelism. Re-instantiation is per-actor, so scaling out (more actors, more nodes) scales well.
+- **Vertical scaling (messages/sec per actor)**: For component-model actors, per-message re-instantiation is the main limit. For very high single-actor throughput, use traditional WASM modules or offload hot work to them.
+
+### Performance Tips
+
+1. **Engine-level pooling** (default: on)  
+   - **Enabled by default**: The node creates the WASM runtime with `WasmRuntime::new()`, which uses `WasmConfig::default()` where **`enable_pooling = true`**.  
+   - This turns on **wasmtime’s pooling allocator** (`InstanceAllocationStrategy::Pooling`): the engine reuses memory and instance allocations instead of allocating per instantiation.  
+   - You get this automatically when starting a node; no extra config is required.  
+   - To turn it off (e.g. for debugging), create the runtime with `WasmRuntime::with_config(config)` and set `config.enable_pooling = false`.
+
+2. **Instance pooling** (recommended, default: on)  
+   - **Recommendation**: Yes. Instance pooling (pre-instantiated instances you checkout instead of instantiating each time) reduces spawn latency when many actors of the same module are created.  
+   - **Config**: **`use_instance_pool`** in `WasmConfig` (and in proto). **On by default** (`true`). When true, the runtime may use a per-module `InstancePool` to serve instantiate requests (checkout from pool instead of full instantiation).  
+   - **Current status**: Deploy-path integration is planned. Until then, only **engine-level pooling** (above) is active when creating actors via HTTP/deploy; each actor is still created via `runtime.instantiate()`. The **`InstancePool`** type exists in `plexspaces-wasm-runtime` and can be used in custom code (e.g. high-spawn-rate workers). When deploy-path integration is complete, `use_instance_pool = true` will enable checkout-from-pool for spawns.  
+   - To turn instance pooling off: set `config.use_instance_pool = false` (or the proto field when using gRPC/config).
+
+3. **Keep durability off unless needed**  
+   - `durability_enabled` is **off by default** in `WasmConfig` (and in proto).  
+   - When off, no checkpoint load on init or save on terminate — no extra I/O or serialization.  
+   - Turn on only when actor state must survive restarts (e.g. Durable Objects–style apps).
+
+3. **Scale horizontally**  
+   - Run more actors and/or more nodes to increase throughput.  
+   - Component-model cost is per-actor; spreading load across actors avoids a single-actor bottleneck.
+
+5. **Use `wasm-opt`**  
+   - Smaller modules load and instantiate faster.  
+   - See [Optimization Recommendations](#optimization-recommendations) (e.g. `wasm-opt -Oz --strip-debug`).
+
+6. **Prefer smaller, focused actors**  
+   - Many small actors can outperform fewer “heavy” actors by better utilizing concurrency and pooling.
+
+7. **Hot path: traditional WASM**  
+   - For a few actors that must handle very high message rates, use traditional WASM modules (non-component) so the same Store/instance is reused and there is no per-message re-instantiation.
+
+8. **Resource limits**  
+   - Set `limits` in `WasmConfig` (e.g. `max_memory_bytes`, `max_fuel`) to avoid runaway usage; tighter limits can also improve predictability.
+
+### Summary
+
+- **Performance**: Component model is correct and recommended; it pays a per-message instantiation cost. Traditional modules give the highest per-actor throughput.
+- **Concurrency**: Good — per-actor serialization, no global serialization; many actors run in parallel.
+- **Scalability**: Good horizontally (more actors/nodes); per-actor throughput is the main limit for component-model.
+- **For high performance**: Use pooling, keep durability off by default, scale out with more actors, optimize with `wasm-opt`, and use traditional WASM on the hottest paths if needed.
+
 ## Complete Deployment Workflow
 
 ### 1. Build WASM Module
@@ -527,16 +596,16 @@ cd examples/simple/wasm_calculator
 
 **Rust:**
 ```bash
-cd examples/simple/polyglot_wasm_deployment/actors/rust
+cd examples/rust/embedded/nbody_wasm/wasm-actors
 cargo build --target wasm32-wasip2 --release
-# Output: target/wasm32-wasip2/release/rust_actor.wasm
+# Output: target/wasm32-wasip2/release/*.wasm
 ```
 
-**TypeScript:**
+**TypeScript (simple-actor WIT):**
 ```bash
-cd examples/simple/polyglot_wasm_deployment/actors/typescript
-npx tsc greeter.ts --target ES2020 --module commonjs
-javy compile greeter.js -o greeter.wasm
+cd examples/typescript/apps/bank_account
+./scripts/build.sh   # tsc → esbuild bundle → jco componentize --disable all
+# Output: account_actor.wasm
 ```
 
 ### 2. Start Empty Node
@@ -611,17 +680,18 @@ cargo run --release --bin plexspaces -- application deploy \
 
 **⚠️ Critical Notes**:
 - **Application Name vs Application ID**: The `name` field is used by `ApplicationManager` for storage and lookup. Use the `name` (not `application_id`) when undeploying.
-- **WASM Components (Python)**: ✅ **Fully Supported** - Python WASM components built with `componentize-py` are supported using the `simple-actor` WIT interface
-  - Uses JSON strings for all complex data (avoids pyo3 lifting issues)
-  - See `examples/python/` for working examples
+- **WASM Components (Python, TypeScript)**: ✅ **Fully Supported** - Components built with `componentize-py` (Python) or `jco componentize` (TypeScript) use the `simple-actor` WIT interface
+  - Uses JSON strings for all complex data (Python: avoids pyo3 lifting; TypeScript: single WIT world)
+  - TypeScript: build with `jco componentize ... --disable all` so the component only imports `plexspaces:simple-actor/host` (no WASI)
+  - See `examples/python/` and `examples/typescript/apps/bank_account/` for working examples
   - See `wit/plexspaces-simple-actor/` for the WIT interface
-- **Traditional WASM Modules** (Rust, Go, JavaScript): ✅ **Supported** - Use standard actor interface
+- **Traditional WASM Modules** (Rust, Go): ✅ **Supported** - Use standard actor interface
 - **ApplicationSpec is Required**: All WASM deployments must include an ApplicationSpec (auto-generated or provided). This ensures applications follow the Erlang-style application model.
 
 **Testing WASM Deployment**:
 - The integration test (`cargo test --package plexspaces-node --test http_wasm_deployment`) creates a working traditional WASM module and successfully deploys it
 - Use the test script (`./scripts/test-empty-node-deployment.sh`) which automatically creates a working WASM module
-- For manual testing, use Rust/Go/JavaScript WASM modules, not Python components
+- For manual testing, use Rust/Go WASM modules or TypeScript/Python components (simple-actor WIT)
 
 ### 4. Verify Deployment
 
@@ -862,6 +932,8 @@ interface host {
     send: func(to: string, msg-type: string, payload-json: string) -> string;
     log: func(level: string, message: string);
     now-ms: func() -> u64;
+    kv-get: func(key: string) -> string;
+    kv-put: func(key: string, value: string) -> string;
 }
 
 world actor-world {
@@ -869,6 +941,49 @@ world actor-world {
     export actor;
 }
 ```
+
+### TupleSpace (ts_write) for WASM
+
+WASM actors using the simple-actor WIT can write tuples via **`host.ts_write(tuple_json)`**. The runtime parses a JSON array (e.g. `["AUDIT","action","actor_id","resource","details","ts"]`) into a Tuple and calls the same TupleSpace backend as native code. Use this for event streams, audit logs, or coordination without keyvalue. The [Audit Log](../examples/python/apps/audit_log/README.md) example currently uses **host.log only** (no ts_write) to avoid WASM integration issues; API support can be added when the runtime is more stable.
+
+**When to use ts_write**: Prefer `ts_write` for fire-and-forget event or audit streams when WASM integration is stable; it avoids reentrancy and readonly issues that can occur when WASM calls into the keyvalue backend during message handling.
+
+### Key-Value Storage (WASM)
+
+WASM actors (Python simple-actor) can persist data via the host **keyvalue** API. This avoids in-actor state serialization issues and provides reliable storage across the WASM boundary.
+
+**Choosing storage**: For event streams or audit logs, prefer **`host.ts_write(tuple_json)`** (see [TupleSpace (ts_write) for WASM](#tuplespace-ts_write-for-wasm)). Key-value values must be UTF-8 strings; binary/protobuf data in the same `kv_store` table may come from the object registry—see [KeyValue crate README](../crates/keyvalue/README.md) for inspecting the store.
+
+| Host function | Description |
+|---------------|-------------|
+| `kv-get(key)` | Returns value as string, or empty if not found. Errors return `"ERROR:message"`. |
+| `kv-put(key, value)` | Stores string value. Returns empty on success, `"ERROR:message"` on failure. |
+
+**Scope**: Keys are scoped per actor (namespace derived from actor ID). The node provides an in-memory keyvalue store for WASM actors by default.
+
+**Example (Python)**:
+
+```python
+from plexspaces import actor, handler, host
+
+@actor
+class SensorStream:
+    @handler("ingest")
+    def ingest(self, sensor_id: str = "", value: str = "0") -> str:
+        raw = host.kv_get("readings")
+        data = json.loads(raw) if raw else []
+        data.append({"sensor_id": sensor_id, "value": value})
+        err = host.kv_put("readings", json.dumps(data))
+        return "" if not err else err
+
+    @handler("count")
+    def count(self) -> str:
+        raw = host.kv_get("readings")
+        data = json.loads(raw) if raw else []
+        return '{"reading_count":' + str(len(data)) + '}'
+```
+
+**Best practice**: Have handlers return **strings only** (e.g. JSON built by concatenation or `json.dumps` inside the handler) to avoid componentize-py traps when crossing the WASM boundary. Full keyvalue API (TTL, list-keys, etc.) will be added to the SDKs later.
 
 ### Building Python Actors
 
@@ -910,6 +1025,19 @@ class Actor(exports.Actor):
 ```
 
 See `examples/python/README.md` for complete documentation.
+
+### TypeScript WASM Development
+
+TypeScript actors use the same **simple-actor** WIT world as Python. Use the [TypeScript SDK](sdk.md#typescript-sdk): extend `PlexSpacesActor<TState>`, implement `getDefaultState()` and `on<Op>(payload)` handlers, then build with **jco componentize** (not Javy).
+
+**Build** (from `examples/typescript/apps/bank_account`):
+
+1. Install deps: `npm install` (includes `@plexspaces/sdk`, `esbuild`, `jco`)
+2. Build: `./scripts/build.sh` — runs tsc, esbuild bundle (actor + SDK → single ESM), then `jco componentize account_actor_bundle.mjs --wit wit/plexspaces-simple-actor -o account_actor.wasm --disable all`
+
+**Important**: Use `--disable all` so the component only imports `plexspaces:simple-actor/host`; the PlexSpaces runtime does not provide WASI 0.2.3 that jco would otherwise add.
+
+See [examples/typescript/apps/bank_account/README.md](../examples/typescript/apps/bank_account/README.md) and [sdks/typescript/README.md](../sdks/typescript/README.md) for full docs.
 
 ## WASM Actor State Persistence (Durability)
 
@@ -1095,12 +1223,14 @@ Tests cover:
 
 ## References
 
-- **[Polyglot WASM Development Guide](polyglot.md)** - Comprehensive guide for polyglot development (Python, TypeScript, Rust, Go) with all WIT abstractions
+- **[SDK Guide](sdk.md)** - Python and TypeScript SDKs for building WASM actors
+- **[Polyglot WASM Development Guide](polyglot.md)** - Polyglot development (Python, TypeScript, Rust, Go) with WIT abstractions
 - **[Python WASM Examples](../examples/python/README.md)** - Python WASM actors with componentize-py
+- **[TypeScript Bank Account Example](../examples/typescript/apps/bank_account/README.md)** - TypeScript WASM with jco and simple-actor WIT
 - [WIT Specification](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md)
 - [componentize-py](https://github.com/bytecodealliance/componentize-py) - Python to WASM Component compiler
+- [jco](https://bytecodealliance.github.io/jco/) - JavaScript/TypeScript componentize (componentize-js)
 - [wasm-opt Documentation](https://github.com/WebAssembly/binaryen)
 - [HTTP Multipart Upload Best Practices](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/POST)
-- [Polyglot WASM Deployment Example](../examples/simple/polyglot_wasm_deployment/README.md)
 - [WASM Calculator Example](../examples/simple/wasm_calculator/README.md)
 

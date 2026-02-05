@@ -29,10 +29,10 @@
 //! - Feature-gated backends for minimal dependencies
 //!
 //! ## Backends
-//! - [`MemoryJournalStorage`]: In-memory HashMap (testing only)
+//! - [`SqliteJournalStorage`]: SQLite with WAL mode (use `:memory:` for in-memory)
 //! - [`PostgresJournalStorage`]: PostgreSQL with auto-migrations (production)
 //! - [`RedisJournalStorage`]: Redis (distributed, eventually consistent)
-//! - [`SqliteJournalStorage`]: SQLite with WAL mode (edge deployments)
+//! - [`DynamoDBJournalStorage`]: DynamoDB (AWS managed)
 
 use plexspaces_core::{JournalError, JournalResult};
 use std::sync::Arc;
@@ -47,9 +47,6 @@ pub use plexspaces_core::JournalStorage;
 // All implementations in this crate implement the trait from core
 
 // Backend implementations
-mod memory;
-pub use memory::MemoryJournalStorage;
-
 #[cfg(any(feature = "postgres-backend", feature = "sqlite-backend"))]
 pub mod sql;
 
@@ -114,9 +111,19 @@ pub async fn create_journal_storage(
     })?;
     
     match backend {
+        // Memory backend maps to SQLite :memory:
         JournalBackend::JournalBackendMemory => {
-            let storage = MemoryJournalStorage::new();
-            Ok(Arc::new(storage))
+            #[cfg(feature = "sqlite-backend")]
+            {
+                let storage = SqliteJournalStorage::new(":memory:").await?;
+                Ok(Arc::new(storage))
+            }
+            #[cfg(not(feature = "sqlite-backend"))]
+            {
+                Err(JournalError::InvalidConfiguration(
+                    "Memory backend requires 'sqlite-backend' feature (uses SQLite :memory:)".to_string(),
+                ))
+            }
         }
         #[cfg(feature = "sqlite-backend")]
         JournalBackend::JournalBackendSqlite => {

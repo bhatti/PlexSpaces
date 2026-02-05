@@ -66,10 +66,9 @@ chrono = "0.4"
 metrics = "0.23"
 
 [features]
-default = ["memory-backend", "sqlite-backend"]
+default = ["sqlite-backend"]
 
 # Backend features
-memory-backend = []
 postgres-backend = ["sqlx", "sqlx/postgres"]
 redis-backend = ["redis"]
 sqlite-backend = ["sqlx", "sqlx/sqlite"]

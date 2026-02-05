@@ -100,8 +100,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -137,8 +137,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -153,8 +153,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-2".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-2".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -182,8 +182,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -198,8 +198,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -226,8 +226,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -241,8 +241,8 @@ mod tests {
                 &ctx,
                 RenewLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    version: lock.version.clone(),
+holder_id: "node-1".to_string(),
+                version: lock.version.clone(),
                     lease_duration_secs: 60,
                     metadata: Default::default(),
                 },
@@ -273,8 +273,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -289,8 +289,8 @@ mod tests {
                 &ctx,
                 RenewLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    version: "wrong-version".to_string(),
+holder_id: "node-1".to_string(),
+                version: "wrong-version".to_string(),
                     lease_duration_secs: 60,
                     metadata: Default::default(),
                 },
@@ -318,8 +318,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -334,8 +334,8 @@ mod tests {
                 &ctx,
                 RenewLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-2".to_string(),
-                    version: lock.version,
+holder_id: "node-2".to_string(),
+                version: lock.version,
                     lease_duration_secs: 60,
                     metadata: Default::default(),
                 },
@@ -363,8 +363,8 @@ mod tests {
                 &ctx,
                 RenewLockOptions {
                     lock_key: "non-existent".to_string(),
-                    holder_id: "node-1".to_string(),
-                    version: "some-version".to_string(),
+holder_id: "node-1".to_string(),
+                version: "some-version".to_string(),
                     lease_duration_secs: 60,
                     metadata: Default::default(),
                 },
@@ -392,8 +392,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -407,8 +407,8 @@ mod tests {
                 &ctx,
                 ReleaseLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    version: lock.version,
+holder_id: "node-1".to_string(),
+                version: lock.version,
                     delete_lock: true,
                 },
             )
@@ -434,8 +434,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -450,8 +450,8 @@ mod tests {
                 &ctx,
                 ReleaseLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    version: lock.version,
+holder_id: "node-1".to_string(),
+                version: lock.version,
                     delete_lock: false,
                 },
             )
@@ -479,8 +479,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -495,8 +495,8 @@ mod tests {
                 &ctx,
                 ReleaseLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    version: "wrong-version".to_string(),
+holder_id: "node-1".to_string(),
+                version: "wrong-version".to_string(),
                     delete_lock: true,
                 },
             )
@@ -523,8 +523,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -539,8 +539,8 @@ mod tests {
                 &ctx,
                 ReleaseLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-2".to_string(),
-                    version: lock.version,
+holder_id: "node-2".to_string(),
+                version: lock.version,
                     delete_lock: true,
                 },
             )
@@ -567,8 +567,8 @@ mod tests {
                 &ctx,
                 ReleaseLockOptions {
                     lock_key: "non-existent".to_string(),
-                    holder_id: "node-1".to_string(),
-                    version: "some-version".to_string(),
+holder_id: "node-1".to_string(),
+                version: "some-version".to_string(),
                     delete_lock: true,
                 },
             )
@@ -600,8 +600,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -634,8 +634,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 1, // 1 second
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 1, // 1 second
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -653,8 +653,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-2".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-2".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -682,8 +682,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 1, // 1 second
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 1, // 1 second
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -701,8 +701,8 @@ mod tests {
                 &ctx,
                 RenewLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    version: lock.version,
+holder_id: "node-1".to_string(),
+                version: lock.version,
                     lease_duration_secs: 60,
                     metadata: Default::default(),
                 },
@@ -733,8 +733,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: metadata.clone(),
@@ -753,8 +753,8 @@ mod tests {
                 &ctx,
                 RenewLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    version: lock.version,
+holder_id: "node-1".to_string(),
+                version: lock.version,
                     lease_duration_secs: 60,
                     metadata: new_metadata.clone(),
                 },
@@ -781,8 +781,8 @@ mod tests {
                 &ctx1,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -797,8 +797,8 @@ mod tests {
                 &ctx2,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -839,8 +839,8 @@ mod tests {
                 &ctx1,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -855,8 +855,8 @@ mod tests {
                 &ctx2,
                 AcquireLockOptions {
                     lock_key: lock_key.clone(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -890,8 +890,8 @@ mod tests {
                         &ctx_clone,
                         AcquireLockOptions {
                             lock_key: lock_key_clone,
-                            holder_id: format!("node-{}", i),
-                            lease_duration_secs: 30,
+holder_id: format!("node-{}", i),
+                        lease_duration_secs: 30,
                             additional_wait_time_ms: 0,
                             refresh_period_ms: 100,
                             metadata: Default::default(),
@@ -931,8 +931,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: "lock-1".to_string(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),
@@ -946,8 +946,8 @@ mod tests {
                 &ctx,
                 AcquireLockOptions {
                     lock_key: "lock-2".to_string(),
-                    holder_id: "node-1".to_string(),
-                    lease_duration_secs: 30,
+holder_id: "node-1".to_string(),
+                lease_duration_secs: 30,
                     additional_wait_time_ms: 0,
                     refresh_period_ms: 100,
                     metadata: Default::default(),

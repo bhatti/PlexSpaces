@@ -16,17 +16,16 @@
 
 use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_core::{ActorRegistry, ObjectRegistry as CoreObjectRegistry, ObjectRegistration};
-use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::object_registry::v1::{ObjectRegistration as ProtoObjectRegistration, ObjectType};
-use plexspaces_keyvalue::InMemoryKVStore;
 use plexspaces_proto::ActorServiceServer;
 use std::sync::Arc;
 use tonic::transport::Server;
 use async_trait::async_trait;
 
-/// Simple wrapper to adapt ObjectRegistry to CoreObjectRegistry trait
+/// Simple wrapper to adapt ObjectRegistryImpl to CoreObjectRegistry trait
 struct ObjectRegistryAdapter {
-    inner: Arc<ObjectRegistry>,
+    inner: Arc<ObjectRegistryImpl>,
 }
 
 #[async_trait]
@@ -149,9 +148,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting ActorService node: {}", node_id);
     println!("Port: {}", port);
 
-    // Create in-memory object registry
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
+    // Create in-memory object registry using SQLite :memory:
+    let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await
+        .map_err(|e| format!("Failed to create object registry repository: {}", e))?);
+    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(repo));
     let object_registry: Arc<dyn CoreObjectRegistry> = Arc::new(ObjectRegistryAdapter {
         inner: object_registry_impl.clone(),
     });

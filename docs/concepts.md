@@ -94,7 +94,7 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 
 - **GenServerBehavior**: Erlang/OTP-style request/reply (synchronous)
 - **GenFSMBehavior**: Finite state machine (state transitions)
-- **GenEventBehavior**: Event-driven processing (fire-and-forget)
+- **GenEventBehavior**: Event-driven processing (fire-and-forget). WASM event-handler actors deploy with `behavior_kind=GenEvent` and appear in logs as `EventHandler`.
 - **WorkflowBehavior**: Durable workflow orchestration (Temporal/Restate-inspired)
 
 ### GenServerBehavior Example
@@ -569,7 +569,7 @@ HTTP Request → HTTP Gateway (Axum) → gRPC InvokeActor → ActorService → A
 3. **gRPC Translation**: Gateway constructs `InvokeActorRequest` with:
    - `tenant_id`, `namespace`, `actor_type` from path
    - `payload` from request body (POST/PUT) or query params (GET)
-   - `message_type` set to `"call"` for GET/DELETE (ask pattern) or `"cast"` for POST/PUT (tell pattern)
+   - `message_type` set to `"call"` for GET or when query param `invocation=call` (ask pattern), `"cast"` for POST/PUT/DELETE by default (tell pattern). Valid `invocation` values: **call**, **cast**, **info** (Erlang-style). Query param `msg_type` is the handler name (e.g. count, readings) and goes into payload.
 4. **Actor Service**: `ActorServiceImpl::invoke_actor` handles the gRPC request
 5. **Actor Discovery**: Service looks up actors by type using `ActorRegistry::discover_actors_by_type`
 6. **Message Delivery**: Selected actor receives message via mailbox
@@ -597,8 +597,8 @@ When multiple actors of the same type exist, the system uses:
 
 Different HTTP methods map to different message patterns:
 
-- **GET/DELETE** → `MessageType::Call` (ask pattern, expects reply)
-- **POST/PUT** → `MessageType::Cast` (tell pattern, fire-and-forget)
+- **GET** (or any method with `?invocation=call`) → `MessageType::Call` (ask pattern, expects reply). Allowed `invocation` values: **call**, **cast**, **info**.
+- **POST/PUT/DELETE** → `MessageType::Cast` (tell pattern, fire-and-forget) by default
 
 **Behavior Handling**:
 - `GenServer::route_message` routes `Call` messages to `handle_request` (expects reply)

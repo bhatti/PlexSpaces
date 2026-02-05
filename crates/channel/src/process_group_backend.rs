@@ -19,7 +19,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::{Channel, ChannelError, ChannelResult};
 use plexspaces_core::{ProcessGroupService, RequestContext, ServiceLocator};
-use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, ChannelStats};
+use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, ChannelStats};
 use plexspaces_proto::common::v1::Message;
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 1024;
@@ -364,7 +364,7 @@ impl Channel for ProcessGroupChannel {
 
         Ok(ChannelStats {
             name: self.group_name.clone(),
-            backend: ChannelBackend::ChannelBackendProcessGroup as i32,
+            provider: ChannelProvider::ChannelProviderProcessGroup as i32,
             messages_sent: stats.messages_sent,
             messages_received: stats.messages_received,
             messages_pending: stats.messages_pending,
@@ -483,6 +483,25 @@ mod tests {
         async fn request_context_for_system_operations(&self) -> plexspaces_core::RequestContext {
             plexspaces_core::RequestContext::new_without_auth(String::new(), String::new())
         }
+        async fn request_context_for_system_operations_with_namespace(&self, namespace: String) -> plexspaces_core::RequestContext {
+            plexspaces_core::RequestContext::new_without_auth(String::new(), namespace)
+        }
+        
+        // Lock manager
+        async fn get_lock_manager(&self) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>> { None }
+        async fn register_lock_manager(&self, _: Arc<dyn plexspaces_locks::LockManager + Send + Sync>) {}
+        
+        // Actor factory
+        async fn get_actor_factory(&self) -> Option<Arc<dyn plexspaces_core::ActorFactory>> { None }
+        async fn register_actor_factory(&self, _: Arc<dyn plexspaces_core::ActorFactory>) {}
+        
+        // Initialize services (no-op for test stub)
+        async fn initialize_services(
+            &self,
+            _node_id: Option<String>,
+            _node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
+            _release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
+        ) {}
         
         // gRPC connection manager
         async fn get_grpc_connection_manager(&self) -> Option<Arc<plexspaces_core::GrpcConnectionManager>> { None }
@@ -576,7 +595,7 @@ mod tests {
     fn create_test_config(name: &str) -> ChannelConfig {
         ChannelConfig {
             name: name.to_string(),
-            backend: ChannelBackend::ChannelBackendProcessGroup as i32,
+            provider: ChannelProvider::ChannelProviderProcessGroup as i32,
             capacity: 100,
             ..Default::default()
         }

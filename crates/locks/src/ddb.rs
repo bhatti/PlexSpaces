@@ -871,7 +871,6 @@ impl LockManager for DynamoDBLockManager {
         let existing_holder_id = existing_lock.holder_id.clone();
         let request_version = options.version.clone();
 
-        // Validate version (optimistic locking)
         if existing_version != request_version {
             metrics::counter!(
                 "plexspaces_locks_ddb_renew_errors_total",
@@ -883,15 +882,13 @@ impl LockManager for DynamoDBLockManager {
                 actual: request_version,
             });
         }
-
-        // Validate holder
         if existing_holder_id != options.holder_id {
             metrics::counter!(
                 "plexspaces_locks_ddb_renew_errors_total",
                 "backend" => "dynamodb",
                 "error_type" => "wrong_holder"
             ).increment(1);
-            return Err(LockError::LockAlreadyHeld(existing_holder_id));
+            return Err(LockError::InvalidHolderId(existing_holder_id));
         }
 
         // Check if expired
@@ -1052,7 +1049,6 @@ impl LockManager for DynamoDBLockManager {
         let existing_holder_id = existing_lock.holder_id.clone();
         let request_version = options.version.clone();
 
-        // Validate version
         if existing_version != request_version {
             metrics::counter!(
                 "plexspaces_locks_ddb_release_errors_total",
@@ -1064,15 +1060,13 @@ impl LockManager for DynamoDBLockManager {
                 actual: request_version.clone(),
             });
         }
-
-        // Validate holder
         if existing_holder_id != options.holder_id {
             metrics::counter!(
                 "plexspaces_locks_ddb_release_errors_total",
                 "backend" => "dynamodb",
                 "error_type" => "wrong_holder"
             ).increment(1);
-            return Err(LockError::LockAlreadyHeld(existing_holder_id));
+            return Err(LockError::InvalidHolderId(existing_holder_id));
         }
 
         if options.delete_lock {

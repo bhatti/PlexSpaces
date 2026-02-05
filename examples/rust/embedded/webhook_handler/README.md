@@ -1,175 +1,53 @@
-# Webhook Handler Example (FaaS Pattern)
+# Webhook Handler Example (FaaS-style HTTP actor)
 
-**Purpose**: Demonstrate actors as HTTP/webhook handlers.
+**Purpose**: Webhook handler actor invoked via HTTP: receive webhooks at a stable URL, store recent deliveries, list via GET. Uses correct PlexSpaces APIs and explicit tenant/namespace (no internal context).
 
-**Use Case**: Process webhooks from GitHub, Stripe, Slack.
+## Overview
 
-## Quick Start
+- **POST** `/api/v1/actors/{tenant_id}/{namespace}/webhook_handler` — Deliver a webhook (body = payload). Returns `{ id, received_at, action: "delivered" }`.
+- **GET** `/api/v1/actors/{tenant_id}/{namespace}/webhook_handler?action=list` — List recent deliveries and total count.
+
+## APIs used
+
+- **NodeBuilder** — Build node with `with_listen_addr`, `with_in_memory_backends`, `build().await`, then `start().await`.
+- **RequestContext::new_without_auth(tenant_id, namespace)** — Explicit tenant/namespace (e.g. `"acme-corp"`, `"webhooks"`).
+- **ActorBuilder::new(behavior).with_id(...).with_namespace(...).spawn(&ctx, service_locator)** — Spawn actor; type `BehaviorType::Custom("webhook_handler")` for HTTP path routing.
+- **GenServer** — Request/reply; `action=list` vs deliver; reply via `ctx.send_reply(...)`.
+
+## Running
+
+Examples use the **workspace shared target directory** (`<workspace>/target`). See `.cargo/config.toml` and CLAUDE.md.
 
 ```bash
 cd examples/rust/embedded/webhook_handler
-
-# Build
-cargo build
-
-# Run
-cargo run
+cargo run --release
 ```
 
-## What It Demonstrates
+Or run the test script:
 
-1. **Actors as HTTP Handlers**: Actor processes webhook requests
-2. **Event Routing**: Route by event type (pattern matching)
-3. **Stateless Processing**: Each request handled independently
-4. **Fire-and-Forget**: Async webhook processing with `tell()`
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ External Services                                               │
-│   GitHub  →  POST /webhooks/github   ─┐                        │
-│   Stripe  →  POST /webhooks/stripe   ─┼→  [HTTP Server]        │
-│   Slack   →  POST /webhooks/slack    ─┘         │              │
-└─────────────────────────────────────────────────────────────────┘
-                                                  │
-                                                  ▼
-                                    ┌─────────────────────────┐
-                                    │   WebhookActor          │
-                                    │   handle_message()      │
-                                    │   ├─ GitHubPush         │
-                                    │   ├─ StripePayment      │
-                                    │   └─ SlackCommand       │
-                                    └─────────────────────────┘
+```bash
+./test.sh
 ```
 
-## Key Code Patterns
+## HTTP testing
 
-### Define Webhook Event Types
+```bash
+# List (empty at start)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:8002/api/v1/actors/acme-corp/webhooks/webhook_handler?action=list"
 
-```rust
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-enum WebhookEvent {
-    #[serde(rename = "github.push")]
-    GitHubPush { repository: String, branch: String, commits: usize },
-    
-    #[serde(rename = "stripe.payment")]
-    StripePayment { customer_id: String, amount_cents: u64, currency: String },
-    
-    #[serde(rename = "slack.command")]
-    SlackCommand { user: String, channel: String, command: String },
-}
+# Deliver a webhook
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"type":"github.push","repo":"acme/backend","commits":3}' \
+  "http://127.0.0.1:8002/api/v1/actors/acme-corp/webhooks/webhook_handler"
 ```
 
-### Create Handler Actor
+## Use cases
 
-```rust
-let handler = ActorBuilder::new(Box::new(WebhookActor::new()))
-    .with_id("webhook-handler")
-    .with_namespace("webhooks")
-    .spawn(&ctx, service_locator.clone())
-    .await?;
-```
+- **Webhook receivers**: Stable URL per endpoint (e.g. GitHub, Stripe, Slack) backed by one actor per tenant/endpoint.
+- **Audit / replay**: Store recent deliveries (e.g. last 100) for debugging or idempotency.
 
-### Send Webhook Event
+## See also
 
-```rust
-let event = WebhookEvent::GitHubPush {
-    repository: "acme/backend".to_string(),
-    branch: "main".to_string(),
-    commits: 3,
-};
-
-let msg = Message::json(&event)?.with_message_type("webhook");
-handler.tell(msg).await?;  // Fire-and-forget
-```
-
-### Handle Events in Actor
-
-```rust
-async fn handle_message(&mut self, _ctx: &ActorContext, message: Message) -> Result<(), BehaviorError> {
-    let event: WebhookEvent = serde_json::from_slice(&message.payload)?;
-    
-    match event {
-        WebhookEvent::GitHubPush { repository, branch, commits } => {
-            // Trigger CI pipeline
-        }
-        WebhookEvent::StripePayment { customer_id, amount_cents, currency } => {
-            // Update subscription
-        }
-        WebhookEvent::SlackCommand { user, channel, command } => {
-            // Execute command
-        }
-    }
-    Ok(())
-}
-```
-
-## Expected Output
-
-```
-Step 1: Create webhook handler actor
-  Actor: webhook-handler@webhook-node
-  Ready to process webhooks
-
-Step 2: GitHub push webhook
-  [GitHub] Push to acme/backend/main: 3 commits
-    → Triggering CI pipeline...
-
-Step 3: Stripe payment webhook
-  [Stripe] Payment from cus_abc123: 99.99 USD
-    → Updating subscription status...
-
-Step 4: Slack command webhook
-  [Slack] @alice in #engineering: /deploy staging
-    → Executing command...
-```
-
-## Use Cases
-
-- **GitHub Webhooks**: Push events, PR events, issue comments
-- **Stripe Webhooks**: Payment succeeded, subscription updated
-- **Slack Commands**: ChatOps, bot commands
-- **Twilio Webhooks**: Incoming SMS, voice calls
-- **Custom APIs**: Any HTTP endpoint backed by actor
-
-## tell() vs ask()
-
-| Method | Pattern | Use Case |
-|--------|---------|----------|
-| `tell()` | Fire-and-forget | Async processing, webhook acknowledgment |
-| `ask()` | Request-response | Sync API responses, queries |
-
-```rust
-// Async webhook (respond 200 immediately)
-handler.tell(msg).await?;
-
-// Sync API (wait for response)
-let response = handler.ask(msg, Duration::from_secs(5)).await?;
-```
-
-## Production Integration
-
-Add HTTP server (axum example):
-
-```rust
-use axum::{routing::post, Router, Json};
-
-async fn webhook_handler(
-    Json(event): Json<WebhookEvent>
-) -> StatusCode {
-    let msg = Message::json(&event)?;
-    handler.tell(msg).await?;
-    StatusCode::OK  // Acknowledge immediately
-}
-
-let app = Router::new()
-    .route("/webhooks", post(webhook_handler));
-```
-
-## See Also
-
-- [Actor Groups (Sharding)](../actor_groups_sharding/) - For scaling handlers
-- [Supervision Tree](../supervision_tree/) - For fault tolerance
-- [Architecture Docs](../../../../docs/architecture.md)
+- [Architecture](../../../../docs/architecture.md)
+- [Examples](../../../../docs/examples.md)

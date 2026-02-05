@@ -70,9 +70,8 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 async fn test_spawn_actor_always_uses_local_node_id() {
     // Test: spawn_actor should always use local node_id, ignoring any node_id in actor_id
     use plexspaces_node::create_default_service_locator;
-    let object_registry_impl = Arc::new(ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
         Arc::new(ObjectRegistryAdapter { inner: object_registry_impl });
     let actor_registry = Arc::new(ActorRegistry::new(
@@ -131,9 +130,8 @@ async fn test_spawn_actor_always_uses_local_node_id() {
 async fn test_spawn_actor_rejects_remote_node_id() {
     // Test: spawn_actor should reject actor_id with remote node_id
     use plexspaces_node::create_default_service_locator;
-    let object_registry_impl = Arc::new(ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
         Arc::new(ObjectRegistryAdapter { inner: object_registry_impl });
     let actor_registry = Arc::new(ActorRegistry::new(
@@ -164,9 +162,8 @@ async fn test_spawn_actor_design_principle() {
     // Test: Verify design principle - ActorService always creates locally
     // This test documents the design: to spawn on remote node, call that node's ActorService
     use plexspaces_node::create_default_service_locator;
-    let object_registry_impl = Arc::new(ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
         Arc::new(ObjectRegistryAdapter { inner: object_registry_impl });
     let actor_registry = Arc::new(ActorRegistry::new(
@@ -213,9 +210,8 @@ async fn test_spawn_actor_with_callback() {
     use plexspaces_core::ActorRef;
     use std::sync::Arc;
     
-    let object_registry_impl = Arc::new(ObjectRegistry::new(
-        Arc::new(plexspaces_keyvalue::InMemoryKVStore::new())
-    ));
+    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
     let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
         Arc::new(ObjectRegistryAdapter { inner: object_registry_impl });
     let actor_registry = Arc::new(ActorRegistry::new(

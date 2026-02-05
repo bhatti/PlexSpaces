@@ -41,11 +41,23 @@ use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
 use prost::Message as ProstMessage;
 use plexspaces_wasm_runtime::{deployment_service::WasmDeploymentService, WasmInstance};
+
 use plexspaces_actor::{Supervisor, SupervisionStrategy, ChildSpec as ActorChildSpec, StartedChild};
 use plexspaces_actor::child_spec::{RestartStrategy, ChildType as ActorChildType};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+
+/// Tries to get application-level msg_type (handler name) from JSON payload, e.g. {"msg_type":"ingest","payload":{...}}.
+/// Returns None if payload is not valid JSON or has no msg_type, or msg_type is transport-only ("call"/"cast").
+fn try_msg_type_from_payload(payload: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    let s = value.get("msg_type")?.as_str()?.trim();
+    if s.is_empty() || s.eq_ignore_ascii_case("call") || s.eq_ignore_ascii_case("cast") {
+        return None;
+    }
+    Some(s.to_string())
+}
 
 /// WASM actor behavior that wraps a WasmInstance
 ///
@@ -54,12 +66,24 @@ use tokio::sync::RwLock;
 /// to the WASM module's handle_message function.
 ///
 /// ## Design
+/// Parses optional behavior_kind string from ChildSpec to BehaviorType for logging.
+fn parse_behavior_kind(s: Option<&str>) -> plexspaces_core::BehaviorType {
+    match s.map(str::trim) {
+        Some("GenEvent") | Some("EventHandler") | Some("eventhandler") | Some("event") => plexspaces_core::BehaviorType::GenEvent,
+        Some("GenServer") | Some("genserver") => plexspaces_core::BehaviorType::GenServer,
+        Some("GenStateMachine") | Some("fsm") => plexspaces_core::BehaviorType::GenStateMachine,
+        Some("Workflow") | Some("workflow") => plexspaces_core::BehaviorType::Workflow,
+        _ => plexspaces_core::BehaviorType::GenServer,
+    }
+}
+
 /// - Wraps a WasmInstance (which holds the WASM module and state)
 /// - Forwards handle_message calls to WASM instance
 /// - Handles serialization/deserialization of messages
 struct WasmActorBehavior {
     instance: Arc<WasmInstance>,
     actor_type: String, // Actor type for dashboard grouping (e.g., application name or child spec id)
+    behavior_kind: plexspaces_core::BehaviorType, // OTP-style kind for logging (GenServer, GenEvent, etc.)
 }
 
 #[async_trait]
@@ -117,12 +141,21 @@ impl Actor for WasmActorBehavior {
                 Ok(())
             }
             Err(e) => {
-                // Log error but don't fail terminate
-                tracing::error!(
-                    actor_type = %self.actor_type,
-                    error = %e,
-                    "WASM actor checkpoint save failed on shutdown"
-                );
+                let err_str = e.to_string();
+                // Component may be poisoned (cannot enter) after trap; log WARN and skip
+                if err_str.to_lowercase().contains("cannot enter") || err_str.to_lowercase().contains("cannot enter component") {
+                    tracing::warn!(
+                        actor_type = %self.actor_type,
+                        error = %err_str,
+                        "WASM checkpoint save skipped (component poisoned or busy)"
+                    );
+                } else {
+                    tracing::error!(
+                        actor_type = %self.actor_type,
+                        error = %e,
+                        "WASM actor checkpoint save failed on shutdown"
+                    );
+                }
                 Ok(())
             }
         }
@@ -133,57 +166,44 @@ impl Actor for WasmActorBehavior {
         ctx: &plexspaces_core::ActorContext,
         message: Message,
     ) -> Result<(), BehaviorError> {
-        // Extract message details
-        let from = if message.sender_id.is_empty() { "unknown" } else { &message.sender_id };
+        // Extract message details. "from" is only for WASM actor context (who sent the message).
+        // Reply is sent only when message.sender_id is non-empty (see below); we never default sender_id for reply.
+        let from = if message.sender_id.is_empty() { "" } else { message.sender_id.as_str() };
         
-        // Determine message type from multiple sources (in priority order):
-        // 1. X-Message-Type header (from HTTP gateway)
-        // 2. message_type field (from gRPC/internal)
-        // 3. Default to "call"
-        let message_type = message.headers.get("x-message-type")
-            .or_else(|| message.headers.get("X-Message-Type"))
-            .map(|s| s.as_str())
+        // Determine message type for WASM dispatch (handler name or transport):
+        // 1. Application msg_type from JSON payload (e.g. "ingest") so SDK can dispatch
+        // 2. X-Message-Type header (from HTTP gateway)
+        // 3. Envelope message_type ("cast"/"call") - POST=cast (tell), GET/ask=call
+        // 4. Default "cast" so POST without invocation=call is fire-and-forget
+        let message_type: String = try_msg_type_from_payload(&message.payload)
             .or_else(|| {
-                // Use message_type field if not empty and not generic "call"/"cast"
-                if !message.message_type.is_empty() 
-                    && message.message_type != "call" 
-                    && message.message_type != "cast" {
-                    Some(message.message_type.as_str())
-                } else {
-                    None
-                }
+                message.headers.get("x-message-type")
+                    .or_else(|| message.headers.get("X-Message-Type"))
+                    .cloned()
             })
-            .unwrap_or("call");
+            .unwrap_or_else(|| message.message_type.clone());
+        let message_type = if message_type.is_empty() { "cast".to_string() } else { message_type };
         
         // Use message payload directly
         let payload = message.payload.clone();
 
         // Clone Arc before await to ensure Send
         let instance = self.instance.clone();
+        let message_id = message.id.clone();
         
-        // Call WASM instance's handle_message
+        // Call WASM instance's handle_message (message_id for correlation with INVOKE_ACTOR logs)
         tracing::debug!(
+            message_id = %message_id,
             "WASM handle_message: from={}, msg_type={}, payload_len={}, sender_id={}",
             from, message_type, payload.len(), message.sender_id
         );
-        
-        match instance.handle_message(from, message_type, payload).await {
+        match instance.handle_message_with_id(from, message_type.as_str(), payload, &message_id).await {
             Ok(response) => {
-                tracing::debug!(
-                    "WASM handle_message succeeded: response_len={}, sender_id={}",
-                    response.len(), message.sender_id
-                );
-                
                 // Handle response for request-reply patterns
                 // If message has sender_id, send reply using ActorRef::send_reply()
                 if !message.sender_id.is_empty() {
                     let sender_id = message.sender_id.clone();
                     let correlation_id = message.correlation_id.clone();
-                    
-                    tracing::debug!(
-                        "WASM preparing reply: sender_id={}, correlation_id={}, response_len={}",
-                        sender_id, correlation_id, response.len()
-                    );
                     
                     let mut reply_message = Message {
                         id: ulid::Ulid::new().to_string(),
@@ -202,15 +222,8 @@ impl Actor for WasmActorBehavior {
                         // Set receiver to sender_id (the actor that called ask())
                         reply_message.receiver_id = sender_id.clone();
                         
-                        tracing::debug!(
-                            "WASM sending reply via ActorService: receiver_id={}, correlation_id={}",
-                            reply_message.receiver_id, reply_message.correlation_id
-                        );
-                        
                         match actor_service.send(&sender_id, reply_message).await {
-                            Ok(_) => {
-                                tracing::debug!("WASM reply sent to {}", sender_id);
-                            }
+                            Ok(_) => {}
                             Err(e) => {
                                 tracing::error!(error = %e, "WASM failed to send reply via ActorService");
                             }
@@ -219,14 +232,14 @@ impl Actor for WasmActorBehavior {
                         tracing::error!("WASM ActorService not available, cannot send reply");
                     }
                 } else {
-                    tracing::debug!("WASM fire-and-forget message (no sender_id)");
+                    tracing::trace!("WASM fire-and-forget message (no sender_id)");
                 }
                 Ok(())
             }
             Err(e) => {
-                tracing::error!(
-                    "🐍 [WASM_ACTOR] handle_message FAILED: error={}",
-                    e
+                tracing::debug!(
+                    error = %e,
+                    "WASM handle_message failed (full error logged by wasm_runtime)"
                 );
                 Err(BehaviorError::ProcessingError(format!(
                     "WASM handle_message failed: {}",
@@ -239,6 +252,10 @@ impl Actor for WasmActorBehavior {
     fn behavior_type(&self) -> BehaviorType {
         // Return custom behavior type with actor_type name for dashboard grouping
         BehaviorType::Custom(self.actor_type.clone())
+    }
+
+    fn behavior_kind(&self) -> BehaviorType {
+        self.behavior_kind.clone()
     }
 }
 
@@ -355,10 +372,6 @@ impl WasmApplication {
         // Strategy 1: Use spec.supervisor if available (config-based supervisor tree)
         if let Some(spec) = &self.spec {
             if spec.supervisor.is_some() {
-                tracing::debug!(
-                    application = %self.name,
-                    "Application has supervisor spec - using supervisor tree"
-                );
                 return self.load_supervisor_tree(node).await;
             }
         }
@@ -380,22 +393,7 @@ impl WasmApplication {
             );
             return Ok(vec![]);
         }
-        
-        // Create actor ID from application name
-        let actor_id = format!("{}@{}", self.name, node.id());
-        
-        // Create a simple ChildSpec for the actor
-        use plexspaces_proto::application::v1::{ChildSpec, ChildType, RestartPolicy};
-        let child_spec = ChildSpec {
-            id: self.name.clone(),
-            r#type: ChildType::ChildTypeWorker as i32,
-            args: std::collections::HashMap::new(),
-            restart: RestartPolicy::RestartPolicyPermanent as i32,
-            shutdown_timeout: Some(prost_types::Duration { seconds: 5, nanos: 0 }),
-            supervisor: None, // No nested supervisor
-            facets: vec![],
-        };
-        
+
         // Get tenant_id/namespace from stored values (set during registration)
         let tenant_id = self.tenant_id.read().await.clone();
         let namespace = self.namespace.read().await.clone();
@@ -406,6 +404,26 @@ impl WasmApplication {
             tenant_id
         };
         let final_namespace = namespace; // Must come from user request; never substitute with config
+
+        // Precompute expected actor_id for error logging (final_namespace is moved into spawn_worker_actor_internal).
+        let expected_actor_id = if final_namespace.is_empty() {
+            format!("{}@{}", self.name, node.id())
+        } else {
+            format!("{}:{}@{}", self.name, final_namespace.as_str(), node.id())
+        };
+
+        // Create a simple ChildSpec for the actor
+        use plexspaces_proto::application::v1::{ChildSpec, ChildType, RestartPolicy};
+        let child_spec = ChildSpec {
+            id: self.name.clone(),
+            r#type: ChildType::ChildTypeWorker as i32,
+            args: std::collections::HashMap::new(),
+            restart: RestartPolicy::RestartPolicyPermanent as i32,
+            shutdown_timeout: Some(prost_types::Duration { seconds: 5, nanos: 0 }),
+            supervisor: None, // No nested supervisor
+            facets: vec![],
+            behavior_kind: None,
+        };
 
         // Spawn the WASM actor using the existing internal spawn method
         match Self::spawn_worker_actor_internal(
@@ -432,7 +450,7 @@ impl WasmApplication {
             Err(e) => {
                 tracing::error!(
                     application = %self.name,
-                    actor_id = %actor_id,
+                    actor_id = %expected_actor_id,
                     error = %e,
                     "Failed to spawn simple WASM actor"
                 );
@@ -680,7 +698,7 @@ impl WasmApplication {
         let app_name = self.name.clone();
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
-                tracing::info!(
+                tracing::trace!(
                     application = %app_name,
                     event = ?event,
                     "Supervisor event received"
@@ -869,13 +887,14 @@ impl WasmApplication {
         
         let tuplespace_provider = service_locator.get_tuplespace_provider().await;
         let object_registry = service_locator.get_object_registry().await;
-        
+        // Get LockManager so WASM actors can use host.lock_acquire/renew/release (e.g. leader election)
+        let lock_manager = service_locator.get_lock_manager().await;
+
         // Get JournalStorage - use SQLite file-based storage for durability
-        // Database URL priority:
-        // 1. PLEXSPACES_DATABASE_URL env var (shared database for all components)
-        // 2. PLEXSPACES_JOURNAL_DB env var (journal-specific, for backward compat)
-        // 3. Default: /tmp/plexspaces-journal-{node_id}.db (file-based for durability)
-        // For in-memory (testing only): set PLEXSPACES_DATABASE_URL=:memory:
+        // Note: Env var handling is centralized in config_manager::initialize()
+        // TODO: Get database URL from ServiceLocator instead of env vars
+        // For now, keeping env var fallback for backward compatibility until
+        // ServiceLocator exposes the configured database URL
         use plexspaces_journaling::JournalStorage;
         let journal_storage: Option<Arc<dyn JournalStorage>> = {
             let journal_db_path = std::env::var("PLEXSPACES_DATABASE_URL")
@@ -888,11 +907,22 @@ impl WasmApplication {
             
             // Check if we should use in-memory
             if journal_db_path == ":memory:" || journal_db_path.contains(":memory:") {
-                tracing::info!(
-                    node_id = %node.id(),
-                    "Journal storage initialized (InMemory - non-persistent)"
-                );
-                Some(Arc::new(plexspaces_journaling::MemoryJournalStorage::new()) as Arc<dyn JournalStorage>)
+                match plexspaces_journaling::SqliteJournalStorage::new(":memory:").await {
+                    Ok(storage) => {
+                        tracing::info!(
+                            node_id = %node.id(),
+                            "Journal storage initialized (SQLite :memory: - non-persistent)"
+                        );
+                        Some(Arc::new(storage) as Arc<dyn JournalStorage>)
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "Failed to create SQLite :memory: journal storage"
+                        );
+                        None
+                    }
+                }
             } else {
                 match plexspaces_journaling::SqliteJournalStorage::new(&journal_db_path).await {
                     Ok(storage) => {
@@ -916,7 +946,13 @@ impl WasmApplication {
             }
         };
 
+        // Get BlobService from node if available
+        let blob_service = node.blob_service().await;
+
         // Create WASM instance with all services
+        // TODO(instance-pool): When config.use_instance_pool is true, checkout from per-module InstancePool
+        // instead of runtime.instantiate() for faster spawn. Lightweight actors + worker pools fit well:
+        // pool of actors can share a pool of pre-instantiated WASM instances. See PROJECT_TRACKER.md.
         let module_any: Arc<dyn std::any::Any + Send + Sync> = module.clone();
         let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(plexspaces_wasm_runtime::WasmConfig::default());
         
@@ -930,20 +966,28 @@ impl WasmApplication {
             tuplespace_provider,
             None, // keyvalue_store
             None, // process_group_registry
-            None, // lock_manager
+            lock_manager,
             object_registry,
             journal_storage,
-            None, // blob_service
+            blob_service,
         ).await.map_err(|e| ApplicationError::Other(format!("WASM instantiation failed: {}", e)))?;
         
         let wasm_instance = plexspaces_wasm_runtime::wasm_runtime_helpers::extract_wasm_instance(instance_any)
             .map_err(|e| ApplicationError::Other(format!("Failed to extract WasmInstance: {}", e)))?;
 
-        // Create behavior
-        let actor_id = format!("{}@{}", child_spec.id, node.id());
+        // Create behavior (behavior_kind from spec for logging)
+        // Include namespace in actor_id so multiple apps (e.g. leader-election-term1, leader-election-term2)
+        // get distinct actors that can contend for the same lock (e.g. leader election).
+        let actor_id = if namespace.is_empty() {
+            format!("{}@{}", child_spec.id, node.id())
+        } else {
+            format!("{}:{}@{}", child_spec.id, namespace, node.id())
+        };
+        let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
         let behavior: Box<dyn CoreActor> = Box::new(WasmActorBehavior {
             instance: wasm_instance,
             actor_type: child_spec.id.clone(),
+            behavior_kind,
         });
 
         // Build unstarted Actor using ActorBuilder
@@ -1092,6 +1136,7 @@ impl WasmApplication {
                 Some(child_spec.id.clone()),
                 actor.context().config.clone(),
                 Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>),
+                None, // behavior_kind not available from application spawn path
             ).await;
         }
 
@@ -1359,7 +1404,7 @@ impl Application for WasmApplication {
         // Mark as running
         *is_running = true;
         
-        tracing::debug!(
+        tracing::trace!(
             application = %self.name,
             actor_count = actor_count,
             "WASM application started successfully"
@@ -1507,6 +1552,10 @@ impl Application for WasmApplication {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn module_hash_for_cleanup(&self) -> Option<String> {
+        Some(self.module_hash().to_string())
+    }
 }
 
 #[cfg(test)]
@@ -1562,6 +1611,7 @@ mod tests {
             dependencies: vec![],
             env: std::collections::HashMap::new(),
             supervisor: None,
+        ..Default::default()
         };
 
         let app = WasmApplication::new(
@@ -1795,7 +1845,8 @@ mod tests {
                     restart: RestartPolicy::RestartPolicyPermanent.into(),
                     shutdown_timeout: Some(Duration { seconds: 5, nanos: 0 }),
                     supervisor: None,
-                    facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                    facets: vec![],
+                    behavior_kind: None,
                 },
             ],
         };
@@ -1808,6 +1859,7 @@ mod tests {
             dependencies: vec![],
             env: std::collections::HashMap::new(),
             supervisor: Some(supervisor_spec),
+        ..Default::default()
         };
 
         let app = WasmApplication::new(

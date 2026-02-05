@@ -18,21 +18,22 @@ plexspaces-mailbox = { workspace = true }
 plexspaces-proto = { workspace = true }
 plexspaces-actor = { workspace = true }
 plexspaces-persistence = { workspace = true }
-plexspaces-keyvalue = { workspace = true }
+plexspaces-keyvalue = { workspace = true, features = ["sql-backend"] }
 plexspaces-object-registry = { workspace = true }
 plexspaces-channel = { workspace = true }
 plexspaces-process-groups = { workspace = true }
 plexspaces-facet = { workspace = true }
 plexspaces-application = { path = "../application" }
 plexspaces-services = { path = "../services" }
-plexspaces-scheduler = { workspace = true, features = ["memory-backend"] }
+plexspaces-scheduler = { workspace = true, features = ["sqlite-backend"] }
 plexspaces-locks = { workspace = true }
 plexspaces-common = { path = "../common" }
 plexspaces-wasm-runtime = { workspace = true }
-plexspaces-blob = { path = "../blob", features = ["sql-backend", "server", "presigned-urls"] }
+plexspaces-blob = { path = "../blob", features = ["sql-backend", "server", "presigned-urls", "s3-backend"] }
 plexspaces-firecracker = { workspace = true, optional = true }
 plexspaces-dashboard = { path = "../dashboard", optional = true }
 plexspaces-circuit-breaker = { workspace = true }
+plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 
 # Core dependencies
 tokio = { workspace = true }

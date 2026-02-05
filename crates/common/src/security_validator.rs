@@ -36,6 +36,11 @@ use plexspaces_proto::security::v1::{JwtConfig, MtlsConfig};
 use std::fs;
 use std::path::Path;
 
+use crate::config_manager::{
+    get_env, get_env_bool,
+    ENV_DISABLE_AUTH, ENV_JWT_SECRET, ENV_MTLS_CERT_DIR,
+};
+
 /// Security configuration validation errors
 #[derive(Debug, thiserror::Error)]
 pub enum SecurityValidationError {
@@ -80,17 +85,14 @@ pub enum SecurityValidationError {
 /// - If mTLS is enabled, certificate files must exist (or auto-generation must be enabled)
 pub async fn validate_security_config(config: &SecurityConfig) -> Result<(), SecurityValidationError> {
     // Check if auth is disabled via env variable (for testing)
-    if std::env::var("PLEXSPACES_DISABLE_AUTH").is_ok() {
-        let env_value = std::env::var("PLEXSPACES_DISABLE_AUTH").unwrap();
-        if env_value == "1" || env_value.eq_ignore_ascii_case("true") || env_value.eq_ignore_ascii_case("yes") {
-            tracing::info!("Auth disabled via PLEXSPACES_DISABLE_AUTH - skipping security validation");
-            return Ok(());
-        }
+    if get_env_bool(ENV_DISABLE_AUTH) {
+        tracing::debug!("Auth disabled via {} - skipping security validation", ENV_DISABLE_AUTH);
+        return Ok(());
     }
     
     // Check if auth is disabled in config
     if config.disable_auth {
-        tracing::info!("Auth disabled in SecurityConfig - skipping security validation");
+        tracing::debug!("Auth disabled in SecurityConfig - skipping security validation");
         return Ok(());
     }
     
@@ -142,16 +144,13 @@ fn validate_jwt_config(jwt: &JwtConfig) -> Result<(), SecurityValidationError> {
     
     // For HS256, we need a secret
     // Priority: 1. Env var PLEXSPACES_JWT_SECRET, 2. Config.secret
-    let secret = std::env::var("PLEXSPACES_JWT_SECRET")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            if !jwt.secret.is_empty() {
-                Some(jwt.secret.clone())
-            } else {
-                None
-            }
-        });
+    let secret = get_env(ENV_JWT_SECRET).or_else(|| {
+        if !jwt.secret.is_empty() {
+            Some(jwt.secret.clone())
+        } else {
+            None
+        }
+    });
     
     if secret.is_none() || secret.as_ref().unwrap().is_empty() {
         return Err(SecurityValidationError::MissingJwtSecret);
@@ -222,10 +221,8 @@ async fn validate_mtls_config(mtls: &MtlsConfig) -> Result<(), SecurityValidatio
 /// Resolve certificate path (env var or config)
 fn resolve_path(config_path: &str, env_var: &str) -> Result<String, SecurityValidationError> {
     // Priority: 1. Env var, 2. Config path
-    if let Ok(env_path) = std::env::var(env_var) {
-        if !env_path.is_empty() {
-            return Ok(env_path);
-        }
+    if let Some(env_path) = get_env(env_var) {
+        return Ok(env_path);
     }
     
     if !config_path.is_empty() {
@@ -254,16 +251,13 @@ fn resolve_path(config_path: &str, env_var: &str) -> Result<String, SecurityVali
 /// - [ ] Add metrics for certificate rotation events
 async fn generate_mtls_certificates(mtls: &MtlsConfig) -> Result<(), SecurityValidationError> {
     // Resolve cert_dir: Priority: 1. Env var PLEXSPACES_MTLS_CERT_DIR, 2. Config cert_dir, 3. Default
-    let cert_dir = std::env::var("PLEXSPACES_MTLS_CERT_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            if !mtls.cert_dir.is_empty() {
-                mtls.cert_dir.clone()
-            } else {
-                "/app/certs".to_string()
-            }
-        });
+    let cert_dir = get_env(ENV_MTLS_CERT_DIR).unwrap_or_else(|| {
+        if !mtls.cert_dir.is_empty() {
+            mtls.cert_dir.clone()
+        } else {
+            "/app/certs".to_string()
+        }
+    });
     
     // Create cert directory if it doesn't exist
     fs::create_dir_all(&cert_dir).map_err(|e| {

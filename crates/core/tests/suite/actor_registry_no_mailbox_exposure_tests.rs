@@ -25,8 +25,7 @@
 //! 4. is_actor_activated() checks MessageSender, not mailbox
 
 use plexspaces_core::{ActorRegistry, ActorId, actor_context::ObjectRegistry, MessageSender, Message, RequestContext};
-use plexspaces_keyvalue::InMemoryKVStore;
-use plexspaces_object_registry::ObjectRegistry as ObjectRegistryImpl;
+use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use ulid::Ulid;
@@ -151,9 +150,9 @@ impl ObjectRegistry for ObjectRegistryAdapter {
     }
 }
 
-fn create_test_registry() -> Arc<ActorRegistry> {
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(kv));
+async fn create_test_registry() -> Arc<ActorRegistry> {
+    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
     let object_registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryAdapter { 
         inner: object_registry_impl 
     });
@@ -172,7 +171,7 @@ fn create_test_context() -> RequestContext {
 
 #[tokio::test]
 async fn test_register_actor_with_message_sender() {
-    let registry = create_test_registry();
+    let registry = create_test_registry().await;
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
     // Create MessageSender
@@ -180,7 +179,7 @@ async fn test_register_actor_with_message_sender() {
     
     // Register actor with MessageSender
     let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
     
     // Verify actor is registered
     let found = registry.lookup_actor(&actor_id).await;
@@ -192,7 +191,7 @@ async fn test_register_actor_with_message_sender() {
 
 #[tokio::test]
 async fn test_register_actor_mailbox_not_exposed() {
-    let registry = create_test_registry();
+    let registry = create_test_registry().await;
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
     // Create MessageSender with internal message storage
@@ -202,7 +201,7 @@ async fn test_register_actor_mailbox_not_exposed() {
     
     // Register actor
     let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
     
     // Verify we can send messages via MessageSender
     let sender = registry.lookup_actor(&actor_id).await.unwrap();
@@ -220,13 +219,13 @@ async fn test_register_actor_mailbox_not_exposed() {
 
 #[tokio::test]
 async fn test_unregister_actor_removes_message_sender() {
-    let registry = create_test_registry();
+    let registry = create_test_registry().await;
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
     // Register actor
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
     
     // Verify registered
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -241,7 +240,7 @@ async fn test_unregister_actor_removes_message_sender() {
 
 #[tokio::test]
 async fn test_is_actor_activated_checks_message_sender() {
-    let registry = create_test_registry();
+    let registry = create_test_registry().await;
     let actor_id: ActorId = "test-actor@test-node".to_string();
     
     // Initially not activated
@@ -250,7 +249,7 @@ async fn test_is_actor_activated_checks_message_sender() {
     // Register actor
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
+    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
     
     // Now activated
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -258,14 +257,14 @@ async fn test_is_actor_activated_checks_message_sender() {
 
 #[tokio::test]
 async fn test_multiple_actors_registration() {
-    let registry = create_test_registry();
+    let registry = create_test_registry().await;
     
     // Register multiple actors
     for i in 0..10 {
         let actor_id: ActorId = format!("actor-{}@test-node", i);
         let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
         let ctx = create_test_context();
-        registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None).await;
+        registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
     }
     
     // Verify all are registered
@@ -273,4 +272,58 @@ async fn test_multiple_actors_registration() {
         let actor_id: ActorId = format!("actor-{}@test-node", i);
         assert!(registry.is_actor_activated(&actor_id).await, "Actor {} should be activated", i);
     }
+}
+
+/// Leader-election routing: discover_actors_by_type must return different actors
+/// for different namespaces (leader-election-term1 vs leader-election-term2).
+/// If both namespaces returned the same actor, both try_lead requests would hit
+/// one actor and both would see leader:true (bug).
+#[tokio::test]
+async fn test_leader_election_discover_actors_by_namespace() {
+    let registry = create_test_registry().await;
+    let tenant = "".to_string();
+    let ns1 = "leader-election-term1".to_string();
+    let ns2 = "leader-election-term2".to_string();
+    let actor_type = "LeaderElection".to_string();
+
+    let actor_id1: ActorId = "LeaderElection:leader-election-term1@test-node".to_string();
+    let actor_id2: ActorId = "LeaderElection:leader-election-term2@test-node".to_string();
+
+    let ctx1 = RequestContext::new_without_auth(tenant.clone(), ns1.clone());
+    let ctx2 = RequestContext::new_without_auth(tenant.clone(), ns2.clone());
+
+    registry
+        .register_actor(
+            &ctx1,
+            actor_id1.clone(),
+            Arc::new(TestMessageSender::new(actor_id1.clone())),
+            Some(actor_type.clone()),
+            None,
+            None,
+            None,
+        )
+        .await;
+    registry
+        .register_actor(
+            &ctx2,
+            actor_id2.clone(),
+            Arc::new(TestMessageSender::new(actor_id2.clone())),
+            Some(actor_type.clone()),
+            None,
+            None,
+            None,
+        )
+        .await;
+
+    let found1 = registry.discover_actors_by_type(&ctx1, &actor_type).await;
+    let found2 = registry.discover_actors_by_type(&ctx2, &actor_type).await;
+
+    assert_eq!(found1.len(), 1, "namespace term1 must resolve to exactly one actor");
+    assert_eq!(found2.len(), 1, "namespace term2 must resolve to exactly one actor");
+    assert_ne!(
+        found1[0], found2[0],
+        "term1 and term2 must resolve to different actors (leader-election routing)"
+    );
+    assert_eq!(found1[0], actor_id1);
+    assert_eq!(found2[0], actor_id2);
 }

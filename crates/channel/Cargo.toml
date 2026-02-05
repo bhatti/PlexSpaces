@@ -63,6 +63,7 @@ pretty_assertions = { version = "1.4" }
 tempfile = { workspace = true }
 tonic = { workspace = true }
 plexspaces-core = { workspace = true }
+plexspaces-locks = { workspace = true }
 ulid = { workspace = true }
 
 [features]

@@ -11,7 +11,7 @@
 
 use plexspaces_channel::{Channel, InMemoryChannel};
 use plexspaces_proto::channel::v1::{
-    ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
+    ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
 };
 use plexspaces_proto::common::v1::Message;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -25,7 +25,7 @@ async fn test_bounded_channel_backpressure_blocks_sender() {
     // Create bounded channel with small capacity
     let config = ChannelConfig {
         name: "backpressure-test".to_string(),
-        backend: ChannelBackend::ChannelBackendInMemory as i32,
+        provider: ChannelProvider::ChannelProviderInMemory as i32,
         capacity: 10, // Small capacity to test backpressure
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -101,7 +101,7 @@ async fn test_bounded_channel_backpressure_blocks_sender() {
 async fn test_backpressure_with_multiple_senders() {
     let config = ChannelConfig {
         name: "multi-sender-backpressure".to_string(),
-        backend: ChannelBackend::ChannelBackendInMemory as i32,
+        provider: ChannelProvider::ChannelProviderInMemory as i32,
         capacity: 5u64, // Small capacity
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -158,7 +158,7 @@ async fn test_backpressure_with_multiple_senders() {
 async fn test_unbounded_channel_no_backpressure() {
     let config = ChannelConfig {
         name: "unbounded-test".to_string(),
-        backend: ChannelBackend::ChannelBackendInMemory as i32,
+        provider: ChannelProvider::ChannelProviderInMemory as i32,
         capacity: 0, // 0 = unbounded
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -207,7 +207,7 @@ async fn test_backpressure_propagation() {
     // Create pipeline: input -> processor -> output
     let input_config = ChannelConfig {
         name: "input-channel".to_string(),
-        backend: ChannelBackend::ChannelBackendInMemory as i32,
+        provider: ChannelProvider::ChannelProviderInMemory as i32,
         capacity: 5u64, // Small capacity
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -216,7 +216,7 @@ async fn test_backpressure_propagation() {
 
     let output_config = ChannelConfig {
         name: "output-channel".to_string(),
-        backend: ChannelBackend::ChannelBackendInMemory as i32,
+        provider: ChannelProvider::ChannelProviderInMemory as i32,
         capacity: 5u64, // Small capacity
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -306,7 +306,7 @@ async fn test_capacity_configuration() {
     for capacity in [1, 10, 100, 1000, 4096] {
         let config = ChannelConfig {
             name: format!("capacity-{}", capacity),
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: capacity as u64,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -345,7 +345,7 @@ async fn test_backpressure_with_timeout() {
 
     let mut config = ChannelConfig {
         name: "timeout-backpressure".to_string(),
-        backend: ChannelBackend::ChannelBackendInMemory as i32,
+        provider: ChannelProvider::ChannelProviderInMemory as i32,
         capacity: 5u64,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

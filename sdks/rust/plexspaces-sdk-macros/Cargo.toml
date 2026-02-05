@@ -1,0 +1,17 @@
+# Proc-macro crate for PlexSpaces Rust SDK (annotations like Python decorators)
+# Use: #[actor], #[handler("msg_type")] to reduce boilerplate
+
+[package]
+name = "plexspaces-sdk-macros"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Procedural macros for PlexSpaces Rust SDK"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"

@@ -4,6 +4,7 @@ PlexSpaces includes comprehensive examples organized by core functionality and c
 
 ## Quick Navigation
 
+- [SDK Examples (Recommended)](#sdk-examples): Python and TypeScript SDKs (decorator-based and inheritance-based)
 - [Examples by Core Functionality](#examples-by-core-functionality): Actors, Workflows, GenServer, Services
 - [Simple Examples](#simple-examples): Basic patterns and concepts
 - [Intermediate Examples](#intermediate-examples): Multi-actor coordination
@@ -11,19 +12,98 @@ PlexSpaces includes comprehensive examples organized by core functionality and c
 - [Domain Examples](#domain-examples): Real-world applications
 - [Framework Comparisons](#framework-comparisons): Side-by-side comparisons
 
+## SDK Examples
+
+The [PlexSpaces SDKs](sdk.md) provide minimal-boilerplate actor development: **Python** (decorator-based: `@actor`, `@handler`, `state()`) and **TypeScript** (inheritance-based: extend `PlexSpacesActor`, `on<Op>()` handlers). Start here for new projects. Each example has a **README.md** with overview, APIs, build, and test.
+
+### Python SDK Examples
+
+| Example | Description | README |
+|---------|-------------|--------|
+| **Bank Account** | Durable state with transaction log | [README](../examples/python/apps/bank_account/README.md) |
+| **Calculator** | Simple math operations | [README](../examples/python/apps/calculator/README.md) |
+| **Feature Flags** | Gradual rollout with supervisor | [README](../examples/python/apps/feature_flags/README.md) |
+| **FSM** | Order workflow state machine | [README](../examples/python/apps/fsm/README.md) |
+| **Receipt Storage** | Expense tracking with filtering | [README](../examples/python/apps/receipt_storage/README.md) |
+| **Chat Room** | Real-time chat with ProcessGroups | [README](../examples/python/apps/chat_room/README.md) |
+| **Task Queue** | Distributed locks via LockFacet | [README](../examples/python/apps/task-queue/README.md) |
+| **Registry** | Service discovery via RegistryFacet | [README](../examples/python/apps/registry/README.md) |
+| **Storefront API** ⚠️ | E-commerce backend: store config, shopping cart, checkout rate limit via host KV. **Status: buggy/incomplete** (host KV depends on node `sql-backend`; test may show "config set failed" until fixed). | [README](../examples/python/apps/storefront/README.md) |
+| **Audit Log** | Event-handler (EventHandler): fire-and-forget audit events via `host.log` only (storage deferred until WASM stable) | [README](../examples/python/apps/audit_log/README.md) |
+| **N-Body** | Multi-actor physics simulation | [README](../examples/python/apps/nbody/README.md) |
+| **Leader Election** ⚠️ | Distributed lock for single-leader pattern (cron, scheduler). **Status: buggy/incomplete**. | [README](../examples/python/apps/leader_election/README.md) |
+
+**⚠️ Buggy/incomplete examples**: Storefront API and Leader Election are marked incomplete; see their READMEs and PROJECT_TRACKER.md.
+
+**Features demonstrated:**
+- `@actor` and `@event_actor` decorators for actor classes
+- `state()` for persistent state fields
+- `@handler()` for message routing
+- `@init_handler` for custom initialization
+- `host.info()` / `host.error()` for logging
+- `host.kv_get` / `host.kv_put` for key-value storage (WASM)
+- `host.ts_write(tuple_json)` for TupleSpace write (WASM; existing API)
+- `host.process_groups` for pub/sub
+- Facets: LockFacet, RegistryFacet
+
+**Build and test (Python):**
+```bash
+cd examples/python/apps/bank_account
+./build.sh           # Build to WASM
+./test.sh 8092       # Test (server must be running)
+```
+
+### TypeScript SDK Examples
+
+| Example | Description | README |
+|---------|-------------|--------|
+| **Bank Account** | Same API as Python: durable state, deposit/withdraw/history/replay. Uses `@plexspaces/sdk` and jco componentize. | [README](../examples/typescript/apps/bank_account/README.md) |
+
+**Build and test (TypeScript):**
+```bash
+cd examples/typescript/apps/bank_account
+./test.sh            # Full E2E: start node, build WASM, deploy, HTTP ops (no Python)
+```
+
+See [SDK Guide](sdk.md) for complete documentation (Python, TypeScript, and Rust).
+
+### Rust SDK Examples
+
+Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[gen_server_actor]`, `#[handler]`, `#[plexspaces_handlers]`, and `spawn_actor` with facets.
+
+| Example | Description | Annotations Used | README |
+|---------|-------------|------------------|--------|
+| **webhook_handler** | GenServer (request-reply); HTTP deliver/list webhooks | `#[gen_server_actor]`, `#[plexspaces_handlers]`, `#[handler]` | [embedded](../examples/rust/embedded/webhook_handler/) |
+| **session_manager** | Custom actor + TimerFacet (idle timeout, heartbeat) | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]` | [apps](../examples/rust/apps/session_manager/README.md) |
+| **timers** | In-memory timers with TimerFacet | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]` | [embedded](../examples/rust/embedded/timers/README.md) |
+| **reminders** | Durable reminders with ReminderFacet | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]` | [embedded](../examples/rust/embedded/reminders/README.md) |
+| **timeseries_forecasting** | Pipeline via ActorFactory (type-name spawn); see README for Factory vs SDK | ActorFactory pattern | [embedded](../examples/rust/embedded/timeseries_forecasting/README.md) |
+
+**Annotations Quick Reference**:
+| Annotation | Description |
+|------------|-------------|
+| `#[gen_server_actor]` | GenServer behavior (request-reply, call by default) |
+| `#[actor(facets = ["timer"])]` | Custom behavior with facets declaration |
+| `#[plexspaces_handlers]` | Generates GenServer dispatch from `#[handler]` methods |
+| `#[plexspaces_handlers(custom)]` | Generates Actor dispatch for custom behaviors |
+| `#[handler("op")]` | Route message to handler (GenServer defaults to call) |
+| `#[handler("op", cast)]` | Fire-and-forget handler (no reply) |
+
+**Conventions**: Use `plexspaces_sdk::spawn_actor(..., behavior, facets)` for single-actor apps; use ActorFactory with type names for pipeline-style multi-actor setups. GenServer uses **call by default** (like Python).
+
 ## Examples by Core Functionality
 
 ### Actors
 
 **Basic Actor Pattern** (Fire-and-Forget):
-- `examples/simple/timers_example/` - Timer-based actors
-- `examples/simple/wasm_calculator/actors/python/calculator_actor.py` - Basic message handling
-- `examples/simple/polyglot_wasm_deployment/actors/typescript/greeter.ts` - TypeScript actor
+- `examples/rust/embedded/timers/` - Timer-based actors
+- `examples/rust/embedded/wasm_calculator/actors/python/calculator_actor.py` - Basic message handling
+- `examples/typescript/apps/bank_account/account_actor.ts` - TypeScript bank account via [@plexspaces/sdk](sdk.md#typescript-sdk) (durable state, same API as Python)
 
 **GenServer Pattern** (Request-Reply):
 - `examples/simple/wasm_calculator/actors/python/calculator_actor.py` - GenServer behavior with request-reply
 - `examples/domains/order-processing/src/actors/order_processor.rs` - Rust GenServer implementation
-- `examples/simple/faas_actor/` - FaaS-style request-reply
+- `examples/rust/embedded/webhook_handler/` - Webhook handler (FaaS-style HTTP deliver/list)
 
 **Durable Actors** (State Persistence):
 - `examples/simple/wasm_calculator/actors/python/durable_calculator_actor.py` - Python durable actor
@@ -69,7 +149,7 @@ PlexSpaces includes comprehensive examples organized by core functionality and c
 
 **Blob Storage**:
 - `examples/wasm_showcase/` - Blob upload/download operations
-- `examples/simple/faas_actor/` - FaaS-style file handling
+- `examples/rust/embedded/webhook_handler/` - Webhook handler (HTTP deliver/list)
 
 **Channels (Queues & Pub/Sub)**:
 - `examples/simple/process_groups_pubsub/` - Process groups with pub/sub messaging
@@ -100,16 +180,16 @@ PlexSpaces includes comprehensive examples organized by core functionality and c
   - `channel_calculator_actor.py` - Channel-based communication
 
 **TypeScript/JavaScript WASM**:
-- `examples/simple/polyglot_wasm_deployment/actors/typescript/greeter.ts` - TypeScript actor
-- `examples/advanced/nbody-wasm/ts-actors/` - TypeScript physics simulation
+- `examples/typescript/apps/bank_account/` - TypeScript bank account (SDK + jco componentize, simple-actor WIT, full E2E)
+- `examples/advanced/nbody-wasm/ts-actors/` - TypeScript physics simulation (if present)
 
 **Rust WASM**:
-- `examples/simple/polyglot_wasm_deployment/actors/rust/` - Rust WASM actors
 - `examples/advanced/nbody-wasm/wasm-actors/` - Rust physics simulation
+- Other Rust WASM examples under `examples/`
 
 **Multi-Language Deployment**:
-- `examples/simple/polyglot_wasm_deployment/` - Deploy actors from multiple languages
 - `examples/wasm_showcase/` - Comprehensive WASM capabilities across languages
+- Python: `examples/python/apps/*`; TypeScript: `examples/typescript/apps/bank_account`
 
 **Documentation**: See [Polyglot WASM Development Guide](polyglot.md) for complete language-specific guides and examples
 
@@ -206,23 +286,21 @@ cd examples/simple/actor_groups_sharding
 cargo run
 ```
 
-### FaaS Actor (HTTP-Based Invocation)
+### Webhook Handler (HTTP-Based Actor)
 
-**Location**: `examples/simple/faas_actor/`
+**Location**: `examples/rust/embedded/webhook_handler/`
 
-Learn FaaS-style actor invocation via HTTP GET/POST requests. Demonstrates serverless patterns and AWS Lambda integration.
+Webhook handler actor invoked via HTTP: POST to deliver webhooks, GET with `?action=list` to list recent deliveries. Uses explicit tenant/namespace and correct PlexSpaces APIs.
 
 **Features**:
-- HTTP-based actor invocation (GET/POST)
-- Actor lookup by type
-- Load balancing across actor instances
-- Multi-tenant isolation
-- Path and subpath routing support
-- AWS Lambda Function URL ready
+- HTTP-based actor invocation (GET list, POST deliver)
+- Actor type `webhook_handler` for path routing
+- RequestContext with explicit tenant/namespace (no internal)
+- ActorBuilder::spawn with GenServer + Custom behavior type
 
 **Run**:
 ```bash
-cd examples/simple/faas_actor
+cd examples/rust/embedded/webhook_handler
 ./test.sh
 ```
 

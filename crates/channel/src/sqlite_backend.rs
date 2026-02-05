@@ -58,7 +58,7 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelStats, SqliteConfig,
+    channel_config, ChannelProvider, ChannelConfig, ChannelStats, SqliteConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use prost_types::Timestamp;
@@ -113,10 +113,10 @@ impl SqliteChannel {
     /// - [`ChannelError::BackendError`]: Failed to connect to SQLite or create schema
     pub async fn new(config: ChannelConfig) -> ChannelResult<Self> {
         // Validate config
-        if config.backend() != ChannelBackend::ChannelBackendSqlite {
+        if config.provider() != ChannelProvider::ChannelProviderSqlite {
             return Err(ChannelError::InvalidConfiguration(format!(
                 "Invalid backend for SqliteChannel: {:?}",
-                config.backend()
+                config.provider()
             )));
         }
 
@@ -494,7 +494,7 @@ impl Channel for SqliteChannel {
         use std::time::Instant;
         
         let start = Instant::now();
-        let backend = backend_name(self.config.backend);
+        let backend = backend_name(self.config.provider);
         
         // First check if message exists and is not already acked
         let check_sql = format!(
@@ -653,7 +653,7 @@ impl Channel for SqliteChannel {
                 message_id,
                 true,
                 1, // delivery_count not tracked in schema, use 1 as placeholder
-                crate::observability::backend_name(self.config.backend),
+                crate::observability::backend_name(self.config.provider),
             );
         } else {
             // Send to DLQ if enabled, otherwise mark as acked (drop)
@@ -715,7 +715,7 @@ impl Channel for SqliteChannel {
                         message_id,
                         0, // delivery_count not tracked in schema, use 0 as placeholder
                         "max_retries_exceeded",
-                        crate::observability::backend_name(self.config.backend),
+                        crate::observability::backend_name(self.config.provider),
                     );
                 }
             } else {
@@ -757,7 +757,7 @@ impl Channel for SqliteChannel {
 
         Ok(ChannelStats {
             name: self.config.name.clone(),
-            backend: self.config.backend,
+            provider: self.config.provider,
             messages_sent: self.stats.messages_sent.load(Ordering::Relaxed),
             messages_received: self.stats.messages_received.load(Ordering::Relaxed),
             messages_pending: pending_count as u64,
@@ -791,7 +791,7 @@ mod tests {
     fn create_test_config(database_path: String) -> ChannelConfig {
         ChannelConfig {
             name: "test-channel".to_string(),
-            backend: ChannelBackend::ChannelBackendSqlite as i32,
+            provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: 0,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

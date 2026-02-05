@@ -377,10 +377,10 @@ impl<S: JournalStorage + Clone + 'static> Facet for EventSourcingFacet<S> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite-backend"))]
 mod tests {
     use super::*;
-    use crate::MemoryJournalStorage;
+    use crate::SqliteJournalStorage;
     use plexspaces_proto::common::v1::PageRequest;
 
     fn create_test_config() -> EventSourcingConfig {
@@ -409,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_creation() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
@@ -419,7 +419,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_attach_without_replay() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let mut config = create_test_config();
         config.auto_replay = false; // Disable replay
 
@@ -436,7 +436,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_attach_with_empty_event_log_replay() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
@@ -448,7 +448,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_event() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
@@ -471,7 +471,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_event_disabled() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let mut config = create_test_config();
         config.event_log_enabled = false; // Disable event logging
 
@@ -493,7 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_events() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         // Pre-populate events
@@ -537,7 +537,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_events_disabled() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let mut config = create_test_config();
         config.auto_replay = false; // Disable auto-replay
 
@@ -550,7 +550,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_after_method_logs_event() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
@@ -573,7 +573,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_after_method_with_event_logging_disabled() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let mut config = create_test_config();
         config.event_log_enabled = false; // Disable event logging
 
@@ -595,7 +595,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_after_method_without_attach_fails() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
@@ -607,7 +607,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_detach() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
@@ -628,7 +628,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_events() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
@@ -659,7 +659,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_events_from_sequence() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         // Pre-populate events
@@ -693,7 +693,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_paginated_event_replay() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let _config = create_test_config();
 
         // Pre-populate 10 events
@@ -746,7 +746,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_actor_history_paginated() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let _config = create_test_config();
 
         // Pre-populate 5 events
@@ -785,7 +785,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_error_handling() {
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);

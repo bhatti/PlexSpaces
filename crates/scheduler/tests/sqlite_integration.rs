@@ -35,9 +35,8 @@ mod sqlite_tests {
         SqliteSchedulingStateStore,
     };
     use plexspaces_channel::InMemoryChannel;
-    use plexspaces_locks::memory::MemoryLockManager;
-    use plexspaces_keyvalue::InMemoryKVStore;
-    use plexspaces_object_registry::ObjectRegistry;
+    use plexspaces_locks::sql::SqliteLockManager;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_core::RequestContext;
     use plexspaces_proto::{
         actor::v1::ActorResourceRequirements,
@@ -188,14 +187,14 @@ mod sqlite_tests {
     #[tokio::test]
     async fn test_sqlite_background_scheduler_with_sqlite_store() {
         let state_store: Arc<dyn SchedulingStateStore> = Arc::new(create_sqlite_state_store().await);
-        let lock_manager = Arc::new(MemoryLockManager::new());
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
 
         let channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            backend: plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 100,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -230,13 +229,13 @@ mod sqlite_tests {
     #[tokio::test]
     async fn test_sqlite_service_with_sqlite_store() {
         let state_store: Arc<dyn SchedulingStateStore> = Arc::new(create_sqlite_state_store().await);
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
 
         let channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            backend: plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 100,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -264,13 +263,15 @@ mod sqlite_tests {
                 placement: None,
                 actor_groups: vec![],
             }),
-            namespace: "default".to_string(),
-            tenant_id: "default".to_string(),
             request_id: String::new(),
         };
 
+        // Create request with metadata for tenant/namespace (required by service)
         use plexspaces_proto::scheduling::v1::scheduling_service_server::SchedulingService;
-        let response = SchedulingService::schedule_actor(&service, tonic::Request::new(req))
+        let mut request = tonic::Request::new(req);
+        request.metadata_mut().insert("x-tenant-id", "default".parse().unwrap());
+        request.metadata_mut().insert("x-namespace", "default".parse().unwrap());
+        let response = SchedulingService::schedule_actor(&service, request)
             .await
             .unwrap()
             .into_inner();

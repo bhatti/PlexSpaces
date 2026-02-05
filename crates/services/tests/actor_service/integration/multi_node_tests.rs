@@ -17,7 +17,7 @@ use plexspaces_core::{
     MessageSender, Message,
 };
 use plexspaces_mailbox::Mailbox;
-use plexspaces_keyvalue::InMemoryKVStore;
+use plexspaces_object_registry::SqliteObjectRegistryRepository;
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService as ActorServiceTrait,
@@ -79,8 +79,8 @@ async fn create_test_registry_with_remote_actors(
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_proto::object_registry::v1::ObjectRegistration;
 
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
+    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
 
     struct ObjectRegistryAdapter {
         inner: Arc<ObjectRegistry>,
@@ -197,7 +197,6 @@ async fn create_test_registry_with_remote_actors(
         metadata: std::collections::HashMap::new(),
         node_registry: None,
         grpc_address: String::new(),
-        wasm_apps_directory: String::new(),
     };
     service_locator.register_node_config(node_config).await;
 

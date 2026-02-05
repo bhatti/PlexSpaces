@@ -9,7 +9,7 @@ mod tests {
     use async_trait::async_trait;
     use futures::StreamExt;
     use plexspaces_channel::{Channel, InMemoryChannel};
-    use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+    use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
     use plexspaces_proto::common::v1::Message as ProtoMessage;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -92,7 +92,7 @@ mod tests {
 
             let config = ChannelConfig {
                 name: name.to_string(),
-                backend: ChannelBackend::ChannelBackendInMemory as i32,
+                provider: ChannelProvider::ChannelProviderInMemory as i32,
                 capacity: 1000,
                 delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
                 ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

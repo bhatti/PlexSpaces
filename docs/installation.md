@@ -343,16 +343,30 @@ Auto-generated certificates are saved to `cert_dir`:
 
 ## Configuration
 
+### Centralized Configuration Management
+
+PlexSpaces uses a centralized configuration manager (`config_manager::initialize`) that handles all configuration with a clear priority order:
+
+1. **Environment Variables** (highest priority) - Always override config file settings
+2. **Configuration File** (release.yaml) - Default settings
+3. **Built-in Defaults** - Sensible defaults for all settings
+
+**Key Design Principle**: The `config_manager` is the **single source of truth** for all `PLEXSPACES_*` environment variables. No other component reads environment variables directly for configuration.
+
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PLEXSPACES_NODE_ID` | Unique node identifier | `node1` |
-| `PLEXSPACES_LISTEN_ADDR` | gRPC listen address | `0.0.0.0:8000` |
+| `PLEXSPACES_LISTEN_ADDR` | gRPC listen address | `0.0.0.0:8090` |
+| `PLEXSPACES_DATABASE_URL` | Database connection string | `sqlite://${base_dir}/db/plexspaces.db` |
+| `PLEXSPACES_BASE_DIR` | Base directory for all data | `~/plexspaces` |
+| `PLEXSPACES_WASM_APPS_DIR` | Directory for WASM applications | `${base_dir}/apps` |
 | `PLEXSPACES_CLUSTER_SEED_NODES` | Cluster seed nodes | - |
 | `PLEXSPACES_JOURNALING_BACKEND` | Journaling backend | `sqlite` (or `ddb` if `AWS_REGION` set) |
 | `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` (or `ddb` if `AWS_REGION` set) |
-| `PLEXSPACES_CHANNEL_BACKEND` | Channel backend | `inmemory` (or `sqs` if `AWS_REGION` set) |
+| `PLEXSPACES_CHANNEL_PROVIDER` | Channel provider | `IN_MEMORY` |
+| `PLEXSPACES_MAILBOX_PROVIDER` | Mailbox provider | `IN_MEMORY` |
 | `PLEXSPACES_CLUSTER_NAME` | Cluster name for UDP channels | - |
 | `PLEXSPACES_JWT_SECRET` | JWT secret for HS256 (required if JWT enabled) | - |
 | `PLEXSPACES_MTLS_CA_CERT` | Path to mTLS CA certificate | - |
@@ -366,6 +380,22 @@ Auto-generated certificates are saved to `cert_dir`:
 | `DYNAMODB_ENDPOINT_URL` | DynamoDB endpoint (for local testing) | - |
 | `SQS_ENDPOINT_URL` | SQS endpoint (for local testing) | - |
 | `S3_ENDPOINT_URL` | S3 endpoint (for local testing) | - |
+
+### Channel Providers
+
+PlexSpaces supports multiple channel providers (renamed from "backends"):
+
+| Provider | Enum Value | Description |
+|----------|------------|-------------|
+| `IN_MEMORY` | 0 | Fast, non-persistent (testing) |
+| `REDIS` | 1 | Distributed, durable (Redis Streams) |
+| `KAFKA` | 2 | High-throughput, durable |
+| `SQLITE` | 3 | File-based, durable (single-node) |
+| `NATS` | 4 | Lightweight pub/sub (multi-node) |
+| `UDP` | 5 | Low-latency multicast (best-effort) |
+| `SQS` | 6 | AWS-managed, auto-scaling |
+| `PROCESS_GROUP` | 7 | In-cluster multicast |
+| `POSTGRES` | 8 | PostgreSQL-based durable messaging |
 
 ### HTTP Endpoints
 
@@ -398,34 +428,82 @@ curl -X POST "http://localhost:8001/api/v1/actors/default/counter" \
 
 See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) for detailed documentation.
 
-### Configuration File
+### Configuration File (release.yaml)
+
+PlexSpaces uses a release configuration file (`release.yaml`) inspired by Erlang/OTP releases:
 
 ```yaml
-# config/default.yaml
+# release.yaml
+name: my-release
+version: "1.0.0"
+description: "My PlexSpaces release"
+
 node:
   id: node1
-  listen_addr: "0.0.0.0:8000"
-  cluster:
-    seed_nodes:
-      - "node1:8000"
-      - "node2:8000"
-      - "node3:8000"
+  grpc_address: "0.0.0.0:8091"
+  heartbeat_interval_ms: 5000
+  clustering_enabled: true
 
-journaling:
-  backend: sqlite  # or "ddb" for DynamoDB (requires AWS_REGION)
-  path: /var/lib/plexspaces/journal.db
+runtime:
+  # Base directory for all data (overridable via PLEXSPACES_BASE_DIR)
+  base_dir: ""  # Defaults to ~/plexspaces
+  
+  # WASM applications directory (overridable via PLEXSPACES_WASM_APPS_DIR)
+  wasm_apps_directory: ""  # Defaults to ${base_dir}/apps
+  
+  # Shared database configuration (overridable via PLEXSPACES_DATABASE_URL)
+  db:
+    connection_string: ""  # Defaults to sqlite://${base_dir}/db/plexspaces.db
+    pool_size: 10
+    auto_migrate: true
+  
+  # Channel provider (0=IN_MEMORY, 1=REDIS, 2=KAFKA, etc.)
+  channel_provider: 0
+  
+  # Mailbox provider (same enum as channel_provider)
+  mailbox_provider: 0
+  
+  # gRPC configuration
+  grpc:
+    listen_addr: "0.0.0.0:8091"
+    max_message_size: 104857600  # 100MB
+  
+  # Health check configuration
+  health:
+    enabled: true
+    port: 8092
+  
+  # Security configuration
+  security:
+    disable_auth: false
+    mtls:
+      enable_mtls: false
+      auto_generate: false
+    jwt:
+      enabled: false
 
-tuplespace:
-  backend: redis  # or "ddb" for DynamoDB (requires AWS_REGION)
-  url: "redis://localhost:6379"
+# Applications to deploy on startup
+applications: []
+```
 
-channel:
-  backend: redis  # or "sqs" for SQS (requires AWS_REGION)
-  url: "redis://localhost:6379"
+### Key Configuration Changes (v0.2+)
 
-# AWS configuration (optional - enables AWS backends when AWS_REGION is set)
+The following field names were updated for clarity:
+
+| Old Name | New Name | Location |
+|----------|----------|----------|
+| `shared_database` | `db` | `runtime.db` |
+| `channel_backend` | `channel_provider` | `runtime.channel_provider` |
+| `mailbox_backend` | `mailbox_provider` | `runtime.mailbox_provider` |
+| `wasm_apps_directory` | `wasm_apps_directory` | `runtime.wasm_apps_directory` (moved from `node`) |
+| `ChannelBackend` enum | `ChannelProvider` enum | Proto files |
+
+### AWS Configuration (Optional)
+
+```yaml
+# AWS configuration (enables AWS backends when AWS_REGION is set)
 aws:
-  region: "us-east-1"  # Set this to enable AWS backends
+  region: "us-east-1"
   dynamodb:
     table_prefix: "plexspaces-"
   sqs:
@@ -437,7 +515,7 @@ aws:
 udp:
   multicast_address: "239.255.0.1"
   multicast_port: 9999
-  cluster_name: "my-cluster"  # Nodes with same cluster_name can communicate
+  cluster_name: "my-cluster"
 ```
 
 ## Backend Options

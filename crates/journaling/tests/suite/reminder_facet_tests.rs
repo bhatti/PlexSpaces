@@ -22,7 +22,7 @@
 //! Tests cover registration, unregistration, persistence, and max_occurrences.
 
 use plexspaces_core::{ActorId, ActorRef};
-use plexspaces_journaling::{JournalStorage, MemoryJournalStorage, ReminderFacet, ReminderError, ReminderRegistration, ReminderState};
+use plexspaces_journaling::{JournalStorage, SqliteJournalStorage, ReminderFacet, ReminderError, ReminderRegistration, ReminderState};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_facet::Facet;
 use plexspaces_proto::prost_types;
@@ -32,14 +32,14 @@ use tokio::time::sleep;
 
 #[tokio::test]
 async fn test_reminder_facet_creation() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let facet = ReminderFacet::new(storage, serde_json::json!({}), 50);
     assert_eq!(facet.facet_type(), "reminder");
 }
 
 #[tokio::test]
 async fn test_reminder_facet_attach() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage, serde_json::json!({}), 50);
     let result = facet.on_attach("test-actor@test-node", serde_json::json!({})).await;
     assert!(result.is_ok());
@@ -47,7 +47,7 @@ async fn test_reminder_facet_attach() {
 
 #[tokio::test]
 async fn test_reminder_facet_detach() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage, serde_json::json!({}), 50);
     facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     let result = facet.on_detach("test-actor@test-node").await;
@@ -56,7 +56,7 @@ async fn test_reminder_facet_detach() {
 
 #[tokio::test]
 async fn test_register_reminder() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage.clone(), serde_json::json!({}), 50);
     facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     
@@ -84,7 +84,7 @@ async fn test_register_reminder() {
 
 #[tokio::test]
 async fn test_register_duplicate_reminder_fails() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage.clone(), serde_json::json!({}), 50);
     facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     
@@ -118,7 +118,7 @@ async fn test_register_duplicate_reminder_fails() {
 
 #[tokio::test]
 async fn test_unregister_reminder() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage.clone(), serde_json::json!({}), 50);
     facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     
@@ -148,7 +148,7 @@ async fn test_unregister_reminder() {
 
 #[tokio::test]
 async fn test_unregister_nonexistent_reminder_fails() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage, serde_json::json!({}), 50);
     facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     
@@ -159,7 +159,7 @@ async fn test_unregister_nonexistent_reminder_fails() {
 
 #[tokio::test]
 async fn test_reminder_persistence() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet1 = ReminderFacet::new(storage.clone(), serde_json::json!({}), 50);
     facet1.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     
@@ -198,7 +198,7 @@ async fn test_reminder_persistence() {
 
 #[tokio::test]
 async fn test_max_occurrences_auto_deletion() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage.clone(), serde_json::json!({}), 50);
     facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     
@@ -234,7 +234,7 @@ async fn test_max_occurrences_auto_deletion() {
 
 #[tokio::test]
 async fn test_multiple_reminders() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage.clone(), serde_json::json!({}), 50);
     facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     
@@ -268,7 +268,7 @@ async fn test_multiple_reminders() {
 
 #[tokio::test]
 async fn test_reminders_cleared_on_detach() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let mut facet = ReminderFacet::new(storage.clone(), serde_json::json!({}), 50);
     facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
     

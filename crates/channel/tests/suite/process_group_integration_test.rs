@@ -35,7 +35,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use plexspaces_channel::{Channel, ChannelError};
-use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
 use plexspaces_proto::common::v1::Message;
 use tokio::sync::RwLock;
 
@@ -108,10 +108,10 @@ impl MarketFeedSubscriber {
 }
 
 /// Create channel config for testing
-fn create_channel_config(name: &str, backend: ChannelBackend) -> ChannelConfig {
+fn create_channel_config(name: &str, provider: ChannelProvider) -> ChannelConfig {
     ChannelConfig {
         name: name.to_string(),
-        backend: backend as i32,
+        provider: provider as i32,
         capacity: 1000,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -146,7 +146,7 @@ fn create_quote_message(symbol: &str, price: f64, volume: u64) -> Message {
 
 #[tokio::test]
 async fn test_inmemory_channel_market_feed() {
-    let config = create_channel_config("market-feed-memory", ChannelBackend::ChannelBackendInMemory);
+    let config = create_channel_config("market-feed-memory", ChannelProvider::ChannelProviderInMemory);
     let channel = plexspaces_channel::InMemoryChannel::new(config).await.unwrap();
     
     run_market_feed_test(Arc::new(channel), "InMemory").await;
@@ -158,7 +158,7 @@ async fn test_inmemory_channel_market_feed() {
 
 #[tokio::test]
 async fn test_sqlite_channel_market_feed() {
-    let config = create_channel_config("market-feed-sqlite", ChannelBackend::ChannelBackendSqlite);
+    let config = create_channel_config("market-feed-sqlite", ChannelProvider::ChannelProviderSqlite);
     
     // Create SQLite channel (uses in-memory by default for tests)
     let mut sqlite_config = config.clone();
@@ -198,7 +198,7 @@ async fn test_kafka_channel_market_feed() {
     let brokers = std::env::var("KAFKA_BROKERS").unwrap();
     let config = ChannelConfig {
         name: "market-feed-kafka".to_string(),
-        backend: ChannelBackend::ChannelBackendKafka as i32,
+        provider: ChannelProvider::ChannelProviderKafka as i32,
         capacity: 1000,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -241,7 +241,7 @@ async fn test_nats_channel_market_feed() {
     let servers = std::env::var("NATS_URL").unwrap();
     let config = ChannelConfig {
         name: "market-feed-nats".to_string(),
-        backend: ChannelBackend::ChannelBackendNats as i32,
+        provider: ChannelProvider::ChannelProviderNats as i32,
         capacity: 1000,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -285,7 +285,7 @@ async fn test_sqs_channel_market_feed() {
     
     let config = ChannelConfig {
         name: "market-feed-sqs".to_string(),
-        backend: ChannelBackend::ChannelBackendSqs as i32,
+        provider: ChannelProvider::ChannelProviderSqs as i32,
         capacity: 1000,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -436,13 +436,13 @@ async fn test_multi_node_market_feed() {
     // Create channels for each "node"
     let node1_channel = Arc::new(
         plexspaces_channel::InMemoryChannel::new(
-            create_channel_config("node1-market", ChannelBackend::ChannelBackendInMemory)
+            create_channel_config("node1-market", ChannelProvider::ChannelProviderInMemory)
         ).await.unwrap()
     );
     
     let node2_channel = Arc::new(
         plexspaces_channel::InMemoryChannel::new(
-            create_channel_config("node2-market", ChannelBackend::ChannelBackendInMemory)
+            create_channel_config("node2-market", ChannelProvider::ChannelProviderInMemory)
         ).await.unwrap()
     );
     
@@ -495,7 +495,7 @@ async fn test_multi_node_market_feed() {
 
 #[tokio::test]
 async fn test_channel_backend_priority_selection() {
-    use plexspaces_proto::channel::v1::ChannelBackend;
+    use plexspaces_proto::channel::v1::ChannelProvider;
     
     println!("\n=== Channel Backend Priority Selection Test ===\n");
     
@@ -504,7 +504,7 @@ async fn test_channel_backend_priority_selection() {
     // With no config, should default to InMemory
     let config_no_backend = ChannelConfig {
         name: "test-priority".to_string(),
-        backend: 0, // Undefined
+        provider: 0, // Undefined
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -513,14 +513,14 @@ async fn test_channel_backend_priority_selection() {
     };
     
     // Backend 0 is InMemory in the proto enum
-    let backend = ChannelBackend::try_from(config_no_backend.backend)
-        .unwrap_or(ChannelBackend::ChannelBackendInMemory);
-    assert_eq!(backend, ChannelBackend::ChannelBackendInMemory);
+    let backend = ChannelProvider::try_from(config_no_backend.provider)
+        .unwrap_or(ChannelProvider::ChannelProviderInMemory);
+    assert_eq!(backend, ChannelProvider::ChannelProviderInMemory);
     
     // With Kafka config, should use Kafka
     let config_kafka = ChannelConfig {
         name: "test-kafka".to_string(),
-        backend: ChannelBackend::ChannelBackendKafka as i32,
+        provider: ChannelProvider::ChannelProviderKafka as i32,
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -536,9 +536,9 @@ async fn test_channel_backend_priority_selection() {
         ..Default::default()
     };
     
-    let backend_kafka = ChannelBackend::try_from(config_kafka.backend)
-        .unwrap_or(ChannelBackend::ChannelBackendInMemory);
-    assert_eq!(backend_kafka, ChannelBackend::ChannelBackendKafka);
+    let backend_kafka = ChannelProvider::try_from(config_kafka.provider)
+        .unwrap_or(ChannelProvider::ChannelProviderInMemory);
+    assert_eq!(backend_kafka, ChannelProvider::ChannelProviderKafka);
     
     println!("Backend priority selection verified!");
     println!("\n=== Channel Backend Priority Selection Test Passed! ===\n");
@@ -552,7 +552,7 @@ async fn test_channel_backend_priority_selection() {
 async fn test_high_throughput_market_feed() {
     println!("\n=== High-Throughput Market Feed Test ===\n");
     
-    let config = create_channel_config("high-throughput", ChannelBackend::ChannelBackendInMemory);
+    let config = create_channel_config("high-throughput", ChannelProvider::ChannelProviderInMemory);
     let channel = Arc::new(plexspaces_channel::InMemoryChannel::new(config).await.unwrap());
     
     let symbols = vec!["AAPL", "GOOG", "META", "AMZN", "MSFT", "NFLX", "TSLA", "NVDA"];

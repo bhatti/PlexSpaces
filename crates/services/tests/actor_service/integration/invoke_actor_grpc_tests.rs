@@ -28,6 +28,7 @@ use tonic::Request;
 /// 3. Verify counter returns initial value (0)
 #[tokio::test]
 async fn test_invoke_actor_get_counter_real_grpc() {
+    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
     // ARRANGE: Spawn node with counter actor
     let mut harness = TestHarness::new();
     let _node = harness
@@ -50,6 +51,8 @@ async fn test_invoke_actor_get_counter_real_grpc() {
         query_params: HashMap::new(),
         path: "/api/v1/actors/default/default/counter".to_string(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     });
 
     let response = client.invoke_actor(request).await;
@@ -79,6 +82,7 @@ async fn test_invoke_actor_get_counter_real_grpc() {
     }
 
     // CLEANUP
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
     harness.shutdown().await;
 }
 
@@ -93,6 +97,7 @@ async fn test_invoke_actor_get_counter_real_grpc() {
 /// 3. Verify message sent successfully
 #[tokio::test]
 async fn test_invoke_actor_post_counter_real_grpc() {
+    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
     // ARRANGE: Spawn node with counter actor
     let mut harness = TestHarness::new();
     let _node = harness
@@ -115,6 +120,8 @@ async fn test_invoke_actor_post_counter_real_grpc() {
         query_params: HashMap::new(),
         path: "/api/v1/actors/default/default/counter".to_string(),
         subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
     });
 
     let response = client.invoke_actor(request).await;
@@ -137,5 +144,109 @@ async fn test_invoke_actor_post_counter_real_grpc() {
     }
 
     // CLEANUP
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
+    harness.shutdown().await;
+}
+
+/// Test InvokeActor POST with ask=true (request-reply) via gRPC
+///
+/// When ask=true, POST uses ask pattern (request-reply) instead of tell (fire-and-forget).
+/// Covers explicit ask override for POST/PUT/DELETE.
+#[tokio::test]
+async fn test_invoke_actor_post_with_ask_true_real_grpc() {
+    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
+    let mut harness = TestHarness::new();
+    let _node = harness
+        .spawn_node("node1")
+        .await
+        .expect("Failed to spawn node1");
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let mut client = harness.get_node("node1").unwrap().client.clone();
+
+    // POST with ask=true => request-reply (ask pattern), expect reply in payload
+    let request = Request::new(InvokeActorRequest {
+        namespace: "default".to_string(),
+        actor_type: "counter".to_string(),
+        http_method: "POST".to_string(),
+        payload: serde_json::json!({ "action": "get" }).to_string().into_bytes(),
+        headers: HashMap::new(),
+        query_params: HashMap::new(),
+        path: "/api/v1/actors/default/default/counter".to_string(),
+        subpath: String::new(),
+        ask: true, // Explicit ask: request-reply even for POST
+        msg_type_override: "call".to_string(),
+    });
+
+    let response = client.invoke_actor(request).await;
+
+    match response {
+        Ok(resp) => {
+            let inner = resp.into_inner();
+            assert!(inner.success, "InvokeActor with ask=true should succeed");
+            println!("✅ POST with ask=true test passed (request-reply)");
+        }
+        Err(e) => {
+            if e.code() == tonic::Code::NotFound {
+                println!("⚠️  Actor not found - expected if node_runner has no counter");
+            } else {
+                panic!("InvokeActor failed: {:?}", e);
+            }
+        }
+    }
+
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
+    harness.shutdown().await;
+}
+
+/// Test InvokeActor DELETE (tell pattern) via gRPC
+///
+/// DELETE uses tell (fire-and-forget) by default; only GET or explicit ask=true use request-reply.
+#[tokio::test]
+async fn test_invoke_actor_delete_tell_real_grpc() {
+    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
+    let mut harness = TestHarness::new();
+    let _node = harness
+        .spawn_node("node1")
+        .await
+        .expect("Failed to spawn node1");
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let mut client = harness.get_node("node1").unwrap().client.clone();
+
+    // DELETE => tell (fire-and-forget), no reply expected
+    let request = Request::new(InvokeActorRequest {
+        namespace: "default".to_string(),
+        actor_type: "counter".to_string(),
+        http_method: "DELETE".to_string(),
+        payload: vec![],
+        headers: HashMap::new(),
+        query_params: HashMap::new(),
+        path: "/api/v1/actors/default/default/counter".to_string(),
+        subpath: String::new(),
+        ask: false, // DELETE uses tell by default
+        msg_type_override: String::new(),
+    });
+
+    let response = client.invoke_actor(request).await;
+
+    match response {
+        Ok(resp) => {
+            let inner = resp.into_inner();
+            assert!(inner.success, "InvokeActor DELETE (tell) should succeed");
+            println!("✅ DELETE tell pattern test passed");
+        }
+        Err(e) => {
+            if e.code() == tonic::Code::NotFound {
+                println!("⚠️  Actor not found - expected if node_runner has no counter");
+            } else {
+                panic!("InvokeActor failed: {:?}", e);
+            }
+        }
+    }
+
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
     harness.shutdown().await;
 }

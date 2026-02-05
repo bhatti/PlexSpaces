@@ -1,0 +1,300 @@
+# PlexSpaces Python SDK
+
+Build PlexSpaces actors with minimal boilerplate, inspired by [Ray's `@ray.remote`](https://docs.ray.io/en/latest/ray-core/api/doc/ray.remote.html).
+
+## Installation
+
+```bash
+# From source (development)
+cd sdks/python
+pip install -e ".[dev]"
+
+# Required for building WASM
+pip install componentize-py
+```
+
+## Quick Start
+
+### 1. Write Your Actor (No Boilerplate!)
+
+```python
+# bank_account.py
+from plexspaces import actor, state, handler
+
+@actor
+class BankAccount:
+    balance: int = state(default=0)
+    account_id: str = state(default="")
+    
+    @handler("deposit")
+    def deposit(self, amount: int) -> dict:
+        self.balance += amount
+        return {"balance": self.balance}
+    
+    @handler("withdraw")
+    def withdraw(self, amount: int) -> dict:
+        if amount > self.balance:
+            return {"error": "insufficient_funds"}
+        self.balance -= amount
+        return {"balance": self.balance}
+    
+    @handler("balance", "get")
+    def get_balance(self) -> dict:
+        return {"balance": self.balance}
+```
+
+### 2. Build to WASM
+
+```bash
+plexspaces-py build bank_account.py -o bank_account_actor.wasm
+```
+
+### 3. Deploy
+
+```bash
+curl -X POST http://localhost:8094/api/v1/deploy \
+  -F "namespace=default" \
+  -F "actor_type=bank_account" \
+  -F "wasm=@bank_account_actor.wasm"
+```
+
+## Features
+
+### State Persistence
+
+Fields decorated with `state()` are automatically:
+- Serialized in `get_state()` 
+- Restored in `set_state()`
+- Persisted across actor restarts
+
+```python
+@actor
+class Counter:
+    count: int = state(default=0)           # Immutable default
+    history: list = state(default_factory=list)  # Mutable default
+```
+
+### Message Handlers
+
+Use `@handler()` to route messages to methods:
+
+```python
+@actor
+class Calculator:
+    @handler("add")
+    def add(self, a: int, b: int) -> dict:
+        return {"result": a + b}
+    
+    @handler("sub", "subtract")  # Multiple message types
+    def subtract(self, a: int, b: int) -> dict:
+        return {"result": a - b}
+```
+
+### Ask vs Tell (GET vs POST)
+
+The HTTP gateway maps **GET** to **ask** (request-reply) and **POST/PUT/DELETE** to **tell** (fire-and-forget). Design handlers accordingly:
+
+- **Read handlers** (e.g. `count`, `get_readings`): Use **GET** so the client receives the reply. Query params are passed as payload, e.g. `?msg_type=readings&limit=10` → `{"msg_type": "readings", "limit": "10"}`.
+- **Write handlers** (e.g. `ingest`, `clear`): Use **POST** (tell); the client does not wait for a reply.
+
+```python
+@actor
+class SensorStream:
+    readings: list = state(default_factory=list)
+
+    @handler("ingest")  # POST (tell) - fire-and-forget
+    def ingest(self, sensor_id: str = "", value: str = "0") -> dict:
+        self.readings.append({"sensor_id": sensor_id, "value": value})
+        return {"status": "ok"}
+
+    @handler("count", "call")  # GET (ask) - client gets reply
+    def count(self) -> dict:
+        return {"reading_count": len(self.readings)}
+
+    @handler("readings")  # GET (ask) - e.g. ?msg_type=readings&limit=10
+    def get_readings(self, limit: int = None) -> dict:
+        n = int(limit) if limit is not None else 100
+        return {"readings": self.readings[-n:], "count": len(self.readings[-n:])}
+```
+
+### WIT/WASM compatibility (production-grade)
+
+The SDK targets the **plexspaces-simple-actor** WIT world: all data crosses the WASM boundary as **JSON strings** (no raw float/list/dict in WIT). To avoid traps in componentize-py:
+
+1. **State and handler returns**: Use only JSON-serializable types: `str`, `int`, `bool`, `list`, `dict`. Avoid raw `float` in state or return values; use `str` for numbers if needed (the SDK sanitizes float→str at the boundary).
+2. **No in-place mutation of state lists**: Prefer replacing the list instead of `list.append()` then `list.pop(0)` in a loop (e.g. `self.items = (list(self.items) + [new])[-max:]` or build a new list and assign).
+3. **Clear/reset**: Use `self.items = []` instead of `self.items.clear()`.
+4. **Return values**: Handlers should return plain dicts; the generated wrapper runs `_sanitize_payload_for_wasm` before `json.dumps` so floats become strings at the boundary.
+
+The generated wrapper automatically sanitizes `get_state`, `set_state`, and `handle` payloads for the WASM boundary.
+
+### Host Functions
+
+Access PlexSpaces capabilities via `host`:
+
+```python
+from plexspaces import actor, handler, host
+
+@actor
+class ChatRoom:
+    @handler("send")
+    def send_message(self, text: str) -> dict:
+        # Log message
+        host.info(f"Sending: {text}")
+        
+        # Broadcast to group
+        host.process_groups.publish("chat-room", {"text": text})
+        
+        return {"status": "sent"}
+```
+
+## API Reference
+
+### Decorators
+
+| Decorator | Description |
+|-----------|-------------|
+| `@actor` | Define a PlexSpaces actor class (GenServer behavior) |
+| `@actor(facets=["..."])` | Actor with facet declaration (e.g., `facets=["durability"]`) |
+| `@event_actor` | Event-handler actor (GenEvent behavior) |
+| `@fsm_actor` | Finite state machine actor (GenStateMachine behavior) |
+| `@gen_server_actor` | Explicit GenServer actor (same as `@actor`) |
+| `@workflow_actor` | Workflow/orchestration actor |
+| `@handler(*msg_types)` | Route messages to this method |
+| `state(default=None, default_factory=None)` | Define persistent state field |
+| `@init_handler` | Custom initialization handler |
+
+### Behavior Types
+
+| Decorator | Behavior | Use Case | Invocation |
+|-----------|----------|----------|------------|
+| `@actor` | GenServer | Request-reply actors (default) | Auto `call` |
+| `@gen_server_actor` | GenServer | Explicit GenServer | Auto `call` |
+| `@event_actor` | GenEvent | Fire-and-forget event handlers | `cast` |
+| `@fsm_actor` | GenStateMachine | State machine workflows | Auto `call` |
+| `@workflow_actor` | Workflow | Long-running orchestrations | Auto `call` |
+
+**GenServer Auto-Invocation**: When using `@actor` or `@gen_server_actor`, all handlers automatically use `invocation="call"` (request-reply). You don't need to specify it in `@handler()`.
+
+### Facets
+
+Facets declare what capabilities an actor expects. For WASM actors:
+
+```python
+@actor(facets=["durability"])
+class DurableAccount:
+    balance: int = state(default=0)
+```
+
+| Facet | WASM Behavior |
+|-------|---------------|
+| `durability` | Checkpoint-based persistence via `WasmConfig.durability_enabled` |
+| `registry` | Service discovery via `RegistryFacet` in app-config |
+
+**Note**: WASM durability uses checkpoint-based persistence (get_state/set_state), not the Rust `DurabilityFacet`. Enable via `durability_enabled: true` in release.yaml or WasmConfig.
+
+### Host Functions
+
+| Function | Description |
+|----------|-------------|
+| `host.send(to, msg_type, payload)` | Send message to another actor |
+| `host.log(level, message)` | Log a message |
+| `host.info(message)` | Log info message |
+| `host.debug(message)` | Log debug message |
+| `host.warn(message)` | Log warning message |
+| `host.error(message)` | Log error message |
+| `host.now_ms()` | Get current timestamp (ms) |
+| **Key-Value** | |
+| `host.kv_get(key)` | Get value for key |
+| `host.kv_put(key, value)` | Store value for key |
+| `host.kv_delete(key)` | Delete key |
+| `host.kv_list(prefix)` | List keys with prefix (returns JSON array) |
+| **TupleSpace** | |
+| `host.ts_write(tuple_json)` | Write tuple (JSON array) |
+| `host.ts_read(pattern_json)` | Read tuple (non-destructive, wildcards: null or "*") |
+| `host.ts_take(pattern_json)` | Take tuple (destructive read) |
+| `host.ts_read_all(pattern_json)` | Read all matching tuples |
+| **Distributed Locks** | |
+| `host.lock_acquire(lock_id, timeout_ms)` | Acquire lock (returns version) |
+| `host.lock_release(lock_id, lock_version)` | Release lock |
+| **Blob Storage** | |
+| `host.blob_upload(blob_id, data, content_type)` | Upload blob (base64 data) |
+| `host.blob_download(blob_id)` | Download blob (returns base64) |
+| `host.blob_delete(blob_id)` | Delete blob |
+| `host.blob_list(prefix)` | List blobs with prefix |
+| **Process Groups** | |
+| `host.process_groups.join(group, actor_id)` | Join a process group |
+| `host.process_groups.leave(group, actor_id)` | Leave a process group |
+| `host.process_groups.publish(group, message)` | Broadcast to group |
+| `host.process_groups.get_members(group)` | Get group members |
+
+## Migration from Legacy Examples
+
+If you have existing actors using the WIT interface directly:
+
+### Before (Legacy)
+```python
+from wit_world import exports
+import json
+
+class Actor(exports.Actor):
+    def init(self, config_json: str) -> str:
+        global _balance
+        _balance = 0
+        return ""
+    
+    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
+        global _balance
+        data = json.loads(payload_json)
+        if msg_type == "deposit":
+            _balance += data["amount"]
+            return json.dumps({"balance": _balance})
+        # ... lots of boilerplate
+    
+    def get_state(self) -> str:
+        return json.dumps({"balance": _balance})
+    
+    def set_state(self, state_json: str) -> str:
+        global _balance
+        _balance = json.loads(state_json)["balance"]
+        return ""
+```
+
+### After (SDK)
+```python
+from plexspaces import actor, state, handler
+
+@actor
+class BankAccount:
+    balance: int = state(default=0)
+    
+    @handler("deposit")
+    def deposit(self, amount: int) -> dict:
+        self.balance += amount
+        return {"balance": self.balance}
+```
+
+## Development
+
+```bash
+# Run tests
+pytest
+
+# Build examples
+cd examples
+plexspaces-py build chat_room.py -v
+```
+
+## Comparison with Other Frameworks
+
+| Feature | PlexSpaces SDK | Ray | Temporal |
+|---------|---------------|-----|----------|
+| Decorator | `@actor` | `@ray.remote` | `@workflow.defn` |
+| State | `state()` | Class attrs | N/A |
+| Handlers | `@handler()` | Methods | `@activity.defn` |
+| Build | WASM | Python | Docker |
+| Runtime | PlexSpaces | Ray Cluster | Temporal Server |
+
+## License
+
+LGPL-2.1-or-later

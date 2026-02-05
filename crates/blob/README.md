@@ -18,6 +18,24 @@ This crate follows **proto-first design** as per CLAUDE.md:
 - **Metadata Storage**: BlobMetadata stored in SQL (SQLite/PostgreSQL) for querying
 - **Multi-tenancy**: Isolation via tenant_id and namespace
 - **Path Structure**: `/plexspaces/{tenant_id}/{namespace}/{blob_id}`
+- **Content Deduplication**: SHA256-based deduplication with stale metadata detection
+- **Auto Bucket Creation**: Automatically creates S3/MinIO bucket if it doesn't exist (s3-backend feature)
+
+## Key Features
+
+### Stale Metadata Detection and Cleanup
+
+When uploading content that matches an existing SHA256 hash (deduplication), the service verifies that the blob still exists in the object store before returning the cached metadata. This handles scenarios where:
+
+1. The object store was cleared (e.g., MinIO restart) but the database metadata remains
+2. The blob was deleted from the object store but not from the database
+3. Storage backend was switched or migrated
+
+If stale metadata is detected, it's automatically cleaned up and a fresh upload proceeds. This ensures reliable blob operations even after storage infrastructure changes.
+
+### Auto Bucket Creation
+
+When using S3 or MinIO backends with the `s3-backend` feature enabled, the service automatically creates the configured bucket if it doesn't exist during initialization.
 
 ## Setup
 

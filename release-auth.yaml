@@ -1,0 +1,63 @@
+# PlexSpaces Release Configuration - Auth enabled (for e2e testing)
+# Use with: PLEXSPACES_JWT_SECRET=your-secret target/debug/plexspaces start --release-config release-auth.yaml ...
+
+name: my-cluster
+version: 1.0.0
+description: "PlexSpaces release for node my-node (auth enabled)"
+
+node:
+  id: my-node
+  listen_addr: 0.0.0.0:8093
+  cluster_seed_nodes: []
+  wasm_apps_directory: "/app/wasm"
+
+runtime:
+  grpc:
+    enabled: true
+    address: 0.0.0.0:8093
+    max_connections: 100
+    keepalive_interval_seconds: 30
+    middleware: []
+  
+  # Blob storage configuration (S3-compatible - MinIO for local dev)
+  blob:
+    storage_type: s3
+    bucket: plexspaces-blobs
+    endpoint: http://localhost:9000
+    region: us-east-1
+    access_key_id: minioadmin
+    secret_access_key: minioadmin
+    force_path_style: true
+  
+  health:
+    heartbeat_interval_seconds: 5
+    heartbeat_timeout_seconds: 30
+    registry_url: ""
+  
+  security:
+    jwt:
+      enable_jwt: true
+      secret: ""  # Set via PLEXSPACES_JWT_SECRET env var
+      issuer: ""
+      jwks_url: ""
+      allowed_audiences:
+        - "plexspaces-api"
+      tenant_id_claim: "tenant_id"
+      user_id_claim: "sub"
+    
+    mtls:
+      enable_mtls: true
+      auto_generate_certs: true
+      cert_dir: "./certs"
+    
+    disable_auth: false
+
+system_applications: []
+
+applications: []
+
+env: {}
+
+shutdown:
+  graceful_timeout_seconds: 30
+  force_timeout_seconds: 10

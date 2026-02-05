@@ -49,13 +49,13 @@ use plexspaces_proto::common::v1::Message;
 // Helper to create test config with retry/DLQ
 fn create_test_config_with_retry_dlq(
     name: &str,
-    backend: ChannelBackend,
+    provider: ChannelProvider,
     max_retries: u32,
     dlq_enabled: bool,
 ) -> ChannelConfig {
     ChannelConfig {
         name: name.to_string(),
-        backend: backend as i32,
+        provider: provider as i32,
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -90,7 +90,7 @@ async fn test_mock_channel_ack_success() {
 
     let config = create_test_config_with_retry_dlq(
         "test-ack",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -121,7 +121,7 @@ async fn test_mock_channel_nack_requeue() {
 
     let config = create_test_config_with_retry_dlq(
         "test-nack-requeue",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -153,7 +153,7 @@ async fn test_mock_channel_poisonous_message_dlq() {
 
     let config = create_test_config_with_retry_dlq(
         "test-poisonous",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -187,7 +187,7 @@ async fn test_mock_channel_max_retries_dlq() {
 
     let config = create_test_config_with_retry_dlq(
         "test-max-retries",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         2, // Max 2 retries
         true,
     );
@@ -236,7 +236,7 @@ async fn test_mock_channel_shutdown_graceful() {
 
     let config = create_test_config_with_retry_dlq(
         "test-shutdown",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -273,7 +273,7 @@ async fn test_mock_channel_crash_simulation() {
 
     let config = create_test_config_with_retry_dlq(
         "test-crash",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -323,7 +323,7 @@ mod redis_tests {
         use prost_types::Duration;
         ChannelConfig {
             name: name.to_string(),
-            backend: ChannelBackend::ChannelBackendRedis as i32,
+            provider: ChannelProvider::ChannelProviderRedis as i32,
             capacity: 100,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -436,7 +436,7 @@ async fn test_poisonous_message_scenario() {
 
     let config = create_test_config_with_retry_dlq(
         "test-poisonous-scenario",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -472,7 +472,7 @@ async fn test_crash_recovery_scenario() {
 
     let config = create_test_config_with_retry_dlq(
         "test-crash-recovery",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -503,7 +503,7 @@ async fn test_shutdown_during_processing() {
 
     let config = create_test_config_with_retry_dlq(
         "test-shutdown-processing",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -548,7 +548,7 @@ async fn test_ack_message_not_found_never_received() {
 
     let config = create_test_config_with_retry_dlq(
         "test-ack-not-found",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -566,7 +566,7 @@ async fn test_ack_message_already_acked() {
 
     let config = create_test_config_with_retry_dlq(
         "test-ack-already-acked",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -593,7 +593,7 @@ async fn test_nack_message_not_found_never_received() {
 
     let config = create_test_config_with_retry_dlq(
         "test-nack-not-found",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -611,7 +611,7 @@ async fn test_nack_message_already_acked() {
 
     let config = create_test_config_with_retry_dlq(
         "test-nack-already-acked",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -638,7 +638,7 @@ async fn test_ack_with_invalid_message_id() {
 
     let config = create_test_config_with_retry_dlq(
         "test-ack-invalid-id",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -662,7 +662,7 @@ async fn test_concurrent_ack_same_message() {
 
     let config = create_test_config_with_retry_dlq(
         "test-concurrent-ack",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -708,7 +708,7 @@ async fn test_ack_after_nack() {
 
     let config = create_test_config_with_retry_dlq(
         "test-ack-after-nack",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -749,7 +749,7 @@ async fn test_sqlite_ack_message_not_found() {
     // Use in-memory SQLite database for fast, isolated testing
     let config = ChannelConfig {
         name: "test-sqlite-ack-not-found".to_string(),
-        backend: ChannelBackend::ChannelBackendSqlite as i32,
+        provider: ChannelProvider::ChannelProviderSqlite as i32,
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

@@ -73,17 +73,17 @@
 //! cargo run
 //! ```
 
-use crate::{InMemoryKVStore, KVError, KVResult, KeyValueStore};
+use crate::{KVError, KVResult, KeyValueStore};
 use std::sync::Arc;
 
 /// Backend type configuration.
 #[derive(Clone)]
 pub enum BackendType {
-    /// In-memory HashMap backend (default, always available)
+    /// In-memory storage using SQLite :memory: (always available via sql-backend)
     InMemory,
     /// SQLite backend (requires sql-backend feature)
     Sqlite {
-        /// Path to SQLite database file
+        /// Path to SQLite database file (use ":memory:" for in-memory)
         path: String,
     },
     /// PostgreSQL backend (requires sql-backend feature)
@@ -291,7 +291,21 @@ pub async fn create_keyvalue_from_env() -> KVResult<Arc<dyn KeyValueStore>> {
 /// ```
 pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn KeyValueStore>> {
     match config.backend {
-        BackendType::InMemory => Ok(Arc::new(InMemoryKVStore::new())),
+        // InMemory maps to SQLite :memory:
+        BackendType::InMemory => {
+            #[cfg(feature = "sql-backend")]
+            {
+                use crate::sql::SqliteKVStore;
+                let store = SqliteKVStore::new(":memory:").await?;
+                Ok(Arc::new(store))
+            }
+            #[cfg(not(feature = "sql-backend"))]
+            {
+                Err(KVError::ConfigError(
+                    "InMemory backend requires 'sql-backend' feature (uses SQLite :memory:)".to_string(),
+                ))
+            }
+        }
 
         #[cfg(feature = "sql-backend")]
         BackendType::Sqlite { path } => {

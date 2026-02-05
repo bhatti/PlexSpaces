@@ -4,8 +4,7 @@
 // Tests for VM Object Registry Integration
 
 use plexspaces_firecracker::{VmRegistry, VmRegistryEntry, VmState};
-use plexspaces_keyvalue::InMemoryKVStore;
-use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::object_registry::v1::ObjectType;
 use plexspaces_core::RequestContext;
 use std::sync::Arc;
@@ -13,8 +12,8 @@ use std::sync::Arc;
 #[tokio::test]
 async fn test_register_vm_in_object_registry() {
     // Test: Register VM in object registry
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry = ObjectRegistry::new(kv);
+    let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry = ObjectRegistryImpl::new(repo);
 
     // Create a VM entry (simulated - not actually running)
     let vm_entry = VmRegistryEntry {
@@ -47,8 +46,8 @@ async fn test_register_vm_in_object_registry() {
 #[tokio::test]
 async fn test_discover_vms_from_object_registry() {
     // Test: Discover VMs using object registry
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry = ObjectRegistry::new(kv);
+    let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry = ObjectRegistryImpl::new(repo);
 
     // Register multiple VMs
     let vm1 = VmRegistryEntry {
@@ -87,8 +86,8 @@ async fn test_discover_vms_from_object_registry() {
 #[tokio::test]
 async fn test_vm_health_status_mapping() {
     // Test: VM state correctly maps to health status
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry = ObjectRegistry::new(kv);
+    let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry = ObjectRegistryImpl::new(repo);
 
     // Test Running -> Healthy
     let vm_running = VmRegistryEntry {

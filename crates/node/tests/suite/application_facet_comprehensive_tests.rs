@@ -33,7 +33,8 @@
 //! - Verify graceful shutdown with all facets
 
 use plexspaces_application::{Application, ApplicationNode, ApplicationError, ApplicationManagerImpl};
-use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec, ChildSpec, ChildType, SupervisionStrategy, RestartPolicy};
+use plexspaces_proto::application::v1::{ApplicationSpec, ShutdownStrategy, SupervisorSpec, ChildSpec, ChildType, SupervisionStrategy, RestartPolicy};
+use prost_types::Duration as ProstDuration;
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -75,16 +76,15 @@ struct ReminderFacetFactory;
 #[async_trait]
 impl FacetFactory for ReminderFacetFactory {
     async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
-        use plexspaces_journaling::ReminderFacet;
-        use plexspaces_journaling::MemoryJournalStorage;
+        use plexspaces_journaling::{ReminderFacet, SqliteJournalStorage};
         let priority = config
             .get("priority")
             .and_then(|v| v.as_i64())
             .map(|p| p as i32)
             .unwrap_or(60);
-        // Create ReminderFacet with in-memory storage for tests
+        // Create ReminderFacet with SQLite :memory: storage for tests
         // ReminderFacet::new() takes Arc<S> where S: JournalStorage
-        let storage = Arc::new(MemoryJournalStorage::new());
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         Ok(Box::new(ReminderFacet::new(storage, config, priority)))
     }
 
@@ -104,15 +104,14 @@ struct DurabilityFacetFactory;
 #[async_trait]
 impl FacetFactory for DurabilityFacetFactory {
     async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
-        use plexspaces_journaling::DurabilityFacet;
-        use plexspaces_journaling::MemoryJournalStorage;
+        use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
         let priority = config
             .get("priority")
             .and_then(|v| v.as_i64())
             .map(|p| p as i32)
             .unwrap_or(100);
-        // Create DurabilityFacet with in-memory storage for tests
-        let storage = Arc::new(MemoryJournalStorage::new());
+        // Create DurabilityFacet with SQLite :memory: storage for tests
+        let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         Ok(Box::new(DurabilityFacet::new(storage, config, priority)))
     }
 
@@ -661,12 +660,18 @@ fn create_application_spec_with_multiple_facets(name: &str, version: &str) -> Ap
     // Create ApplicationSpec
     ApplicationSpec {
         name: name.to_string(),
+        namespace: String::new(),
         version: version.to_string(),
         description: format!("Test application {} with multiple facets", name),
         r#type: plexspaces_proto::application::v1::ApplicationType::ApplicationTypeActive as i32,
         supervisor: Some(supervisor_spec),
         env: HashMap::new(),
         dependencies: vec![],
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        metadata: None,
     }
 }
 
@@ -702,12 +707,18 @@ fn create_application_spec_with_single_facet(name: &str, version: &str, facet_ty
     
     ApplicationSpec {
         name: name.to_string(),
+        namespace: String::new(),
         version: version.to_string(),
         description: format!("Test application {} with {} facet", name, facet_type),
         r#type: plexspaces_proto::application::v1::ApplicationType::ApplicationTypeActive as i32,
         supervisor: Some(supervisor_spec),
         env: HashMap::new(),
         dependencies: vec![],
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        metadata: None,
     }
 }
 

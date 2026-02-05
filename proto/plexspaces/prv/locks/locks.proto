@@ -51,7 +51,7 @@ message Lock {
   // Lock key (unique identifier)
   string lock_key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   
-  // Node/process ID holding the lock
+  // Node/process ID holding the lock (only this identity can renew/release)
   string holder_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   
   // Lock version (for optimistic locking)
@@ -79,7 +79,7 @@ message AcquireLockOptions {
   // Lock key (unique identifier)
   string lock_key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   
-  // Holder ID (node/process ID requesting the lock)
+  // Holder ID (node/process ID requesting the lock; only this identity can renew/release)
   string holder_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   
   // Lease duration (seconds)
@@ -102,7 +102,7 @@ message RenewLockOptions {
   // Lock key (unique identifier)
   string lock_key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   
-  // Holder ID (must match current holder)
+  // Holder ID (must match current holder to renew)
   string holder_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   
   // Current version (must match for optimistic locking)
@@ -120,7 +120,7 @@ message ReleaseLockOptions {
   // Lock key (unique identifier)
   string lock_key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   
-  // Holder ID (must match current holder)
+  // Holder ID (must match current holder to release)
   string holder_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   
   // Current version (must match for optimistic locking)

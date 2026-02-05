@@ -1,12 +1,12 @@
-# Calculator Actor (Python WASM)
+# Calculator Actor (Python WASM with SDK)
 
-A simple calculator demonstrating Python WASM Components in PlexSpaces.
+A simple calculator demonstrating Python WASM actors using the PlexSpaces SDK.
 
 ## Overview
 
 This example shows:
-- Building Python actors with componentize-py
-- Using the simple-actor WIT interface (JSON-over-string pattern)
+- Building Python actors with PlexSpaces SDK
+- Using `@actor`, `state()`, and `@handler()` decorators
 - Calculator operations: add, subtract, multiply, divide
 - State management and history tracking
 
@@ -22,7 +22,7 @@ This example shows:
 
 ```bash
 cd /path/to/tspaces
-cargo run -p plexspaces -- start --node-id test-node --listen-addr '0.0.0.0:8090'
+cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr '0.0.0.0:8090'
 ```
 
 ### 3. Run Tests
@@ -31,9 +31,25 @@ cargo run -p plexspaces -- start --node-id test-node --listen-addr '0.0.0.0:8090
 ./test.sh
 ```
 
-## Calculator Operations
+## SDK Implementation
 
-The calculator accepts JSON payloads with an `operation` field:
+```python
+from plexspaces import actor, state, handler
+
+@actor
+class Calculator:
+    history: list = state(default_factory=list)
+    
+    @handler("add")
+    def add(self, operands: list = None) -> dict:
+        result = sum(operands or [])
+        return {"result": result, "operation": "add"}
+```
+
+**Before SDK**: 98 lines with manual WIT interface  
+**After SDK**: 90 lines with decorators (cleaner, type-safe)
+
+## Calculator Operations
 
 ```json
 // Addition
@@ -60,42 +76,31 @@ The calculator accepts JSON payloads with an `operation` field:
 ## HTTP API
 
 ```bash
-# Send operation (POST = fire-and-forget)
-curl -X POST "http://localhost:8091/api/v1/actors/internal/system/calculator" \
+# Send operation
+curl -X POST "http://localhost:8091/api/v1/actors/calculator-test/calculator" \
     -H "Content-Type: application/json" \
     -d '{"operation": "add", "operands": [1, 2, 3]}'
 ```
 
-## Actor Interface
+## SDK Features Demonstrated
 
-Implements `plexspaces:simple-actor@0.1.0`:
-
-```python
-class Actor(exports.Actor):
-    def init(self, config_json: str) -> str:
-        """Initialize with optional config. Returns "" on success."""
-        
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
-        """Handle message. Returns JSON response."""
-        
-    def get_state(self) -> str:
-        """Returns state as JSON."""
-        
-    def set_state(self, state_json: str) -> str:
-        """Restores state. Returns "" on success."""
-```
+| Feature | How It's Used |
+|---------|---------------|
+| `@actor` | Marks `Calculator` as PlexSpaces actor |
+| `state()` | Defines `history`, `last_result` as persistent |
+| `@handler()` | Routes `add`, `subtract`, `multiply`, `divide` |
+| `@init_handler` | Restores state from config |
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `calculator_actor.py` | Python actor implementation |
-| `build.sh` | Build script using componentize-py |
+| `calculator_actor.py` | Python actor using SDK decorators |
+| `build.sh` | Build using `plexspaces-py build` |
 | `test.sh` | Integration test script |
-| `calculator_actor.wasm` | Built WASM component (~35MB) |
 
 ## References
 
-- [Python WASM README](../../README.md) - Full documentation
-- [WIT Interface](../../../../wit/plexspaces-simple-actor/) - Interface definition
-- [PlexSpaces Docs](../../../../docs/) - Framework documentation
+- [PlexSpaces Python SDK](../../../../sdks/python/README.md) - SDK documentation
+- [SDK Guide](../../../../docs/sdk.md) - Complete SDK reference
+- [Python WASM README](../../README.md) - Python WASM development

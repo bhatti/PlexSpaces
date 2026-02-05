@@ -107,6 +107,86 @@ mod tests {
         }
     }
 
+    /// Leader-election lock: same (tenant, namespace, lock_key) as simple_component_host uses
+    /// for lock_id "leader". Only one holder may hold the lock; second must get LockAlreadyHeld.
+    /// Renew works for holder; other still cannot acquire until release.
+    #[tokio::test]
+    async fn test_leader_election_lock_exclusive() {
+        let manager = create_manager().await;
+        let ctx = RequestContext::new_without_auth(String::new(), "leader-election".to_string());
+        let lock_key = "leader".to_string();
+        let opts = |holder_id: &str| AcquireLockOptions {
+            lock_key: lock_key.clone(),
+            holder_id: holder_id.to_string(),
+            lease_duration_secs: 30,
+            additional_wait_time_ms: 0,
+            refresh_period_ms: 100,
+            metadata: Default::default(),
+        };
+
+        // Term1 acquires -> success
+        let lock1 = manager
+            .acquire_lock(&ctx, opts("LeaderElection:leader-election-term1@test-node"))
+            .await
+            .expect("term1 acquire must succeed");
+        assert!(lock1.locked);
+        assert!(!lock1.version.is_empty());
+
+        // Term2 try-acquire -> must fail (lock held by term1)
+        let result = manager
+            .acquire_lock(&ctx, opts("LeaderElection:leader-election-term2@test-node"))
+            .await;
+        assert!(result.is_err(), "term2 must not acquire while term1 holds lock");
+        assert!(
+            matches!(result, Err(plexspaces_locks::LockError::LockAlreadyHeld(_))),
+            "expected LockAlreadyHeld"
+        );
+
+        // Term1 renews -> success
+        let renewed = manager
+            .renew_lock(
+                &ctx,
+                RenewLockOptions {
+                    lock_key: lock_key.clone(),
+                    holder_id: "LeaderElection:leader-election-term1@test-node".to_string(),
+                    version: lock1.version.clone(),
+                    lease_duration_secs: 30,
+                    metadata: Default::default(),
+                },
+            )
+            .await
+            .expect("term1 renew must succeed");
+        assert!(!renewed.version.is_empty());
+
+        // Term2 try-acquire again -> still must fail
+        let result2 = manager
+            .acquire_lock(&ctx, opts("LeaderElection:leader-election-term2@test-node"))
+            .await;
+        assert!(result2.is_err());
+        assert!(matches!(result2, Err(plexspaces_locks::LockError::LockAlreadyHeld(_))));
+
+        // Term1 releases
+        manager
+            .release_lock(
+                &ctx,
+                ReleaseLockOptions {
+                    lock_key: lock_key.clone(),
+                    holder_id: "LeaderElection:leader-election-term1@test-node".to_string(),
+                    version: renewed.version,
+                    delete_lock: false,
+                },
+            )
+            .await
+            .expect("release must succeed");
+
+        // Term2 can now acquire
+        let lock2 = manager
+            .acquire_lock(&ctx, opts("LeaderElection:leader-election-term2@test-node"))
+            .await
+            .expect("term2 acquire after release must succeed");
+        assert!(lock2.locked, "term2 must hold lock after term1 release");
+    }
+
     #[tokio::test]
     async fn test_sqlite_acquire_lock_same_holder() {
         let manager = create_manager().await;
@@ -182,7 +262,7 @@ mod tests {
     async fn test_sqlite_renew_lock_version_mismatch() {
         let manager = create_manager().await;
 
-        let lock = manager
+        let _lock = manager
             .acquire_lock(&test_ctx(), AcquireLockOptions {
                 lock_key: "test-lock".to_string(),
                 holder_id: "node-1".to_string(),

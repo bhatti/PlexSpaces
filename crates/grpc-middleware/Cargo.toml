@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 plexspaces-proto = { path = "../proto" }
+plexspaces-common = { path = "../common" }
 
 # gRPC
 tonic = "0.12"

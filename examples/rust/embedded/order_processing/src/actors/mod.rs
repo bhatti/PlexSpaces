@@ -9,4 +9,10 @@
 pub mod order_processor;
 
 // Re-export
-pub use order_processor::{OrderProcessorBehavior, OrderMessage, OrderConfig};
+pub use order_processor::{
+    OrderProcessorBehavior, 
+    OrderConfig,
+    CreateOrderRequest,
+    GetOrderRequest,
+    CancelOrderRequest,
+};

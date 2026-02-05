@@ -54,37 +54,12 @@ option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/tuplespac
 option java_package = "com.bhatti.plexspaces.tuplespace.v1";
 option java_multiple_files = true;
 
-// Storage provider types
+// Storage provider types (kept for reference; tuplespace now uses shared db from RuntimeConfig)
 enum StorageProvider {
   STORAGE_PROVIDER_UNSPECIFIED = 0;
-  STORAGE_PROVIDER_MEMORY = 1;       // In-memory HashMap
-  STORAGE_PROVIDER_REDIS = 2;        // Redis with pub/sub
-  STORAGE_PROVIDER_POSTGRES = 3;     // PostgreSQL with JSONB
-  STORAGE_PROVIDER_SQLITE = 4;       // SQLite embedded
-}
-
-// TupleSpace storage configuration
-message TupleSpaceStorageConfig {
-  // Storage provider type
-  StorageProvider provider = 1;
-
-  // Provider-specific configuration
-  oneof config {
-    MemoryStorageConfig memory = 2;
-    RedisStorageConfig redis = 3;
-    PostgresStorageConfig postgres = 4;
-    SqliteStorageConfig sqlite = 5;
-  }
-
-  // Common settings
-  bool enable_metrics = 10;
-  google.protobuf.Duration cleanup_interval = 11;
-}
-
-// In-memory storage configuration
-message MemoryStorageConfig {
-  uint32 initial_capacity = 1;
-  uint64 cleanup_interval_ms = 2;
+  STORAGE_PROVIDER_REDIS = 1;        // Redis with pub/sub
+  STORAGE_PROVIDER_POSTGRES = 2;     // PostgreSQL with JSONB
+  STORAGE_PROVIDER_SQLITE = 3;       // SQLite embedded
 }
 
 // Redis storage configuration

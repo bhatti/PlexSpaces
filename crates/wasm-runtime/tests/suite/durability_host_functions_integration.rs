@@ -15,7 +15,7 @@ mod tests {
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::durability::Host;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::types as actor_types;
     use plexspaces_core::ActorId;
-    use plexspaces_journaling::{JournalStorage, MemoryJournalStorage};
+    use plexspaces_journaling::{JournalStorage, SqliteJournalStorage};
     use std::sync::Arc;
     use plexspaces_wasm_runtime::HostFunctions;
 
@@ -27,8 +27,8 @@ mod tests {
         }
     }
 
-    fn create_test_host_functions_with_journal() -> Arc<HostFunctions> {
-        let journal_storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+    async fn create_test_host_functions_with_journal() -> Arc<HostFunctions> {
+        let journal_storage: Arc<dyn JournalStorage + Send + Sync> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         
         Arc::new(HostFunctions::with_all_services(
             None, // No message sender
@@ -46,7 +46,7 @@ mod tests {
     async fn test_durability_impl_persist() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist an event
@@ -66,7 +66,7 @@ mod tests {
     async fn test_durability_impl_persist_batch() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist batch of events
@@ -88,7 +88,7 @@ mod tests {
     async fn test_durability_impl_get_sequence() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist some events
@@ -109,7 +109,7 @@ mod tests {
     async fn test_durability_impl_checkpoint() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist some events
@@ -129,7 +129,7 @@ mod tests {
     async fn test_durability_impl_get_checkpoint_sequence() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist events and create checkpoint
@@ -150,7 +150,7 @@ mod tests {
     async fn test_durability_impl_is_replaying() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Check replay mode (should be false by default)
@@ -165,7 +165,7 @@ mod tests {
     async fn test_durability_impl_cache_side_effect() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Cache a side effect
@@ -185,7 +185,7 @@ mod tests {
     async fn test_durability_impl_read_journal() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist some events
@@ -208,7 +208,7 @@ mod tests {
     async fn test_durability_impl_compact() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_journal();
+        let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist events and create checkpoint

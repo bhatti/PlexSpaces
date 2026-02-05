@@ -2,6 +2,17 @@
 
 **Purpose**: Provides Erlang/OTP-inspired behaviors for actors, enabling common patterns like request/reply, event handling, finite state machines, and durable workflows.
 
+## Base actor and where behaviors live
+
+- **Base actor**: The core contract is `plexspaces_core::Actor` (in `crates/core`). Implement `handle_message` and `behavior_type()`.
+- **All behaviors are defined in this crate** in `src/mod.rs`:
+  - **GenServer** – request/reply; routes `MessageType::Call` → `handle_request()` (reply expected); `Cast` → `handle_request()` (optional reply). **GenServer uses call semantics by default** (like Python SDK).
+  - **GenEvent** – fire-and-forget event handling; `GenEventBehavior` + `EventHandler`.
+  - **GenStateMachine** – FSM; `GenStateMachineBehavior<S, E>` with `transition()` and state handlers.
+  - **Workflow** – durable workflows; `WorkflowBehavior` with `run()`, `signal()`, `query()`.
+
+Handler dispatching aligns with the Python SDK: **call** = request-reply (GET/ask), **cast** = fire-and-forget (POST/tell). GenServer treats **Call** as requiring a reply and **Cast** as optional reply.
+
 ## Overview
 
 This crate implements composable behaviors that actors can use to handle different types of messages and state transitions. Behaviors are traits that actors implement, following the Erlang/OTP philosophy of separating concerns.

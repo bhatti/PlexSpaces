@@ -59,7 +59,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, Notify, RwLock};
 use ulid::Ulid;
 use plexspaces_channel::{Channel, ChannelError, create_channel};
-use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig};
+use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig};
 use plexspaces_proto::common::v1::Message as ProtoMessage;
 use prost_types::Timestamp;
 
@@ -69,8 +69,8 @@ use lru_cache::LruCache;
 
 // Re-export proto-generated types
 pub use plexspaces_proto::mailbox::v1::{
-    BackpressureStrategy, DurabilityStrategy, MailboxConfig, MailboxError as MailboxErrorProto,
-    MessagePriority, OrderingStrategy, StorageStrategy,
+    BackpressureStrategy, MailboxConfig, MailboxError as MailboxErrorProto,
+    MessagePriority, OrderingStrategy,
 };
 
 // Wrapper for MailboxError to provide thiserror compatibility
@@ -865,9 +865,7 @@ impl From<Message> for ProtoMessage {
 // Helper functions for MailboxConfig (cannot add methods to proto-generated types)
 pub fn mailbox_config_default() -> MailboxConfig {
     let mut config = MailboxConfig::default();
-    config.storage_strategy = StorageStrategy::Memory as i32;
     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-    config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
     config.backpressure_strategy = BackpressureStrategy::Block as i32;
     config.capacity = 10000;
     config
@@ -924,7 +922,7 @@ pub struct Mailbox {
     /// Channel name (used for message routing)
     channel_name: String,
     /// Channel backend type (for is_durable() and backend_type())
-    channel_backend: i32,
+    channel_provider: i32,
     /// Mailbox ID (for logging/metrics)
     mailbox_id: String,
     /// Internal queue for ordering/priority (feeds into channel)
@@ -1011,7 +1009,7 @@ impl Mailbox {
     /// Create a new mailbox with configuration
     ///
     /// ## Channel-Based Architecture
-    /// Creates a channel backend based on `config.channel_backend` (defaults to IN_MEMORY).
+    /// Creates a channel backend based on `config.channel_provider` (defaults to IN_MEMORY).
     /// The channel backend must be available/configured, otherwise this will return an error.
     ///
     /// ## Arguments
@@ -1026,14 +1024,14 @@ impl Mailbox {
     /// - `MailboxError::StorageError`: Channel backend initialization failed (e.g., Kafka not configured)
     pub async fn new(config: MailboxConfig, mailbox_id: String) -> Result<Self, MailboxError> {
         // Determine channel backend (default to IN_MEMORY if not specified)
-        let channel_backend = if config.channel_backend != 0 {
-            ChannelBackend::try_from(config.channel_backend)
-                .map_err(|_| MailboxError::InvalidConfig(format!("Invalid channel_backend: {}", config.channel_backend)))?
+        let channel_provider = if config.channel_provider != 0 {
+            ChannelProvider::try_from(config.channel_provider)
+                .map_err(|_| MailboxError::InvalidConfig(format!("Invalid channel_provider: {}", config.channel_provider)))?
         } else {
-            ChannelBackend::ChannelBackendInMemory
+            ChannelProvider::ChannelProviderInMemory
         };
-        let is_in_memory = channel_backend == ChannelBackend::ChannelBackendInMemory;
-        let channel_backend_value = channel_backend as i32;
+        let is_in_memory = channel_provider == ChannelProvider::ChannelProviderInMemory;
+        let channel_provider_value = channel_provider as i32;
         
         // Helper to check if backend is in-memory (needed for shutdown logic)
         let _is_in_memory_clone = is_in_memory;
@@ -1042,7 +1040,7 @@ impl Mailbox {
         let mut channel_config = config.channel_config.clone().unwrap_or_else(|| {
             ChannelConfig {
                 name: format!("mailbox:{}", mailbox_id),
-                backend: channel_backend_value,
+                provider: channel_provider_value,
                 capacity: config.capacity as u64,
                 ..Default::default()
             }
@@ -1081,7 +1079,7 @@ impl Mailbox {
             config: config.clone(),
             channel: Arc::from(channel),
             channel_name: channel_config.name.clone(),
-            channel_backend: channel_backend_value,
+            channel_provider: channel_provider_value,
             mailbox_id: mailbox_id.clone(),
             internal_queue: Arc::new(RwLock::new(internal_queue)),
             stats: Arc::new(RwLock::new(MailboxStats::default())),
@@ -1258,23 +1256,23 @@ impl Mailbox {
                     // This is non-blocking and doesn't require a lock
                     let local_send_result = local_sender.send(msg.clone());
                     
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(
                             message_id = %msg_id,
-                            "Mailbox processor: Sending message - channel: {:?}, local_receiver: {:?}", 
-                            channel_send_result.is_ok(), 
-                            local_send_result.is_ok()
+                            channel_ok = channel_send_result.is_ok(),
+                            local_ok = local_send_result.is_ok(),
+                            "Mailbox processor: sending message"
                         );
                     }
                     
                     match (channel_send_result, local_send_result) {
                         (Ok(_), Ok(())) => {
                             num_sent += 1;
-                            if tracing::enabled!(tracing::Level::DEBUG) {
-                                tracing::debug!(
+                            if tracing::enabled!(tracing::Level::TRACE) {
+                                tracing::trace!(
                                     message_id = %msg_id,
-                                    "Mailbox processor: ✅ Successfully sent message to both channel and local_receiver (total: {})", 
-                                    num_sent
+                                    num_sent,
+                                    "Mailbox processor: sent to channel and local_receiver"
                                 );
                             }
                         }
@@ -1462,11 +1460,11 @@ impl Mailbox {
         // Notify processor that a message is available
         // This wakes up the processor task that's waiting on notify.notified()
         self.notify.notify_one();
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            message_id = %message_id,
-            "Mailbox::enqueue: Notified processor task"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                message_id = %message_id,
+                "Mailbox::enqueue: Notified processor task"
+            );
         }
 
         Ok(())
@@ -1511,12 +1509,12 @@ impl Mailbox {
         let local_receiver = self.local_receiver.clone();
         let mailbox_id = self.mailbox_id.clone();
         let shutdown_flag = self.shutdown_flag.clone();
-        // Compute is_in_memory from channel_backend (avoiding lifetime issues)
-        use plexspaces_proto::channel::v1::ChannelBackend;
-        let channel_backend = self.channel_backend; // Copy the i32 value
+        // Compute is_in_memory from channel_provider (avoiding lifetime issues)
+        use plexspaces_proto::channel::v1::ChannelProvider;
+        let channel_provider = self.channel_provider; // Copy the i32 value
         let is_in_memory = matches!(
-            ChannelBackend::try_from(channel_backend),
-            Ok(ChannelBackend::ChannelBackendInMemory)
+            ChannelProvider::try_from(channel_provider),
+            Ok(ChannelProvider::ChannelProviderInMemory)
         );
         
         async move {
@@ -1758,8 +1756,8 @@ impl Mailbox {
             "Message acked successfully"
         );
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+        tracing::trace!(
             mailbox_id = %self.mailbox_id,
             message_id = %message.id,
             channel_msg_id = %channel_msg_id,
@@ -1803,22 +1801,14 @@ impl Mailbox {
             stats.total_dropped += 1; // Track failed messages
         }
 
-        // OBSERVABILITY: Track nacks via tracing
-        tracing::trace!(
-            mailbox_id = %self.mailbox_id,
-            message_id = %message.id,
-            error = ?error,
-            "Message nacked (channel handles retry/DLQ)"
-        );
-
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            mailbox_id = %self.mailbox_id,
-            message_id = %message.id,
-            channel_msg_id = %channel_msg_id,
-            error = ?error,
-            "⚠️ Mailbox::nack_message: Message nacked (channel handles retry/DLQ)"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                mailbox_id = %self.mailbox_id,
+                message_id = %message.id,
+                channel_msg_id = %channel_msg_id,
+                error = ?error,
+                "Message nacked (channel handles retry/DLQ)"
+            );
         }
 
         Ok(())
@@ -1898,11 +1888,11 @@ impl Mailbox {
     /// ## Use Case
     /// Used by DurabilityFacet to determine if mailbox messages will survive actor restart.
     pub fn is_durable(&self) -> bool {
-        use plexspaces_proto::channel::v1::ChannelBackend;
+        use plexspaces_proto::channel::v1::ChannelProvider;
         // Check if backend is durable (not InMemory or UDP)
-        match ChannelBackend::try_from(self.channel_backend) {
-            Ok(ChannelBackend::ChannelBackendInMemory) => false,
-            Ok(ChannelBackend::ChannelBackendUdp) => false, // UDP is best-effort, not persistent
+        match ChannelProvider::try_from(self.channel_provider) {
+            Ok(ChannelProvider::ChannelProviderInMemory) => false,
+            Ok(ChannelProvider::ChannelProviderUdp) => false, // UDP is best-effort, not persistent
             Ok(_) => true, // SQLite, Redis, Kafka, NATS are all durable
             Err(_) => false, // Invalid backend, assume not durable
         }
@@ -1910,10 +1900,10 @@ impl Mailbox {
 
     /// Check if backend is in-memory (for shutdown logic)
     pub fn is_in_memory(&self) -> bool {
-        use plexspaces_proto::channel::v1::ChannelBackend;
+        use plexspaces_proto::channel::v1::ChannelProvider;
         matches!(
-            ChannelBackend::try_from(self.channel_backend),
-            Ok(ChannelBackend::ChannelBackendInMemory)
+            ChannelProvider::try_from(self.channel_provider),
+            Ok(ChannelProvider::ChannelProviderInMemory)
         )
     }
 
@@ -1921,18 +1911,18 @@ impl Mailbox {
     ///
     /// Returns the backend type as a string for logging/metrics.
     pub fn backend_type(&self) -> &'static str {
-        use plexspaces_proto::channel::v1::ChannelBackend;
-        match ChannelBackend::try_from(self.channel_backend) {
-            Ok(ChannelBackend::ChannelBackendInMemory) => "in_memory",
-            Ok(ChannelBackend::ChannelBackendRedis) => "redis",
-            Ok(ChannelBackend::ChannelBackendKafka) => "kafka",
-            Ok(ChannelBackend::ChannelBackendSqlite) => "sqlite",
-            Ok(ChannelBackend::ChannelBackendNats) => "nats",
-            Ok(ChannelBackend::ChannelBackendUdp) => "udp",
-            Ok(ChannelBackend::ChannelBackendSqs) => "sqs",
-            Ok(ChannelBackend::ChannelBackendProcessGroup) => "process_group",
-            Ok(ChannelBackend::ChannelBackendPostgres) => "postgres",
-            Ok(ChannelBackend::ChannelBackendCustom) => "custom",
+        use plexspaces_proto::channel::v1::ChannelProvider;
+        match ChannelProvider::try_from(self.channel_provider) {
+            Ok(ChannelProvider::ChannelProviderInMemory) => "in_memory",
+            Ok(ChannelProvider::ChannelProviderRedis) => "redis",
+            Ok(ChannelProvider::ChannelProviderKafka) => "kafka",
+            Ok(ChannelProvider::ChannelProviderSqlite) => "sqlite",
+            Ok(ChannelProvider::ChannelProviderNats) => "nats",
+            Ok(ChannelProvider::ChannelProviderUdp) => "udp",
+            Ok(ChannelProvider::ChannelProviderSqs) => "sqs",
+            Ok(ChannelProvider::ChannelProviderProcessGroup) => "process_group",
+            Ok(ChannelProvider::ChannelProviderPostgres) => "postgres",
+            Ok(ChannelProvider::ChannelProviderCustom) => "custom",
             Err(_) => "unknown",
         }
     }
@@ -2092,7 +2082,7 @@ pub struct MailboxObservabilityStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_proto::channel::v1::ChannelBackend;
+    use plexspaces_proto::channel::v1::ChannelProvider;
 
     /// Helper to create a test mailbox with InMemory backend
     async fn create_test_mailbox(config: MailboxConfig) -> Mailbox {
@@ -3014,7 +3004,7 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_inmemory_backend() {
         let mut config = mailbox_config_default();
-        config.channel_backend = ChannelBackend::ChannelBackendInMemory as i32;
+        config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
         
         let mailbox = Mailbox::new(config, "test-mailbox".to_string()).await.unwrap();
         
@@ -3040,7 +3030,7 @@ mod tests {
         let db_path_str = ":memory:".to_string();
         
         let mut config = mailbox_config_default();
-        config.channel_backend = ChannelBackend::ChannelBackendSqlite as i32;
+        config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
         
         let sqlite_config = SqliteConfig {
             database_path: db_path_str,
@@ -3052,7 +3042,7 @@ mod tests {
         
         let channel_config = ChannelConfig {
             name: "test-mailbox-sqlite".to_string(),
-            backend: ChannelBackend::ChannelBackendSqlite as i32,
+            provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: 1000,
             backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
             ..Default::default()
@@ -3078,7 +3068,7 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_invalid_backend() {
         let mut config = mailbox_config_default();
-        config.channel_backend = 999; // Invalid backend value
+        config.channel_provider = 999; // Invalid backend value
         
         let result = Mailbox::new(config, "test-mailbox".to_string()).await;
         assert!(result.is_err());
@@ -3093,7 +3083,7 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_default_backend() {
         let config = mailbox_config_default();
-        // channel_backend is 0 (unspecified), should default to InMemory
+        // channel_provider is 0 (unspecified), should default to InMemory
         
         let mailbox = Mailbox::new(config, "test-mailbox".to_string()).await.unwrap();
         
@@ -3113,11 +3103,11 @@ mod tests {
         use plexspaces_proto::channel::v1::ChannelConfig;
         
         let mut config = mailbox_config_default();
-        config.channel_backend = ChannelBackend::ChannelBackendInMemory as i32;
+        config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
         
         let channel_config = ChannelConfig {
             name: "custom-mailbox".to_string(),
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 5000,
             ..Default::default()
         };
@@ -3163,7 +3153,7 @@ mod tests {
         // Create first mailbox instance and send messages
         {
             let mut config = mailbox_config_default();
-            config.channel_backend = ChannelBackend::ChannelBackendSqlite as i32;
+            config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
             
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
@@ -3175,7 +3165,7 @@ mod tests {
             
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
-                backend: ChannelBackend::ChannelBackendSqlite as i32,
+                provider: ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
                 backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
                 ..Default::default()
@@ -3198,7 +3188,7 @@ mod tests {
         // Create new mailbox instance (simulating recovery after restart)
         {
             let mut config = mailbox_config_default();
-            config.channel_backend = ChannelBackend::ChannelBackendSqlite as i32;
+            config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
             
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
@@ -3210,7 +3200,7 @@ mod tests {
             
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
-                backend: ChannelBackend::ChannelBackendSqlite as i32,
+                provider: ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
                 backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
                 ..Default::default()
@@ -3267,7 +3257,7 @@ mod tests {
         // Phase 1: Create mailbox, send messages, simulate crash
         {
             let mut config = mailbox_config_default();
-            config.channel_backend = ChannelBackend::ChannelBackendSqlite as i32;
+            config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
             
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
@@ -3279,7 +3269,7 @@ mod tests {
             
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
-                backend: ChannelBackend::ChannelBackendSqlite as i32,
+                provider: ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
                 backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
                 ..Default::default()
@@ -3303,7 +3293,7 @@ mod tests {
         // Phase 2: Create new mailbox instance (simulating recovery after restart)
         {
             let mut config = mailbox_config_default();
-            config.channel_backend = ChannelBackend::ChannelBackendSqlite as i32;
+            config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
             
             // Use the same db_path_str from Phase 1
             let sqlite_config = SqliteConfig {
@@ -3316,7 +3306,7 @@ mod tests {
             
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
-                backend: ChannelBackend::ChannelBackendSqlite as i32,
+                provider: ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
                 backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
                 ..Default::default()
@@ -3377,7 +3367,7 @@ mod tests {
         
         // Create mailbox with SQLite
         let mut config = mailbox_config_default();
-        config.channel_backend = ChannelBackend::ChannelBackendSqlite as i32;
+        config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
         
         let sqlite_config = SqliteConfig {
             database_path: db_path_str,
@@ -3389,7 +3379,7 @@ mod tests {
         
         let channel_config = ChannelConfig {
             name: "multi-mailbox".to_string(),
-            backend: ChannelBackend::ChannelBackendSqlite as i32,
+            provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: 1000,
             backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
             ..Default::default()

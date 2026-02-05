@@ -455,7 +455,7 @@ async fn test_message_with_headers_via_service() {
 #[tokio::test]
 async fn test_concurrent_message_sends_via_service() {
     let (node, _actor_ref) = create_test_node_with_actor("test-node-svc-conc").await;
-    let service = Arc::new(ActorServiceImpl::new(node.service_locator().clone(), node.id().as_str().to_string()));
+    let service = Arc::new(ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string()));
 
     let mut handles = vec![];
     for i in 0..5 {

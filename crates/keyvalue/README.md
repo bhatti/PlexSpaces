@@ -16,6 +16,15 @@ The KeyValue store is foundational infrastructure used throughout PlexSpaces:
 - **Metrics**: Counters and observability data
 - **Sessions**: Stateful interactions with automatic expiry
 
+## kv_store table contents (SQLite / PostgreSQL)
+
+The same `kv_store` table is used by:
+
+1. **Object registry** (node/application/service discovery): `tenant_id`, `namespace` like `application:<app>@<node>`, key like `ObjectType:object_id`. **Value = protobuf (binary)**. These rows show as binary/special chars in `SELECT value`.
+2. **WASM actor kv** (host.kv_put from Python/actors): `namespace` = actor_id (e.g. `AuditLog@my-node`), key = actor-chosen (e.g. `AUDIT_123`, `max_entries`). **Value = UTF-8 bytes**. These rows display as text in sqlite.
+
+When inspecting `SELECT tenant_id, namespace, key, value FROM kv_store`, filter by `namespace`: actor namespaces (e.g. `AuditLog@my-node`) have UTF-8 values; `application:...` and `node:...` entries have protobuf.
+
 ## Why KeyValue NOT TupleSpace?
 
 TupleSpace is designed for coordination (dataflow patterns) with destructive `take()` operations. Registry and configuration need **non-destructive reads** with safe lookup semantics. Industry standard (Consul, etcd, Redis) uses key-value for persistent state.

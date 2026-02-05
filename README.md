@@ -49,6 +49,7 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 
 **Facets** (Runtime capabilities):
 - **Infrastructure**: VirtualActorFacet, DurabilityFacet, MobilityFacet
+- **Python WASM durability**: Use `@actor(facets=["durability"])` and enable via `WasmConfig.durability_enabled` in release/node config — see [Durability](docs/durability.md#durability-facet-parameter-python-sdk) and [Bank Account example](examples/python/apps/bank_account/README.md)
 - **Capabilities**: HttpClientFacet, KeyValueFacet, BlobStorageFacet
 - **Timers/Reminders**: TimerFacet, ReminderFacet
 - **Observability**: MetricsFacet, TracingFacet, LoggingFacet

@@ -75,6 +75,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use thiserror::Error;
 use prost_types;
+use plexspaces_core::BlobServiceTrait;
 
 // Re-export proto types for convenience
 pub use plexspaces_proto::v1::application::{
@@ -182,6 +183,18 @@ pub trait Application: Send + Sync {
     /// ## Returns
     /// Reference to `std::any::Any` for type checking and downcasting
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Module hash for cleanup on undeploy (WASM applications only).
+    ///
+    /// ## Purpose
+    /// When unregistering a WASM application, the runtime can evict the compiled module
+    /// from cache to avoid memory leaks. Non-WASM applications return `None`.
+    ///
+    /// ## Returns
+    /// `Some(hash)` for WASM apps (to evict from module cache), `None` otherwise
+    fn module_hash_for_cleanup(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Minimal Node interface needed by Applications
@@ -224,6 +237,18 @@ pub trait ApplicationNode: Send + Sync {
     /// ## Returns
     /// Some(ActorFactory) if available, None otherwise
     async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
+        None
+    }
+    
+    /// Get BlobService if available.
+    /// 
+    /// ## Purpose
+    /// WASM actors need BlobService for blob_upload, blob_download, blob_list, etc.
+    /// Node implementations return Some(blob_service), mocks return None.
+    ///
+    /// ## Returns
+    /// Some(BlobServiceTrait) if available, None otherwise
+    async fn blob_service(&self) -> Option<Arc<dyn BlobServiceTrait>> {
         None
     }
 }

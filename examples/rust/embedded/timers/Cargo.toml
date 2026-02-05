@@ -12,17 +12,13 @@ name = "timers"
 path = "src/main.rs"
 
 [dependencies]
-# PlexSpaces framework
+# PlexSpaces SDK (includes core, actor, macros, TimerFacet)
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-core = { path = "../../../../crates/core" }  # Required for macro-generated code
 plexspaces-node = { path = "../../../../crates/node" }
-plexspaces-core = { path = "../../../../crates/core" }
-plexspaces-actor = { path = "../../../../crates/actor" }
-plexspaces-journaling = { path = "../../../../crates/journaling" }
-plexspaces-facet = { path = "../../../../crates/facet" }
-plexspaces-proto = { path = "../../../../crates/proto" }
 
 # Async
 tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

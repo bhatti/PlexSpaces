@@ -1,101 +1,78 @@
-# Receipt Storage Service (Python WASM)
+# Receipt Storage Service (Python WASM with SDK)
 
-A simple expense tracking service demonstrating blob storage patterns. Store receipts from purchases, list them by merchant, and get spending summaries.
+A simple expense tracking service for storing and querying receipts.
 
 **Real-world use case**: Personal finance app, expense tracker, small business bookkeeping.
+
+## PlexSpaces Python SDK
+
+This example uses the [PlexSpaces Python SDK](../../../../sdks/python/README.md):
+
+```python
+from plexspaces import actor, state, handler
+
+@actor
+class ReceiptStorageService:
+    receipts: dict = state(default_factory=dict)
+    
+    @handler("store")
+    def store_receipt(self, merchant: str, amount: float, date: str) -> dict:
+        receipt_id = f"{merchant.lower()}-{date}-1"
+        self.receipts[receipt_id] = {"merchant": merchant, "amount": amount}
+        return {"status": "ok", "id": receipt_id}
+```
+
+**Before SDK**: 181 lines with manual WIT interface  
+**After SDK**: 110 lines with decorators
 
 ## Quick Start
 
 ```bash
-# Build
-./build.sh
-
-# Test (requires running PlexSpaces node)
-./test.sh
+./build.sh  # Build WASM actor
+./test.sh   # Run tests (requires PlexSpaces node)
 ```
-
-## What It Demonstrates
-
-1. **Storing Structured Data** - Receipts with merchant, amount, date, description
-2. **Filtering/Querying** - List receipts, filter by merchant
-3. **Aggregations** - Spending summary grouped by merchant
-4. **Simple Actor Pattern** - Single actor handling CRUD + queries
 
 ## Operations
 
-### Store a Receipt
+| Operation | Payload | Description |
+|-----------|---------|-------------|
+| store | `{"merchant":"Starbucks","amount":5.75,"date":"2024-01-15"}` | Store receipt |
+| get | `{"id":"starbucks-2024-01-15-1"}` | Get by ID |
+| list | `{"merchant":"Starbucks"}` | List (optional filter) |
+| delete | `{"id":"starbucks-2024-01-15-1"}` | Delete receipt |
+| summary | `{}` | Spending summary |
+
+## Example Output
+
 ```json
 {
-  "op": "store",
-  "merchant": "Starbucks",
-  "amount": 5.75,
-  "date": "2024-01-15",
-  "description": "Grande latte"
-}
-```
-
-### List Receipts
-```json
-{"op": "list"}
-{"op": "list", "merchant": "Starbucks"}  // Filter by merchant
-```
-
-### Get Spending Summary
-```json
-{"op": "summary"}
-```
-Returns:
-```json
-{
+  "status": "ok",
   "grand_total": 142.57,
   "by_merchant": {
     "Whole Foods": {"total": 87.32, "count": 1},
-    "Starbucks": {"total": 10.25, "count": 2},
-    "Shell": {"total": 45.00, "count": 1}
+    "Starbucks": {"total": 10.25, "count": 2}
   }
 }
 ```
 
-### Get/Delete Receipt
-```json
-{"op": "get", "id": "starbucks-2024-01-15-1"}
-{"op": "delete", "id": "starbucks-2024-01-15-1"}
-```
+## SDK Features Demonstrated
 
-## Example Output
-
-```
-=== Receipt Storage Service Test ===
-Testing expense tracking with blob storage pattern
-
-1. Deploying receipt storage actor...
-2. Storing receipts from a shopping trip...
-   - Morning coffee at Starbucks...
-   - Weekly groceries at Whole Foods...
-   - Fill up at Shell...
-   - Afternoon coffee...
-
-5. Get spending summary...
-{
-    "status": "ok",
-    "grand_total": 142.57,
-    "by_merchant": {
-        "Whole Foods": {"total": 87.32, "count": 1},
-        "Shell": {"total": 45.0, "count": 1},
-        "Starbucks": {"total": 10.25, "count": 2}
-    }
-}
-```
+| Feature | How It's Used |
+|---------|---------------|
+| `@actor` | Marks `ReceiptStorageService` as actor |
+| `state()` | Defines `receipts` as persistent dict |
+| `@handler()` | Routes store, get, list, summary |
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `receipt_actor.py` | Receipt storage implementation |
-| `build.sh` | Build with componentize-py |
-| `test.sh` | Integration test with sample receipts |
+| `receipt_actor.py` | Receipt storage using SDK |
+| `build.sh` | Build using `plexspaces-py build` |
+| `test.sh` | Integration test |
 
 ## See Also
 
-- [Python WASM Guide](../../README.md)
-- [KeyValue Example](../keyvalue/) - Similar storage pattern
+- [PlexSpaces Python SDK](../../../../sdks/python/README.md) - SDK documentation
+- [SDK Guide](../../../../docs/sdk.md) - Complete SDK reference
+- [Feature Flags Example](../feature_flags/) - Similar CRUD pattern

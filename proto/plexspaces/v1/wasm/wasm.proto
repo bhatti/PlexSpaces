@@ -321,6 +321,20 @@ message WasmConfig {
   // If true, compile module to native code on deployment.
   // Trade-off: Deployment time vs execution speed.
   bool enable_aot = 5;
+
+  // Enable checkpoint/restore durability (load on init, save on terminate).
+  //
+  // Off by default for performance. When true, actor state is loaded from
+  // journal on init and saved on terminate (Cloudflare Durable Objects pattern).
+  bool durability_enabled = 6;
+
+  // Use pre-instantiated instance pool (InstancePool) when spawning actors.
+  //
+  // On by default. When true, runtime may checkout from a per-module pool instead
+  // of instantiating each time (faster spawn when pool has capacity). Requires
+  // deploy-path integration; until then, only engine-level pooling (enable_pooling)
+  // is active for HTTP/deploy.
+  bool use_instance_pool = 7;
 }
 
 // Deploy WASM module request

@@ -80,7 +80,7 @@
 //! // Create in-memory channel with FIFO ordering
 //! let config = ChannelConfig {
 //!     name: "work-queue".to_string(),
-//!     backend: ChannelBackend::ChannelBackendInMemory as i32,
+//!     provider: ChannelProvider::ChannelProviderInMemory as i32,
 //!     capacity: 100,
 //!     delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
 //!     ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -114,7 +114,7 @@
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = ChannelConfig {
 //!     name: "events".to_string(),
-//!     backend: ChannelBackend::ChannelBackendInMemory as i32,
+//!     provider: ChannelProvider::ChannelProviderInMemory as i32,
 //!     capacity: 0, // Unbounded for pub/sub
 //!     delivery: DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
 //!     ..Default::default()

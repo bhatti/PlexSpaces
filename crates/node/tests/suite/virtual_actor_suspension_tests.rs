@@ -4,7 +4,7 @@
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{ActorContext, BehaviorType, BehaviorError, ActorId, Actor as ActorTrait};
-use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, MemoryJournalStorage, StateLoader, JournalResult, JournalError, JournalStorage};
+use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, SqliteJournalStorage, StateLoader, JournalResult, JournalError, JournalStorage};
 use plexspaces_core::Message;
 use plexspaces_node::{Node, NodeBuilder};
 use serde::{Deserialize, Serialize};
@@ -239,7 +239,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     let actor_id: ActorId = "counter-suspend-ask@test-node".to_string();
     
     // Create shared storage for DurabilityFacet (needed to create checkpoint manually)
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let storage_for_checkpoint = storage.clone();
     
     // Register eager virtual actor with DurabilityFacet
@@ -322,7 +322,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
         state_schema_version: 1,
     };
     // Use JournalStorage trait method
-    <MemoryJournalStorage as JournalStorage>::save_checkpoint(&*storage_for_checkpoint, &checkpoint).await.unwrap();
+    JournalStorage::save_checkpoint(&*storage_for_checkpoint, &checkpoint).await.unwrap();
     eprintln!("🟢 [TEST] Created checkpoint with count=1 before suspension (state restoration not yet implemented)");
     
     // Suspend/passivate the actor

@@ -43,13 +43,13 @@ use tokio::time::sleep;
 // Helper to create test config
 fn create_test_config_with_retry_dlq(
     name: &str,
-    backend: ChannelBackend,
+    provider: ChannelProvider,
     max_retries: u32,
     dlq_enabled: bool,
 ) -> ChannelConfig {
     ChannelConfig {
         name: name.to_string(),
-        backend: backend as i32,
+        provider: provider as i32,
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -85,7 +85,7 @@ async fn test_mock_shutdown_stop_accepting_new() {
 
     let config = create_test_config_with_retry_dlq(
         "test-shutdown-new",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -114,7 +114,7 @@ async fn test_mock_shutdown_complete_in_progress() {
 
     let config = create_test_config_with_retry_dlq(
         "test-shutdown-in-progress",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -152,7 +152,7 @@ async fn test_mock_restart_recover_unacked() {
     // Phase 1: Send messages, receive some, don't ACK (simulate crash)
     let config1 = create_test_config_with_retry_dlq(
         "test-restart-recover",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -176,7 +176,7 @@ async fn test_mock_restart_recover_unacked() {
     // In real backends (Redis, SQLite), unacked messages would be recovered
     let config2 = create_test_config_with_retry_dlq(
         "test-restart-recover",
-        ChannelBackend::ChannelBackendCustom,
+        ChannelProvider::ChannelProviderCustom,
         3,
         true,
     );
@@ -204,7 +204,7 @@ mod sqlite_tests {
     async fn create_sqlite_channel(name: &str, db_path: &str) -> SqliteChannel {
         let config = ChannelConfig {
             name: name.to_string(),
-            backend: ChannelBackend::ChannelBackendSqlite as i32,
+            provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: 100,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -371,7 +371,7 @@ mod redis_tests {
     async fn create_redis_channel(name: &str) -> RedisChannel {
         let config = ChannelConfig {
             name: name.to_string(),
-            backend: ChannelBackend::ChannelBackendRedis as i32,
+            provider: ChannelProvider::ChannelProviderRedis as i32,
             capacity: 100,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

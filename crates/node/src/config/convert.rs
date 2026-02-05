@@ -11,9 +11,10 @@ use plexspaces_proto::node::v1::{
 use plexspaces_proto::application::v1::ApplicationSpec;
 use std::collections::HashMap;
 use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
+use plexspaces_proto::channel::v1::ChannelProvider;
 use plexspaces_proto::storage::v1::{
-    BlobConfig, KafkaBackendConfig, MemoryBackendConfig, NatsBackendConfig,
-    RedisBackendConfig, SharedRelationalDbConfig, SqliteBackendConfig, StorageProvider, StorageProviderConfig,
+    BlobConfig, RedisBackendConfig, SharedDbConfig, SqliteBackendConfig, 
+    StorageProvider, StorageProviderConfig,
 };
 
 /// Convert YAML representation to proto ReleaseSpec
@@ -34,24 +35,19 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             metadata: HashMap::new(),
             node_registry: None,
             grpc_address: String::new(),
-            wasm_apps_directory: yaml.node.wasm_apps_directory,
         }),
-        runtime: Some({
-            let runtime_config = RuntimeConfig {
-                grpc: Some(convert_grpc_config(yaml.runtime.grpc)),
-                health: Some(convert_health_config(yaml.runtime.health)),
-                security: Some(convert_security_config(yaml.runtime.security)?),
-                blob: yaml.runtime.blob.map(convert_blob_config),
-                shared_database: yaml.runtime.shared_database.map(convert_shared_db_config),
-                locks_provider: yaml.runtime.locks_provider.map(convert_storage_provider),
-                channel_provider: yaml.runtime.channel_provider.map(convert_storage_provider),
-                tuplespace_provider: yaml.runtime.tuplespace_provider.map(convert_storage_provider),
-                framework_info: None, // Set at runtime
-                ..Default::default() // Include mailbox_provider default until proto is regenerated
-            };
-            // Note: mailbox_provider field will be available after running `buf generate`
-            // For now, Default::default() will set it to None
-            runtime_config
+        runtime: Some(RuntimeConfig {
+            grpc: Some(convert_grpc_config(yaml.runtime.grpc)),
+            health: Some(convert_health_config(yaml.runtime.health)),
+            security: Some(convert_security_config(yaml.runtime.security)?),
+            blob: yaml.runtime.blob.map(convert_blob_config),
+            db: yaml.runtime.db.map(convert_shared_db_config),
+            locks_provider: yaml.runtime.locks_provider.map(convert_storage_provider),
+            channel_provider: parse_channel_provider(&yaml.runtime.channel_provider),
+            mailbox_provider: parse_channel_provider(&yaml.runtime.mailbox_provider),
+            framework_info: None, // Set at runtime
+            base_dir: yaml.runtime.base_dir, // Set by config_manager::initialize if empty
+            wasm_apps_directory: yaml.runtime.wasm_apps_directory, // Set by config_manager::initialize if empty
         }),
         system_applications: yaml.system_applications,
         applications: yaml
@@ -62,6 +58,27 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
         env: yaml.env,
         shutdown: Some(convert_shutdown_config(yaml.shutdown)),
     })
+}
+
+/// Parse channel provider string to ChannelProvider enum value (as i32)
+fn parse_channel_provider(provider: &Option<String>) -> i32 {
+    let provider_str = match provider {
+        Some(s) if !s.is_empty() => s.as_str(),
+        _ => return ChannelProvider::ChannelProviderInMemory as i32,
+    };
+    
+    match provider_str.to_uppercase().as_str() {
+        "IN_MEMORY" | "MEMORY" => ChannelProvider::ChannelProviderInMemory as i32,
+        "REDIS" => ChannelProvider::ChannelProviderRedis as i32,
+        "KAFKA" => ChannelProvider::ChannelProviderKafka as i32,
+        "NATS" => ChannelProvider::ChannelProviderNats as i32,
+        "SQLITE" => ChannelProvider::ChannelProviderSqlite as i32,
+        "POSTGRES" | "POSTGRESQL" => ChannelProvider::ChannelProviderPostgres as i32,
+        "SQS" => ChannelProvider::ChannelProviderSqs as i32,
+        "UDP" => ChannelProvider::ChannelProviderUdp as i32,
+        "PROCESS_GROUP" => ChannelProvider::ChannelProviderProcessGroup as i32,
+        _ => ChannelProvider::ChannelProviderInMemory as i32,
+    }
 }
 
 fn convert_grpc_config(yaml: GrpcConfigYaml) -> GrpcConfig {
@@ -141,7 +158,7 @@ fn convert_security_config(yaml: SecurityConfigYaml) -> Result<SecurityConfig, S
             .into_iter()
             .map(convert_api_key)
             .collect(),
-        disable_auth: false,
+        disable_auth: yaml.disable_auth,
     })
 }
 
@@ -258,7 +275,8 @@ fn convert_application_config(yaml: ApplicationSpecYaml) -> ApplicationSpec {
     });
     
     ApplicationSpec {
-        name: yaml.name,
+        name: yaml.name.clone(),
+        namespace: yaml.name, // Use name as namespace by default
         version: yaml.version,
         description: yaml.description,
         r#type: 0, // Default type
@@ -297,8 +315,8 @@ fn convert_blob_config(yaml: BlobConfigYaml) -> BlobConfig {
     }
 }
 
-fn convert_shared_db_config(yaml: SharedRelationalDbConfigYaml) -> SharedRelationalDbConfig {
-    SharedRelationalDbConfig {
+fn convert_shared_db_config(yaml: SharedRelationalDbConfigYaml) -> SharedDbConfig {
+    SharedDbConfig {
         connection_string: yaml.connection_string,
         pool_size: yaml.pool_size,
         auto_migrate: yaml.auto_migrate,
@@ -323,21 +341,9 @@ fn convert_storage_provider(yaml: StorageProviderConfigYaml) -> StorageProviderC
             Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Sqlite(
                 convert_sqlite_config(sqlite),
             ))
-        } else if let Some(kafka) = yaml.kafka {
-            Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Kafka(
-                convert_kafka_config(kafka),
-            ))
-        } else if let Some(nats) = yaml.nats {
-            Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Nats(
-                convert_nats_config(nats),
-            ))
         } else if let Some(dynamodb) = yaml.dynamodb {
             Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Dynamodb(
                 convert_dynamodb_config(dynamodb),
-            ))
-        } else if let Some(in_memory) = yaml.in_memory {
-            Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Memory(
-                convert_in_memory_config(in_memory),
             ))
         } else {
             None
@@ -347,12 +353,9 @@ fn convert_storage_provider(yaml: StorageProviderConfigYaml) -> StorageProviderC
 
 fn parse_storage_provider_type(s: &str) -> StorageProvider {
     match s.to_uppercase().as_str() {
-        "STORAGE_PROVIDER_MEMORY" | "MEMORY" => StorageProvider::StorageProviderMemory,
         "STORAGE_PROVIDER_SQLITE" | "SQLITE" => StorageProvider::StorageProviderSqlite,
         "STORAGE_PROVIDER_POSTGRES" | "POSTGRES" => StorageProvider::StorageProviderPostgres,
         "STORAGE_PROVIDER_REDIS" | "REDIS" => StorageProvider::StorageProviderRedis,
-        "STORAGE_PROVIDER_KAFKA" | "KAFKA" => StorageProvider::StorageProviderKafka,
-        "STORAGE_PROVIDER_NATS" | "NATS" => StorageProvider::StorageProviderNats,
         "STORAGE_PROVIDER_DYNAMODB" | "DYNAMODB" => StorageProvider::StorageProviderDynamodb,
         _ => StorageProvider::StorageProviderUnspecified,
     }
@@ -376,40 +379,6 @@ fn convert_sqlite_config(yaml: SqliteBackendConfigYaml) -> SqliteBackendConfig {
     }
 }
 
-fn convert_kafka_config(yaml: KafkaBackendConfigYaml) -> KafkaBackendConfig {
-    use plexspaces_proto::storage::v1::kafka_backend_config::{CompressionType, ProducerAcks};
-    KafkaBackendConfig {
-        brokers: yaml.brokers,
-        topic: yaml.topic_prefix,  // Use topic_prefix as topic
-        consumer_group: yaml.consumer_group_prefix,  // Use consumer_group_prefix as consumer_group
-        partitions: yaml.partitions,
-        replication_factor: yaml.replication_factor,
-        compression: CompressionType::CompressionTypeNone as i32,  // Default: no compression
-        acks: ProducerAcks::ProducerAcksAll as i32,  // Default: wait for all replicas
-        batch_size: 16384,  // Default: 16KB batch size
-        linger_ms: None,  // Default: no batching delay
-    }
-}
-
-fn convert_nats_config(yaml: NatsBackendConfigYaml) -> NatsBackendConfig {
-    let subject = yaml.subject_prefix.clone();
-    let queue_group = yaml.queue_group_prefix.clone();
-    NatsBackendConfig {
-        servers: yaml.servers,
-        subject: subject.clone(),  // Use subject_prefix as subject
-        queue_group: queue_group.clone(),  // Use queue_group_prefix as queue_group
-        jetstream_enabled: yaml.jetstream_enabled,
-        jetstream_stream: format!("plexspaces-{}", subject),  // Default stream name
-        jetstream_consumer: format!("plexspaces-consumer-{}", queue_group),  // Default consumer name
-        connect_timeout: None,  // Default: no timeout
-        reconnect_attempts: 10,  // Default: 10 attempts
-        tls_enabled: false,  // Default: TLS disabled
-        tls_cert_path: String::new(),  // Default: no cert path
-        tls_key_path: String::new(),  // Default: no key path
-        tls_ca_path: String::new(),  // Default: no CA path
-    }
-}
-
 fn convert_dynamodb_config(yaml: DynamoDbBackendConfigYaml) -> plexspaces_proto::storage::v1::DynamoDbBackendConfig {
     plexspaces_proto::storage::v1::DynamoDbBackendConfig {
         region: yaml.region,
@@ -417,12 +386,6 @@ fn convert_dynamodb_config(yaml: DynamoDbBackendConfigYaml) -> plexspaces_proto:
         endpoint_url: yaml.endpoint_url,
         access_key_id: yaml.access_key_id,
         secret_access_key: yaml.secret_access_key,
-    }
-}
-
-fn convert_in_memory_config(yaml: InMemoryBackendConfigYaml) -> MemoryBackendConfig {
-    MemoryBackendConfig {
-        initial_capacity: yaml.capacity as u32,
     }
 }
 

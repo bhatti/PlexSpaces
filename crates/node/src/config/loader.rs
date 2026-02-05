@@ -119,29 +119,6 @@ impl ConfigLoader {
         Ok(spec)
     }
 
-    /// Load ReleaseSpec with environment variable precedence
-    ///
-    /// ## Purpose
-    /// Loads config from file, then applies environment variable overrides.
-    /// Environment variables take precedence over file config.
-    ///
-    /// ## Environment Variable Naming
-    /// Uses dot notation for nested fields:
-    /// - `PLEXSPACES_NODE_ID` → `node.id`
-    /// - `PLEXSPACES_RUNTIME_GRPC_ADDRESS` → `runtime.grpc.address`
-    pub async fn load_release_spec_with_env_precedence(
-        &self,
-        path: &str,
-    ) -> Result<ReleaseSpec, ConfigLoaderError> {
-        // Load base config from file
-        let mut spec = self.load_release_spec(path).await?;
-
-        // Apply environment variable overrides
-        self.apply_env_overrides(&mut spec)?;
-
-        Ok(spec)
-    }
-
     /// Substitute environment variables in YAML content
     ///
     /// Supports:
@@ -179,43 +156,6 @@ impl ConfigLoader {
         }
 
         Ok(result)
-    }
-
-    /// Apply environment variable overrides to ReleaseSpec
-    ///
-    /// Environment variables override file config values.
-    fn apply_env_overrides(&self, spec: &mut ReleaseSpec) -> Result<(), ConfigLoaderError> {
-        // Node ID override
-        if let Ok(node_id) = env::var("PLEXSPACES_NODE_ID") {
-            if let Some(ref mut node) = spec.node {
-                node.id = node_id;
-            }
-        }
-
-        // Node listen address override
-        if let Ok(listen_addr) = env::var("PLEXSPACES_LISTEN_ADDR") {
-            if let Some(ref mut node) = spec.node {
-                node.listen_addr = listen_addr;
-            }
-        }
-
-        // gRPC address override
-        if let Ok(grpc_addr) = env::var("PLEXSPACES_GRPC_ADDRESS") {
-            if let Some(ref mut runtime) = spec.runtime {
-                if let Some(ref mut grpc) = runtime.grpc {
-                    grpc.address = grpc_addr;
-                }
-            }
-        }
-
-        // WASM apps directory override (Tomcat-style auto-deploy)
-        if let Ok(wasm_apps_dir) = env::var("PLEXSPACES_WASM_APPS_DIR") {
-            if let Some(ref mut node) = spec.node {
-                node.wasm_apps_directory = wasm_apps_dir;
-            }
-        }
-
-        Ok(())
     }
 
     /// Validate security configuration in YAML content (before substitution)

@@ -44,8 +44,23 @@ use prost::Message as ProstMessage;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::RwLock;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, sleep, Duration};
 use tracing::{error, info, warn};
+
+/// Max retries for lease operations when backend returns transient database errors.
+const LEASE_RETRY_MAX: u32 = 3;
+const LEASE_RETRY_BACKOFF: Duration = Duration::from_secs(1);
+
+/// Check if error is a transient database error (readonly, locked, etc.)
+fn is_transient_db_error(e: &str) -> bool {
+    let lower = e.to_lowercase();
+    lower.contains("readonly") 
+        || lower.contains("read-only") 
+        || lower.contains("attempt to write")
+        || lower.contains("database is locked")
+        || lower.contains("code: 517")  // SQLite SQLITE_BUSY
+        || lower.contains("code: 8")    // SQLite SQLITE_READONLY
+}
 
 /// Error types for background scheduler
 #[derive(Debug, thiserror::Error)]
@@ -224,7 +239,7 @@ impl BackgroundScheduler {
                     Ok(())
                 }
                 Err(e) => {
-                    warn!("Failed to renew lease: {}", e);
+                    // Error logged at call site with retry count
                     Err(BackgroundSchedulerError::LockError(e.to_string()))
                 }
             }
@@ -282,28 +297,53 @@ impl BackgroundScheduler {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        match scheduler.renew_lease().await {
-                            Ok(()) => {
-                                // Success - continue
-                            }
-                            Err(e) => {
-                                warn!("Failed to renew lease: {}", e);
-                                // Try to re-acquire lease (lease may have expired)
-                                match scheduler.acquire_lease().await {
-                                    Ok(new_lease) => {
-                                        info!("Re-acquired lease after expiration");
-                                        {
-                                            let mut current = scheduler.current_lease.write().await;
-                                            *current = Some(new_lease);
-                                        }
-                                        // Continue with renewed lease
-                                    }
-                                    Err(acquire_err) => {
-                                        error!("Failed to re-acquire lease: {}", acquire_err);
-                                        // Stop worker - cannot continue without lease
+                        let mut renew_result = scheduler.renew_lease().await;
+                        let mut renew_attempts = 1u32;
+                        for attempt in 1..=LEASE_RETRY_MAX {
+                            match &renew_result {
+                                Ok(()) => break,
+                                Err(e) => {
+                                    let err_str = e.to_string();
+                                    if is_transient_db_error(&err_str) && attempt < LEASE_RETRY_MAX {
+                                        warn!("Failed to renew lease (try {}/{}): {}", attempt, LEASE_RETRY_MAX, err_str);
+                                        sleep(LEASE_RETRY_BACKOFF).await;
+                                        renew_result = scheduler.renew_lease().await;
+                                        renew_attempts = attempt + 1;
+                                    } else {
                                         break;
                                     }
                                 }
+                            }
+                        }
+                        if let Err(e) = renew_result {
+                            error!("Failed to renew lease (try {}/{}): {}", renew_attempts, LEASE_RETRY_MAX, e);
+                            let mut acquire_result = scheduler.acquire_lease().await;
+                            let mut acquire_attempts = 1u32;
+                            for attempt in 1..=LEASE_RETRY_MAX {
+                                match &acquire_result {
+                                    Ok(new_lease) => {
+                                        info!("Re-acquired lease after expiration");
+                                        let mut current = scheduler.current_lease.write().await;
+                                        *current = Some(new_lease.clone());
+                                        break;
+                                    }
+                                    Err(acquire_err) => {
+                                        let err_str = acquire_err.to_string();
+                                        if is_transient_db_error(&err_str) && attempt < LEASE_RETRY_MAX {
+                                            warn!("Failed to re-acquire lease (try {}/{}): {}", attempt, LEASE_RETRY_MAX, err_str);
+                                            sleep(LEASE_RETRY_BACKOFF).await;
+                                            acquire_result = scheduler.acquire_lease().await;
+                                            acquire_attempts = attempt + 1;
+                                        } else {
+                                            error!("Failed to re-acquire lease (try {}/{}): {}", attempt, LEASE_RETRY_MAX, acquire_err);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if let Err(acquire_err) = acquire_result {
+                                error!("Failed to re-acquire lease (try {}/{}): {}", acquire_attempts, LEASE_RETRY_MAX, acquire_err);
+                                break;
                             }
                         }
                     }
@@ -422,14 +462,14 @@ impl BackgroundScheduler {
 // Note: BackgroundScheduler needs to be Clone for moving into tasks
 // But we can't derive Clone because of trait objects. We'll use Arc instead.
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite-backend"))]
 mod tests {
     use super::*;
-    use crate::state_store::memory::MemorySchedulingStateStore;
+    use crate::state_store::sql::SqliteSchedulingStateStore;
     use plexspaces_channel::InMemoryChannel;
-    use plexspaces_locks::memory::MemoryLockManager;
-    use plexspaces_object_registry::ObjectRegistry;
-    use plexspaces_keyvalue::InMemoryKVStore;
+    use plexspaces_core::ObjectRegistry;
+    use plexspaces_locks::sql::SqliteLockManager;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::channel::v1::ChannelConfig;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -437,19 +477,19 @@ mod tests {
 
     async fn create_test_scheduler() -> (
         Arc<BackgroundScheduler>,
-        Arc<MemoryLockManager>,
-        Arc<MemorySchedulingStateStore>,
+        Arc<SqliteLockManager>,
+        Arc<SqliteSchedulingStateStore>,
         Arc<dyn Channel>,
     ) {
-        let lock_manager = Arc::new(MemoryLockManager::new());
-        let state_store = Arc::new(MemorySchedulingStateStore::new());
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
+        let state_store = Arc::new(SqliteSchedulingStateStore::new(":memory:").await.unwrap());
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
 
         let channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            backend: plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 100,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -481,8 +521,8 @@ mod tests {
     #[tokio::test]
     async fn test_acquire_lease_already_held() {
         let (scheduler1, lock_manager, state_store, channel) = create_test_scheduler().await;
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
         let scheduler2 = Arc::new(BackgroundScheduler::new(
             "test-node-2".to_string(),

@@ -125,7 +125,7 @@ async fn create_test_registry_with_node(
     use async_trait::async_trait;
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_object_registry::ObjectRegistry;
-    use plexspaces_keyvalue::InMemoryKVStore;
+    use plexspaces_object_registry::SqliteObjectRegistryRepository;
     use plexspaces_proto::object_registry::v1::{ObjectRegistration as ProtoObjectRegistration, ObjectType, ObjectRegistration};
 
     // Simple wrapper to adapt ObjectRegistry to ObjectRegistryTrait
@@ -213,8 +213,8 @@ async fn create_test_registry_with_node(
         }
     }
 
-    let kv = Arc::new(InMemoryKVStore::new());
-    let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
+    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
 
     // Register node as a service object (nodes are registered as services)
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
@@ -264,7 +264,7 @@ async fn register_test_actor(
         service_locator,
     ));
     let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+    actor_registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
 }
 
 /// Helper to start a test gRPC server
@@ -501,7 +501,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
         node1_service_locator.clone(),
     ));
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
-    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
+    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None, None).await;
     
     // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
     let mailbox_counter_clone = mailbox_counter.clone();
@@ -621,7 +621,7 @@ async fn test_chained_asks_multi_node() {
         node1_service_locator.clone(),
     ));
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
-    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
+    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None, None).await;
     
     // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
     let mailbox_counter_clone = mailbox_counter.clone();
@@ -739,7 +739,7 @@ async fn test_concurrent_asks_multi_node() {
         node1_service_locator.clone(),
     ));
     let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
-    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None).await;
+    actor_registry1.register_actor(&ctx, counter_id.clone(), sender_counter, None, None, None, None).await;
     
     // Spawn task to handle messages and reply via ActorRegistry (simpler and more robust)
     let mailbox_counter_clone = mailbox_counter.clone();

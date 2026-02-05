@@ -118,13 +118,13 @@ mod tests {
             health: None,
             security: Some(security_config),
             blob: None,
-            shared_database: None,
+            db: None,
             locks_provider: None,
-            channel_provider: None,
-            tuplespace_provider: None,
-            mailbox_provider: None,
-            journaling_provider: None,
+            channel_provider: 0,
+            mailbox_provider: 0,
             framework_info: None,
+            base_dir: String::new(),
+            wasm_apps_directory: String::new(),
         };
 
         assert!(runtime_config.security.is_some());
@@ -152,13 +152,13 @@ mod tests {
             health: None,
             security: Some(security_config),
             blob: None,
-            shared_database: None,
+            db: None,
             locks_provider: None,
-            channel_provider: None,
-            tuplespace_provider: None,
-            mailbox_provider: None,
-            journaling_provider: None,
+            channel_provider: 0,
+            mailbox_provider: 0,
             framework_info: None,
+            base_dir: String::new(),
+            wasm_apps_directory: String::new(),
         };
 
         let release_spec = ReleaseSpec {

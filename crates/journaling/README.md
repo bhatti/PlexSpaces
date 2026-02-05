@@ -17,10 +17,9 @@ This crate implements **Pillar 3: Durability** (Restate-inspired) of the PlexSpa
                           v
 ┌─────────────────────────────────────────────────────────────────┐
 │ JournalStorage Trait (this crate)                              │
-│   ├─ MemoryJournalStorage   (testing)                          │
+│   ├─ SqliteJournalStorage   (edge/testing with :memory:)       │
 │   ├─ PostgresJournalStorage (production)                       │
-│   ├─ RedisJournalStorage    (distributed)                      │
-│   └─ SqliteJournalStorage   (edge)                             │
+│   └─ RedisJournalStorage    (distributed)                      │
 └─────────────────────────────────────────────────────────────────┘
                           │
                           v
@@ -85,20 +84,16 @@ pub struct DurabilityFacet {
 
 ## Backend Implementations
 
-### MemoryJournalStorage
-
-In-memory storage for testing:
-
-```rust
-let storage = MemoryJournalStorage::new();
-```
-
 ### SqliteJournalStorage
 
-SQLite backend for edge deployments:
+SQLite backend for edge deployments and testing (use `:memory:` for in-memory storage):
 
 ```rust
+// For testing (in-memory, non-persistent)
 let storage = SqliteJournalStorage::new(":memory:").await?;
+
+// For edge/single-node (persistent)
+let storage = SqliteJournalStorage::new("/var/lib/plexspaces/journal.db").await?;
 ```
 
 ### PostgresJournalStorage
@@ -119,14 +114,15 @@ let storage = RedisJournalStorage::new("redis://localhost:6379").await?;
 
 ## Usage Examples
 
-### Basic Usage (Memory Backend)
+### Basic Usage (In-Memory SQLite Backend)
 
 ```rust
 use plexspaces_journaling::*;
 use plexspaces_proto::prost_types;
 
 // Create in-memory journal (for testing)
-let storage = MemoryJournalStorage::new();
+// Uses SQLite's :memory: mode for fast, non-persistent storage
+let storage = SqliteJournalStorage::new(":memory:").await?;
 
 // Create journal entry with MessageReceived
 let entry = JournalEntry {

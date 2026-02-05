@@ -69,7 +69,7 @@ fn create_test_config(name: &str) -> ChannelConfig {
 
     ChannelConfig {
         name: name.to_string(),
-        backend: ChannelBackend::ChannelBackendRedis as i32,
+        provider: ChannelProvider::ChannelProviderRedis as i32,
         capacity: 100,
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

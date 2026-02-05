@@ -294,7 +294,7 @@ cargo run -p plexspaces-cli -- deploy \
     -w examples/python/apps/my_actor/my_actor.wasm
 
 # Send message (POST = fire-and-forget)
-curl -X POST "http://localhost:8091/api/v1/actors/internal/system/my-actor" \
+curl -X POST "http://localhost:8091/api/v1/actors/{namespace}/{actor-type}" \
     -H "Content-Type: application/json" \
     -d '{"operation": "ping"}'
 ```
@@ -310,10 +310,35 @@ curl -X POST "http://localhost:8091/api/v1/actors/internal/system/my-actor" \
 
 ## Examples
 
-| Example | Description |
-|---------|-------------|
-| `apps/calculator/` | Calculator with add/subtract/multiply/divide |
-| `apps/counter/` | Simple counter (planned) |
+### SDK Examples (Recommended)
+
+The [PlexSpaces Python SDK](../../docs/sdk.md) provides decorator-based actor development with minimal boilerplate:
+
+| Example | Description | Features | Status |
+|---------|-------------|----------|--------|
+| `apps/bank_account/` | Bank account with durability | `@actor(facets=["durability"])`, state(), checkpoint via WasmConfig.durability_enabled | ✅ Complete (2.2) |
+| `apps/payment_handler/` | Payment microservice | GenServer, KV idempotency, locks, `@gen_server_actor(facets=["durability"])` | ✅ Complete (2.5 microservices) |
+| `apps/job_processing/` | Distributed job processing | TupleSpace scatter/gather, ts_write/ts_take/ts_read_all | ✅ Complete (2.5 MPI-like) |
+| `apps/cdn_cache/` | Blob storage for assets | blob_upload/download/list/delete, MinIO/S3 | ✅ Complete (2.7) |
+| `apps/leader_election/` | **Locks (2.8)** | host.lock_acquire/lock_release, leader election (cron singleton, task scheduler) | ✅ Complete |
+| `apps/audit_log/` | Event-driven audit log | @event_actor, host.log | Pending (2.3) |
+| `apps/feature_flags/` | Gradual rollout | KV, consistent hashing | Pending |
+| `apps/fsm/` | Order workflow state machine | State transitions, @fsm_actor | Pending (2.6) |
+| `apps/registry/` | Service discovery | RegistryFacet | Pending (2.4) |
+| `apps/calculator/` | Simple math operations | @handler with multiple ops | Existing (not in reorg plan) |
+| `apps/receipt_storage/` | Expense tracking | CRUD, filtering, aggregation | Pending |
+| `apps/chat_room/` | Real-time chat | ProcessGroups, pub/sub | Pending |
+| `apps/task-queue/` | Distributed task queue | LockFacet, heartbeats | Pending |
+| `apps/nbody/` | Physics simulation | Multi-actor coordination | Pending |
+
+**Durability facet (WASM):** Use `@actor(facets=["durability"])` in Python; enable checkpoint persistence via `durability_enabled: true` in release.yaml or app-config. See [Durability: Durability Facet Parameter](docs/durability.md#durability-facet-parameter-python-sdk).
+
+**Quick Start:**
+```bash
+cd apps/bank_account
+./build.sh           # Build WASM
+./test.sh 8092       # Test (server must be running on port 8091)
+```
 
 ## Troubleshooting
 

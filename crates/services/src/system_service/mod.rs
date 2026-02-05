@@ -727,8 +727,6 @@ mod tests {
             dependency_registration: Some(DependencyRegistrationConfig {
                 enabled: false,
                 dependencies: vec![],
-                default_namespace: String::new(),
-                default_tenant: String::new(),
             }),
             ..Default::default()
         };
@@ -751,8 +749,6 @@ mod tests {
             dependency_registration: Some(DependencyRegistrationConfig {
                 enabled: false,
                 dependencies: vec![],
-                default_namespace: String::new(),
-                default_tenant: String::new(),
             }),
             ..Default::default()
         };
@@ -776,8 +772,6 @@ mod tests {
             dependency_registration: Some(DependencyRegistrationConfig {
                 enabled: false,
                 dependencies: vec![],
-                default_namespace: String::new(),
-                default_tenant: String::new(),
             }),
             ..Default::default()
         };
@@ -804,8 +798,6 @@ mod tests {
             dependency_registration: Some(DependencyRegistrationConfig {
                 enabled: false,
                 dependencies: vec![],
-                default_namespace: String::new(),
-                default_tenant: String::new(),
             }),
             ..Default::default()
         };
@@ -839,8 +831,6 @@ mod tests {
             dependency_registration: Some(DependencyRegistrationConfig {
                 enabled: false,
                 dependencies: vec![],
-                default_namespace: String::new(),
-                default_tenant: String::new(),
             }),
             ..Default::default()
         };

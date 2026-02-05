@@ -491,7 +491,7 @@ impl ActorRef {
             drop(waiters); // Release lock before notifying
             if waiter.notify(reply).await.is_ok() {
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("ActorRef::try_notify_reply_waiter: Notified waiter for correlation_id: {}", correlation_id);
+                    tracing::trace!("ActorRef::try_notify_reply_waiter: Notified waiter for correlation_id: {}", correlation_id);
                 }
                 return true;
             }
@@ -752,12 +752,6 @@ impl ActorRef {
         if message.id.is_empty() {
             use ulid::Ulid;
             message.id = Ulid::new().to_string();
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    "[TELL] Generated message_id: {} for message without ID",
-                    message.id
-                );
-            }
         }
 
         // VALIDATION: Check for self-messaging (sender == receiver)
@@ -791,9 +785,9 @@ impl ActorRef {
             );
         }
 
-        // OBSERVABILITY: Tracing span for tell
+        // OBSERVABILITY: Tracing span for tell (TRACE to reduce log noise)
         let span = tracing::span!(
-            tracing::Level::DEBUG,
+            tracing::Level::TRACE,
             "actor_ref.tell",
             actor_id = %actor_id,
             message_type = %message_type,
@@ -803,13 +797,6 @@ impl ActorRef {
         );
         let _guard = span.enter();
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "[TELL] START: actor_ref_id={}, message_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}",
-                actor_id, message.id, message.sender_id, message.receiver_id, message_type, message.correlation_id
-            );
-        }
-
         // VIRTUAL ACTOR CHECK: For lazy virtual actors, ensure they're activated before sending
         // This handles the case where lookup_actor_ref() creates an ActorRef from a lazy virtual actor's mailbox
         // but the actor isn't active yet. We need to trigger activation via VirtualActorWrapper.
@@ -818,10 +805,6 @@ impl ActorRef {
         if let Some(manager) = self.service_locator().virtual_actor_manager().await {
             let is_virtual = manager.is_virtual(&actor_id).await;
             let is_active = manager.is_active(&actor_id).await;
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!("[TELL] Virtual actor check: actor_id={}, is_virtual={}, is_active={}", actor_id, is_virtual, is_active);
-            }
-            
             if is_virtual && !is_active {
                 // Lazy virtual actor that isn't active - use VirtualActorWrapper to trigger activation
                 // Get VirtualActorWrapper from registry (it should be there for lazy virtual actors)
@@ -829,9 +812,6 @@ impl ActorRef {
                 if let Some(registry) = self.service_locator().actor_registry().await {
                     if let Some(virtual_wrapper) = registry.lookup_actor(&actor_id).await {
                         // VirtualActorWrapper will handle activation and message delivery
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!("[TELL] Lazy virtual actor not active, routing via VirtualActorWrapper: actor_id={}", actor_id);
-                        }
                         return virtual_wrapper.tell(message).await
                             .map_err(|e| ActorRefError::SendFailed(format!("VirtualActorWrapper.tell() failed: {}", e)));
                     } else {
@@ -871,8 +851,8 @@ impl ActorRef {
                         );
                     }
                     if waiter_registry.notify(corr_id, message_clone).await {
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(
+                        if tracing::enabled!(tracing::Level::TRACE) {
+                            tracing::trace!(
                                 "[TELL] REPLY TO TEMPORARY SENDER ROUTED: correlation_id={}, receiver={}",
                                 corr_id, message.receiver_id
                             );
@@ -943,8 +923,8 @@ impl ActorRef {
                         );
                         ActorRefError::SendFailed(format!("Mailbox send failed: {}", e))
                     });
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
                     "[TELL] MAILBOX SEND SUCCESS: actor_ref_id={}, sender={:?}, receiver={}",
                     actor_id, msg_sender, msg_receiver
                     );
@@ -1190,9 +1170,9 @@ impl ActorRef {
         let message_type = message.message_type.clone();
         let start = std::time::Instant::now();
 
-        // OBSERVABILITY: Tracing span for ask
+        // OBSERVABILITY: Tracing span for ask (TRACE to reduce log noise)
         let span = tracing::span!(
-            tracing::Level::DEBUG,
+            tracing::Level::TRACE,
             "actor_ref.ask",
             actor_id = %actor_id,
             message_type = %message_type,
@@ -1206,19 +1186,6 @@ impl ActorRef {
         if message.id.is_empty() {
             use ulid::Ulid;
             message.id = Ulid::new().to_string();
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                "🔵 [ASK] Generated message_id: {} for message without ID",
-                message.id
-            );
-            }
-        }
-
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-            "🔵 [ASK] START: caller_actor_ref_id={}, target_actor_id={}, message_id={}, message_type={}, sender={:?}, receiver={}, correlation_id={:?}",
-            actor_id, message.receiver_id, message.id, message_type, message.sender_id, message.receiver_id, message.correlation_id
-        );
         }
 
         let result = match &self.inner {
@@ -1226,13 +1193,6 @@ impl ActorRef {
                 // LOCAL PATH: Use ReplyWaiterRegistry (global registry) for all cases
                 // Generate unique correlation_id for this request
                 let correlation_id = Ulid::new().to_string();
-
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                    "🔵 [ASK] LOCAL PATH: Generated correlation_id={}, caller_actor_ref_id={}, target_actor_id={}",
-                    correlation_id, actor_id, message.receiver_id
-                );
-                }
 
                 // Create reply waiter (like Erlang temporary process, Akka temporary actor)
                 let waiter = ReplyWaiter::new();
@@ -1246,12 +1206,6 @@ impl ActorRef {
                 // but reply is routed to caller's ActorRef)
                 if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
                     waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                        "🔵 [ASK] Registered ReplyWaiter in ReplyWaiterRegistry: correlation_id={}, caller_actor_id={:?}, target_actor_id={}",
-                        correlation_id, message.sender_id, actor_id
-                    );
-                    }
                 } else {
                     // Fallback: Store on self if ReplyWaiterRegistry not available (shouldn't happen in production)
                     tracing::warn!(
@@ -1265,16 +1219,6 @@ impl ActorRef {
                 // Production-grade: ask() on ActorRef targets that actor
                 if message.receiver_id.is_empty() {
                     message.receiver_id = actor_id.clone();
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                        "🔵 [ASK] Message receiver was unset, set to ActorRef.id: {}",
-                        actor_id
-                    );
-                    }
-                } else {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!("🔵 [ASK] Message receiver already set: {}", message.receiver_id);
-                    }
                 }
                 
                 // CRITICAL: Always override sender to temporary sender ID for ask() pattern
@@ -1291,13 +1235,6 @@ impl ActorRef {
                 // Override sender to temporary sender ID (CRITICAL for reply routing)
                 let old_sender = message.sender_id.clone();
                 message.sender_id = temp_sender_id.clone();
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                    "🔵 [ASK] Overriding sender to temporary sender ID: old_sender={}, new_sender={}, correlation_id={}",
-                    old_sender, temp_sender_id, correlation_id
-                );
-                }
-                
                 // Set correlation_id in message for reply routing
                 message.correlation_id = correlation_id.clone();
                 
@@ -2118,7 +2055,7 @@ mod tests {
             let ctx = RequestContext::new_without_auth(String::new(), String::new())
                 .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-            registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None).await;
+            registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None, None).await;
         }
 
         let message = create_test_message(b"hello".to_vec());
@@ -2221,7 +2158,7 @@ impl MockActorService {
             let ctx = RequestContext::new_without_auth(String::new(), String::new())
                 .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref1.clone());
-            registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None).await;
+            registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None, None).await;
         }
         
         // Clone it
@@ -2342,7 +2279,7 @@ impl MockActorService {
             let ctx = RequestContext::new_without_auth(String::new(), String::new())
                 .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-            registry.register_actor(&ctx, "target-actor@node1".to_string(), sender, None, None, None).await;
+            registry.register_actor(&ctx, "target-actor@node1".to_string(), sender, None, None, None, None).await;
         }
         
         let message = create_test_message(b"hello".to_vec());
@@ -2444,7 +2381,7 @@ impl MockActorService {
             let ctx = RequestContext::new_without_auth(String::new(), String::new())
                 .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(target_ref.clone());
-            registry.register_actor(&ctx, "target@node1".to_string(), sender, None, None, None).await;
+            registry.register_actor(&ctx, "target@node1".to_string(), sender, None, None, None, None).await;
         }
 
         // Send reply message with correlation_id (simulating reply from another actor)
@@ -2621,7 +2558,7 @@ impl MockActorService {
             let ctx = RequestContext::new_without_auth(String::new(), String::new())
                 .with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref1.clone());
-            registry.register_actor(&ctx, "actor@node1".to_string(), sender, None, None, None).await;
+            registry.register_actor(&ctx, "actor@node1".to_string(), sender, None, None, None, None).await;
         }
         
         actor_ref1.tell(create_test_message(b"local".to_vec())).await.unwrap();

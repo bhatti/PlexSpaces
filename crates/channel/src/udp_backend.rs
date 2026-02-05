@@ -46,7 +46,7 @@ use tracing::{debug, info};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelStats, UdpConfig,
+    channel_config, ChannelProvider, ChannelConfig, ChannelStats, UdpConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
@@ -100,10 +100,10 @@ impl UdpChannel {
     /// - [`ChannelError::BackendError`]: Failed to bind socket or join multicast group
     pub async fn new(config: ChannelConfig) -> ChannelResult<Self> {
         // Validate backend
-        if config.backend() != ChannelBackend::ChannelBackendUdp {
+        if config.provider() != ChannelProvider::ChannelProviderUdp {
             return Err(ChannelError::InvalidConfiguration(format!(
                 "Invalid backend for UdpChannel: {:?}",
-                config.backend()
+                config.provider()
             )));
         }
 
@@ -502,7 +502,7 @@ impl Channel for UdpChannel {
     async fn get_stats(&self) -> ChannelResult<ChannelStats> {
         Ok(ChannelStats {
             name: self.config.name.clone(),
-            backend: ChannelBackend::ChannelBackendUdp as i32,
+            provider: ChannelProvider::ChannelProviderUdp as i32,
             messages_sent: self.stats.messages_sent.load(Ordering::Relaxed),
             messages_received: self.stats.messages_received.load(Ordering::Relaxed),
             messages_pending: 0, // UDP has no queue

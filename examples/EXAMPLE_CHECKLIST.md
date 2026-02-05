@@ -22,10 +22,9 @@ All examples are run with: `cargo run --bin <name> -- [options]`
 | reminders | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | process_groups_pubsub | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | firecracker_multi_tenant | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| timeseries_forecasting | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| faas_actor | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| polyglot_wasm_deployment | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| config_updates | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| timeseries_forecasting | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | 📋 Reviewed (fix deferred) |
+| webhook_handler | ✅ | ✅ | ✅ | ⏳ | ⏳ | ✅ | ✅ |
+| chat_room | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 
 ### Intermediate Examples
 
@@ -98,7 +97,8 @@ Actors to deploy to empty node.
 
 | Actor | Loads | Runs | Output | APIs OK |
 |-------|-------|------|--------|---------|
-| greeter.ts | ⏳ | ⏳ | ⏳ | ⏳ |
+| greeter (greeter.ts) | ⏳ | ⏳ | ⏳ | ⏳ |
+| bank_account (account_actor.ts) | ⏳ | ⏳ | ⏳ | ⏳ |
 | body.ts | ⏳ | ⏳ | ⏳ | ⏳ |
 | market_feed_subscriber.ts | ⏳ | ⏳ | ⏳ | ⏳ |
 
@@ -155,3 +155,4 @@ cargo run --bin actor_groups_sharding -- -v
 5. [ ] Test --size (small/medium/large) flag
 6. [ ] Test --test flag for quick validation
 7. [ ] Review APIs for deprecated usage
+8. [ ] **TODO**: Update remaining examples that use `InMemoryKVStore` to `SqliteKVStore::new(":memory:")` with keyvalue `sql-backend`: `wasm_showcase` (see PROJECT_TRACKER.md). Done: `chat_room`, `feature_flags`, `mpi_collectives`.

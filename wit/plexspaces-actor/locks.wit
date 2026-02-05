@@ -2,41 +2,44 @@
 //
 // Provides distributed lock/lease coordination for background schedulers and
 // other coordination tasks. Uses version-based optimistic locking for atomic operations.
+//
+// All operations require tenant-id and namespace (via ctx) for isolation.
+// Only the holder (holder-id) that acquired the lock can renew or release it.
 
 interface locks {
     use types.{payload, actor-error, duration-ms, context};
 
-    /// Lock metadata
+    /// Lock metadata (returned from acquire/renew/get-lock)
     record lock {
-        /// Lock key
+        /// Lock key (unique id / lock name)
         lock-key: string,
-        /// Current holder ID
+        /// Current holder ID (only this identity can renew/release)
         holder-id: string,
-        /// Lock version (for optimistic locking)
+        /// Lock version (for optimistic locking; required for renew/release)
         version: string,
         /// Whether lock is currently held
         locked: bool,
+        /// Lease duration in seconds
+        lease-duration-secs: u32,
         /// Lock expiration timestamp (Unix epoch milliseconds)
         expires-at: u64,
         /// Last heartbeat timestamp (Unix epoch milliseconds)
         last-heartbeat: u64,
     }
 
-    /// Acquire a lock (atomic operation)
+    /// Acquire a lock (atomic operation).
     ///
-    /// If lock doesn't exist: Create lock with new version.
-    /// If lock exists and expired: Acquire lock with new version.
-    /// If lock exists and not expired: Return error if held by different holder.
+    /// Requires: tenant-id and namespace (ctx), lock-key (lock name), holder-id, lease-duration.
+    /// Returns: full lock record (id, version, holder-id, expires-at, etc.) or error.
     ///
     /// # Arguments
-    /// - `lock-key`: Unique lock identifier
-    /// - `holder-id`: Identifier for the lock holder (e.g., actor ID, node ID)
+    /// - `ctx`: Request context; supplies tenant-id and namespace (required; empty string for default)
+    /// - `lock-key`: Unique lock identifier (lock name)
+    /// - `holder-id`: Identifier for the lock holder (required; only this identity can renew/release)
     /// - `lease-duration-ms`: Lock lease duration in milliseconds
-    /// - `tenant-id`: Tenant ID (required, empty string for default)
-    /// - `namespace`: Namespace (required, empty string for default)
     ///
     /// # Returns
-    /// - `ok(lock)`: Lock acquired successfully
+    /// - `ok(lock)`: Lock acquired successfully (id=lock-key, version, holder-id, etc.)
     /// - `err`: Acquire failed (lock already held, backend error)
     acquire: func(
         ctx: context,
@@ -45,19 +48,20 @@ interface locks {
         lease-duration-ms: duration-ms
     ) -> result<lock, actor-error>;
 
-    /// Renew a lock (heartbeat mechanism)
+    /// Renew a lock (heartbeat mechanism).
     ///
-    /// Validates version matches current lock version and updates expiration timestamp.
+    /// Requires: tenant-id and namespace (ctx), lock-key (id), holder-id, version.
     ///
     /// # Arguments
-    /// - `lock-key`: Lock identifier
-    /// - `holder-id`: Lock holder identifier
+    /// - `ctx`: Request context (tenant-id, namespace)
+    /// - `lock-key`: Lock identifier (same as acquire)
+    /// - `holder-id`: Must match current holder (only holder can renew)
     /// - `version`: Current lock version (from acquire or previous renew)
     /// - `lease-duration-ms`: New lease duration in milliseconds
     ///
     /// # Returns
-    /// - `ok(lock)`: Lock renewed successfully
-    /// - `err`: Renew failed (version mismatch, lock not found, lock expired)
+    /// - `ok(lock)`: Lock renewed successfully (updated version, expires-at, etc.)
+    /// - `err`: Renew failed (version mismatch, wrong holder, lock not found, lock expired)
     renew: func(
         ctx: context,
         lock-key: string,
@@ -66,19 +70,20 @@ interface locks {
         lease-duration-ms: duration-ms
     ) -> result<lock, actor-error>;
 
-    /// Release a lock (atomic operation)
+    /// Release a lock (atomic operation).
     ///
-    /// Validates version matches current lock version.
+    /// Requires: tenant-id and namespace (ctx), lock-key (id), holder-id, version.
     ///
     /// # Arguments
-    /// - `lock-key`: Lock identifier
-    /// - `holder-id`: Lock holder identifier
-    /// - `version`: Current lock version
-    /// - `delete-lock`: If true, removes lock entry completely; if false, sets locked = false but keeps entry
+    /// - `ctx`: Request context (tenant-id, namespace)
+    /// - `lock-key`: Lock identifier (same as acquire)
+    /// - `holder-id`: Must match current holder (only holder can release)
+    /// - `version`: Current lock version (from acquire or last renew)
+    /// - `delete-lock`: If true, removes lock entry; if false, sets locked = false but keeps entry
     ///
     /// # Returns
     /// - `ok`: Lock released successfully
-    /// - `err`: Release failed (version mismatch, lock not found)
+    /// - `err`: Release failed (version mismatch, wrong holder, lock not found)
     release: func(
         ctx: context,
         lock-key: string,
@@ -87,14 +92,10 @@ interface locks {
         delete-lock: bool
     ) -> result<_, actor-error>;
 
-    /// Try to acquire a lock (non-blocking)
+    /// Try to acquire a lock (non-blocking).
     ///
-    /// Attempts to acquire lock without waiting. Returns immediately if lock is held.
-    ///
-    /// # Arguments
-    /// - `lock-key`: Lock identifier
-    /// - `holder-id`: Lock holder identifier
-    /// - `lease-duration-ms`: Lock lease duration in milliseconds
+    /// Requires: tenant-id and namespace (ctx), lock-key, holder-id, lease-duration.
+    /// Returns immediately if lock is held (ok(none)).
     ///
     /// # Returns
     /// - `ok(option<lock>)`: Some(lock) if acquired, None if lock is held
@@ -106,10 +107,9 @@ interface locks {
         lease-duration-ms: duration-ms
     ) -> result<option<lock>, actor-error>;
 
-    /// Get current lock state (non-blocking)
+    /// Get current lock state (non-blocking).
     ///
-    /// # Arguments
-    /// - `lock-key`: Lock identifier
+    /// Requires: tenant-id and namespace (ctx), lock-key.
     ///
     /// # Returns
     /// - `ok(option<lock>)`: Current lock state if exists, None if not found

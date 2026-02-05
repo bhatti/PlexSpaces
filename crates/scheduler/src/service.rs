@@ -296,14 +296,14 @@ impl SchedulingService for SchedulingServiceImpl {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite-backend"))]
 mod tests {
     use super::*;
     use crate::capacity_tracker::CapacityTracker;
-    use crate::state_store::memory::MemorySchedulingStateStore;
+    use crate::state_store::sql::SqliteSchedulingStateStore;
     use plexspaces_channel::InMemoryChannel;
-    use plexspaces_keyvalue::InMemoryKVStore;
-    use plexspaces_object_registry::ObjectRegistry;
+    use plexspaces_core::ObjectRegistry;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::{
         actor::v1::ActorResourceRequirements,
         channel::v1::ChannelConfig,
@@ -311,19 +311,19 @@ mod tests {
     };
     use std::sync::Arc;
 
-    fn create_test_service() -> (
+    async fn create_test_service() -> (
         SchedulingServiceImpl,
-        Arc<MemorySchedulingStateStore>,
+        Arc<SqliteSchedulingStateStore>,
         Arc<InMemoryChannel>,
     ) {
-        let state_store = Arc::new(MemorySchedulingStateStore::new());
-        let kv = Arc::new(InMemoryKVStore::new());
-        let registry = Arc::new(ObjectRegistry::new(kv));
+        let state_store = Arc::new(SqliteSchedulingStateStore::new(":memory:").await.unwrap());
+        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
 
         let channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            backend: plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 100,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -344,7 +344,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schedule_actor() {
-        let (service, state_store, _) = create_test_service();
+        let (service, state_store, _) = create_test_service().await;
 
         let req = ScheduleActorRequest {
             requirements: Some(ActorResourceRequirements {
@@ -359,13 +359,16 @@ mod tests {
                 placement: None,
                 actor_groups: vec![],
             }),
-            namespace: String::new(), // Empty for test
-            tenant_id: String::new(), // Empty for test
             request_id: String::new(),
         };
 
+        // Create request with metadata for tenant/namespace
+        let mut request = Request::new(req);
+        request.metadata_mut().insert("x-tenant-id", "test-tenant".parse().unwrap());
+        request.metadata_mut().insert("x-namespace", "default".parse().unwrap());
+
         let response = service
-            .schedule_actor(Request::new(req))
+            .schedule_actor(request)
             .await
             .unwrap()
             .into_inner();
@@ -385,12 +388,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_schedule_actor_missing_requirements() {
-        let (service, _, _) = create_test_service();
+        let (service, _, _) = create_test_service().await;
 
         let req = ScheduleActorRequest {
             requirements: None,
-            namespace: String::new(), // Empty for test
-            tenant_id: String::new(), // Empty for test
             request_id: String::new(),
         };
 
@@ -401,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_scheduling_status() {
-        let (service, state_store, _) = create_test_service();
+        let (service, state_store, _) = create_test_service().await;
 
         // Create and store a request
         let request_id = "test-request-1".to_string();
@@ -459,7 +460,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_scheduling_status_not_found() {
-        let (service, _, _) = create_test_service();
+        let (service, _, _) = create_test_service().await;
 
         let req = GetSchedulingStatusRequest {
             request_id: "non-existent".to_string(),
@@ -474,7 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_node_capacity_not_found() {
-        let (service, _, _) = create_test_service();
+        let (service, _, _) = create_test_service().await;
 
         let req = GetNodeCapacityRequest {
             node_id: "non-existent".to_string(),
@@ -487,7 +488,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_node_capacities() {
-        let (service, _, _) = create_test_service();
+        let (service, _, _) = create_test_service().await;
 
         let req = ListNodeCapacitiesRequest {
             label_filters: HashMap::new(),

@@ -242,7 +242,7 @@ impl WasmRuntimeService for WasmRuntimeServiceImpl {
             return Err(Status::invalid_argument("actor_id cannot be empty"));
         }
 
-        let config = req.config.map(|_| WasmConfig::default());
+        let config = req.config.map(WasmConfig::from);
 
         match self
             .deployment_service

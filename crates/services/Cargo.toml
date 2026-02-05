@@ -17,9 +17,9 @@ plexspaces-mailbox = { workspace = true }
 plexspaces-tuplespace = { path = "../tuplespace" }
 plexspaces-channel = { workspace = true }
 plexspaces-common = { path = "../common" }
-plexspaces-keyvalue = { workspace = true }
-plexspaces-locks = { workspace = true, features = ["memory-backend", "sqlite-backend"] }
-plexspaces-object-registry = { workspace = true }
+plexspaces-keyvalue = { workspace = true, features = ["sql-backend"] }
+plexspaces-locks = { workspace = true, features = ["sqlite-backend"] }
+plexspaces-object-registry = { workspace = true, features = ["sql-backend"] }
 plexspaces-process-groups = { workspace = true }
 plexspaces-facet = { workspace = true }
 plexspaces-application = { path = "../application" }
@@ -81,8 +81,7 @@ tempfile = "3.8"
 plexspaces-node = { path = "../node" }
 
 [features]
-default = ["memory-backend", "sqlite-backend"]
-memory-backend = ["plexspaces-locks/memory-backend"]
+default = ["sqlite-backend"]
 sqlite-backend = ["plexspaces-locks/sqlite-backend"]
 firecracker = ["plexspaces-firecracker"]
 

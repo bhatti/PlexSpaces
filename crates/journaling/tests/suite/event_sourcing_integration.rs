@@ -13,7 +13,7 @@ use std::time::SystemTime;
 
 #[tokio::test]
 async fn test_event_sourcing_full_workflow() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let config = EventSourcingConfig {
         event_log_enabled: true,
         auto_replay: true,
@@ -58,7 +58,7 @@ async fn test_event_sourcing_full_workflow() {
 
 #[tokio::test]
 async fn test_event_sourcing_replay_on_activation() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
 
     // Pre-populate events
     for i in 1..=3 {
@@ -105,7 +105,7 @@ async fn test_event_sourcing_replay_on_activation() {
 
 #[tokio::test]
 async fn test_event_sourcing_paginated_history() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
 
     // Pre-populate 20 events
     for i in 1..=20 {
@@ -156,7 +156,7 @@ async fn test_event_sourcing_paginated_history() {
 
 #[tokio::test]
 async fn test_event_sourcing_time_travel() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
 
     // Pre-populate events representing state changes
     let events_data = vec![
@@ -191,7 +191,7 @@ async fn test_event_sourcing_time_travel() {
 #[tokio::test]
 async fn test_event_sourcing_with_durability_facet() {
     // This test demonstrates how EventSourcingFacet works with DurabilityFacet
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
 
     // Create durability config
     let durability_config = DurabilityConfig {
@@ -245,7 +245,7 @@ async fn test_event_sourcing_with_durability_facet() {
 
 #[tokio::test]
 async fn test_event_sourcing_large_event_log() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
 
     // Create 1000 events
     for i in 1..=1000 {
@@ -310,7 +310,7 @@ async fn test_event_sourcing_large_event_log() {
 
 #[tokio::test]
 async fn test_event_sourcing_causal_tracking() {
-    let storage = Arc::new(MemoryJournalStorage::new());
+    let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
 
     // Create events with causal tracking
     let correlation_ids = vec!["corr-1", "corr-2", "corr-3"];

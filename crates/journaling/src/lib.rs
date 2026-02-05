@@ -36,10 +36,10 @@
 //!                           v
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │ JournalStorage Trait (this crate)                              │
-//! │   ├─ MemoryJournalStorage   (testing)                          │
+//! │   ├─ SqliteJournalStorage   (use :memory: for in-memory tests) │
 //! │   ├─ PostgresJournalStorage (production)                       │
 //! │   ├─ RedisJournalStorage    (distributed)                      │
-//! │   └─ SqliteJournalStorage   (edge)                             │
+//! │   └─ DynamoDBJournalStorage (AWS managed)                      │
 //! └─────────────────────────────────────────────────────────────────┘
 //!                           │
 //!                           v
@@ -72,15 +72,15 @@
 //!
 //! ## Examples
 //!
-//! ### Basic Usage (Memory Backend)
+//! ### Basic Usage (SQLite :memory: Backend)
 //! ```rust,no_run
 //! use plexspaces_journaling::*;
 //! use plexspaces_journaling::journal_entry;
 //! use plexspaces_proto::prost_types;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Create in-memory journal (for testing)
-//! let storage = MemoryJournalStorage::new();
+//! // Create in-memory SQLite journal (for testing)
+//! let storage = SqliteJournalStorage::new(":memory:").await?;
 //!
 //! // Create journal entry with MessageReceived
 //! let entry = JournalEntry {

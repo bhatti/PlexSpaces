@@ -42,28 +42,19 @@
 #[cfg(feature = "redis-backend")]
 mod redis_multinode_tests {
     use plexspaces_tuplespace::*;
-    use plexspaces_proto::tuplespace::v1::{
-        StorageProvider, TupleSpaceStorageConfig,
-        tuple_space_storage_config, RedisStorageConfig,
-    };
+    use plexspaces_tuplespace::storage::StorageConfig;
+    use plexspaces_proto::tuplespace::v1::RedisStorageConfig;
     use std::sync::Arc;
     use std::time::Duration;
 
     /// Create a TupleSpace instance connected to shared Redis
     async fn create_redis_tuplespace(node_id: &str) -> Arc<TupleSpace> {
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderRedis as i32,
-            config: Some(tuple_space_storage_config::Config::Redis(
-                RedisStorageConfig {
-                    connection_string: "redis://localhost:6379".to_string(),
-                    pool_size: 10,
-                    key_prefix: format!("test-multinode-{}", node_id),
-                    enable_pubsub: false,
-                }
-            )),
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
+        let config = StorageConfig::Redis(RedisStorageConfig {
+            connection_string: "redis://localhost:6379".to_string(),
+            pool_size: 10,
+            key_prefix: format!("test-multinode-{}", node_id),
+            enable_pubsub: false,
+        });
 
         let storage = storage::create_storage(config).await
             .expect("Failed to create Redis storage");
@@ -73,19 +64,12 @@ mod redis_multinode_tests {
 
     /// Helper: Check if Redis is available
     async fn is_redis_available() -> bool {
-        let config = TupleSpaceStorageConfig {
-            provider: StorageProvider::StorageProviderRedis as i32,
-            config: Some(tuple_space_storage_config::Config::Redis(
-                RedisStorageConfig {
-                    connection_string: "redis://localhost:6379".to_string(),
-                    pool_size: 1,
-                    key_prefix: "test-health".to_string(),
-                    enable_pubsub: false,
-                }
-            )),
-            enable_metrics: false,
-            cleanup_interval: None,
-        };
+        let config = StorageConfig::Redis(RedisStorageConfig {
+            connection_string: "redis://localhost:6379".to_string(),
+            pool_size: 1,
+            key_prefix: "test-health".to_string(),
+            enable_pubsub: false,
+        });
 
         storage::create_storage(config).await.is_ok()
     }

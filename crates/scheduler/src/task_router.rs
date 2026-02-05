@@ -369,7 +369,7 @@ mod tests {
     async fn create_test_channel(name: &str) -> Result<Arc<dyn Channel>, String> {
         let config = ChannelConfig {
             name: name.to_string(),
-            backend: plexspaces_proto::channel::v1::ChannelBackend::ChannelBackendInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 100,
             delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,

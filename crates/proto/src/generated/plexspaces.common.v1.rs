@@ -467,6 +467,7 @@ pub struct Message {
     /// Message type discriminator
     /// Common values: "call", "cast", "info", "signal", "event", "command", "query"
     /// Example: "call" for request/reply, "cast" for fire-and-forget
+    /// Empty = unset. Validated to allowed values only.
     #[prost(string, tag="5")]
     pub message_type: ::prost::alloc::string::String,
     /// Message payload (opaque bytes)

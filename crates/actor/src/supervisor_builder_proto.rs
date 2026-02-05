@@ -233,8 +233,9 @@ mod tests {
                         seconds: 30,
                         nanos: 0,
                     }),
-                    supervisor: None, // Worker, not supervisor
-                    facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                    supervisor: None,
+                    facets: vec![],
+                    behavior_kind: None,
                 },
             ],
         }

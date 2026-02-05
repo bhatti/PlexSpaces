@@ -119,8 +119,8 @@ impl ReplyWaiter {
     /// - Ok(Message) if reply received within timeout
     /// - Err(ReplyWaiterError::Timeout) if timeout exceeded
     pub async fn wait(&self, timeout: Duration) -> Result<Message, ReplyWaiterError> {
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 "[REPLY_WAITER] WAIT START: timeout={:?}",
                 timeout
             );
@@ -131,8 +131,8 @@ impl ReplyWaiter {
             loop {
                 let mut reply = self.reply.lock().await;
                 if let Some(msg) = reply.take() {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(
                             "[REPLY_WAITER] WAIT SUCCESS: Received reply, sender={}, receiver={}, correlation_id={}",
                             msg.sender_id, msg.receiver_id, msg.correlation_id
                         );
@@ -142,28 +142,28 @@ impl ReplyWaiter {
                 drop(reply); // Release lock before waiting
                 
                 // Wait for notification
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("[REPLY_WAITER] WAITING: Waiting for notification...");
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!("[REPLY_WAITER] WAITING: Waiting for notification...");
                 }
                 self.notify.notified().await;
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("[REPLY_WAITER] NOTIFIED: Woken up, checking for reply...");
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!("[REPLY_WAITER] NOTIFIED: Woken up, checking for reply...");
                 }
             }
         };
         
         tokio::select! {
             result = wait_future => {
-                if tracing::enabled!(tracing::Level::DEBUG) {
+                if tracing::enabled!(tracing::Level::TRACE) {
                     match &result {
                         Ok(msg) => {
-                            tracing::debug!(
+                            tracing::trace!(
                                 "[REPLY_WAITER] WAIT COMPLETED: Reply received, sender={}, receiver={}, correlation_id={}",
                                 msg.sender_id, msg.receiver_id, msg.correlation_id
                             );
                         }
                         Err(e) => {
-                            tracing::debug!(
+                            tracing::trace!(
                                 "[REPLY_WAITER] WAIT ERROR: error={:?}",
                                 e
                             );
@@ -173,8 +173,8 @@ impl ReplyWaiter {
                 result
             },
             _ = timeout_future => {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("[REPLY_WAITER] WAIT TIMEOUT: timeout={:?}", timeout);
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!("[REPLY_WAITER] WAIT TIMEOUT: timeout={:?}", timeout);
                 }
                 Err(ReplyWaiterError::Timeout)
             },
@@ -190,8 +190,8 @@ impl ReplyWaiter {
     /// - Ok(()) if notification sent successfully
     /// - Err if reply already set
     pub async fn notify(&self, reply: Message) -> Result<(), ReplyWaiterError> {
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 "[REPLY_WAITER] NOTIFY START: reply_sender={}, reply_receiver={}, correlation_id={}",
                 reply.sender_id, reply.receiver_id, reply.correlation_id
             );
@@ -200,26 +200,22 @@ impl ReplyWaiter {
         let mut stored_reply = self.reply.lock().await;
         
         if stored_reply.is_some() {
-            tracing::warn!(
-                "🟣 [REPLY_WAITER] NOTIFY FAILED: Reply already set, correlation_id={:?}",
-                reply.correlation_id
-            );
             return Err(ReplyWaiterError::AlreadySet);
         }
         
         *stored_reply = Some(reply.clone());
         drop(stored_reply); // Release lock before notifying
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 "[REPLY_WAITER] NOTIFYING: correlation_id={}, reply_sender={}, reply_receiver={}",
                 reply.correlation_id, reply.sender_id, reply.receiver_id
             );
         }
         self.notify.notify_one();
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 "[REPLY_WAITER] NOTIFY SUCCESS: correlation_id={:?}",
                 reply.correlation_id
             );
@@ -262,8 +258,8 @@ impl ReplyWaiterRegistry {
     pub async fn register(&self, correlation_id: String, waiter: ReplyWaiter) {
         let mut waiters = self.waiters.write().await;
         waiters.insert(correlation_id.clone(), waiter);
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 "[REPLY_WAITER_REGISTRY] Registered waiter: correlation_id={}, total_waiters={}",
                 correlation_id,
                 waiters.len()
@@ -282,8 +278,8 @@ impl ReplyWaiterRegistry {
     /// - false if no waiter found for this correlation_id
     pub async fn notify(&self, correlation_id: &str, reply: Message) -> bool {
         let waiters_count = self.waiters.read().await.len();
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 "[REPLY_WAITER_REGISTRY] notify called: correlation_id={}, waiters_count={}",
                 correlation_id,
                 waiters_count
@@ -293,20 +289,26 @@ impl ReplyWaiterRegistry {
         let mut waiters = self.waiters.write().await;
         if let Some(waiter) = waiters.remove(correlation_id) {
             drop(waiters); // Release lock before notifying
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!("[REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...", correlation_id);
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!("[REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...", correlation_id);
             }
-            if waiter.notify(reply).await.is_ok() {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("[REPLY_WAITER_REGISTRY] Waiter notified successfully: correlation_id={}", correlation_id);
+            match waiter.notify(reply).await {
+                Ok(()) => {
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!("[REPLY_WAITER_REGISTRY] Waiter notified successfully: correlation_id={}", correlation_id);
+                    }
+                    return true;
                 }
-                return true;
-            } else {
-                tracing::warn!("🟢 [REPLY_WAITER_REGISTRY] Failed to notify waiter: correlation_id={}", correlation_id);
+                Err(e) => {
+                    tracing::warn!(
+                        "[REPLY_WAITER_REGISTRY] Failed to notify waiter: correlation_id={}, reason={}",
+                        correlation_id, e
+                    );
+                }
             }
         } else {
             tracing::warn!(
-                "🟢 [REPLY_WAITER_REGISTRY] No waiter found for correlation_id={}, available_ids={:?}",
+                "[REPLY_WAITER_REGISTRY] No waiter found for correlation_id={}, available_ids={:?}",
                 correlation_id,
                 waiters.keys().collect::<Vec<_>>()
             );
@@ -319,8 +321,8 @@ impl ReplyWaiterRegistry {
     /// ## Arguments
     /// * `correlation_id` - Correlation ID to remove
     pub async fn remove(&self, correlation_id: &str) {
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("ReplyWaiterRegistry::remove: correlation_id={}", correlation_id);
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("ReplyWaiterRegistry::remove: correlation_id={}", correlation_id);
         }
         let mut waiters = self.waiters.write().await;
         waiters.remove(correlation_id);

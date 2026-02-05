@@ -1,63 +1,92 @@
-# Bank Account - Durability Example (Python WASM)
+# Bank Account - Durability Example (Python WASM with SDK)
 
 Demonstrates **durable actors** with persistent state using a banking example.
 
 **Real-world use case**: Banking, wallets, financial ledgers - where data must survive restarts.
 
-## How WASM Actor Durability Works
+## PlexSpaces Python SDK
 
-WASM actors use the **Cloudflare Durable Objects pattern** - checkpoint-based state persistence via `get-state()` and `set-state()` WIT interface functions.
-
-**Why this pattern for WASM?**
-- Rust actors use DurabilityFacet with journaling + replay
-- WASM actors can't use DurabilityFacet (requires fully initialized actors for replay)
-- The checkpoint pattern is simpler, robust, and proven at scale (Cloudflare)
-
-### The Simple Actor WIT Interface
+This example uses the [PlexSpaces Python SDK](../../../../sdks/python/README.md) for minimal boilerplate:
 
 ```python
-def get_state(self) -> str:
-    """Called by framework to save state before shutdown/checkpoint."""
-    return json.dumps({"balance": _balance, "transactions": _transactions})
+from plexspaces import actor, state, handler, init_handler
 
-def set_state(self, state_json: str) -> str:
-    """Called by framework to restore state after restart."""
-    data = json.loads(state_json)
-    _balance = data.get("balance", 0)
-    _transactions = data.get("transactions", [])
-    return ""
+@actor(facets=["durability"])  # Declares this actor expects durability
+class BankAccount:
+    # State fields are automatically persisted
+    balance: int = state(default=0)
+    transactions: list = state(default_factory=list)
+    
+    @handler("deposit")
+    def deposit(self, amount: int = 0) -> dict:
+        self.balance += amount
+        return {"balance": self.balance}
 ```
+
+**Before SDK**: 150+ lines with manual WIT interface  
+**After SDK**: ~90 lines with decorators
+
+## Durability Configuration
+
+### WASM vs Rust Durability
+
+| Aspect | WASM Actors | Rust Actors |
+|--------|-------------|-------------|
+| **Mechanism** | Checkpoint-based (get_state/set_state) | DurabilityFacet with journal |
+| **Configuration** | `WasmConfig.durability_enabled` | `facets = [{ type = "durability" }]` in app-config |
+| **Storage** | SQLite checkpoint store | Journal storage (SQLite/Postgres) |
+| **Annotation** | `@actor(facets=["durability"])` | N/A (Rust uses app-config) |
+
+### How to Enable WASM Durability
+
+**Option 1: Release config (release.yaml)**
+```yaml
+wasm:
+  durability_enabled: true
+```
+
+**Option 2: Application spec**
+```toml
+# app-config.toml
+[wasm]
+durability_enabled = true
+```
+
+**Option 3: Node config (config/default.yaml)**
+```yaml
+wasm:
+  durability_enabled: true
+```
+
+The `facets=["durability"]` annotation in the Python code is for **documentation and validation** - it declares that this actor expects durability to be enabled. The actual durability is provided by the node configuration.
+
+### How WASM Durability Works
+
+WASM actors use the **Cloudflare Durable Objects pattern** - checkpoint-based state persistence.
+
+State fields defined with `state()` are automatically:
+- Serialized via `get_state()` before shutdown
+- Restored via `set_state()` on restart
 
 ### Durability Timeline
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│           WASM Actor Lifecycle (Cloudflare DO Pattern)          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  START: Actor created                                           │
-│    └── init() called                                            │
-│                                                                  │
-│  OPERATIONS: Normal processing                                   │
-│    ├── deposit($1000) → balance = 1000                         │
-│    ├── withdraw($200) → balance = 800                          │
-│    └── Actor maintains state internally                         │
-│                                                                  │
-│  CHECKPOINT: Framework calls get_state()                         │
-│    └── Returns: {"balance": 800, "transactions": [...]}         │
-│    └── State saved to checkpoint storage (SQLite)               │
-│                                                                  │
-│  CRASH/SHUTDOWN: Actor stops                                     │
-│                                                                  │
-│  RESTART: Actor recreated                                        │
-│    ├── Framework loads latest checkpoint                        │
-│    ├── Framework calls set_state(checkpoint_data)               │
-│    └── Balance restored: 800 ✓                                  │
-│                                                                  │
-│  Note: Unlike Rust actors, WASM actors don't use journal         │
-│        replay - state is restored from checkpoint only           │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+START: Actor created
+  └── @init_handler called with config
+
+OPERATIONS: Normal processing
+  ├── deposit($1000) → balance = 1000
+  ├── withdraw($200) → balance = 800
+  └── State tracked in state() fields
+
+CHECKPOINT: Framework calls get_state()
+  └── SDK auto-serializes all state() fields
+  └── State saved to checkpoint storage (SQLite)
+
+RESTART: Actor recreated
+  ├── Framework loads latest checkpoint
+  ├── SDK auto-restores state() fields
+  └── Balance restored: 800
 ```
 
 ## Quick Start
@@ -68,68 +97,16 @@ def set_state(self, state_json: str) -> str:
 ./test-durability.sh # Full durability test (restarts server)
 ```
 
-### Start Node with Logging
-
-To see backend initialization logs when starting the node:
+### Start Node
 
 ```bash
 # From workspace root
-cd /path/to/tspaces
-
-# Start node with INFO logging to see backend initialization
 RUST_LOG=info cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr 0.0.0.0:8091
-
-# Expected output shows storage backends:
-# INFO plexspaces_journaling: Journal storage initialized db_path="/tmp/plexspaces-test-node.db" backend="SQLite"
-# INFO plexspaces_keyvalue: KeyValue storage initialized backend="SQLite"
-# INFO plexspaces_blob: Blob storage initialized backend="local" bucket="plexspaces-blobs"
 ```
 
-Then in another terminal, run the tests:
-
+Then in another terminal:
 ```bash
 ./test.sh 8092       # HTTP port is gRPC port + 1
-```
-
-## Test Scripts
-
-### `test.sh` - Basic Operations (no restart)
-Tests banking operations without restarting the server:
-- Deposit/withdraw across 3 accounts
-- Balance checks
-- Transaction history
-- Replay capability
-- Error handling (insufficient funds)
-
-**Requires**: A PlexSpaces node already running
-
-### `test-durability.sh` - Full Durability Test (with restart)
-Tests that state survives server restart:
-1. Starts fresh node
-2. Deploys accounts, does operations
-3. Stops server (simulating crash)
-4. Restarts server
-5. Verifies balances were restored
-
-**Note**: This script manages the server lifecycle itself.
-
-## Multiple Actors via ApplicationSpec
-
-This example deploys **3 bank accounts** via `app-config.toml`:
-
-```toml
-[supervisor]
-strategy = "one_for_one"
-max_restarts = 10
-
-[[supervisor.children]]
-id = "account-alice"
-
-[[supervisor.children]]
-id = "account-bob"
-
-[[supervisor.children]]
-id = "account-charlie"
 ```
 
 ## Operations
@@ -142,28 +119,35 @@ id = "account-charlie"
 | History | `{"op":"history","count":5}` | `{"transactions":[...]}` |
 | Replay | `{"op":"replay"}` | `{"replayed":5,"rebuilt_balance":800}` |
 
-## Durability Features Demonstrated
+## SDK Features Demonstrated
 
-| Feature | How It Works |
-|---------|--------------|
-| **Persistent Balance** | `get_state()` saves balance before shutdown |
-| **Crash Recovery** | `set_state()` restores balance on restart |
-| **Transaction Log** | Every operation logged for audit/replay |
-| **Replay** | Can rebuild state from transaction log |
+| Feature | How It's Used |
+|---------|---------------|
+| `@actor(facets=["durability"])` | Marks `BankAccount` as durable PlexSpaces actor |
+| `state()` | Defines `balance`, `transactions` as persistent fields |
+| `@handler()` | Routes `deposit`, `withdraw`, `balance` messages |
+| `@init_handler` | Initializes account from config |
+
+### Facets Parameter
+
+The `facets=["durability"]` parameter:
+- Documents that this actor expects durability to be enabled
+- Can be used by tooling to validate app-config matches actor expectations
+- Does NOT automatically enable durability (that's done via node/release config)
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `account_actor.py` | Bank account with get_state/set_state |
+| `account_actor.py` | Bank account using SDK decorators |
 | `app-config.toml` | ApplicationSpec for 3 accounts |
-| `build.sh` | Build WASM |
-| `test.sh` | Basic operations test (no restart) |
-| `test-durability.sh` | Full durability test (restarts server) |
+| `build.sh` | Build using `plexspaces-py build` |
+| `test.sh` | Basic operations test |
+| `test-durability.sh` | Full durability test |
 
 ## See Also
 
-- [Durability Documentation](../../../../docs/durability.md) - Full durability guide (Rust + WASM patterns)
-- [WASM Deployment Guide](../../../../docs/wasm-deployment.md) - Complete WASM deployment guide
+- [PlexSpaces Python SDK](../../../../sdks/python/README.md) - SDK documentation
+- [SDK Guide](../../../../docs/sdk.md) - Complete SDK reference
+- [Durability Documentation](../../../../docs/durability.md) - Durability patterns
 - [Python WASM Guide](../../README.md) - Python WASM development
-- [FSM Example](../fsm/) - State machine pattern

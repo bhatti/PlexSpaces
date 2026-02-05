@@ -476,10 +476,10 @@ pub trait WasmRuntimeTrait: Send + Sync {
         tuplespace_provider: Option<std::sync::Arc<dyn TupleSpaceProvider>>,
         keyvalue_store: Option<std::sync::Arc<dyn KeyValueStore>>,
         process_group_registry: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
-        lock_manager: Option<std::sync::Arc<dyn plexspaces_locks::LockManager>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_locks::LockManager + Send + Sync>>,
         object_registry: Option<std::sync::Arc<dyn ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn JournalStorage>>,
-        blob_service: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+        blob_service: Option<std::sync::Arc<dyn BlobServiceTrait>>,
     ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>>;
     
     /// Get as Arc<dyn Any> for downcasting to concrete type
@@ -540,40 +540,73 @@ pub trait ApplicationManager: Send + Sync {
 /// ## Purpose
 /// Allows ServiceLocator to return BlobService without depending on blob crate.
 /// The concrete BlobService type is in plexspaces-blob crate.
+///
+/// ## Name-based vs ID-based access
+/// - `upload`: Uses `name` (path like "assets/images/logo.png") - returns internal blob_id
+/// - `download` / `delete`: Use internal blob_id (ULID)
+/// - `download_by_name` / `delete_by_name`: Use name (path) - preferred for WASM actors
+/// - `list`: Returns names (paths) matching a prefix
 #[async_trait]
 pub trait BlobServiceTrait: Send + Sync {
-    /// Upload blob
+    /// Upload blob with a user-friendly name (path).
+    /// If a blob with the same name exists, it will be replaced (upsert).
+    /// Returns the internal blob_id on success.
     async fn upload(
         &self,
         ctx: &RequestContext,
-        key: &str,
+        name: &str,
         data: Vec<u8>,
         content_type: Option<String>,
         metadata: std::collections::HashMap<String, String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Download blob
+    /// Download blob by internal blob_id (ULID).
     async fn download(
         &self,
         ctx: &RequestContext,
-        key: &str,
+        blob_id: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Download blob by name (path). Preferred for WASM actors.
+    async fn download_by_name(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Delete blob
+    /// Delete blob by internal blob_id (ULID).
     async fn delete(
         &self,
         ctx: &RequestContext,
-        key: &str,
+        blob_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Delete blob by name (path). Preferred for WASM actors.
+    async fn delete_by_name(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Check if blob exists
+    /// Check if blob exists by internal blob_id.
     async fn exists(
         &self,
         ctx: &RequestContext,
-        key: &str,
+        blob_id: &str,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// List blob names (paths) matching a prefix.
+    /// Returns names, not internal blob_ids.
+    async fn list(
+        &self,
+        ctx: &RequestContext,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
     
-    /// Get as Arc<dyn Any> for downcasting to concrete type
+    /// Get as Arc<dyn Any> for downcasting to concrete type.
+    /// This is needed for advanced usage where concrete BlobService methods are required
+    /// (e.g., component_host.rs which uses full blob API).
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync>;
 }
 

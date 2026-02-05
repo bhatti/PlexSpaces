@@ -133,11 +133,14 @@ The ActorService provides comprehensive actor lifecycle management, messaging, a
 
 The `InvokeActor` RPC provides HTTP-style invocation for serverless patterns:
 
+- **GET** → ask (request-reply). Query params become payload.
+- **POST/PUT/DELETE** → tell (fire-and-forget) by default. Use query param **`invocation=call`** for request-reply (e.g. `POST ...?invocation=call`). Valid **`invocation`** values (Erlang-style): **call**, **cast**, **info** only. Query param **`msg_type`** is the handler name (e.g. count, readings) and is passed in the payload.
+
 ```
-GET  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Read operation
-POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Create/Update
-PUT  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Update
-DELETE /api/v1/actors/{tenant_id}/{namespace}/{actor_type}   - Delete
+GET  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Read (ask, request-reply)
+POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Create/Update (tell)
+PUT  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Update (tell)
+DELETE /api/v1/actors/{tenant_id}/{namespace}/{actor_type}   - Delete (tell)
 ```
 
 ### NodeService

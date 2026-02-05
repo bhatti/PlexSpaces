@@ -29,6 +29,7 @@ pub mod aws_config;
 pub mod security_validator;
 pub mod release_config;
 pub mod release_parser;
+pub mod config_manager;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
@@ -38,4 +39,7 @@ pub use aws_config::{AWSConfig, DynamoDBConfig, SQSConfig, S3Config, DLQConfig};
 pub use security_validator::{validate_security_config, SecurityValidationError};
 pub use release_config::create_default_release_config;
 pub use release_parser::{Release, ReleaseError};
+pub use config_manager::{
+    EnvConfig, initialize, get_env, get_env_or, get_env_bool, get_env_u32, get_env_u64,
+};
 

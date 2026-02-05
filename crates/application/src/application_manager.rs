@@ -243,28 +243,20 @@ impl ApplicationManagerImpl {
 
         // Transition to Starting
         instance.state = ApplicationState::ApplicationStateStarting;
-        
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            application = %name,
-            state = ?instance.state,
-            "Application state transition: Created -> Starting"
-        );
-        }
 
         // Get tenant_id/namespace from ApplicationInstance (stored during registration)
         let tenant_id = instance.tenant_id.clone();
         let namespace = instance.namespace.clone();
         
-        // Note: WasmApplication tenant_id/namespace are set when created in ApplicationService::deploy_application()
-        // before boxing, so no need to set them here.
-        
-        tracing::debug!(
-            application = %name,
-            tenant_id = %if tenant_id.is_empty() { "<empty>" } else { &tenant_id },
-            namespace = %if namespace.is_empty() { "<empty>" } else { &namespace },
-            "Using tenant_id/namespace from registration for actor spawning"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                application = %name,
+                state = ?instance.state,
+                tenant_id = %if tenant_id.is_empty() { "<empty>" } else { &tenant_id },
+                namespace = %if namespace.is_empty() { "<empty>" } else { &namespace },
+                "Application starting (tenant_id/namespace from registration); calling start()"
+            );
+        }
         
         // Get node context (must be set before calling start)
         let node_context = {
@@ -273,14 +265,6 @@ impl ApplicationManagerImpl {
                 "Node context not set. Call set_node_context() before starting applications.".to_string()
             ))?.clone()
         };
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            application = %name,
-            tenant_id = %tenant_id,
-            namespace = %namespace,
-            "Calling application.start() method"
-        );
-        }
         match instance.app.start(node_context).await {
             Ok(()) => {
                 instance.state = ApplicationState::ApplicationStateRunning;
@@ -592,14 +576,17 @@ impl ApplicationManagerImpl {
     ///
     /// ## Purpose
     /// Remove an application from the manager. The application must be stopped first.
+    /// For WASM applications, returns the module hash so the caller can evict the
+    /// compiled module from cache (cleanup to avoid memory leaks).
     ///
     /// ## Arguments
     /// * `name` - Application name
     ///
     /// ## Returns
-    /// * `Ok(())` - Application unregistered successfully
+    /// * `Ok(Some(hash))` - WASM app unregistered; caller should evict module with this hash
+    /// * `Ok(None)` - Non-WASM app unregistered
     /// * `Err(ApplicationError)` - Application not found or still running
-    pub async fn unregister(&self, name: &str) -> Result<(), ApplicationError> {
+    pub async fn unregister(&self, name: &str) -> Result<Option<String>, ApplicationError> {
         let mut apps = self.applications.write().await;
 
         let instance = apps
@@ -614,6 +601,8 @@ impl ApplicationManagerImpl {
             )));
         }
 
+        // Get module hash for WASM apps before remove (for cache eviction)
+        let module_hash = instance.app.module_hash_for_cleanup();
         apps.remove(name);
         if tracing::enabled!(tracing::Level::INFO) {
             tracing::info!("Unregistered application: {}", name);
@@ -622,7 +611,7 @@ impl ApplicationManagerImpl {
         // Note: Object-registry unregistration is handled by the node crate
         // to avoid circular dependency (core can't depend on object-registry)
 
-        Ok(())
+        Ok(module_hash)
     }
 
     /// Update application metrics

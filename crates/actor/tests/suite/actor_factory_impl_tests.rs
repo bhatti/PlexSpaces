@@ -217,6 +217,7 @@ async fn test_activate_virtual_actor_success() {
             None,
             None,
             Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>),
+            None, // behavior_kind
         ).await;
     }
     
@@ -279,7 +280,7 @@ async fn test_activate_virtual_actor_already_active() {
     let wrapper: Arc<dyn MessageSender> = Arc::new(actor_ref);
     
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    registry.register_actor(&ctx, "test-actor@test-node".to_string(), wrapper, None, None, Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>)).await;
+    registry.register_actor(&ctx, "test-actor@test-node".to_string(), wrapper, None, None, Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>), None).await;
     manager.mark_activated(&"test-actor@test-node".to_string()).await.unwrap();
     
     // Try to activate - should return Ok immediately (actor is already active)

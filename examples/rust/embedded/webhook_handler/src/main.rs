@@ -1,250 +1,353 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Webhook Handler Example (FaaS Actor Pattern)
+// This file is part of PlexSpaces.
 //
-// Demonstrates HTTP/webhook handling with actors:
-// - Request-response pattern (simulated HTTP)
-// - Different webhook event types
-// - Stateless processing with actor isolation
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
 //
-// Use Case: GitHub webhooks, Stripe events, Slack commands
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-use async_trait::async_trait;
-use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, RequestContext,
+//! Webhook Handler Example (FaaS-style HTTP actor) - SDK Annotations Demo
+//!
+//! Demonstrates **PlexSpaces Rust SDK annotations** (like Python @actor, @handler):
+//! - `#[gen_server_actor]` - marks struct as GenServer actor
+//! - `#[plexspaces_handlers]` - scans impl for #[handler] methods
+//! - `#[handler("op", call)]` - routes message to handler method
+//!
+//! ## HTTP Endpoints
+//! - **POST** /api/v1/actors/{tenant}/{namespace}/webhook_handler — deliver a webhook
+//! - **GET**  /api/v1/actors/{tenant}/{namespace}/webhook_handler?action=list — list recent deliveries
+//!
+//! ## Before (manual boilerplate)
+//! ```ignore
+//! impl ActorTrait for WebhookHandler { fn behavior_type()...; fn handle_message()... }
+//! impl GenServer for WebhookHandler { fn handle_request()... }
+//! ```
+//!
+//! ## After (SDK annotations)
+//! ```ignore
+//! #[gen_server_actor]
+//! struct WebhookHandler { ... }
+//!
+//! #[plexspaces_handlers]
+//! impl WebhookHandler {
+//!     #[handler("deliver")]  // GenServer defaults to call (no second param needed)
+//!     async fn deliver(...) { ... }
+//! }
+//! ```
+
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    ActorContext, BehaviorError, Message, NodeBuilder, RequestContext,
+    spawn_actor, json, Value,
 };
-use plexspaces_mailbox::Message;
-use plexspaces_node::NodeBuilder;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
+use tracing::{error, info};
 
-// =============================================================================
-// Webhook Event Types (JSON payloads from external services)
-// =============================================================================
+// -----------------------------------------------------------------------------
+// Webhook delivery (stored in actor state)
+// -----------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-enum WebhookEvent {
-    #[serde(rename = "github.push")]
-    GitHubPush {
-        repository: String,
-        branch: String,
-        commits: usize,
-    },
-    #[serde(rename = "stripe.payment")]
-    StripePayment {
-        customer_id: String,
-        amount_cents: u64,
-        currency: String,
-    },
-    #[serde(rename = "slack.command")]
-    SlackCommand {
-        user: String,
-        channel: String,
-        command: String,
-    },
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct WebhookDelivery {
+    id: String,
+    received_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload_preview: Option<String>,
 }
 
-// =============================================================================
-// Webhook Handler Actor
-// =============================================================================
-
-struct WebhookActor {
-    processed_count: u64,
-}
-
-impl WebhookActor {
-    fn new() -> Self {
-        Self { processed_count: 0 }
-    }
-}
-
-#[async_trait]
-impl ActorTrait for WebhookActor {
-    async fn handle_message(
-        &mut self,
-        _ctx: &ActorContext,
-        message: plexspaces_proto::common::v1::Message,
-    ) -> Result<(), BehaviorError> {
-        let event: WebhookEvent = serde_json::from_slice(&message.payload)
-            .map_err(|e| BehaviorError::ProcessingError(format!("Parse error: {}", e)))?;
-
-        self.processed_count += 1;
-        
-        // Route to handler based on event type
-        match event {
-            WebhookEvent::GitHubPush { repository, branch, commits } => {
-                println!("  [GitHub] Push to {}/{}: {} commits", repository, branch, commits);
-                println!("    → Triggering CI pipeline...");
-            }
-            WebhookEvent::StripePayment { customer_id, amount_cents, currency } => {
-                let amount = amount_cents as f64 / 100.0;
-                println!("  [Stripe] Payment from {}: {:.2} {}", customer_id, amount, currency);
-                println!("    → Updating subscription status...");
-            }
-            WebhookEvent::SlackCommand { user, channel, command } => {
-                println!("  [Slack] @{} in #{}: /{}", user, channel, command);
-                println!("    → Executing command...");
-            }
+impl WebhookDelivery {
+    fn new(id: String, payload: &[u8]) -> Self {
+        let received_at = chrono::Utc::now().to_rfc3339();
+        let payload_preview = String::from_utf8(payload.to_vec())
+            .ok()
+            .map(|s| {
+                if s.len() > 200 {
+                    format!("{}...", &s[..200])
+                } else {
+                    s
+                }
+            });
+        Self {
+            id,
+            received_at,
+            payload_preview,
         }
-
-        Ok(())
-    }
-
-    fn behavior_type(&self) -> BehaviorType {
-        BehaviorType::GenServer
     }
 }
 
-// =============================================================================
-// Main
-// =============================================================================
+// -----------------------------------------------------------------------------
+// Webhook Handler Actor - SDK style with annotations (like Python @gen_server_actor)
+// -----------------------------------------------------------------------------
+
+/// Webhook handler actor using SDK annotations.
+/// 
+/// ## Annotations
+/// - `#[gen_server_actor(name = "webhook_handler")]` - generates `impl Actor` with Custom("webhook_handler") type
+///   This allows HTTP gateway to route requests to `/api/v1/actors/{tenant}/{namespace}/webhook_handler`
+/// - `#[plexspaces_handlers]` - generates `impl GenServer` dispatching to `#[handler]` methods
+#[gen_server_actor(name = "webhook_handler")]
+struct WebhookHandlerActor {
+    deliveries: Vec<WebhookDelivery>,
+    max_deliveries: usize,
+    total_count: u64,
+}
+
+impl WebhookHandlerActor {
+    fn new() -> Self {
+        Self {
+            deliveries: Vec::new(),
+            max_deliveries: 100,
+            total_count: 0,
+        }
+    }
+}
+
+/// Handler implementations - SDK scans these and generates GenServer dispatch.
+/// 
+/// Each `#[handler("op")]` method is called when `payload.action == "op"`.
+/// For GenServer, all handlers default to "call" (request-reply) - no second param needed.
+/// Return `Result<Value, BehaviorError>` - SDK serializes and sends reply automatically.
+#[plexspaces_handlers]
+impl WebhookHandlerActor {
+    /// Handle "list" action - returns list of recent deliveries
+    #[handler("list")]
+    async fn list(&mut self, _ctx: &ActorContext, _msg: &Message) -> Result<Value, BehaviorError> {
+        let total = self.total_count;
+        let list: Vec<WebhookDelivery> = self.deliveries.clone();
+        Ok(json!({
+            "deliveries": list,
+            "total": total,
+            "action": "list"
+        }))
+    }
+
+    /// Handle "deliver" action - stores webhook and returns delivery info
+    #[handler("deliver")]
+    async fn deliver(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
+        let id = ulid::Ulid::new().to_string();
+        let delivery = WebhookDelivery::new(id.clone(), &msg.payload);
+        self.total_count += 1;
+        self.deliveries.push(delivery.clone());
+        if self.deliveries.len() > self.max_deliveries {
+            self.deliveries.remove(0);
+        }
+        info!(
+            "Webhook delivered id={} total={}",
+            id, self.total_count
+        );
+        Ok(json!({
+            "id": delivery.id,
+            "received_at": delivery.received_at,
+            "action": "delivered"
+        }))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Main: node + spawn actor + HTTP self-test
+// -----------------------------------------------------------------------------
+
+const TENANT_ID: &str = "acme-corp";
+const NAMESPACE: &str = "webhooks";
+const GRPC_PORT: u16 = 8001;
+const HTTP_PORT: u16 = 8002;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("╔════════════════════════════════════════════════════════════════╗");
-    println!("║           Webhook Handler Example (FaaS Pattern)               ║");
-    println!("╚════════════════════════════════════════════════════════════════╝");
-    println!();
-    println!("Use Case: Process webhooks from GitHub, Stripe, Slack");
-    println!();
+    tracing_subscriber::fmt()
+        .with_env_filter("info,plexspaces=debug")
+        .init();
 
-    // =========================================================================
-    // Step 1: Create node and handler actor
-    // =========================================================================
-    println!("Step 1: Create webhook handler actor");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    let node = Arc::new(NodeBuilder::new("webhook-node").build().await);
-    
-    let service_locator = node.service_locator();
-    let ctx = RequestContext::new_without_auth("acme-corp".to_string(), "webhooks".to_string());
+    info!("🚀 Webhook Handler Example (SDK Annotations Demo)");
+    info!("   Using #[gen_server_actor], #[plexspaces_handlers], #[handler]");
+    info!("   POST = deliver webhook, GET ?action=list = list recent deliveries");
 
-    let handler = ActorBuilder::new(Box::new(WebhookActor::new()))
-        .with_id("webhook-handler")
-        .with_namespace("webhooks")
-        .spawn(&ctx, service_locator.clone())
-        .await
-        .map_err(|e| format!("Failed to spawn webhook handler: {}", e))?;
-    
-    println!("  Actor: {}", handler.id());
-    println!("  Ready to process webhooks");
-    println!();
+    std::env::set_var("BLOB_ENABLED", "false");
+    let jwt_secret = std::env::var("PLEXSPACES_JWT_SECRET")
+        .unwrap_or_else(|_| "webhook-handler-example-secret".to_string());
+    std::env::set_var("PLEXSPACES_JWT_SECRET", &jwt_secret);
 
-    // =========================================================================
-    // Step 2: Receive GitHub push event
-    // =========================================================================
-    println!("Step 2: GitHub push webhook");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    let github_event = WebhookEvent::GitHubPush {
-        repository: "acme/backend".to_string(),
-        branch: "main".to_string(),
-        commits: 3,
-    };
-    
-    let msg = Message::json(&github_event)?
-        .with_message_type("webhook");
-    
-    handler.tell(msg).await.map_err(|e| format!("Send error: {}", e))?;
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    println!();
+    let node = NodeBuilder::new("webhook-handler-node")
+        .with_listen_addr(format!("0.0.0.0:{}", GRPC_PORT))
+        .with_in_memory_backends()
+        .build()
+        .await;
 
-    // =========================================================================
-    // Step 3: Receive Stripe payment event
-    // =========================================================================
-    println!("Step 3: Stripe payment webhook");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    let stripe_event = WebhookEvent::StripePayment {
-        customer_id: "cus_abc123".to_string(),
-        amount_cents: 9999,
-        currency: "USD".to_string(),
-    };
-    
-    let msg = Message::json(&stripe_event)?
-        .with_message_type("webhook");
-    
-    handler.tell(msg).await.map_err(|e| format!("Send error: {}", e))?;
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    println!();
+    let node_arc = Arc::new(node);
+    let node_for_server = node_arc.clone();
+    let _start_handle = tokio::spawn(async move {
+        if let Err(e) = node_for_server.start().await {
+            eprintln!("Node start error: {}", e);
+        }
+    });
 
-    // =========================================================================
-    // Step 4: Receive Slack command
-    // =========================================================================
-    println!("Step 4: Slack command webhook");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    let slack_event = WebhookEvent::SlackCommand {
-        user: "alice".to_string(),
-        channel: "engineering".to_string(),
-        command: "deploy staging".to_string(),
-    };
-    
-    let msg = Message::json(&slack_event)?
-        .with_message_type("webhook");
-    
-    handler.tell(msg).await.map_err(|e| format!("Send error: {}", e))?;
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    println!();
+    wait_for_port(HTTP_PORT).await?;
+    info!("✅ Node listening (gRPC {} HTTP {})", GRPC_PORT, HTTP_PORT);
 
-    // =========================================================================
-    // Step 5: Batch processing (multiple events)
-    // =========================================================================
-    println!("Step 5: Batch webhook processing");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    let events = vec![
-        WebhookEvent::GitHubPush {
-            repository: "acme/frontend".to_string(),
-            branch: "feature/dark-mode".to_string(),
-            commits: 1,
-        },
-        WebhookEvent::StripePayment {
-            customer_id: "cus_xyz789".to_string(),
-            amount_cents: 4999,
-            currency: "EUR".to_string(),
-        },
-    ];
-    
-    for event in events {
-        let msg = Message::json(&event)?.with_message_type("webhook");
-        handler.tell(msg).await.map_err(|e| format!("Send error: {}", e))?;
+    let service_locator = node_arc.service_locator();
+    let ctx = RequestContext::new_without_auth(TENANT_ID.to_string(), NAMESPACE.to_string());
+
+    let actor_ref = spawn_actor(
+        &ctx,
+        service_locator.clone(),
+        format!("webhook-handler-1@{}", node_arc.id()),
+        NAMESPACE,
+        WebhookHandlerActor::new(),
+        vec![],
+    )
+    .await
+    .map_err(|e| format!("spawn: {}", e))?;
+
+    info!("✅ Webhook handler actor spawned: {}", actor_ref.id());
+
+    let http_base = format!("http://127.0.0.1:{}", HTTP_PORT);
+    let url_list = format!(
+        "{}/api/v1/actors/{}/{}/webhook_handler?action=list",
+        http_base, TENANT_ID, NAMESPACE
+    );
+    let url_deliver = format!(
+        "{}/api/v1/actors/{}/{}/webhook_handler",
+        http_base, TENANT_ID, NAMESPACE
+    );
+
+    let jwt = make_jwt(TENANT_ID, &jwt_secret)?;
+    let client = reqwest::Client::new();
+
+    info!("📥 GET list (initial, should be empty)");
+    let list0 = client
+        .get(&url_list)
+        .header("Authorization", format!("Bearer {}", jwt))
+        .send()
+        .await?;
+    let list0_status = list0.status();
+    if !list0_status.is_success() {
+        error!("GET list failed: {}", list0_status);
+        let text = list0.text().await?;
+        return Err(format!("GET list: {} {}", list0_status, text).into());
     }
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    println!();
+    let json0: Value = list0.json().await?;
+    let total0 = json0
+        .get("payload")
+        .and_then(|p| p.get("total"))
+        .and_then(|t| t.as_u64())
+        .unwrap_or(0);
+    info!("   total={}", total0);
+    assert_eq!(total0, 0, "initial total should be 0");
 
-    // =========================================================================
-    // Summary
-    // =========================================================================
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("Webhook Handler Example Complete");
-    println!();
-    println!("Key Concepts:");
-    println!("  - Actors as HTTP/webhook handlers");
-    println!("  - Request routing by event type");
-    println!("  - Stateless processing with isolation");
-    println!();
-    println!("PlexSpaces Integration:");
-    println!("  - ActorBuilder: Create handler actor");
-    println!("  - Message::json(): Serialize webhook payload");
-    println!("  - tell(): Fire-and-forget (async processing)");
-    println!("  - ask(): Request-response (for sync HTTP)");
-    println!();
-    println!("Use Cases:");
-    println!("  - GitHub webhooks (CI/CD triggers)");
-    println!("  - Stripe webhooks (payment processing)");
-    println!("  - Slack commands (ChatOps)");
-    println!("  - Twilio webhooks (SMS/voice)");
-    println!("  - Custom API endpoints");
-    println!();
-    println!("Production Notes:");
-    println!("  - Add HTTP server (axum/actix) in front");
-    println!("  - Verify webhook signatures");
-    println!("  - Use ask() for synchronous responses");
-    println!();
+    info!("📤 POST deliver (webhook payload)");
+    // Include "action": "deliver" to route to #[handler("deliver")]
+    // Use ?invocation=call to get request-reply (default POST is fire-and-forget)
+    let body1 = json!({ "action": "deliver", "type": "github.push", "repo": "acme/backend", "commits": 3 });
+    let post1 = client
+        .post(format!("{}?invocation=call", &url_deliver))
+        .header("Authorization", format!("Bearer {}", jwt))
+        .json(&body1)
+        .send()
+        .await?;
+    let post1_status = post1.status();
+    if !post1_status.is_success() {
+        error!("POST deliver failed: {}", post1_status);
+        let text = post1.text().await?;
+        return Err(format!("POST deliver: {} {}", post1_status, text).into());
+    }
+    let resp1: Value = post1.json().await?;
+    let id1 = resp1
+        .get("payload")
+        .and_then(|p| p.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    info!("   delivered id={}", id1);
+    assert!(!id1.is_empty(), "delivery should return id");
 
+    info!("📤 POST deliver (second webhook)");
+    // Include "action": "deliver" to route to #[handler("deliver")]
+    let body2 = json!({ "action": "deliver", "type": "stripe.payment", "amount_cents": 9999 });
+    let _post2 = client
+        .post(format!("{}?invocation=call", &url_deliver))
+        .header("Authorization", format!("Bearer {}", jwt))
+        .json(&body2)
+        .send()
+        .await?;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    info!("📥 GET list (should show 2 deliveries)");
+    let list2 = client
+        .get(&url_list)
+        .header("Authorization", format!("Bearer {}", jwt))
+        .send()
+        .await?;
+    if !list2.status().is_success() {
+        error!("GET list (2) failed: {}", list2.status());
+        return Err("GET list (2) failed".into());
+    }
+    let json2: Value = list2.json().await?;
+    let total2 = json2
+        .get("payload")
+        .and_then(|p| p.get("total"))
+        .and_then(|t| t.as_u64())
+        .unwrap_or(0);
+    let deliveries = json2
+        .get("payload")
+        .and_then(|p| p.get("deliveries"))
+        .and_then(|d| d.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    info!("   total={} deliveries.len={}", total2, deliveries);
+    assert_eq!(total2, 2, "total should be 2 after two POSTs");
+    assert!(deliveries >= 1 && deliveries <= 2, "deliveries list should have 1–2 items");
+
+    info!("✅ Webhook Handler example completed.");
+    info!("   GET  {}", url_list);
+    info!("   POST {} with JSON body to deliver", url_deliver);
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
     Ok(())
+}
+
+async fn wait_for_port(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let addr = format!("127.0.0.1:{}", port);
+    for _ in 0..50 {
+        if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err("HTTP gateway did not become ready".into())
+}
+
+fn make_jwt(tenant_id: &str, secret: &str) -> Result<String, Box<dyn std::error::Error>> {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Claims {
+        sub: String,
+        exp: i64,
+        iat: i64,
+        tenant_id: String,
+        roles: Vec<String>,
+    }
+    let claims = Claims {
+        sub: "webhook-handler-example".to_string(),
+        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),
+        iat: chrono::Utc::now().timestamp(),
+        tenant_id: tenant_id.to_string(),
+        roles: vec!["user".to_string()],
+    };
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    let token = jsonwebtoken::encode(
+        &header,
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+    )?;
+    Ok(token)
 }

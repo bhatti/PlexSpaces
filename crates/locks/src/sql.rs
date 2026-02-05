@@ -48,14 +48,17 @@ use sqlx::{Acquire, Row, SqlitePool};
 ///
 /// ```sql
 /// CREATE TABLE IF NOT EXISTS locks (
-///   lock_key TEXT PRIMARY KEY,
+///   tenant_id TEXT NOT NULL,
+///   namespace TEXT NOT NULL,
+///   lock_key TEXT NOT NULL,
 ///   holder_id TEXT NOT NULL,
 ///   version TEXT NOT NULL,
 ///   expires_at INTEGER NOT NULL,
 ///   lease_duration_secs INTEGER NOT NULL,
 ///   last_heartbeat INTEGER NOT NULL,
 ///   locked INTEGER NOT NULL,
-///   metadata TEXT
+///   metadata TEXT,
+///   PRIMARY KEY (tenant_id, namespace, lock_key)
 /// );
 /// ```
 ///
@@ -169,7 +172,6 @@ impl SqliteLockManager {
 impl LockManager for SqliteLockManager {
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
     async fn acquire_lock(&self, ctx: &RequestContext, options: AcquireLockOptions) -> LockResult<Lock> {
-        // Use tenant_id and namespace as-is (may be empty)
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
         
@@ -213,11 +215,9 @@ impl LockManager for SqliteLockManager {
             let expired = expires_at_row <= now || locked_flag == 0;
 
             if !expired && holder_id != options.holder_id {
-                // Lock is held by someone else
                 return Err(LockError::LockAlreadyHeld(holder_id));
             }
 
-            // Either expired or held by same holder – acquire/refresh
             let new_version = Ulid::new().to_string();
             let metadata_json_new = if options.metadata.is_empty() {
                 metadata_json
@@ -252,9 +252,9 @@ impl LockManager for SqliteLockManager {
             .await
             .map_err(|e| LockError::BackendError(format!("update lock: {e}")))?;
 
-            tx.commit()
-                .await
-                .map_err(|e| LockError::BackendError(format!("commit tx: {e}")))?;
+        tx.commit()
+            .await
+            .map_err(|e| LockError::BackendError(format!("commit tx: {e}")))?;
 
             return Self::lock_from_row(
                 lock_key,
@@ -268,7 +268,6 @@ impl LockManager for SqliteLockManager {
             );
         }
 
-        // No existing lock – insert new
         let version = Ulid::new().to_string();
         let metadata_json = if options.metadata.is_empty() {
             None
@@ -316,7 +315,6 @@ impl LockManager for SqliteLockManager {
 
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
     async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions) -> LockResult<Lock> {
-        // Use tenant_id and namespace as-is (may be empty)
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
         
@@ -412,7 +410,7 @@ impl LockManager for SqliteLockManager {
             options.holder_id.clone(),
             new_version,
             new_expires,
-            lease_secs, // Use new lease duration from options, not the old one from DB
+            lease_secs,
             now,
             1,
             metadata_json_new,
@@ -421,7 +419,6 @@ impl LockManager for SqliteLockManager {
 
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
     async fn release_lock(&self, ctx: &RequestContext, options: ReleaseLockOptions) -> LockResult<()> {
-        // Use tenant_id and namespace as-is (may be empty)
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
         
@@ -435,7 +432,6 @@ impl LockManager for SqliteLockManager {
             .await
             .map_err(|e| LockError::BackendError(format!("begin tx: {e}")))?;
 
-        // Load lock - MUST filter by tenant_id and namespace
         let row = sqlx::query(
             r#"SELECT holder_id, version FROM locks WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
         )

@@ -170,7 +170,7 @@ pub struct HostFunctions {
     /// Process group registry for pub/sub (optional)
     process_group_registry: Option<Arc<ProcessGroupRegistry>>,
     /// Lock manager for distributed locks (optional)
-    lock_manager: Option<Arc<dyn LockManager>>,
+    lock_manager: Option<Arc<dyn LockManager + Send + Sync>>,
     /// Object registry for service discovery (optional)
     object_registry: Option<Arc<dyn ObjectRegistry>>,
     /// Journal storage for durability (optional)
@@ -245,7 +245,7 @@ impl HostFunctions {
         channel_service: Option<Arc<dyn ChannelService>>,
         keyvalue_store: Option<Arc<dyn KeyValueStore>>,
         process_group_registry: Option<Arc<ProcessGroupRegistry>>,
-        lock_manager: Option<Arc<dyn LockManager>>,
+        lock_manager: Option<Arc<dyn LockManager + Send + Sync>>,
         object_registry: Option<Arc<dyn ObjectRegistry>>,
         journal_storage: Option<Arc<dyn JournalStorage>>,
         blob_service: Option<Arc<BlobService>>,
@@ -288,7 +288,7 @@ impl HostFunctions {
     }
 
     /// Get lock manager if available
-    pub fn lock_manager(&self) -> Option<&Arc<dyn LockManager>> {
+    pub fn lock_manager(&self) -> Option<&Arc<dyn LockManager + Send + Sync>> {
         self.lock_manager.as_ref()
     }
 
@@ -319,6 +319,9 @@ impl HostFunctions {
     }
 
     /// Get key-value store operation helper
+    ///
+    /// WIT compatibility: simple-actor uses `host.kv-get(key) -> string`; full plexspaces-actor
+    /// uses `keyvalue.get(ctx, key) -> result<option<payload>, actor-error>`. Both end up here.
     pub async fn get_keyvalue(
         &self,
         ctx: &RequestContext,
@@ -329,6 +332,11 @@ impl HostFunctions {
                 .await
                 .map_err(|e| format!("KeyValue get failed: {}", e))
         } else {
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    "KeyValue store not configured; kv_get will return error (check node passes keyvalue_store when instantiating WASM)"
+                );
+            }
             Err("KeyValue store not configured".to_string())
         }
     }
@@ -344,6 +352,43 @@ impl HostFunctions {
             kv.put(ctx, key, value)
                 .await
                 .map_err(|e| format!("KeyValue put failed: {}", e))
+        } else {
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    key = %key,
+                    value_len = value.len(),
+                    "KeyValue store not configured; kv_put will return error"
+                );
+            }
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Delete key-value store operation helper
+    pub async fn delete_keyvalue(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+    ) -> Result<(), String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.delete(ctx, key)
+                .await
+                .map_err(|e| format!("KeyValue delete failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// List keys by prefix operation helper
+    pub async fn list_keyvalue(
+        &self,
+        ctx: &RequestContext,
+        prefix: &str,
+    ) -> Result<Vec<String>, String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.list_keys(ctx, prefix)
+                .await
+                .map_err(|e| format!("KeyValue list failed: {}", e))
         } else {
             Err("KeyValue store not configured".to_string())
         }

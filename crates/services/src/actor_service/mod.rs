@@ -360,11 +360,11 @@ impl ActorServiceImpl {
         actor_id: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            "🟪 [ACTOR_SERVICE::send_message] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}",
-            message.id, actor_id, message.sender_id, message.receiver_id, message.message_type, message.correlation_id
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "🟪 [ACTOR_SERVICE::send_message] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}",
+                message.id, actor_id, message.sender_id, message.receiver_id, message.message_type, message.correlation_id
+            );
         }
         
         // Check if this is a reply (has correlation_id) and route to per-ActorRef reply map if local
@@ -390,19 +390,19 @@ impl ActorServiceImpl {
                     // MessageSender exists - use it directly
                     // ActorRef::tell() will check for correlation_id and route to ReplyWaiter if present
                     let message_id = message.id.to_string();
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        "🟪 [ACTOR_SERVICE::send_message] REPLY ROUTING: message_id={}, correlation_id={}, routing via MessageSender.tell()",
-                        message_id, correlation_id
-                    );
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(
+                            "🟪 [ACTOR_SERVICE::send_message] REPLY ROUTING: message_id={}, correlation_id={}, routing via MessageSender.tell()",
+                            message_id, correlation_id
+                        );
                     }
                     sender.tell(message).await
                         .map_err(|e| Status::internal(format!("Failed to send reply: {}", e)))?;
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        "🟪 [ACTOR_SERVICE::send_message] REPLY ROUTED: message_id={}, correlation_id={}",
-                        message_id, correlation_id
-                    );
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(
+                            "🟪 [ACTOR_SERVICE::send_message] REPLY ROUTED: message_id={}, correlation_id={}",
+                            message_id, correlation_id
+                        );
                     }
                     return Ok(message_id);
                 }
@@ -410,21 +410,21 @@ impl ActorServiceImpl {
         }
         
         // Normal message routing (no correlation_id or remote actor)
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            "🟪 [ACTOR_SERVICE::send_message] NORMAL ROUTING: message_id={}, actor_id={}, calling route_message",
-            message.id, actor_id
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "🟪 [ACTOR_SERVICE::send_message] NORMAL ROUTING: message_id={}, actor_id={}, calling route_message",
+                message.id, actor_id
+            );
         }
         let (msg_id, _) = self
             .route_message(actor_id, message, false, None)
             .await
             .map_err(|e| format!("Failed to send message: {}", e))?;
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            "🟪 [ACTOR_SERVICE::send_message] COMPLETED: message_id={}, actor_id={}",
-            msg_id, actor_id
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "🟪 [ACTOR_SERVICE::send_message] COMPLETED: message_id={}, actor_id={}",
+                msg_id, actor_id
+            );
         }
         Ok(msg_id)
     }
@@ -448,11 +448,11 @@ impl ActorServiceImpl {
         message: Message,
         timeout: Option<std::time::Duration>,
     ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            "🟪 [ACTOR_SERVICE::send_message_and_wait] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}, timeout={:?}",
-            message.id, actor_id, message.sender_id, message.receiver_id, message.message_type, message.correlation_id, timeout
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "🟪 [ACTOR_SERVICE::send_message_and_wait] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}, timeout={:?}",
+                message.id, actor_id, message.sender_id, message.receiver_id, message.message_type, message.correlation_id, timeout
+            );
         }
         
         // Parse actor_id to determine if local or remote
@@ -482,11 +482,11 @@ impl ActorServiceImpl {
             };
 
             let timeout_duration = timeout.unwrap_or(std::time::Duration::from_secs(5));
-            if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "🟪 [ACTOR_SERVICE::send_message_and_wait] LOCAL: message_id={}, actor_id={}, calling ActorRef::ask()",
-                message.id, actor_id_str
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    "🟪 [ACTOR_SERVICE::send_message_and_wait] LOCAL: message_id={}, actor_id={}, calling ActorRef::ask()",
+                    message.id, actor_id_str
+                );
             }
             let result = actor_ref.ask(message, timeout_duration).await
                 .map_err(|e| {
@@ -496,8 +496,8 @@ impl ActorServiceImpl {
                         _ => format!("Failed to send ask request: {}", e).into(),
                     }
                 });
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
                     "🟪 [ACTOR_SERVICE::send_message_and_wait] LOCAL COMPLETED: actor_id={}, result={:?}",
                     actor_id_str, result.is_ok()
                 );
@@ -505,19 +505,19 @@ impl ActorServiceImpl {
             result
         } else {
             // REMOTE: Use route_message (which handles remote routing via gRPC)
-            if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "🟪 [ACTOR_SERVICE::send_message_and_wait] REMOTE: message_id={}, actor_id={}, calling route_message",
-                message.id, actor_id
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    "🟪 [ACTOR_SERVICE::send_message_and_wait] REMOTE: message_id={}, actor_id={}, calling route_message",
+                    message.id, actor_id
+                );
             }
             let (_, response) = self
                 .route_message(actor_id, message, true, timeout)
                 .await
                 .map_err(|e| format!("Failed to send message and wait: {}", e))?;
 
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
                     "🟪 [ACTOR_SERVICE::send_message_and_wait] REMOTE COMPLETED: actor_id={}, has_response={}",
                     actor_id, response.is_some()
                 );
@@ -554,11 +554,11 @@ impl ActorServiceImpl {
         let message_type = message.message_type.to_string();
         let message_correlation_id = message.correlation_id.clone();
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            "🟪 [ACTOR_SERVICE::route_message] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}, wait_for_response={}, timeout={:?}",
-            message_id, actor_id, message_sender, message_receiver, message_type, message_correlation_id, wait_for_response, timeout
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "🟪 [ACTOR_SERVICE::route_message] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}, wait_for_response={}, timeout={:?}",
+                message_id, actor_id, message_sender, message_receiver, message_type, message_correlation_id, wait_for_response, timeout
+            );
         }
         
         // Parse actor@node ID (or just actor name, defaults to local node)
@@ -591,11 +591,11 @@ impl ActorServiceImpl {
             // LOCAL ROUTING: Deliver to local actor
             // If actor exists locally with original actor_id, pass that actor_id to route_local
             // Otherwise, use the parsed node_id (which should match local_node_id)
-            if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "🟪 [ACTOR_SERVICE::route_message] LOCAL ROUTING: message_id={}, actor_id={}, actor_exists_locally={}",
-                message_id, actor_id, actor_exists_locally
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    "🟪 [ACTOR_SERVICE::route_message] LOCAL ROUTING: message_id={}, actor_id={}, actor_exists_locally={}",
+                    message_id, actor_id, actor_exists_locally
+                );
             }
             // Pass the original actor_id so route_local can look it up correctly
             // route_local will try both the constructed ID and the original receiver ID
@@ -603,18 +603,18 @@ impl ActorServiceImpl {
                 .await
         } else {
             // REMOTE ROUTING: Forward to remote node
-            if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "🟪 [ACTOR_SERVICE::route_message] REMOTE ROUTING: message_id={}, actor_id={}, node_id={}",
-                message_id, actor_id, node_id
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    "🟪 [ACTOR_SERVICE::route_message] REMOTE ROUTING: message_id={}, actor_id={}, node_id={}",
+                    message_id, actor_id, node_id
+                );
             }
             self.route_remote(&node_id, actor_id, message, wait_for_response, timeout)
                 .await
         };
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 "🟪 [ACTOR_SERVICE::route_message] COMPLETED: message_id={}, actor_id={}, result={:?}",
                 message_id, actor_id, result.is_ok()
             );
@@ -1016,13 +1016,6 @@ impl ActorServiceTrait for ActorServiceImpl {
             &proto_message.receiver_id
         };
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            "🟪 [ACTOR_SERVICE::send_message (gRPC)] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}, wait_for_response={}",
-            message.id, actor_id, message.sender_id, message.receiver_id, message.message_type, message.correlation_id, req.wait_for_response
-        );
-        }
-
         // Convert timeout
         let timeout = req.timeout.map(|d| {
             std::time::Duration::from_secs(d.seconds as u64)
@@ -1033,13 +1026,6 @@ impl ActorServiceTrait for ActorServiceImpl {
         let (message_id, response) = self
             .route_message(actor_id, message, req.wait_for_response, timeout)
             .await?;
-        
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "🟪 [ACTOR_SERVICE::send_message (gRPC)] COMPLETED: message_id={}, actor_id={}, has_response={}",
-                message_id, actor_id, response.is_some()
-            );
-        }
 
         // Response is already proto Message
         let response_message = response;
@@ -1142,12 +1128,6 @@ impl ActorServiceTrait for ActorServiceImpl {
             for proto_facet in &facets {
                 match plexspaces_actor::create_facet_from_proto(proto_facet, facet_registry).await {
                     Ok(facet_box) => {
-                        tracing::debug!(
-                            actor_id = %actor_id,
-                            facet_type = %proto_facet.r#type,
-                            priority = proto_facet.priority,
-                            "Created facet for actor"
-                        );
                         facet_boxes.push(facet_box);
                     }
                     Err(e) => {
@@ -1404,9 +1384,16 @@ impl ActorServiceTrait for ActorServiceImpl {
         // Get request body (tenant_id is no longer in request)
         let req = request.into_inner();
         
-        // Extract tenant_id and namespace from RequestContext (from auth/default config)
+        // Extract tenant_id and namespace. Path-derived namespace (req.namespace) is the source
+        // of truth for actor lookup so /api/v1/actors/leader-election-term1/LeaderElection and
+        // .../leader-election-term2/LeaderElection resolve to different actors.
         let tenant_id = ctx.tenant_id().to_string();
-        let namespace = ctx.namespace().to_string();
+        let namespace = if !req.namespace.is_empty() {
+            req.namespace.clone()
+        } else {
+            ctx.namespace().to_string()
+        };
+        let lookup_ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
         
         // OBSERVABILITY: Start tracing span (clone for span to avoid moving)
         let tenant_id_for_span = tenant_id.clone();
@@ -1421,10 +1408,12 @@ impl ActorServiceTrait for ActorServiceImpl {
         );
         let _guard = span.enter();
         
-        tracing::info!(
-            "🟦 [INVOKE_ACTOR] START: tenant_id={}, namespace={}, actor_type={}, http_method={}",
-            &tenant_id, &namespace, req.actor_type, req.http_method
-        );
+        // URL for logging (path from request or constructed)
+        let url = if req.path.is_empty() {
+            format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, req.actor_type)
+        } else {
+            req.path.clone()
+        };
 
         let actor_type = req.actor_type.clone();
         if actor_type.is_empty() {
@@ -1453,18 +1442,18 @@ impl ActorServiceTrait for ActorServiceImpl {
         let lookup_start = std::time::Instant::now();
         
         // Discover actors by type using efficient hashmap lookup (O(1))
-        let actor_ids = actor_registry.discover_actors_by_type(&ctx, &actor_type).await;
+        let actor_ids = actor_registry.discover_actors_by_type(&lookup_ctx, &actor_type).await;
 
         // OBSERVABILITY: Track lookup duration
         let lookup_duration = lookup_start.elapsed();
         metrics::histogram!("plexspaces_actor_service_invoke_actor_lookup_duration_seconds")
             .record(lookup_duration.as_secs_f64());
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            "🟦 [INVOKE_ACTOR] Lookup complete: found {} actors of type '{}' in tenant '{}', namespace '{}' (took {:?})",
-            actor_ids.len(), actor_type, tenant_id, namespace, lookup_duration
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                "🟦 [INVOKE_ACTOR] Lookup complete: found {} actors of type '{}' in tenant '{}', namespace '{}' (took {:?})",
+                actor_ids.len(), actor_type, tenant_id, namespace, lookup_duration
+            );
         }
 
         if actor_ids.is_empty() {
@@ -1494,21 +1483,26 @@ impl ActorServiceTrait for ActorServiceImpl {
             actor_ids[idx].clone()
         };
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 "🟦 [INVOKE_ACTOR] Selected actor: {} (from {} candidates)",
                 selected_actor_id, actor_ids.len()
             );
         }
         
-        // Determine HTTP method
-        // GET = read operation (uses ask pattern - request-reply)
-        // POST/PUT = update operation (uses tell pattern - fire-and-forget)
-        // DELETE = delete operation (uses ask pattern - request-reply for confirmation)
-        // Default to GET if not specified (read is safer default)
+        // Determine invocation pattern: tell (fire-and-forget) vs ask (request-reply)
+        // - tell: message_type "cast"; ask: message_type "call".
+        // msg_type_override (from query param msg_type) takes precedence when set; otherwise ask flag or GET.
         let http_method = req.http_method.to_uppercase();
         let is_get = http_method.is_empty() || http_method == "GET";
         let is_delete = http_method == "DELETE";
+        let use_ask = if req.msg_type_override == "call" {
+            true
+        } else if req.msg_type_override == "cast" {
+            false
+        } else {
+            req.ask || is_get
+        };
 
         // Prepare message payload and metadata
         let (payload, mut metadata) = if is_get || is_delete {
@@ -1530,36 +1524,28 @@ impl ActorServiceTrait for ActorServiceImpl {
         // This allows actors to access the complete URL path for custom routing
         if !req.path.is_empty() {
             metadata.insert("http_path".to_string(), req.path.clone());
-            if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "🟦 [INVOKE_ACTOR] Custom path provided: {}",
-                req.path
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!("🟦 [INVOKE_ACTOR] Custom path provided: {}", req.path);
             }
         }
         
         // Add subpath to metadata if provided (for future routing capabilities)
         if !req.subpath.is_empty() {
             metadata.insert("http_subpath".to_string(), req.subpath.clone());
-            if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "🟦 [INVOKE_ACTOR] Subpath provided: {}",
-                req.subpath
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!("🟦 [INVOKE_ACTOR] Subpath provided: {}", req.subpath);
             }
         }
 
-        // Create message
+        // Create message (id from client not yet in proto; server assigns ULID for correlation)
         let mut message = Message {
             id: ulid::Ulid::new().to_string(),
             payload,
             receiver_id: selected_actor_id.clone(),
             ..Default::default()
         };
-        // Set message type based on HTTP method:
-        // GET/DELETE = "call" (ask pattern, expects reply)
-        // POST/PUT = "cast" (tell pattern, fire-and-forget)
-        message.message_type = if is_get || is_delete {
+        // Set message type: ask = "call" (request-reply), tell = "cast" (fire-and-forget)
+        message.message_type = if use_ask {
             "call".to_string()
         } else {
             "cast".to_string()
@@ -1573,25 +1559,37 @@ impl ActorServiceTrait for ActorServiceImpl {
         } else {
             format!("/api/v1/actors/{}/{}", &namespace, req.actor_type)
         };
-        message.uri_path = full_path;
+        message.uri_path = full_path.clone();
         message.uri_method = http_method.clone();
 
-        // Use route_message to invoke the actor (handles local/remote routing automatically)
-        // This avoids creating invalid Remote ActorRefs with local node_ids
-        let wait_for_response = is_get || is_delete;
+        // route_message: wait_for_response=true => ask (request-reply), false => tell (fire-and-forget)
+        let wait_for_response = use_ask;
         let timeout = if wait_for_response {
             Some(std::time::Duration::from_secs(5))
         } else {
             None
         };
 
+        let message_id = message.id.clone();
+        let invocation_label = if use_ask { "ask" } else { "tell" };
+        let envelope_msg_type = message.message_type.clone();
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                message_id = %message_id,
+                invocation = %invocation_label,
+                msg_type = %envelope_msg_type,
+                "🟦 [INVOKE_ACTOR] START: tenant_id={}, namespace={}, actor_type={}, http_method={}, url={}",
+                &tenant_id, &namespace, actor_type, http_method, url
+            );
+        }
+
         // OBSERVABILITY: Track invocation start
         let invoke_start = std::time::Instant::now();
         
-        // Invoke actor based on HTTP method using route_message
-        let result = if is_get || is_delete {
-            // GET/DELETE: Use ask() (request-reply)
-            let method_label = if is_get { "GET" } else { "DELETE" };
+        // Branch on ask vs tell (request-reply vs fire-and-forget)
+        let result = if use_ask {
+            // Ask pattern (request-reply): GET or explicit ask=true
+            let method_label = if is_get { "GET" } else { "POST/PUT" };
             metrics::counter!("plexspaces_actor_service_invoke_actor_total",
                 "method" => method_label,
                 "pattern" => "ask",
@@ -1603,7 +1601,6 @@ impl ActorServiceTrait for ActorServiceImpl {
             match self.route_message(&selected_actor_id, message, true, timeout).await {
                 Ok((_, Some(reply))) => {
                     let invoke_duration = invoke_start.elapsed();
-                    let method_label = if is_get { "GET" } else { "DELETE" };
                     metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
                         "method" => method_label,
                         "pattern" => "ask",
@@ -1614,8 +1611,16 @@ impl ActorServiceTrait for ActorServiceImpl {
                     ).record(invoke_duration.as_secs_f64());
                     
                     tracing::info!(
-                        "🟦 [INVOKE_ACTOR] SUCCESS ({}/ask): actor_id={}, duration={:?}, payload_size={}",
-                        method_label, selected_actor_id, invoke_duration, reply.payload.len()
+                        message_id = %message_id,
+                        invocation = "ask",
+                        msg_type = %envelope_msg_type,
+                        actor_id = %selected_actor_id,
+                        path = %full_path,
+                        method = %http_method,
+                        duration_ms = invoke_duration.as_millis(),
+                        payload_size = reply.payload.len(),
+                        "INVOKE_ACTOR SUCCESS (ask) duration_ms={}",
+                        invoke_duration.as_millis()
                     );
                     
                     Ok(Response::new(InvokeActorResponse {
@@ -1632,7 +1637,6 @@ impl ActorServiceTrait for ActorServiceImpl {
                 }
                 Err(e) => {
                     let invoke_duration = invoke_start.elapsed();
-                    let method_label = if is_get { "GET" } else { "DELETE" };
                     metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
                         "method" => method_label,
                         "pattern" => "ask",
@@ -1649,17 +1653,25 @@ impl ActorServiceTrait for ActorServiceImpl {
                         "actor_type" => actor_type.clone()
                     ).increment(1);
                     
+                    let err_first = e.message().lines().next().unwrap_or("");
                     tracing::error!(
-                        "🟦 [INVOKE_ACTOR] FAILED ({}/ask): actor_id={}, error={}, duration={:?}",
-                        method_label, selected_actor_id, e, invoke_duration
+                        message_id = %message_id,
+                        invocation = "ask",
+                        actor_id = %selected_actor_id,
+                        path = %full_path,
+                        method = %http_method,
+                        error_first_line = %err_first,
+                        duration_ms = invoke_duration.as_millis(),
+                        "INVOKE_ACTOR FAILED (ask) duration_ms={}",
+                        invoke_duration.as_millis()
                     );
                     
                     Err(e)
                 }
             }
         } else {
-            // POST/PUT: Use tell() (fire-and-forget)
-            let method_label = if http_method == "PUT" { "PUT" } else { "POST" };
+            // POST/PUT/DELETE: Use tell() (fire-and-forget)
+            let method_label = if http_method == "PUT" { "PUT" } else if is_delete { "DELETE" } else { "POST" };
             metrics::counter!("plexspaces_actor_service_invoke_actor_total",
                 "method" => method_label,
                 "pattern" => "tell",
@@ -1671,7 +1683,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             match self.route_message(&selected_actor_id, message, false, None).await {
                 Ok((_, _)) => {
                     let invoke_duration = invoke_start.elapsed();
-                    let method_label = if http_method == "PUT" { "PUT" } else { "POST" };
+                    let method_label = if http_method == "PUT" { "PUT" } else if is_delete { "DELETE" } else { "POST" };
                     metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
                         "method" => method_label,
                         "pattern" => "tell",
@@ -1682,8 +1694,15 @@ impl ActorServiceTrait for ActorServiceImpl {
                     ).record(invoke_duration.as_secs_f64());
                     
                     tracing::info!(
-                        "🟦 [INVOKE_ACTOR] SUCCESS ({}/tell): actor_id={}, duration={:?}",
-                        method_label, selected_actor_id, invoke_duration
+                        message_id = %message_id,
+                        invocation = "tell",
+                        msg_type = %envelope_msg_type,
+                        actor_id = %selected_actor_id,
+                        path = %full_path,
+                        method = %http_method,
+                        duration_ms = invoke_duration.as_millis(),
+                        "INVOKE_ACTOR SUCCESS (tell) duration_ms={}",
+                        invoke_duration.as_millis()
                     );
                     
                     Ok(Response::new(InvokeActorResponse {
@@ -1696,7 +1715,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 }
                 Err(e) => {
                     let invoke_duration = invoke_start.elapsed();
-                    let method_label = if http_method == "PUT" { "PUT" } else { "POST" };
+                    let method_label = if http_method == "PUT" { "PUT" } else if is_delete { "DELETE" } else { "POST" };
                     metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
                         "method" => method_label,
                         "pattern" => "tell",
@@ -1713,9 +1732,17 @@ impl ActorServiceTrait for ActorServiceImpl {
                         "actor_type" => actor_type.clone()
                     ).increment(1);
                     
+                    let err_first = e.message().lines().next().unwrap_or("");
                     tracing::error!(
-                        "🟦 [INVOKE_ACTOR] FAILED ({}/tell): actor_id={}, error={}, duration={:?}",
-                        method_label, selected_actor_id, e, invoke_duration
+                        message_id = %message_id,
+                        invocation = "tell",
+                        actor_id = %selected_actor_id,
+                        path = %full_path,
+                        method = %http_method,
+                        error_first_line = %err_first,
+                        duration_ms = invoke_duration.as_millis(),
+                        "INVOKE_ACTOR FAILED (tell) duration_ms={}",
+                        invoke_duration.as_millis()
                     );
                     
                     Err(e)
@@ -1728,8 +1755,10 @@ impl ActorServiceTrait for ActorServiceImpl {
         metrics::histogram!("plexspaces_actor_service_invoke_actor_total_duration_seconds")
             .record(total_duration.as_secs_f64());
         
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                path = %full_path,
+                method = %http_method,
                 "🟦 [INVOKE_ACTOR] COMPLETED: total_duration={:?}, success={}",
                 total_duration, result.is_ok()
             );
@@ -1927,8 +1956,8 @@ pub use get_or_activate_impl::get_or_activate_actor_impl;
 mod tests {
     use super::*;
     use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
-    use plexspaces_keyvalue::InMemoryKVStore;
-    use plexspaces_object_registry::ObjectRegistry;
+    use plexspaces_keyvalue::SqliteKVStore;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::object_registry::v1::ObjectRegistration;
     use plexspaces_proto::object_registry::v1::ObjectType;
     use std::time::Duration as StdDuration;
@@ -1944,9 +1973,9 @@ mod tests {
         }
     }
 
-    /// Simple wrapper to adapt ObjectRegistry to ObjectRegistryTrait
+    /// Simple wrapper to adapt ObjectRegistryImpl to ObjectRegistryTrait
     struct ObjectRegistryAdapter {
-        inner: Arc<ObjectRegistry>,
+        inner: Arc<ObjectRegistryImpl>,
     }
 
     #[async_trait::async_trait]
@@ -2041,10 +2070,10 @@ mod tests {
         }
     }
 
-    /// Helper to create a test ActorRegistry
-    fn create_test_registry(local_node_id: &str) -> Arc<ActorRegistry> {
-        let kv = Arc::new(InMemoryKVStore::new());
-        let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
+    /// Helper to create a test ActorRegistry (async because SqliteObjectRegistryRepository::new is async)
+    async fn create_test_registry(local_node_id: &str) -> Arc<ActorRegistry> {
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
         let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
             inner: object_registry_impl,
         });
@@ -2054,7 +2083,7 @@ mod tests {
     /// Helper to create ActorServiceImpl with proper ServiceLocator setup for tests
     async fn create_test_actor_service(actor_registry: Arc<ActorRegistry>, node_id: String) -> ActorServiceImpl {
         use crate::service_locator::ServiceLocatorImpl;
-        use plexspaces_core::{ServiceLocatorInitialization, ServiceLocator as ServiceLocatorTrait};
+        use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
         // Create ServiceLocatorImpl directly
         let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
         // Register actor_registry using strongly-typed method
@@ -2084,13 +2113,13 @@ mod tests {
         // Tenant comes from auth, not config - use empty strings for test actor registration
         use plexspaces_core::RequestContext;
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
-        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None).await;
+        actor_registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
     }
 
     /// Helper to create a test ActorRegistry with a node registration
     async fn create_test_registry_with_node(local_node_id: &str, node_id: &str, node_address: &str) -> Arc<ActorRegistry> {
-        let kv = Arc::new(InMemoryKVStore::new());
-        let object_registry_impl = Arc::new(ObjectRegistry::new(kv));
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
         
         // Register node using ObjectTypeNode
         // Use internal context for system operations (node registration is system-level)
@@ -2119,7 +2148,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_local_actor_not_found() {
         // ARRANGE: Create service with empty local actors
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let message = create_test_message(b"test".to_vec());
@@ -2139,7 +2168,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_local_fire_and_forget_success() {
         // ARRANGE: Create actor and register it
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test@node1".to_string()).await.expect("Failed to create mailbox"));
@@ -2182,7 +2211,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_local_request_reply_not_implemented() {
         // ARRANGE: Create actor and register it
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test@node1".to_string()).await.expect("Failed to create mailbox"));
@@ -2216,7 +2245,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_remote_node_not_found() {
         // ARRANGE: Create service with empty registry
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
         
         // Service registration is synchronous - no wait needed
@@ -2246,7 +2275,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_and_unregister_local_actor() {
         // ARRANGE
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test@node1".to_string()).await.expect("Failed to create mailbox"));
@@ -2294,7 +2323,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_message_invalid_actor_id() {
         // ARRANGE: Create service
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let message = create_test_message(b"test".to_vec());
@@ -2316,7 +2345,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_message_local_routing() {
         // ARRANGE: Create actor and register it locally
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test@node1".to_string()).await.expect("Failed to create mailbox"));
@@ -2350,7 +2379,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_missing_message() {
         // ARRANGE: Create service
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         // ACT: Call send_message with no message
@@ -2372,7 +2401,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_missing_receiver() {
         // ARRANGE: Create service
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         // Create message without receiver_id
@@ -2398,7 +2427,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_success() {
         // ARRANGE: Create actor and register it
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test@node1".to_string()).await.expect("Failed to create mailbox"));
@@ -2435,7 +2464,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_timeout() {
         // ARRANGE
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test@node1".to_string()).await.expect("Failed to create mailbox"));
@@ -2469,7 +2498,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connection_manager_available() {
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
         
         // Test that connection manager is available
@@ -2484,7 +2513,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_remote_node_not_in_registry() {
         // ARRANGE: Create service with empty registry
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
         
         // Service registration is synchronous - no wait needed
@@ -2514,7 +2543,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_remote_registry_error() {
         // ARRANGE: Create service with registry that will fail lookup
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
         
         // Service registration is synchronous - no wait needed
@@ -2575,7 +2604,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_converts_timeout_correctly() {
         // ARRANGE
-        let actor_registry = create_test_registry("node1");
+        let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
         let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test@node1".to_string()).await.expect("Failed to create mailbox"));

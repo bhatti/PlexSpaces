@@ -1067,12 +1067,11 @@ pub fn new(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_keyvalue::InMemoryKVStore;
-    use plexspaces_object_registry::ObjectRegistryImpl;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 
-    fn create_test_node_registry() -> NodeRegistry {
-        let kv_store = Arc::new(InMemoryKVStore::new());
-        let object_registry = Arc::new(ObjectRegistryImpl::new(kv_store));
+    async fn create_test_node_registry() -> NodeRegistry {
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry = Arc::new(ObjectRegistryImpl::new(object_repo));
         let mut config = NodeRegistryConfig::default();
         config.gossip_enabled = false; // Disable for unit tests
         config.use_shared_db = false;
@@ -1085,9 +1084,9 @@ mod tests {
         )
     }
 
-    fn create_test_node_registry_with_db() -> NodeRegistry {
-        let kv_store = Arc::new(InMemoryKVStore::new());
-        let object_registry = Arc::new(ObjectRegistryImpl::new(kv_store));
+    async fn create_test_node_registry_with_db() -> NodeRegistry {
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry = Arc::new(ObjectRegistryImpl::new(object_repo));
         let mut config = NodeRegistryConfig::default();
         config.gossip_enabled = false;
         config.use_shared_db = true;
@@ -1105,7 +1104,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_and_lookup_node() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         let node_reg = NodeRegistration {
@@ -1123,7 +1122,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unregister_node() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         let node_reg = NodeRegistration {
@@ -1141,7 +1140,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_nodes() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         for i in 0..3 {
@@ -1159,7 +1158,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_heartbeat() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         let node_reg = NodeRegistration {
@@ -1177,7 +1176,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_swim_integration() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         // Register nodes
@@ -1203,7 +1202,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_db_fallback_with_backoff() {
-        let registry = create_test_node_registry_with_db();
+        let registry = create_test_node_registry_with_db().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         let node_reg = NodeRegistration {
@@ -1222,7 +1221,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_gossip_protocol_disabled() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         
         assert!(!registry.is_gossip_running());
         registry.start_gossip_protocol();
@@ -1232,7 +1231,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_stats() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         let (size, hits, ttl) = registry.cache_stats().await;
@@ -1252,7 +1251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pagination() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         for i in 0..10 {
@@ -1270,7 +1269,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_swim_member_state_transitions() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         let node_reg = NodeRegistration {
@@ -1297,7 +1296,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cluster_filter() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         // Add nodes to different clusters
@@ -1329,7 +1328,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_exponential_backoff_integration() {
-        let registry = create_test_node_registry_with_db();
+        let registry = create_test_node_registry_with_db().await;
         
         // Verify backoff config
         assert_eq!(registry.config.db_max_attempts, 3);
@@ -1338,7 +1337,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_swim_refute_self_suspicion() {
-        let registry = create_test_node_registry();
+        let registry = create_test_node_registry().await;
 
         let initial = registry.swim().local_incarnation();
         
@@ -1352,7 +1351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_swim_anti_entropy_merge() {
-        let registry1 = create_test_node_registry();
+        let registry1 = create_test_node_registry().await;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
         // Registry1 knows about node-x
@@ -1368,8 +1367,8 @@ mod tests {
         assert!(!state.is_empty());
 
         // Create registry2 and merge state
-        let kv_store = Arc::new(InMemoryKVStore::new());
-        let object_registry = Arc::new(ObjectRegistryImpl::new(kv_store));
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry = Arc::new(ObjectRegistryImpl::new(object_repo));
         let mut config = NodeRegistryConfig::default();
         config.gossip_enabled = false;
         
@@ -1523,8 +1522,8 @@ mod tests {
             SwimConfig as ProtoSwimConfig,
         };
 
-        let kv_store = Arc::new(InMemoryKVStore::new());
-        let object_registry = Arc::new(ObjectRegistryImpl::new(kv_store));
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry = Arc::new(ObjectRegistryImpl::new(object_repo));
 
         let node_config = NodeConfig {
             id: "test-node-proto".to_string(),

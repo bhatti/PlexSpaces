@@ -1,155 +1,116 @@
 """
-Bank Account Actor - Durable State Example (Python WASM)
+Bank Account Actor - Durable State Example (Python WASM with SDK)
 
 A bank account that demonstrates durability:
-- Balance persists across restarts via get_state/set_state
+- Balance persists across restarts via state() decorator
 - Transaction log enables replay after crash
 - Multiple accounts deployed via ApplicationSpec
 
 Real-world use case: Banking, wallets, any financial ledger.
 
-## Durability Features Demonstrated
+## SDK Features Used
 
-1. **Persistent State** - Balance saved via get_state(), restored via set_state()
-2. **Transaction Log** - Every operation logged for replay/audit
-3. **Crash Recovery** - After restart, balance is restored from saved state
-4. **Replay** - Transaction log can recreate state from scratch
+1. **@actor(facets=["durability"])** - Marks class as durable PlexSpaces actor
+2. **state()** - Defines persistent state fields (auto-saved/restored)
+3. **@handler()** - Routes messages to methods
+4. **@init_handler** - Custom initialization
 
-## WASM Memory Workarounds Applied
-See examples/python/README.md for documentation.
+## Durability Configuration
+
+WASM actors use checkpoint-based durability (Cloudflare Durable Objects pattern):
+- State fields defined with state() are auto-serialized via get_state()/set_state()
+- Enable durability via `durability_enabled: true` in release.yaml or WasmConfig
+- The `facets=["durability"]` annotation documents this actor expects durability
+
+Note: This differs from Rust actors which use DurabilityFacet. WASM actors use
+the simpler checkpoint model for portability across WASM runtimes.
 """
 
-import json
-from wit_world import exports
-
-# Account state (persisted)
-_account_id = ""
-_balance = 0
-_transactions = []  # [{type, amount, timestamp, balance_after}]
+from plexspaces import actor, state, handler, init_handler
 
 
-class Actor(exports.Actor):
+@actor(facets=["durability"])
+class BankAccount:
     """Bank account actor with durable state."""
     
-    def init(self, config_json: str) -> str:
-        """Initialize account with zero balance."""
-        global _account_id, _balance, _transactions
-        _account_id = ""
-        _balance = 0
-        _transactions = []
-        
-        if config_json:
-            cfg = json.loads(config_json)
-            _account_id = cfg.get("account_id", "")
-        return ""
+    # Persistent state fields (auto-saved/restored)
+    account_id: str = state(default="")
+    balance: int = state(default=0)
+    transactions: list = state(default_factory=list)
     
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
-        """Handle banking operations."""
-        global _account_id, _balance, _transactions
-        
-        payload = {}
-        if payload_json:
-            payload = json.loads(payload_json)
-        
-        op = payload.get("op", msg_type)
-        
-        # Get balance
-        if op == "balance" or op == "get":
-            return '{"account":"' + _account_id + '","balance":' + str(_balance) + '}'
-        
-        # Deposit money
-        if op == "deposit":
-            amount = payload.get("amount", 0)
-            if amount <= 0:
-                return '{"error":"invalid_amount"}'
-            
-            _balance += amount
-            _transactions.append({
-                "type": "deposit",
-                "amount": amount,
-                "balance_after": _balance
-            })
-            return '{"status":"ok","balance":' + str(_balance) + '}'
-        
-        # Withdraw money
-        if op == "withdraw":
-            amount = payload.get("amount", 0)
-            if amount <= 0:
-                return '{"error":"invalid_amount"}'
-            if amount > _balance:
-                return '{"error":"insufficient_funds","balance":' + str(_balance) + '}'
-            
-            _balance -= amount
-            _transactions.append({
-                "type": "withdraw",
-                "amount": amount,
-                "balance_after": _balance
-            })
-            return '{"status":"ok","balance":' + str(_balance) + '}'
-        
-        # Get transaction count
-        if op == "tx_count":
-            return '{"count":' + str(len(_transactions)) + '}'
-        
-        # Get recent transactions
-        if op == "history":
-            count = min(payload.get("count", 5), len(_transactions))
-            recent = _transactions[-count:] if count > 0 else []
-            return json.dumps({"transactions": recent})
-        
-        # Replay transactions (rebuild state from log)
-        if op == "replay":
-            replayed = 0
-            rebuilt_balance = 0
-            for tx in _transactions:
-                if tx["type"] == "deposit":
-                    rebuilt_balance += tx["amount"]
-                elif tx["type"] == "withdraw":
-                    rebuilt_balance -= tx["amount"]
-                replayed += 1
-            return ('{"replayed":' + str(replayed) + 
-                    ',"rebuilt_balance":' + str(rebuilt_balance) + 
-                    ',"current_balance":' + str(_balance) + '}')
-        
-        # Set account ID
-        if op == "set_account":
-            _account_id = payload.get("account_id", "")
-            return '{"status":"ok"}'
-        
-        return '{"error":"unknown_op"}'
+    @init_handler
+    def on_init(self, config: dict):
+        """Initialize account from config."""
+        self.account_id = config.get("account_id", "")
+        self.balance = 0
+        self.transactions = []
     
-    def get_state(self) -> str:
-        """
-        DURABILITY: Save account state before shutdown/passivation.
+    @handler("balance", "get")
+    def get_balance(self) -> dict:
+        """Get current balance."""
+        return {"account": self.account_id, "balance": self.balance}
+    
+    @handler("deposit")
+    def deposit(self, amount: int = 0) -> dict:
+        """Deposit money into account."""
+        if amount <= 0:
+            return {"error": "invalid_amount"}
         
-        This is called by PlexSpaces framework:
-        - Before actor passivation (idle timeout)
-        - Before node shutdown
-        - During snapshot creation
-        
-        The returned JSON is stored in the journal and restored on restart.
-        """
-        global _account_id, _balance, _transactions
-        return json.dumps({
-            "account_id": _account_id,
-            "balance": _balance,
-            "transactions": _transactions
+        self.balance += amount
+        self.transactions.append({
+            "type": "deposit",
+            "amount": amount,
+            "balance_after": self.balance
         })
+        return {"status": "ok", "balance": self.balance}
     
-    def set_state(self, state_json: str) -> str:
-        """
-        DURABILITY: Restore account state after restart/recovery.
+    @handler("withdraw")
+    def withdraw(self, amount: int = 0) -> dict:
+        """Withdraw money from account."""
+        if amount <= 0:
+            return {"error": "invalid_amount"}
+        if amount > self.balance:
+            return {"error": "insufficient_funds", "balance": self.balance}
         
-        This is called by PlexSpaces framework:
-        - After actor reactivation
-        - After node restart
-        - After crash recovery
-        
-        Balance and transaction history are restored - no data loss!
-        """
-        global _account_id, _balance, _transactions
-        data = json.loads(state_json)
-        _account_id = data.get("account_id", "")
-        _balance = data.get("balance", 0)
-        _transactions = data.get("transactions", [])
-        return ""
+        self.balance -= amount
+        self.transactions.append({
+            "type": "withdraw",
+            "amount": amount,
+            "balance_after": self.balance
+        })
+        return {"status": "ok", "balance": self.balance}
+    
+    @handler("tx_count")
+    def transaction_count(self) -> dict:
+        """Get number of transactions."""
+        return {"count": len(self.transactions)}
+    
+    @handler("history")
+    def get_history(self, count: int = 5) -> dict:
+        """Get recent transactions."""
+        count = min(count, len(self.transactions))
+        recent = self.transactions[-count:] if count > 0 else []
+        return {"transactions": recent}
+    
+    @handler("replay")
+    def replay_transactions(self) -> dict:
+        """Replay transactions to verify state consistency."""
+        replayed = 0
+        rebuilt_balance = 0
+        for tx in self.transactions:
+            if tx["type"] == "deposit":
+                rebuilt_balance += tx["amount"]
+            elif tx["type"] == "withdraw":
+                rebuilt_balance -= tx["amount"]
+            replayed += 1
+        return {
+            "replayed": replayed,
+            "rebuilt_balance": rebuilt_balance,
+            "current_balance": self.balance
+        }
+    
+    @handler("set_account")
+    def set_account_id(self, account_id: str = "") -> dict:
+        """Set account ID."""
+        self.account_id = account_id
+        return {"status": "ok"}

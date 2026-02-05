@@ -1,8 +1,8 @@
-# Session Manager Example (TimerFacet)
+# Session Manager Example (TimerFacet) - SDK Annotations Demo
 
-**Purpose**: Demonstrate in-memory timers using PlexSpaces `TimerFacet`.
+**Purpose**: Demonstrate in-memory timers using PlexSpaces `TimerFacet` with **SDK annotations**.
 
-**PlexSpaces APIs**: `TimerFacet`, `register_once()`, `register_periodic()`, `cancel()`
+**PlexSpaces APIs**: `TimerFacet`, `register_once()`, `register_periodic()`, `cancel()`, **SDK annotations**
 
 ## Quick Start
 
@@ -14,32 +14,64 @@ cargo run
 
 ## What It Demonstrates
 
-1. **TimerFacet attachment**: Attach timer capability to actors
-2. **One-shot timers**: `register_once(name, delay)` - fire once after delay
-3. **Periodic timers**: `register_periodic(name, interval)` - fire repeatedly
-4. **Timer cancellation**: `cancel(name)` - stop a timer
-5. **Timer listing**: `list_active_timers()` - see all active timers
+1. **SDK Annotations**: `#[actor]`, `#[plexspaces_handlers]`, `#[handler]` for clean actor definitions
+2. **TimerFacet attachment**: Attach timer capability to actors via `spawn_actor`
+3. **One-shot timers**: `register_once(name, delay)` - fire once after delay
+4. **Periodic timers**: `register_periodic(name, interval)` - fire repeatedly
+5. **Timer cancellation**: `cancel(name)` - stop a timer
+6. **Timer listing**: `list_active_timers()` - see all active timers
 
-## PlexSpaces API Usage
+## PlexSpaces SDK Usage
 
-### Create Actor with TimerFacet
+### Define Actor with SDK Annotations
 
 ```rust
-use plexspaces_journaling::TimerFacet;
-use plexspaces_facet::Facet;
+use plexspaces_sdk::{
+    actor, plexspaces_handlers, handler,
+    ActorContext, BehaviorError, Message, spawn_actor, TimerFacet,
+};
 
+// Step 1: Annotate struct with #[actor(facets = ["timer"])]
+// Generates: FACETS const for documentation
+#[actor(facets = ["timer"])]
+struct SessionActor {
+    user_id: String,
+    is_active: bool,
+    activity_count: u32,
+}
+
+// Step 2: Annotate impl with #[plexspaces_handlers(custom)]
+// Generates: impl Actor with handle_message dispatch
+#[plexspaces_handlers(custom)]
+impl SessionActor {
+    #[handler("timer_fired", cast)]  // fire-and-forget
+    async fn handle_timer_fired(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<(), BehaviorError> {
+        let timer_name = String::from_utf8_lossy(&msg.payload);
+        match timer_name.as_ref() {
+            "idle_timeout" => self.is_active = false,
+            "heartbeat" => println!("Heartbeat"),
+            _ => {}
+        }
+        Ok(())
+    }
+}
+```
+
+### Spawn Actor with TimerFacet
+
+```rust
 // Create TimerFacet
 let timer_facet = TimerFacet::new(json!({}), 50);
 
-// Build actor
-let mut actor = ActorBuilder::new(Box::new(SessionActor::new("user-123")))
-    .with_id("session-user-123@node")
-    .with_namespace("sessions")
-    .build(&ctx, service_locator)
-    .await?;
-
-// Attach facet
-actor.attach_facet(Box::new(timer_facet)).await?;
+// Spawn with SDK helper (like Python @actor(facets=["timer"]))
+let actor_ref = spawn_actor(
+    &ctx,
+    service_locator,
+    "session-user-123@node",
+    "sessions",
+    SessionActor::new("user-123"),
+    vec![Box::new(timer_facet)],
+).await?;
 ```
 
 ### Register Timers
@@ -55,25 +87,22 @@ if let Some(facet) = actor.get_facet::<TimerFacet>().await {
 }
 ```
 
-### Handle Timer Events
+### Handle Timer Events (SDK style)
 
 ```rust
-#[async_trait]
-impl ActorTrait for SessionActor {
-    async fn handle_message(&mut self, ctx: &ActorContext, msg: Message) -> Result<(), BehaviorError> {
-        // Timer events have message_type = "timer_fired"
-        if msg.message_type == "timer_fired" {
-            let timer_name = String::from_utf8_lossy(&msg.payload);
-            match timer_name.as_ref() {
-                "idle_timeout" => {
-                    self.is_active = false;
-                    println!("Session expired!");
-                }
-                "heartbeat" => {
-                    println!("Heartbeat");
-                }
-                _ => {}
+// With SDK annotations, handlers are clean methods:
+#[plexspaces_handlers(custom)]
+impl SessionActor {
+    #[handler("timer_fired", cast)]
+    async fn handle_timer_fired(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<(), BehaviorError> {
+        let timer_name = String::from_utf8_lossy(&msg.payload);
+        match timer_name.as_ref() {
+            "idle_timeout" => {
+                self.is_active = false;
+                println!("Session expired!");
             }
+            "heartbeat" => println!("Heartbeat"),
+            _ => {}
         }
         Ok(())
     }
@@ -115,8 +144,18 @@ facet.register_once("idle_timeout", Duration::from_secs(30)).await?;
 | Use case | Short-lived, high-frequency | Long-lived, critical |
 | Example | Heartbeat, retry | Billing, notifications |
 
+## SDK Annotations Reference
+
+| Annotation | Description |
+|------------|-------------|
+| `#[actor(facets = ["timer"])]` | Marks struct as actor with facets (documentation) |
+| `#[plexspaces_handlers(custom)]` | Generates Actor impl with dispatch |
+| `#[handler("op", cast)]` | Fire-and-forget handler (no reply) |
+| `spawn_actor(..., facets)` | Spawn actor with facets attached |
+
 ## See Also
 
 - [Reminders](../reminders/) - Durable reminders with ReminderFacet
 - [Durable Actor](../durable_actor/) - Journaling and durability
+- [SDK Documentation](../../../../docs/sdk.md) - Full SDK reference
 - [Architecture Docs](../../../../docs/architecture.md)

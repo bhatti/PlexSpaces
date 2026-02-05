@@ -26,7 +26,7 @@ use plexspaces_proto::system::v1::{
 use std::sync::Arc;
 use tokio::signal;
 use tonic::transport::Channel;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tracing_subscriber;
 
 pub async fn status(node_addr: &str) -> Result<()> {
@@ -81,31 +81,40 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
     let mut builder = NodeBuilder::new(node_id.to_string())
         .with_listen_addr(listen_addr.to_string());
     
-    if let Some(release_config_path) = release_config {
-        info!("Loading release config from: {}", release_config_path);
+    let mut spec = if let Some(release_config_path) = release_config {
+        debug!("Loading release config from: {}", release_config_path);
         use plexspaces_node::config::loader::ConfigLoader;
         let loader = ConfigLoader::new();
         match loader.load_release_spec(release_config_path).await {
-            Ok(spec) => {
-                builder = builder.with_release_spec(spec);
-                info!("Release config loaded successfully");
-            }
+            Ok(spec) => spec,
             Err(e) => {
                 warn!("Failed to load release config: {}. Using defaults.", e);
+                // Fall back to default config
+                use plexspaces_common::release_config::create_default_release_config;
+                create_default_release_config(
+                    "plexspaces-cluster".to_string(),
+                    "1.0.0".to_string(),
+                    node_id.to_string(),
+                    listen_addr.to_string(),
+                ).await
             }
         }
     } else {
         // Use default release config
         use plexspaces_common::release_config::create_default_release_config;
-        let default_spec = create_default_release_config(
+        create_default_release_config(
             "plexspaces-cluster".to_string(),
             "1.0.0".to_string(),
             node_id.to_string(),
             listen_addr.to_string(),
-        ).await;
-        builder = builder.with_release_spec(default_spec);
-        info!("Using default release configuration");
-    }
+        ).await
+    };
+    
+    // Initialize config: apply env overrides, set defaults, validate, and log
+    use plexspaces_common::config_manager::initialize;
+    initialize(&mut spec);
+    
+    builder = builder.with_release_spec(spec);
     
     // Create node using NodeBuilder (this may call fatal_exit() if security validation fails)
     let node = builder.build().await;

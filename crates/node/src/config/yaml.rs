@@ -32,11 +32,7 @@ pub struct NodeConfigYaml {
     pub listen_addr: String,
     #[serde(default)]
     pub cluster_seed_nodes: Vec<String>,
-    /// Directory containing WASM applications to auto-deploy on startup.
-    /// Each subdirectory should contain app.wasm (required) and optionally app-config.toml.
-    /// If empty, no auto-deploy happens (default behavior).
-    #[serde(default)]
-    pub wasm_apps_directory: String,
+    // Note: wasm_apps_directory moved to RuntimeConfigYaml
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,18 +45,23 @@ pub struct RuntimeConfigYaml {
     pub security: SecurityConfigYaml,
     #[serde(default)]
     pub blob: Option<BlobConfigYaml>,
-    #[serde(default)]
-    pub shared_database: Option<SharedRelationalDbConfigYaml>,
+    /// Shared database config (renamed from shared_database)
+    #[serde(default, alias = "shared_database")]
+    pub db: Option<SharedRelationalDbConfigYaml>,
     #[serde(default)]
     pub locks_provider: Option<StorageProviderConfigYaml>,
+    /// Channel provider type (e.g., "in_memory", "redis", "kafka", "postgres")
     #[serde(default)]
-    pub channel_provider: Option<StorageProviderConfigYaml>,
+    pub channel_provider: Option<String>,
+    /// Mailbox provider type (e.g., "in_memory", "redis", "sqlite", "postgres")
     #[serde(default)]
-    pub tuplespace_provider: Option<StorageProviderConfigYaml>,
+    pub mailbox_provider: Option<String>,
+    /// Base directory for PlexSpaces data (default: $HOME/plexspaces)
     #[serde(default)]
-    pub keyvalue_provider: Option<StorageProviderConfigYaml>,
+    pub base_dir: String,
+    /// Directory containing WASM applications to auto-deploy on startup
     #[serde(default)]
-    pub mailbox_provider: Option<StorageProviderConfigYaml>,
+    pub wasm_apps_directory: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -111,6 +112,9 @@ pub struct SecurityConfigYaml {
     pub authn_config: Option<AuthnConfigYaml>,
     #[serde(default)]
     pub authz_config: Option<AuthzConfigYaml>,
+    /// When true, disables JWT/mTLS auth (for local testing). Also set via PLEXSPACES_DISABLE_AUTH=1.
+    #[serde(default)]
+    pub disable_auth: bool,
 }
 
 #[derive(Debug, Deserialize)]

@@ -30,6 +30,8 @@ members = [
     "crates/cli",
     "crates/dashboard",
     "crates/services",
+    "sdks/rust/plexspaces-sdk-macros",
+    "sdks/rust/plexspaces-sdk",
 ]
 # Default members: Exclude rarely-changed or optional crates from default builds
 # This speeds up default `cargo build` and `cargo test` by only building frequently-changed crates

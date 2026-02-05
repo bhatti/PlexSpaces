@@ -28,7 +28,7 @@ use anyhow::{Context, Result};
 use plexspaces_proto::application::v1::{
     application_service_client::ApplicationServiceClient,
     DeployApplicationRequest, UndeployApplicationRequest, ListApplicationsRequest,
-    ApplicationSpec, ApplicationType,
+    ApplicationSpec, ApplicationType, ShutdownStrategy,
 };
 use plexspaces_proto::wasm::v1::WasmModule;
 use std::fs;
@@ -132,12 +132,18 @@ pub async fn deploy(
         // For now, create minimal config
         Some(ApplicationSpec {
             name: name.to_string(),
+            namespace: app_id.to_string(), // Use app_id as namespace
             version: version.to_string(),
             description: format!("Application {}", name),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: std::collections::HashMap::new(),
             supervisor: None,
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: None,
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         })
     } else if wasm_module.is_none() {
         // Config required if not WASM
@@ -146,34 +152,37 @@ pub async fn deploy(
         // For WASM apps, create minimal config
         Some(ApplicationSpec {
             name: name.to_string(),
+            namespace: app_id.to_string(), // Use app_id as namespace
             version: version.to_string(),
             description: format!("WASM application {}", name),
             r#type: ApplicationType::ApplicationTypeActive.into(),
             dependencies: vec![],
             env: std::collections::HashMap::new(),
             supervisor: None,
+            enabled: true,
+            auto_start: true,
+            shutdown_timeout: None,
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            metadata: None,
         })
     };
 
-    // Load release config if provided
-    let release_config = if let Some(release_path) = release_config_file {
+    // Load release config if provided (reserved for future use; not sent in DeployApplicationRequest)
+    let _release_config = if let Some(release_path) = release_config_file {
         use plexspaces_node::config_loader::ConfigLoader;
-        
-        // Determine file type from extension
         let path = std::path::Path::new(release_path);
         let is_yaml = path.extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| ext == "yaml" || ext == "yml")
             .unwrap_or(false);
-        
         if is_yaml {
-            // Load YAML release config
-            let loader = ConfigLoader::new(); // Enable security validation
-              let spec = loader.load_release_spec_with_env_precedence(release_path).await
+            let loader = ConfigLoader::new();
+            let mut spec = loader.load_release_spec(release_path).await
                 .map_err(|e| anyhow::anyhow!("Failed to load release config from {}: {}", release_path, e))?;
+            // Apply env overrides and set defaults through config_manager
+            plexspaces_common::config_manager::initialize(&mut spec);
             Some(spec)
         } else {
-            // Try TOML (for future support)
             anyhow::bail!("TOML release config parsing not yet implemented, use YAML format");
         }
     } else {
@@ -186,7 +195,6 @@ pub async fn deploy(
         version: version.to_string(),
         wasm_module,
         config: app_config,
-        release_config,
         initial_state: vec![],
     };
 

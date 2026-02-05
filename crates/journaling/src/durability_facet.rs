@@ -177,7 +177,7 @@ impl DurabilityFacet {
     /// ```rust,no_run
     /// # use plexspaces_journaling::*;
     /// # async fn example() -> JournalResult<()> {
-    /// let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+    /// let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     /// let config = serde_json::json!({
     ///     "checkpoint_interval": 100,
     ///     "replay_on_activation": true,
@@ -1359,10 +1359,10 @@ impl Facet for DurabilityFacet {
 // TESTS (TDD - Write tests FIRST, then implement)
 // =============================================================================
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite-backend"))]
 mod tests {
     use super::*;
-    use crate::{Checkpoint, MemoryJournalStorage};
+    use crate::{Checkpoint, SqliteJournalStorage};
     use std::collections::HashMap;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1399,7 +1399,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_creation() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1409,7 +1409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_attach_without_replay() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let mut config = create_test_config();
         config.replay_on_activation = false; // Disable replay
 
@@ -1430,7 +1430,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_attach_with_empty_journal_replay() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config(); // replay_on_activation = true
 
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1442,7 +1442,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_detach() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1463,7 +1463,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_before_method_journals_message_received() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1496,7 +1496,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_after_method_journals_message_processed() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1534,7 +1534,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sequence_number_increments() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1563,7 +1563,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_checkpoint_creation_at_interval() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1588,7 +1588,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_journal_on_activation() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false; // First attach without replay
@@ -1633,7 +1633,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_error_handling() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1646,7 +1646,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_before_method_without_attach_fails() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1658,7 +1658,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_messages_with_different_payloads() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1698,7 +1698,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_get_state() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
@@ -1709,7 +1709,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_set_state() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
@@ -1721,7 +1721,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_with_checkpoint() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(MemoryJournalStorage::new());
+        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1775,7 +1775,7 @@ mod tests {
         // in a single append_batch() call for improved performance (3-5x faster)
 
         // Use SQLite :memory: database to ensure writes are actually persisted
-        // and to avoid any potential issues with MemoryJournalStorage cloning
+        // and to avoid any potential issues with storage cloning
         use crate::sql::SqliteJournalStorage;
 
         let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());

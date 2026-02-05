@@ -20,7 +20,7 @@
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, ChannelStats};
+use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, ChannelStats};
 use plexspaces_proto::common::v1::Message;
 use thiserror::Error;
 
@@ -242,7 +242,7 @@ pub trait Channel: Send + Sync {
 /// # async fn example() -> ChannelResult<()> {
 /// let config = ChannelConfig {
 ///     name: "my-channel".to_string(),
-///     backend: ChannelBackend::ChannelBackendInMemory as i32,
+///     provider: ChannelProvider::ChannelProviderInMemory as i32,
 ///     capacity: 100,
 ///     ..Default::default()
 /// };
@@ -253,78 +253,78 @@ pub trait Channel: Send + Sync {
 pub async fn create_channel(config: ChannelConfig) -> ChannelResult<Box<dyn Channel>> {
     use crate::InMemoryChannel;
 
-    match config.backend() {
-        ChannelBackend::ChannelBackendInMemory => {
+    match config.provider() {
+        ChannelProvider::ChannelProviderInMemory => {
             let channel = InMemoryChannel::new(config).await?;
             Ok(Box::new(channel))
         }
         #[cfg(feature = "redis-backend")]
-        ChannelBackend::ChannelBackendRedis => {
+        ChannelProvider::ChannelProviderRedis => {
             use crate::RedisChannel;
             let channel = RedisChannel::new(config).await?;
             Ok(Box::new(channel))
         }
         #[cfg(not(feature = "redis-backend"))]
-        ChannelBackend::ChannelBackendRedis => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderRedis => Err(ChannelError::InvalidConfiguration(
             "Redis backend not enabled. Enable 'redis-backend' feature.".to_string(),
         )),
         #[cfg(feature = "kafka-backend")]
-        ChannelBackend::ChannelBackendKafka => {
+        ChannelProvider::ChannelProviderKafka => {
             use crate::KafkaChannel;
             let channel = KafkaChannel::new(config).await?;
             Ok(Box::new(channel))
         }
         #[cfg(not(feature = "kafka-backend"))]
-        ChannelBackend::ChannelBackendKafka => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderKafka => Err(ChannelError::InvalidConfiguration(
             "Kafka backend not enabled. Enable 'kafka-backend' feature.".to_string(),
         )),
         #[cfg(feature = "nats-backend")]
-        ChannelBackend::ChannelBackendNats => {
+        ChannelProvider::ChannelProviderNats => {
             use crate::NatsChannel;
             let channel = NatsChannel::new(config).await?;
             Ok(Box::new(channel))
         }
         #[cfg(not(feature = "nats-backend"))]
-        ChannelBackend::ChannelBackendNats => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderNats => Err(ChannelError::InvalidConfiguration(
             "NATS backend not enabled. Enable 'nats-backend' feature.".to_string(),
         )),
         #[cfg(feature = "sqlite-backend")]
-        ChannelBackend::ChannelBackendSqlite => {
+        ChannelProvider::ChannelProviderSqlite => {
             use crate::SqliteChannel;
             let channel = SqliteChannel::new(config).await?;
             Ok(Box::new(channel))
         }
         #[cfg(not(feature = "sqlite-backend"))]
-        ChannelBackend::ChannelBackendSqlite => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderSqlite => Err(ChannelError::InvalidConfiguration(
             "SQLite backend not enabled. Enable 'sqlite-backend' feature.".to_string(),
         )),
         #[cfg(feature = "sqs-backend")]
-        ChannelBackend::ChannelBackendSqs => {
+        ChannelProvider::ChannelProviderSqs => {
             use crate::SQSChannel;
             let channel = SQSChannel::new(config).await?;
             Ok(Box::new(channel))
         }
         #[cfg(not(feature = "sqs-backend"))]
-        ChannelBackend::ChannelBackendSqs => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderSqs => Err(ChannelError::InvalidConfiguration(
             "SQS backend not enabled. Enable 'sqs-backend' feature.".to_string(),
         )),
         #[cfg(feature = "udp-backend")]
-        ChannelBackend::ChannelBackendUdp => {
+        ChannelProvider::ChannelProviderUdp => {
             use crate::UdpChannel;
             let channel = UdpChannel::new(config).await?;
             Ok(Box::new(channel))
         }
         #[cfg(not(feature = "udp-backend"))]
-        ChannelBackend::ChannelBackendUdp => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderUdp => Err(ChannelError::InvalidConfiguration(
             "UDP backend not enabled. Enable 'udp-backend' feature.".to_string(),
         )),
-        ChannelBackend::ChannelBackendProcessGroup => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderProcessGroup => Err(ChannelError::InvalidConfiguration(
             "ProcessGroup backend requires ServiceLocator. Use ProcessGroupChannel::new() directly.".to_string(),
         )),
-        ChannelBackend::ChannelBackendPostgres => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderPostgres => Err(ChannelError::InvalidConfiguration(
             "PostgreSQL backend not yet implemented.".to_string(),
         )),
-        ChannelBackend::ChannelBackendCustom => Err(ChannelError::InvalidConfiguration(
+        ChannelProvider::ChannelProviderCustom => Err(ChannelError::InvalidConfiguration(
             "Custom backend requires manual instantiation".to_string(),
         )),
         // Handle unspecified backend (default enum value 0 conflicts with InMemory)
@@ -344,7 +344,7 @@ mod tests {
     async fn test_create_channel_in_memory() {
         let config = ChannelConfig {
             name: "test-channel".to_string(),
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 10,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -362,7 +362,7 @@ mod tests {
     async fn test_create_channel_kafka_not_implemented() {
         let config = ChannelConfig {
             name: "test-channel".to_string(),
-            backend: ChannelBackend::ChannelBackendKafka as i32,
+            provider: ChannelProvider::ChannelProviderKafka as i32,
             ..Default::default()
         };
 

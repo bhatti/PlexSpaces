@@ -15,6 +15,7 @@ This document provides detailed information about PlexSpaces abstractions, compo
 7. [Journaling](#journaling)
 8. [Supervision](#supervision)
 9. [Observability](#observability)
+10. [Database Models and ER Diagram](#database-models-and-er-diagram)
 
 ## Actors
 
@@ -112,94 +113,129 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 
 ## Behaviors
 
-### GenServerBehavior
+**All behaviors are defined in `crates/behavior/src/mod.rs`.** The base actor contract is `plexspaces_core::Actor` (in `crates/core`). Handler dispatching follows the Python SDK: **call** = request-reply (GET/ask), **cast** = fire-and-forget (POST/tell). **GenServer uses call by default** (routes `MessageType::Call` → `handle_request()` with reply expected).
 
-Erlang/OTP-style request/reply pattern:
+See [crates/behavior/README.md](../crates/behavior/README.md) for full behavior documentation and tests.
 
+### Behavior Types Summary
+
+| BehaviorType | Trait | SDK Annotation | Use Case | Default Invocation |
+|--------------|-------|----------------|----------|-------------------|
+| `GenServer` | `GenServer` | `#[gen_server_actor]` | Request-reply actors | call |
+| `GenEvent` | `EventHandler` | `#[event_actor]` | Fire-and-forget events | cast |
+| `GenStateMachine` | `StateHandler<S,E>` | `#[fsm_actor]` | State machine workflows | call |
+| `Workflow` | `Workflow` | `#[workflow_actor]` | Durable orchestrations | call |
+| `Custom(name)` | `Actor` | `#[actor]` | User-defined behavior | varies |
+
+### GenServer
+
+Request/reply (OTP-style). Trait: `plexspaces_behavior::GenServer`. Implements `handle_request(ctx, msg)`; `route_message()` routes Call → handle_request (reply expected), Cast → handle_request (optional reply).
+
+**Location**: `crates/behavior/src/mod.rs` (lines 97-342)
+
+**SDK Usage**:
 ```rust
-#[async_trait]
-pub trait GenServerBehavior: ActorBehavior {
-    type Request: Send + Sync;
-    type Reply: Send + Sync;
+#[gen_server_actor]
+struct MyActor { ... }
+
+#[plexspaces_handlers]
+impl MyActor {
+    #[handler("operation")]  // defaults to call semantics
+    async fn handle_op(&mut self, ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> { ... }
+}
+```
+
+### GenEvent
+
+Fire-and-forget event handling. `GenEventBehavior` + `EventHandler` trait. No reply.
+
+**Location**: `crates/behavior/src/mod.rs` (lines 344-405)
+
+**SDK Usage**:
+```rust
+#[event_actor]
+struct AuditLogger { ... }
+
+#[plexspaces_handlers(event)]
+impl AuditLogger {
+    #[handler("log", cast)]  // cast semantics (fire-and-forget)
+    async fn handle_log(&mut self, ctx: &ActorContext, msg: &Message) -> Result<(), BehaviorError> { ... }
+}
+```
+
+### GenStateMachine (GenFSM)
+
+Finite state machine. `GenStateMachineBehavior<S, E>` with `transition(ctx, event)` and state handlers.
+
+**Location**: `crates/behavior/src/mod.rs` (lines 407-520)
+
+**SDK Usage**:
+```rust
+#[fsm_actor]
+struct OrderWorkflow { state: OrderState }
+
+#[plexspaces_handlers(fsm)]
+impl OrderWorkflow {
+    #[handler("submit")]
+    async fn on_submit(&mut self, ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
+        // Transition state based on event
+        self.state = OrderState::Processing;
+        Ok(json!({ "state": "processing" }))
+    }
+}
+```
+
+### Workflow
+
+Durable workflows (Restate/Temporal-style). `Workflow` trait with `run()`, `signal()`, `query()`.
+
+**Location**: `crates/behavior/src/mod.rs` (lines 522-812), `crates/behavior/src/workflow.rs` (ExecutionContext)
+
+**SDK Usage**:
+```rust
+#[workflow_actor(facets = ["durability"])]
+struct PaymentPipeline { ... }
+
+#[plexspaces_handlers(workflow)]
+impl PaymentPipeline {
+    #[run_handler]
+    async fn run(&mut self, ctx: &ActorContext, input: Message) -> Result<Message, BehaviorError> {
+        // Main workflow execution (exclusive)
+    }
     
-    async fn handle_request(
-        &mut self,
-        ctx: &ActorContext,
-        request: Self::Request,
-    ) -> Result<Self::Reply, BehaviorError>;
-}
-```
-
-**Features**:
-- Type-safe request/reply
-- Automatic error handling
-- Integration with ask pattern
-
-### GenFSMBehavior
-
-Finite state machine behavior:
-
-```rust
-#[async_trait]
-pub trait GenFSMBehavior: ActorBehavior {
-    type State: Send + Sync;
-    type Event: Send + Sync;
+    #[signal_handler("cancel")]
+    async fn on_cancel(&mut self, ctx: &ActorContext, data: Message) -> Result<(), BehaviorError> {
+        // Handle external signals
+    }
     
-    async fn handle_event(
-        &mut self,
-        ctx: &ActorContext,
-        state: Self::State,
-        event: Self::Event,
-    ) -> Result<Self::State, BehaviorError>;
+    #[query_handler("status")]
+    async fn get_status(&self, ctx: &ActorContext, params: Message) -> Result<Message, BehaviorError> {
+        // Read-only queries (concurrent)
+    }
 }
 ```
 
-**Features**:
-- State transitions
-- Event-driven processing
-- State validation
+**ExecutionContext Methods** (for durable execution):
+- `ctx.run(|| ...)` - Execute side-effect durably
+- `ctx.sleep(duration)` - Durable sleep
+- `ctx.promise()` - Create awaitable promise
+- `ctx.now()` - Deterministic timestamp
 
-### GenEventBehavior
+### Custom Behavior
 
-Event-driven behavior:
+User-defined behavior type for specialized actors.
 
+**SDK Usage**:
 ```rust
-#[async_trait]
-pub trait GenEventBehavior: ActorBehavior {
-    type Event: Send + Sync;
-    
-    async fn handle_event(
-        &mut self,
-        ctx: &ActorContext,
-        event: Self::Event,
-    ) -> Result<(), BehaviorError>;
+#[actor(name = "my_custom_actor")]
+struct CustomActor { ... }
+
+#[plexspaces_handlers(custom)]
+impl CustomActor {
+    #[handler("process", cast)]
+    async fn process(&mut self, ctx: &ActorContext, msg: &Message) -> Result<(), BehaviorError> { ... }
 }
 ```
-
-**Features**:
-- Event subscriptions
-- Pub/sub patterns
-- Event filtering
-
-### WorkflowBehavior
-
-Durable workflow orchestration:
-
-```rust
-#[async_trait]
-pub trait WorkflowBehavior: ActorBehavior {
-    async fn execute(
-        &mut self,
-        ctx: &WorkflowContext,
-    ) -> Result<(), WorkflowError>;
-}
-```
-
-**Features**:
-- Step-by-step execution
-- Automatic persistence
-- Retry policies
-- Compensation logic
 
 ## Facets
 
@@ -226,6 +262,123 @@ graph LR
     style Persistence fill:#0891b2,stroke:#22d3ee,stroke-width:2px,color:#000
     style Response fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
 ```
+
+### Built-in Facet Inventory
+
+**Complete list of facets** available in PlexSpaces, their SDK annotation names (for `facets = [...]`), and implementation locations:
+
+| Facet | SDK Name | Category | Implementation |
+|-------|----------|----------|----------------|
+| **TimerFacet** | `timer` | Scheduling | `crates/journaling/src/timer_facet.rs` |
+| **ReminderFacet** | `reminder` | Scheduling | `crates/journaling/src/reminder_facet.rs` |
+| **DurabilityFacet** | `durability` | Persistence | `crates/journaling/src/durability_facet.rs` |
+| **EventSourcingFacet** | `event_sourcing` | Persistence | `crates/journaling/src/event_sourcing_facet.rs` |
+| **VirtualActorFacet** | `virtual_actor` | Lifecycle | `crates/journaling/src/virtual_actor_facet.rs` |
+| **EventEmitterFacet** | `event_emitter` | Messaging | `crates/facet/src/event_emitter.rs` |
+| **KeyValueFacet** | `keyvalue` | Storage | `crates/facet/src/capabilities/keyvalue.rs` |
+| **HttpClientFacet** | `http_client` | Integration | `crates/facet/src/capabilities/http_client.rs` |
+| **LockFacet** | `lock` | Coordination | `crates/facet/src/capabilities/locks.rs` |
+| **RegistryFacet** | `registry` | Discovery | `crates/facet/src/capabilities/registry.rs` |
+| **ProcessGroupFacet** | `process_group` | Coordination | `crates/facet/src/capabilities/process_groups.rs` |
+| **LoggingFacet** | `logging` | Observability | `crates/facet/src/mod.rs` |
+| **CachingFacet** | `caching` | Performance | `crates/facet/src/mod.rs` |
+| **MetricsFacet** | `metrics` | Observability | `crates/facet/src/metrics_facet.rs` |
+| **MobilityFacet** | `mobility` | Distribution | (mobility crate) |
+| **BlobStorageFacet** | `blob_storage` | Storage | (blob crate) |
+| **SecretsFacet** | `secrets` | Security | (secrets facet) |
+| **StreamingFacet** | `streaming` | Messaging | (streaming facet) |
+| **TransactionFacet** | `transaction` | Persistence | (transaction facet) |
+| **StatelessWorkerFacet** | `stateless_worker` | Scaling | (stateless worker facet) |
+
+### Facet Categories
+
+**Scheduling Facets** - Time-based operations (Orleans Model):
+
+| Facet | Durability | Storage | Use Case |
+|-------|------------|---------|----------|
+| `TimerFacet` | Transient (in-memory) | None | Heartbeats, timeouts, health checks |
+| `ReminderFacet` | Durable (persisted) | `Arc<dyn JournalStorage>` | Billing, SLA, scheduled tasks |
+
+The naming convention follows the **industry standard** (Orleans, Akka, Dapr):
+- **Timer** = transient, fast, no persistence overhead, lost on crash
+- **Reminder** = durable, requires storage, survives crashes
+
+This is a deliberate design choice - the name itself communicates durability semantics.
+
+**Persistence Facets** - State durability:
+- `DurabilityFacet`: Checkpoint-based state persistence
+- `EventSourcingFacet`: Event log-based state reconstruction
+
+**Lifecycle Facets** - Actor lifecycle management:
+- `VirtualActorFacet`: Automatic activation/passivation with idle timeout
+
+**Messaging Facets** - Communication patterns:
+- `EventEmitterFacet`: Pub/sub event broadcasting
+- `StreamingFacet`: Streaming message delivery
+
+**Storage Facets** - Data access:
+- `KeyValueFacet`: Key-value store operations
+- `BlobStorageFacet`: Large object storage
+- `CachingFacet`: In-memory caching
+
+**Coordination Facets** - Distributed coordination:
+- `LockFacet`: Distributed locking
+- `ProcessGroupFacet`: Actor group membership
+- `RegistryFacet`: Actor discovery and registration
+
+**Integration Facets** - External systems:
+- `HttpClientFacet`: HTTP client for external APIs
+- `SecretsFacet`: Secure credential access
+
+**Observability Facets** - Monitoring:
+- `LoggingFacet`: Structured logging
+- `MetricsFacet`: Metrics collection and export
+
+### Using Facets with SDK Annotations
+
+Facets are declared using the `facets = [...]` parameter on actor type annotations:
+
+```rust
+// Single facet
+#[gen_server_actor(facets = ["timer"])]
+struct TimerActor { ... }
+
+// Multiple facets
+#[workflow_actor(facets = ["durability", "event_sourcing", "metrics"])]
+struct DurableWorkflow { ... }
+
+// With custom name
+#[actor(name = "my_actor", facets = ["keyvalue", "lock"])]
+struct CustomActor { ... }
+```
+
+The SDK generates a `FACETS` constant containing the declared facet names:
+
+```rust
+// Generated by #[gen_server_actor(facets = ["timer", "reminder"])]
+impl MyActor {
+    pub const FACETS: &'static [&'static str] = &["timer", "reminder"];
+}
+```
+
+### Proto Definition
+
+`BuiltInFacetType` enum (proto: `plexspaces.facets.v1`):
+
+| BuiltInFacetType | Proto Value |
+|------------------|-------------|
+| Mobility | `MOBILITY` |
+| EventEmitter | `EVENT_EMITTER` |
+| KeyValue | `KEY_VALUE` |
+| Timer | `TIMER` |
+| Reminder | `REMINDER` |
+| HttpClient | `HTTP_CLIENT` |
+| BlobStorage | `BLOB_STORAGE` |
+| Secrets | `SECRETS` |
+| Streaming | `STREAMING` |
+| Transaction | `TRANSACTION` |
+| StatelessWorker | `STATELESS_WORKER` |
+| VirtualActor | `VIRTUAL_ACTOR` |
 
 ### Facet Philosophy
 
@@ -437,9 +590,10 @@ Distributed lock coordination for task queues, resource coordination, and leader
 - `"get_lock"`: Get current lock state
 
 **Backend**: Uses LockManager from ServiceLocator (configured via node-config/runtimeconfig)
-- **MemoryLockManager**: In-memory (testing)
-- **SQLiteLockManager**: SQLite-backed (production)
+- **SQLiteLockManager**: SQLite-backed (use `:memory:` for testing, file path for production)
 - **DynamoDBLockManager**: DynamoDB-backed (distributed)
+
+> **Note**: In-memory testing uses `SqliteLockManager::new(":memory:")` which provides fast, isolated storage without persistence.
 - **RedisLockManager**: Redis-backed (distributed)
 
 **Use Cases**:
@@ -613,9 +767,12 @@ pub struct KeyValueFacet {
 - Multi-tenant isolation
 
 **Backend Support**:
-- **InMemory**: HashMap-based (testing)
-- **SQLite/PostgreSQL**: Persistent SQL storage
+- **SQLite**: Use `:memory:` for testing, file path for persistent storage
+- **PostgreSQL**: Production-grade persistent SQL storage
 - **Redis**: Distributed with native TTL
+- **DynamoDB**: AWS-native distributed storage
+
+> **Note**: In-memory testing uses `SqliteKVStore::new(":memory:")` which provides fast, isolated storage without persistence.
 - **Blob**: Object storage (MinIO/S3/GCP/Azure) using object_store directly
 
 **Use Cases**: Caching, session storage, configuration, feature flags
@@ -1392,7 +1549,7 @@ See `scripts/BLOB_TESTING_GUIDE.md` for detailed testing instructions.
 
 ## TupleSpace
 
-PlexSpaces TupleSpace is inspired by Linda memory model.
+PlexSpaces TupleSpace is inspired by Linda memory model. WASM actors using the simple-actor WIT can write tuples via the host function **`ts-write(tuple-json)`**; the runtime parses a JSON array into a `Tuple` and calls the same TupleSpace backend. See [WASM Deployment: TupleSpace (ts_write)](wasm-deployment.md#tuplespace-ts_write-for-wasm). The Audit Log example currently uses host.log only (storage deferred until WASM stable).
 
 ### Linda Operations
 
@@ -1434,9 +1591,11 @@ let pattern = Pattern::new(vec![
 
 ### Backends
 
-- **InMemory**: Single-node, testing
+- **SQLite**: Single-node, use `:memory:` for testing
 - **Redis**: Multi-node, production
 - **PostgreSQL**: Multi-node, transactional
+
+> **Note**: In-memory testing uses `SqlStorage::new_sqlite(":memory:")` which provides fast, isolated storage without persistence.
 - **Blob**: Object storage (MinIO/S3/GCP/Azure) - uses object_store directly, no SQL database needed
 
 ## Workflows
@@ -1770,6 +1929,8 @@ message InvokeActorRequest {
 4. Set `message.uri_path` and `message.uri_method` from request
 5. Call `actor_ref.tell(message)`
 6. Return success immediately (fire-and-forget)
+
+**Query parameter: invocation** (Erlang-style). Allowed values only: **call**, **cast**, **info**. Use `?invocation=call` on POST/PUT/DELETE for request-reply; default is cast (fire-and-forget). Invalid values return 400.
 
 ### Actor Lookup
 
@@ -2602,6 +2763,341 @@ pub trait ObjectRegistry: Send + Sync {
     ) -> Result<(), Error>;
 }
 ```
+
+## Database Models and ER Diagram
+
+PlexSpaces uses multiple database tables across different services for persistence and coordination. Each service has its own schema optimized for its specific use case.
+
+### Overview
+
+This section documents the database schemas for all PlexSpaces services that require persistent storage. Understanding these schemas is essential for:
+
+- **Operators**: Capacity planning, backup strategies, and performance tuning
+- **Developers**: Understanding data relationships and implementing new features
+- **Debuggers**: Troubleshooting issues by inspecting database state
+
+### Multi-Backend Support
+
+All database-backed services support multiple storage backends:
+
+| Backend | Use Case | Configuration |
+|---------|----------|---------------|
+| **SQLite** | Development, testing, embedded deployments | File path or `:memory:` |
+| **PostgreSQL** | Production, multi-node clusters | Connection URL |
+| **DynamoDB** | AWS serverless deployments | Table name + region |
+
+For in-memory testing, use SQLite with `:memory:` path, which provides fast, isolated storage without persistence.
+
+### Migration Files
+
+Each service has SQL migrations in its crate directory:
+
+```
+crates/<service>/migrations/
+├── postgres/
+│   └── 001_<table>.up.sql / .down.sql
+└── sqlite/
+    └── 001_<table>.up.sql / .down.sql
+```
+
+Migrations run automatically when initializing SQL-backed repositories.
+
+### Service Database Tables Overview
+
+| Service | Crate | Tables | Purpose |
+|---------|-------|--------|---------|
+| **Object Registry** | `crates/object-registry` | `object_registrations` | Unified service discovery with indexed columns |
+| **Locks** | `crates/locks` | `locks` | Distributed lock coordination |
+| **Scheduler** | `crates/scheduler` | `scheduling_requests` | Actor scheduling metadata |
+| **Channel** | `crates/channel` | `channel_messages` | Persistent message queuing |
+| **Workflow** | `crates/workflow` | `workflow_definitions`, `workflow_executions`, `workflow_execution_labels`, `step_executions`, `signals` | Durable workflow orchestration |
+| **Journaling** | `crates/journaling` | `journal_entries`, `checkpoints`, `actor_events`, `reminders` | Event sourcing and actor state persistence |
+| **Blob** | `crates/blob` | `blob_metadata` | Object storage metadata |
+| **TupleSpace** | `crates/tuplespace` | `tuples`, `barriers`, `watchers` | Linda-style coordination |
+| **KeyValue** | `crates/keyvalue` | `kv_store` | General key-value storage |
+
+### Entity-Relationship Diagram
+
+```mermaid
+erDiagram
+    object_registrations {
+        text tenant_id PK
+        text namespace PK
+        text object_id PK
+        int object_type
+        text object_name
+        text version
+        text node_id
+        text grpc_address
+        text object_category
+        int health_status
+        timestamp last_heartbeat
+        timestamp created_at
+        timestamp updated_at
+        blob registration_blob
+    }
+
+    locks {
+        text tenant_id PK
+        text namespace PK
+        text lock_key PK
+        text holder_id
+        text version
+        timestamp expires_at
+        int lease_duration_secs
+        timestamp last_heartbeat
+        bool locked
+        jsonb metadata
+    }
+
+    scheduling_requests {
+        text request_id PK
+        text status
+        jsonb requirements_json
+        text namespace
+        text tenant_id
+        text selected_node_id
+        text actor_id
+        text error_message
+        timestamp created_at
+        timestamp scheduled_at
+        timestamp completed_at
+        jsonb metadata_json
+    }
+
+    channel_messages {
+        text id PK
+        text channel_name
+        blob payload
+        timestamp timestamp
+        bool acked
+        timestamp created_at
+    }
+
+    workflow_definitions {
+        text id PK
+        text version PK
+        text name
+        blob definition_proto
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    workflow_executions {
+        text execution_id PK
+        text definition_id FK
+        text definition_version FK
+        text status
+        text current_step_id
+        text input_json
+        text output_json
+        text error
+        text node_id
+        int version
+        timestamp last_heartbeat
+        text metadata_json
+        timestamp created_at
+        timestamp started_at
+        timestamp completed_at
+    }
+
+    workflow_execution_labels {
+        text execution_id PK_FK
+        text label_key PK
+        text label_value
+    }
+
+    step_executions {
+        text step_execution_id PK
+        text execution_id FK
+        text step_id
+        text status
+        text input_json
+        text output_json
+        text error
+        int attempt
+        text metadata_json
+        timestamp started_at
+        timestamp completed_at
+    }
+
+    signals {
+        text signal_id PK
+        text execution_id FK
+        text signal_name
+        text payload
+        timestamp received_at
+    }
+
+    journal_entries {
+        text id PK
+        text actor_id
+        bigint sequence
+        timestamp timestamp
+        text correlation_id
+        text entry_type
+        jsonb entry_data
+    }
+
+    checkpoints {
+        text actor_id PK
+        bigint sequence PK
+        timestamp timestamp
+        blob state_data
+        int compression
+        jsonb metadata
+        int state_schema_version
+    }
+
+    actor_events {
+        text id PK
+        text actor_id
+        bigint sequence
+        text event_type
+        blob event_data
+        timestamp timestamp
+        text caused_by
+        jsonb metadata
+    }
+
+    reminders {
+        text actor_id PK
+        text reminder_name PK
+        bigint interval_seconds
+        int interval_nanos
+        bigint first_fire_time_seconds
+        int first_fire_time_nanos
+        blob callback_data
+        bool persist_across_activations
+        int max_occurrences
+        bigint last_fired_seconds
+        bigint next_fire_time_seconds
+        int fire_count
+        bool is_active
+        bigint created_at
+        bigint updated_at
+    }
+
+    blob_metadata {
+        text blob_id PK
+        text tenant_id
+        text namespace
+        text name
+        text sha256
+        text content_type
+        bigint content_length
+        text etag
+        text blob_group
+        text kind
+        text metadata_json
+        text tags_json
+        timestamp expires_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    tuples {
+        text id PK
+        text tuple_data
+        text created_at
+        text expires_at
+        int renewable
+    }
+
+    barriers {
+        text barrier_id PK
+        text space_id
+        int expected_count
+        int current_count
+        text participants_json
+        text metadata_json
+        timestamp created_at
+        timestamp completed_at
+        timestamp expires_at
+    }
+
+    watchers {
+        text watcher_id PK
+        text space_id
+        text actor_id
+        text pattern_hash
+        text event_types
+        text metadata_json
+        timestamp created_at
+        timestamp last_notified_at
+        int notification_count
+        bool active
+    }
+
+    kv_store {
+        text tenant_id PK
+        text namespace PK
+        text key PK
+        blob value
+        bigint expires_at
+        bigint created_at
+        bigint updated_at
+    }
+
+    workflow_definitions ||--o{ workflow_executions : "defines"
+    workflow_executions ||--o{ workflow_execution_labels : "has"
+    workflow_executions ||--o{ step_executions : "contains"
+    workflow_executions ||--o{ signals : "receives"
+```
+
+### Object Registry Schema Details
+
+The `object_registrations` table uses indexed columns for fast queries while preserving the full `ObjectRegistration` protobuf blob:
+
+**Indexed Columns (for fast queries):**
+- `tenant_id`, `namespace`, `object_id` - Primary key for tenant isolation
+- `object_type` - Discover by type (actors, services, nodes, etc.)
+- `node_id` - Find objects on a specific node
+- `health_status` - Filter by health state
+- `last_heartbeat` - Find stale registrations
+- `object_category` - Filter by sub-type (e.g., "GenServer", "redis")
+
+**Blob Column:**
+- `registration_blob` - Full `ObjectRegistration` protobuf for complete data
+
+**Performance:**
+- `heartbeat()` - O(1) single column UPDATE (no blob read/write)
+- `discover()` - O(log n + k) using indexed columns
+- `lookup()` - O(1) primary key lookup
+
+### Multi-Backend Support
+
+Each service supports multiple database backends:
+
+| Service | SQLite | PostgreSQL | DynamoDB | Redis |
+|---------|--------|------------|----------|-------|
+| Object Registry | Yes | Yes | Yes | - |
+| Locks | Yes | Yes | Yes | Yes |
+| KeyValue | Yes | Yes | Yes | Yes |
+| Workflow | Yes | Yes | - | - |
+| Journaling | Yes | Yes | - | - |
+| Channel | Yes | Yes | - | - |
+| Blob (metadata) | Yes | Yes | - | - |
+| TupleSpace | Yes | Yes | - | Yes |
+| Scheduler | Yes | Yes | - | - |
+
+> **Note**: For testing, use SQLite with `:memory:` connection string. This provides the same interface as file-backed SQLite but with faster, non-persistent storage.
+
+### Related Resources
+
+For detailed documentation on each service's database schema:
+
+| Service | README | Migration Path |
+|---------|--------|----------------|
+| Object Registry | [README](../crates/object-registry/README.md) | `crates/object-registry/migrations/` |
+| Locks | [README](../crates/locks/README.md) | `crates/locks/migrations/` |
+| KeyValue | [README](../crates/keyvalue/README.md) | `crates/keyvalue/migrations/` |
+| Workflow | [README](../crates/workflow/README.md) | `crates/workflow/migrations/` |
+| Journaling | [README](../crates/journaling/README.md) | `crates/journaling/migrations/` |
+| Channel | [README](../crates/channel/README.md) | `crates/channel/migrations/` |
+| Blob | [README](../crates/blob/README.md) | `crates/blob/migrations/` |
+| TupleSpace | [README](../crates/tuplespace/README.md) | `crates/tuplespace/migrations/` |
+| Scheduler | [README](../crates/scheduler/README.md) | `crates/scheduler/migrations/` |
 
 ## See Also
 

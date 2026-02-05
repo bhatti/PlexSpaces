@@ -40,6 +40,109 @@ interface host {
     
     /// Get timestamp in milliseconds
     now-ms: func() -> u64;
+    
+    // ============================================================================
+    // Key-Value Store
+    // ============================================================================
+    
+    /// Key-value get (string-only for componentize-py). Returns value or empty if not found.
+    /// Namespace is derived from actor. Errors return "ERROR:message".
+    kv-get: func(key: string) -> string;
+    
+    /// Key-value put (string-only). Returns empty on success, "ERROR:message" on failure.
+    kv-put: func(key: string, value: string) -> string;
+    
+    /// Key-value delete. Returns empty on success, "ERROR:message" on failure.
+    kv-delete: func(key: string) -> string;
+    
+    /// Key-value list keys with prefix. Returns JSON array of keys, e.g. ["key1","key2"].
+    /// Errors return "ERROR:message".
+    kv-list: func(prefix: string) -> string;
+    
+    // ============================================================================
+    // TupleSpace (Linda-style coordination)
+    // ============================================================================
+    
+    /// TupleSpace write. tuple-json: JSON array of strings/numbers, e.g. ["task","worker-1",123].
+    /// Returns empty on success, "ERROR:message" on failure.
+    ts-write: func(tuple-json: string) -> string;
+    
+    /// TupleSpace read (non-destructive). pattern-json: JSON array with wildcards, e.g. ["task","*",null].
+    /// null or "*" matches any value. Returns matched tuple as JSON array, or empty if not found.
+    /// Errors return "ERROR:message".
+    ts-read: func(pattern-json: string) -> string;
+    
+    /// TupleSpace take (destructive read). pattern-json: JSON array with wildcards.
+    /// Returns matched tuple as JSON array and removes it, or empty if not found.
+    /// Errors return "ERROR:message".
+    ts-take: func(pattern-json: string) -> string;
+    
+    /// TupleSpace read-all matching tuples (non-destructive). pattern-json: JSON array with wildcards.
+    /// Returns JSON array of matched tuples, e.g. [["task","w1",1],["task","w2",2]].
+    /// Errors return "ERROR:message".
+    ts-read-all: func(pattern-json: string) -> string;
+    
+    // ============================================================================
+    // Distributed Locks
+    // ============================================================================
+    // All lock operations require tenant-id, namespace, and holder-id for isolation.
+    // Only the holder that acquired the lock can renew or release it.
+    
+    /// Acquire a distributed lock.
+    /// Required: tenant-id, namespace, holder-id, lock-name. Optional: lease-duration-secs (default 30), timeout-ms (0 = try once).
+    /// Returns JSON on success: {"lock_key":"...","version":"...","holder_id":"...","locked":true,"lease_duration_secs":30,"expires_at_ms":...}
+    /// or "ERROR:message" on failure/timeout.
+    lock-acquire: func(
+        tenant-id: string,
+        namespace: string,
+        holder-id: string,
+        lock-name: string,
+        lease-duration-secs: u32,
+        timeout-ms: u64
+    ) -> string;
+    
+    /// Release a distributed lock.
+    /// Required: lock-id (lock key), tenant-id, namespace, holder-id, lock-version (from acquire or last renew).
+    /// Returns empty string on success, "ERROR:message" on failure.
+    lock-release: func(
+        lock-id: string,
+        tenant-id: string,
+        namespace: string,
+        holder-id: string,
+        lock-version: string
+    ) -> string;
+    
+    /// Renew lease on a held lock (heartbeat).
+    /// Required: lock-id, tenant-id, namespace, holder-id, lock-version, lease-duration-secs.
+    /// Returns new lock-version on success (use for next renew/release), or "ERROR:message" on failure.
+    lock-renew: func(
+        lock-id: string,
+        tenant-id: string,
+        namespace: string,
+        holder-id: string,
+        lock-version: string,
+        lease-duration-secs: u32
+    ) -> string;
+    
+    // ============================================================================
+    // Blob Storage
+    // ============================================================================
+    
+    /// Upload blob data. blob-id: unique blob identifier. data: base64-encoded content.
+    /// content-type: MIME type (e.g., "application/json", "image/png").
+    /// Returns empty on success, "ERROR:message" on failure.
+    blob-upload: func(blob-id: string, data: string, content-type: string) -> string;
+    
+    /// Download blob data. blob-id: unique blob identifier.
+    /// Returns base64-encoded content on success, empty if not found, "ERROR:message" on failure.
+    blob-download: func(blob-id: string) -> string;
+    
+    /// Delete blob. Returns empty on success, "ERROR:message" on failure.
+    blob-delete: func(blob-id: string) -> string;
+    
+    /// List blobs with prefix. Returns JSON array of blob IDs, e.g. ["blob1","blob2"].
+    /// Errors return "ERROR:message".
+    blob-list: func(prefix: string) -> string;
 }
 
 world actor-world {

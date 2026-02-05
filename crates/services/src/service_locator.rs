@@ -157,7 +157,61 @@ fn fatal_exit(message: &str) -> ! {
     }
 }
 
+/// Helper function to create SQLite lock manager using the shared database
+///
+/// Uses the same database URL as the main shared database, ensuring locks
+/// are stored in the same DB file for consistency and simplicity.
+#[cfg(feature = "sqlite-backend")]
+async fn create_sqlite_lock_manager(
+    db_url: &Option<String>,
+    node_id_str: &str,
+) -> Arc<dyn plexspaces_locks::LockManager> {
+    use plexspaces_locks::sql::SqliteLockManager;
+    
+    // Use the shared database URL (same as KeyValue store)
+    let lock_db_url = if let Some(ref url) = db_url {
+        // Use the shared database URL directly (it already has mode=rwc)
+        url.clone()
+    } else {
+        // Fallback: use default path with node_id
+        let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
+        format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", sanitized_node_id)
+    };
+    
+    tracing::info!(
+        backend = "SQLite",
+        db_url = %lock_db_url,
+        "Lock manager using shared SQLite database"
+    );
+    
+    match SqliteLockManager::new(&lock_db_url).await {
+        Ok(manager) => Arc::new(manager),
+        Err(e) => {
+            let error_msg = format!(
+                "FATAL: Failed to initialize SQLite lock manager with shared DB '{}': {}. \
+                Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
+                lock_db_url, e
+            );
+            tracing::error!(
+                db_url = %lock_db_url,
+                error = %e,
+                "FATAL: Failed to initialize SQLite lock manager with shared database"
+            );
+            fatal_exit(&error_msg);
+        }
+    }
+}
 
+/// Fallback for when sqlite-backend feature is not enabled
+#[cfg(not(feature = "sqlite-backend"))]
+async fn create_sqlite_lock_manager(
+    _db_url: &Option<String>,
+    _node_id_str: &str,
+) -> Arc<dyn plexspaces_locks::LockManager> {
+    let error_msg = "FATAL: SQLite backend not available. Enable 'sqlite-backend' feature for plexspaces-locks.";
+    tracing::error!("{}", error_msg);
+    fatal_exit(error_msg);
+}
 
 // Import ActorService and TupleSpaceProvider traits for trait object storage
 use plexspaces_core::actor_context::{ActorService, ChannelService, TupleSpaceProvider, ObjectRegistry};
@@ -472,7 +526,6 @@ impl ServiceLocatorImpl {
         if std::env::var("PLEXSPACES_DISABLE_AUTH").is_ok() {
             let env_value = std::env::var("PLEXSPACES_DISABLE_AUTH").unwrap();
             if env_value == "1" || env_value.eq_ignore_ascii_case("true") || env_value.eq_ignore_ascii_case("yes") {
-                tracing::info!("Auth disabled via PLEXSPACES_DISABLE_AUTH env variable");
                 return true;
             }
         }
@@ -1051,13 +1104,14 @@ impl ServiceLocatorImpl {
         mailbox_id: String,
     ) -> Result<plexspaces_mailbox::Mailbox, Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_mailbox::Mailbox;
-        use plexspaces_proto::channel::v1::ChannelBackend;
+        use plexspaces_proto::channel::v1::ChannelProvider;
         
         // Create default mailbox config (defaults to memory)
         let mut mailbox_config = plexspaces_mailbox::mailbox_config_default();
         
-        // Default to memory backend (will be extended to use mailbox_provider from RuntimeConfig)
-        mailbox_config.channel_backend = ChannelBackend::ChannelBackendInMemory as i32;
+        // Default to IN_MEMORY (config_manager sets mailbox_provider in RuntimeConfig)
+        // TODO: Read from RuntimeConfig.mailbox_provider when ServiceLocator has access to release_config
+        mailbox_config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
         
         // Create mailbox with the configured backend
         Mailbox::new(mailbox_config, mailbox_id)
@@ -1085,12 +1139,13 @@ impl ServiceLocatorImpl {
         &self,
         channel_name: String,
     ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_proto::channel::v1::{ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+        use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
         
         // Create default channel config (memory backend)
+        // TODO: Read from RuntimeConfig.channel_provider when ServiceLocator has access to release_config
         let channel_config = ChannelConfig {
             name: channel_name,
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 1000, // Default capacity
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -1134,37 +1189,24 @@ impl ServiceLocatorImpl {
         config: plexspaces_proto::channel::v1::ChannelConfig,
         ctx: &plexspaces_core::RequestContext,
     ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_proto::channel::v1::ChannelBackend;
+        use plexspaces_proto::channel::v1::ChannelProvider;
         
-        let backend = ChannelBackend::try_from(config.backend)
-            .unwrap_or(ChannelBackend::ChannelBackendInMemory);
+        // Use provider from config (defaults to IN_MEMORY if 0)
+        // Provider is set by config_manager::initialize() based on RuntimeConfig.channel_provider
+        let provider = ChannelProvider::try_from(config.provider)
+            .unwrap_or(ChannelProvider::ChannelProviderInMemory);
         
-        // If backend is explicitly specified (not 0/InMemory as default), use it
-        // Backend values: 0 = InMemory, 1 = Redis, 2 = Kafka, etc.
-        // We treat 0 as "undefined" for priority-based selection
-        let final_backend = if config.backend == 0 {
-            // Priority-based backend selection
-            self.select_channel_backend(&config).await?
-        } else {
-            backend
-        };
+        // Validate provider-specific config
+        self.validate_channel_config(&config)?;
         
-        // Create channel with the selected backend
-        let mut final_config = config.clone();
-        let backend_i32 = final_backend as i32;
-        final_config.backend = backend_i32;
-        
-        // Validate backend-specific config
-        self.validate_channel_config(&final_config)?;
-        
-        // Create channel based on backend type (use i32 for matching since enum moved)
-        match ChannelBackend::try_from(backend_i32).unwrap_or(ChannelBackend::ChannelBackendInMemory) {
-            ChannelBackend::ChannelBackendProcessGroup => {
-                self.create_process_group_channel(final_config, ctx).await
+        // Create channel based on provider type
+        match provider {
+            ChannelProvider::ChannelProviderProcessGroup => {
+                self.create_process_group_channel(config, ctx).await
             }
             _ => {
-                // Use generic create_channel for other backends
-                let channel = plexspaces_channel::create_channel(final_config)
+                // Use generic create_channel for other providers
+                let channel = plexspaces_channel::create_channel(config)
                     .await
                     .map_err(|e| format!("Failed to create channel: {}", e))?;
                 Ok(Arc::from(channel))
@@ -1172,95 +1214,58 @@ impl ServiceLocatorImpl {
         }
     }
 
-    /// Select channel backend based on priority and config availability
-    async fn select_channel_backend(
-        &self,
-        config: &plexspaces_proto::channel::v1::ChannelConfig,
-    ) -> Result<plexspaces_proto::channel::v1::ChannelBackend, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_proto::channel::v1::ChannelBackend;
-        
-        // Check for Kafka config
-        if config.backend_config.is_some() {
-            if let Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(_)) = &config.backend_config {
-                return Ok(ChannelBackend::ChannelBackendKafka);
-            }
-        }
-        
-        // Check for NATS config
-        if config.backend_config.is_some() {
-            if let Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Nats(_)) = &config.backend_config {
-                return Ok(ChannelBackend::ChannelBackendNats);
-            }
-        }
-        
-        // Check for SQS config
-        if config.backend_config.is_some() {
-            if let Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqs(_)) = &config.backend_config {
-                return Ok(ChannelBackend::ChannelBackendSqs);
-            }
-        }
-        
-        // Check for Process Group service availability
-        if self.get_process_group_service().await.is_some() {
-            return Ok(ChannelBackend::ChannelBackendProcessGroup);
-        }
-        
-        // Default to in-memory
-        Ok(ChannelBackend::ChannelBackendInMemory)
-    }
-
-    /// Validate channel configuration for the specified backend
+    /// Validate channel configuration for the specified provider
     fn validate_channel_config(
         &self,
         config: &plexspaces_proto::channel::v1::ChannelConfig,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_proto::channel::v1::ChannelBackend;
+        use plexspaces_proto::channel::v1::ChannelProvider;
         
-        let backend = ChannelBackend::try_from(config.backend)
-            .unwrap_or(ChannelBackend::ChannelBackendInMemory);
+        let provider = ChannelProvider::try_from(config.provider)
+            .unwrap_or(ChannelProvider::ChannelProviderInMemory);
         
-        match backend {
-            ChannelBackend::ChannelBackendKafka => {
+        match provider {
+            ChannelProvider::ChannelProviderKafka => {
                 match &config.backend_config {
                     Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(kafka)) => {
                         if kafka.brokers.is_empty() {
-                            return Err("Kafka backend requires brokers configuration".into());
+                            return Err("Kafka provider requires brokers configuration".into());
                         }
                     }
-                    _ => return Err("Kafka backend requires kafka config".into()),
+                    _ => return Err("Kafka provider requires kafka config".into()),
                 }
             }
-            ChannelBackend::ChannelBackendNats => {
+            ChannelProvider::ChannelProviderNats => {
                 match &config.backend_config {
                     Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Nats(nats)) => {
                         if nats.servers.is_empty() {
-                            return Err("NATS backend requires servers configuration".into());
+                            return Err("NATS provider requires servers configuration".into());
                         }
                     }
-                    _ => return Err("NATS backend requires nats config".into()),
+                    _ => return Err("NATS provider requires nats config".into()),
                 }
             }
-            ChannelBackend::ChannelBackendSqs => {
+            ChannelProvider::ChannelProviderSqs => {
                 match &config.backend_config {
                     Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqs(sqs)) => {
                         if sqs.region.is_empty() {
-                            return Err("SQS backend requires region configuration".into());
+                            return Err("SQS provider requires region configuration".into());
                         }
                     }
-                    _ => return Err("SQS backend requires sqs config".into()),
+                    _ => return Err("SQS provider requires sqs config".into()),
                 }
             }
-            ChannelBackend::ChannelBackendRedis => {
+            ChannelProvider::ChannelProviderRedis => {
                 match &config.backend_config {
                     Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(redis)) => {
                         if redis.url.is_empty() {
-                            return Err("Redis backend requires url configuration".into());
+                            return Err("Redis provider requires url configuration".into());
                         }
                     }
-                    _ => return Err("Redis backend requires redis config".into()),
+                    _ => return Err("Redis provider requires redis config".into()),
                 }
             }
-            // InMemory, ProcessGroup, SQLite, UDP don't require config validation
+            // InMemory, ProcessGroup, SQLite, UDP, Postgres don't require config validation
             _ => {}
         }
         
@@ -1628,13 +1633,15 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
 /// Internal helper function that implements service initialization
 /// Takes concrete ServiceLocatorImpl to access register_service_by_name
 /// 
-/// # Configuration Hierarchy (highest to lowest priority)
-/// 1. Environment variable: `PLEXSPACES_DATABASE_URL` (runtime override)
-/// 2. RuntimeConfig.shared_database.connection_string (deployment config)
-/// 3. Default: SQLite file-based (`/tmp/plexspaces-kv-{node_id}.db`)
+/// # Configuration
+/// All configuration comes from ReleaseSpec.runtime which has already been
+/// initialized by config_manager::initialize() with env var overrides applied.
+/// 
+/// This function does NOT read environment variables directly - all env var
+/// handling is centralized in config_manager.
 /// 
 /// # Backend Selection
-/// - URL contains `:memory:` → InMemory backend
+/// - URL contains `:memory:` → SQLite :memory: backend (in-memory)
 /// - Otherwise → SQLite file-based
 /// 
 /// # Panics
@@ -1647,13 +1654,12 @@ async fn initialize_services_impl(
 ) {
     // Get trait object for methods that need it (used implicitly via service_locator_impl)
     use plexspaces_core::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
-    use plexspaces_keyvalue::{InMemoryKVStore, SqliteKVStore};
+    use plexspaces_keyvalue::SqliteKVStore;
+    use plexspaces_object_registry::SqliteObjectRegistryRepository;
     use plexspaces_process_groups::ProcessGroupRegistry;
     use std::collections::HashMap;
     
     // LockManager imports (behind feature flags)
-    #[cfg(feature = "memory-backend")]
-    use plexspaces_locks::memory::MemoryLockManager;
     #[cfg(feature = "sqlite-backend")]
     use plexspaces_locks::sql::SqliteLockManager;
     
@@ -1677,7 +1683,6 @@ async fn initialize_services_impl(
                 metadata: HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
-                wasm_apps_directory: String::new(),
             }
         })
     } else {
@@ -1695,76 +1700,102 @@ async fn initialize_services_impl(
             metadata: HashMap::new(),
             node_registry: None,
             grpc_address: String::new(),
-            wasm_apps_directory: String::new(),
         }
     };
     
     let node_id_str = final_node_config.id.clone();
     
-    // Get database URL with proper priority:
-    // 1. Environment variable (highest priority - runtime override)
-    // 2. RuntimeConfig.shared_database.connection_string
-    // 3. Default SQLite file-based
-    let db_url = std::env::var("PLEXSPACES_DATABASE_URL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            release_config.as_ref()
-                .and_then(|r| r.runtime.as_ref())
-                .and_then(|rt| rt.shared_database.as_ref())
-                .map(|db| db.connection_string.clone())
-                .filter(|s| !s.is_empty())
-        });
+    // Get database URL from RuntimeConfig.db (already initialized by config_manager with env overrides)
+    // Note: All env var handling is centralized in config_manager::initialize()
+    let db_url = release_config.as_ref()
+        .and_then(|r| r.runtime.as_ref())
+        .and_then(|rt| rt.db.as_ref())
+        .map(|db| db.connection_string.clone())
+        .filter(|s| !s.is_empty());
     
     // Use in-memory if URL contains ":memory:"
     let use_memory = db_url.as_ref()
         .map(|s| s.contains(":memory:"))
         .unwrap_or(false);
     
-    // Create KeyValueStore based on configuration
-    let kv_store: Arc<dyn plexspaces_keyvalue::KeyValueStore> = if use_memory {
-        let source = if std::env::var("PLEXSPACES_DATABASE_URL").is_ok() { "env" } else { "config" };
-        tracing::info!(backend = "InMemory", source = source, "KeyValue storage using in-memory backend");
-        Arc::new(InMemoryKVStore::new())
-    } else {
-        // Use SQLite file-based storage for persistence
-        // SqliteKVStore::new() expects just a path (it adds sqlite: prefix internally)
-        let db_path = if let Some(ref url) = db_url {
-            // Extract path from URL: sqlite:///path -> /path, sqlite://path -> path, or just use as-is
-            if url.starts_with("sqlite:///") {
-                url.strip_prefix("sqlite://").unwrap().to_string()
-            } else if url.starts_with("sqlite://") {
-                url.strip_prefix("sqlite://").unwrap().to_string()
-            } else if url.starts_with("sqlite:") {
-                url.strip_prefix("sqlite:").unwrap().to_string()
-            } else {
-                url.clone()
-            }
+    // Extract db_path from URL (used for both KV store and Lock manager)
+    // SqliteKVStore::new() expects just a path (it adds sqlite: prefix and ?mode=rwc internally)
+    // We need to strip any existing scheme prefix and query params
+    let db_path = if let Some(ref url) = db_url {
+        // Extract path from URL: sqlite:///path?mode=rwc -> /path
+        let path_with_params = if url.starts_with("sqlite:///") {
+            url.strip_prefix("sqlite://").unwrap().to_string()
+        } else if url.starts_with("sqlite://") {
+            url.strip_prefix("sqlite://").unwrap().to_string()
+        } else if url.starts_with("sqlite:") {
+            url.strip_prefix("sqlite:").unwrap().to_string()
         } else {
-            // Default: file-based SQLite with node_id in filename
-            let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
-            format!("/tmp/plexspaces-kv-{}.db", sanitized_node_id)
+            url.clone()
         };
-        match SqliteKVStore::new(&db_path).await {
-            Ok(store) => Arc::new(store),
-            Err(e) => {
-                let error_msg = format!(
-                    "FATAL: Failed to initialize SQLite KeyValue store at '{}': {}. \
-                    Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
-                    db_path, e
-                );
-                tracing::error!(
-                    db_path = %db_path,
-                    error = %e,
-                    "FATAL: Failed to initialize SQLite KeyValue store. Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory."
-                );
-                // Note: initialize_services_impl doesn't have access to ServiceLocatorImpl
-                // So we can't use the channel here - use direct exit
-                fatal_exit(&error_msg);
+        // Strip query parameters (e.g., ?mode=rwc) - SqliteKVStore::new() adds them
+        path_with_params.split('?').next().unwrap_or(&path_with_params).to_string()
+    } else {
+        // Default: file-based SQLite with node_id in filename
+        let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
+        format!("/tmp/plexspaces-kv-{}.db", sanitized_node_id)
+    };
+
+    // Create KeyValueStore based on configuration (for ProcessGroupRegistry and other services)
+    // Always use SQLite - use :memory: for in-memory mode
+    let effective_db_path = if use_memory { ":memory:".to_string() } else { db_path.clone() };
+    let kv_store: Arc<dyn plexspaces_keyvalue::KeyValueStore> = match SqliteKVStore::new(&effective_db_path).await {
+        Ok(store) => {
+            if use_memory {
+                tracing::info!(backend = "SQLite :memory:", "KeyValue storage using in-memory SQLite");
+            } else {
+                tracing::info!(backend = "SQLite", path = %effective_db_path, "KeyValue storage using file-based SQLite");
             }
+            Arc::new(store)
+        }
+        Err(e) => {
+            let error_msg = format!(
+                "FATAL: Failed to initialize SQLite KeyValue store at '{}': {}. \
+                Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
+                effective_db_path, e
+            );
+            tracing::error!(
+                db_path = %effective_db_path,
+                error = %e,
+                "FATAL: Failed to initialize SQLite KeyValue store. Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory."
+            );
+            // Note: initialize_services_impl doesn't have access to ServiceLocatorImpl
+            // So we can't use the channel here - use direct exit
+            fatal_exit(&error_msg);
         }
     };
-    let object_registry = Arc::new(plexspaces_object_registry::ObjectRegistryImpl::new(kv_store.clone()));
+    
+    // Create ObjectRegistry with its own repository backend (indexed columns for fast queries)
+    // Uses the same SQLite database path as KeyValueStore for simplicity, but with its own table
+    // Always use SQLite - use :memory: for in-memory mode
+    let object_registry_repo: Arc<dyn plexspaces_object_registry::repository::ObjectRegistryRepository> = match SqliteObjectRegistryRepository::new(&effective_db_path).await {
+        Ok(repo) => {
+            if use_memory {
+                tracing::info!(backend = "SQLite :memory:", "Object Registry using in-memory SQLite");
+            } else {
+                tracing::info!(backend = "SQLite", path = %effective_db_path, "Object Registry using SQLite backend");
+            }
+            Arc::new(repo)
+        }
+        Err(e) => {
+            let error_msg = format!(
+                "FATAL: Failed to initialize SQLite Object Registry at '{}': {}. \
+                Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
+                effective_db_path, e
+            );
+            tracing::error!(
+                db_path = %effective_db_path,
+                error = %e,
+                "FATAL: Failed to initialize SQLite Object Registry."
+            );
+            fatal_exit(&error_msg);
+        }
+    };
+    let object_registry = Arc::new(plexspaces_object_registry::ObjectRegistryImpl::new(object_registry_repo));
     
     // Create ProcessGroupRegistry with same KeyValueStore backend
     let process_group_registry = Arc::new(ProcessGroupRegistry::new(
@@ -1772,43 +1803,18 @@ async fn initialize_services_impl(
         kv_store.clone(),
     ));
     
-    // Create LockManager based on configuration (same pattern as KeyValueStore)
+    // Create LockManager based on locks_provider from config
+    // Config manager has already resolved this: Redis (if available) > Shared DB
+    // Always use SQLite - use :memory: for in-memory mode
     let lock_manager: Arc<dyn plexspaces_locks::LockManager> = if use_memory {
-        #[cfg(feature = "memory-backend")]
-        {
-            let source = if std::env::var("PLEXSPACES_DATABASE_URL").is_ok() { "env" } else { "config" };
-            tracing::info!(backend = "InMemory", source = source, "Lock manager using in-memory backend");
-            Arc::new(MemoryLockManager::new())
-        }
-        #[cfg(not(feature = "memory-backend"))]
-        {
-            let error_msg = "FATAL: Memory backend not available. Enable 'memory-backend' feature for plexspaces-locks.";
-            tracing::error!("{}", error_msg);
-            // Note: initialize_services_impl doesn't have access to ServiceLocatorImpl
-            // So we can't use the channel here - use direct exit
-            fatal_exit(error_msg);
-        }
-    } else {
         #[cfg(feature = "sqlite-backend")]
         {
-            let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
-            // mode=rwc creates the file if it doesn't exist
-            let lock_db_url = format!("sqlite:///tmp/plexspaces-locks-{}.db?mode=rwc", sanitized_node_id);
-            match SqliteLockManager::new(&lock_db_url).await {
+            tracing::info!(backend = "SQLite :memory:", "Lock manager using in-memory SQLite");
+            match SqliteLockManager::new(":memory:").await {
                 Ok(manager) => Arc::new(manager),
                 Err(e) => {
-                    let error_msg = format!(
-                        "FATAL: Failed to initialize SQLite lock manager at '{}': {}. \
-                        Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
-                        lock_db_url, e
-                    );
-                    tracing::error!(
-                        lock_db_url = %lock_db_url,
-                        error = %e,
-                        "FATAL: Failed to initialize SQLite lock manager. Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory."
-                    );
-                    // Note: initialize_services_impl doesn't have access to ServiceLocatorImpl
-                    // So we can't use the channel here - use direct exit
+                    let error_msg = format!("FATAL: Failed to create SQLite :memory: lock manager: {}", e);
+                    tracing::error!("{}", error_msg);
                     fatal_exit(&error_msg);
                 }
             }
@@ -1817,9 +1823,51 @@ async fn initialize_services_impl(
         {
             let error_msg = "FATAL: SQLite backend not available. Enable 'sqlite-backend' feature for plexspaces-locks.";
             tracing::error!("{}", error_msg);
-            // Note: initialize_services_impl doesn't have access to ServiceLocatorImpl
-            // So we can't use the channel here - use direct exit
             fatal_exit(error_msg);
+        }
+    } else {
+        // Read locks_provider from config (already resolved by config_manager)
+        let locks_provider = release_config
+            .as_ref()
+            .and_then(|r| r.runtime.as_ref())
+            .and_then(|rt| rt.locks_provider.as_ref());
+        
+        match locks_provider {
+            Some(lp) if lp.provider == plexspaces_proto::storage::v1::StorageProvider::StorageProviderRedis as i32 => {
+                // Use Redis for locks
+                #[cfg(feature = "redis-backend")]
+                {
+                    use plexspaces_locks::redis::RedisLockManager;
+                    
+                    let redis_url = lp.config.as_ref()
+                        .and_then(|c| match c {
+                            plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(r) => Some(r.url.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| "redis://localhost:6379".to_string());
+                    
+                    tracing::info!(backend = "Redis", redis_url = %redis_url, "Lock manager using Redis backend");
+                    match RedisLockManager::new(&redis_url).await {
+                        Ok(manager) => Arc::new(manager),
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Failed to initialize Redis lock manager, falling back to shared database"
+                            );
+                            create_sqlite_lock_manager(&db_url, &node_id_str).await
+                        }
+                    }
+                }
+                #[cfg(not(feature = "redis-backend"))]
+                {
+                    tracing::warn!("Redis backend not available (feature disabled), using shared database for locks");
+                    create_sqlite_lock_manager(&db_url, &node_id_str).await
+                }
+            }
+            _ => {
+                // Use shared database for locks (SQLite or Postgres)
+                create_sqlite_lock_manager(&db_url, &node_id_str).await
+            }
         }
     };
     
@@ -1887,13 +1935,17 @@ async fn initialize_services_impl(
     use plexspaces_core::ActorFactory;
     let factory_trait: Arc<dyn ActorFactory> = actor_factory_impl.clone();
     service_locator_impl.register_actor_factory(factory_trait).await;
-    tracing::info!("✅ ActorFactoryImpl registered and ready for actor spawning");
+    if tracing::enabled!(tracing::Level::TRACE) {
+        tracing::trace!("✅ ActorFactoryImpl registered and ready for actor spawning");
+    }
     
     // Create and register ActorServiceImpl (needs node_id, which we have from node_id_str)
     use crate::actor_service::ActorServiceImpl;
     let actor_service = Arc::new(ActorServiceImpl::new(service_locator_impl.clone(), node_id_str.clone()));
     service_locator.register_actor_service(actor_service as Arc<dyn plexspaces_core::ActorService + Send + Sync>).await;
-    tracing::info!(node_id = %node_id_str, "✅ ActorServiceImpl registered for message routing");
+    if tracing::enabled!(tracing::Level::TRACE) {
+        tracing::trace!(node_id = %node_id_str, "✅ ActorServiceImpl registered for message routing");
+    }
     
     // Create and register default TupleSpaceProvider
     // Tenant comes from auth, not config - use empty strings for initialization
@@ -1904,7 +1956,9 @@ async fn initialize_services_impl(
     let tuplespace = TupleSpaceProviderWrapper::from_context(&ctx);
     let tuplespace_provider = Arc::new(TupleSpaceProviderWrapper::new(tuplespace));
     service_locator.register_tuplespace_provider(tuplespace_provider as Arc<dyn plexspaces_core::TupleSpaceProvider + Send + Sync>).await;
-    tracing::info!("✅ TupleSpaceProvider registered");
+    if tracing::enabled!(tracing::Level::TRACE) {
+        tracing::trace!("✅ TupleSpaceProvider registered");
+    }
     
     // Register NodeConfig (determined above)
     service_locator.register_node_config(final_node_config.clone()).await;

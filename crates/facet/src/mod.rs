@@ -569,7 +569,9 @@ impl FacetContainer {
         let start = std::time::Instant::now();
         
         let facet_count = self.get_facet_count();
-        debug!(method = %method, facet_count = facet_count, "FacetContainer: Checking facets for interception");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(method = %method, facet_count = facet_count, "FacetContainer: Checking facets for interception");
+        }
         
         let mut current_args = args.to_vec();
 
@@ -599,7 +601,9 @@ impl FacetContainer {
         let duration = start.elapsed();
         metrics::histogram!("plexspaces_facet_intercept_before_duration_seconds", "method" => method.to_string()).record(duration.as_secs_f64());
         let facet_count = self.get_facet_count();
-        debug!(method = %method, facet_count = facet_count, duration_ms = duration.as_millis(), "FacetContainer: No facet intercepted, passing to actor");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(method = %method, facet_count = facet_count, duration_ms = duration.as_millis(), "FacetContainer: No facet intercepted, passing to actor");
+        }
         
         Ok(BeforeInterceptOutcome::CallActor(current_args))
     }

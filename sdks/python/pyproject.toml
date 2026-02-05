@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# PlexSpaces Python SDK
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plexspaces"
+version = "0.1.0"
+description = "PlexSpaces Python SDK - Build actors with minimal boilerplate"
+readme = "README.md"
+license = {text = "LGPL-2.1-or-later"}
+authors = [
+    {name = "PlexSpaces Contributors"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "componentize-py>=0.12",
+]
+
+[project.scripts]
+plexspaces-py = "plexspaces_cli.build:main"
+
+[project.urls]
+Homepage = "https://github.com/plexspaces/plexspaces"
+Documentation = "https://docs.plexspaces.io"
+Repository = "https://github.com/plexspaces/plexspaces"
+
+[tool.setuptools.packages.find]
+include = ["plexspaces*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

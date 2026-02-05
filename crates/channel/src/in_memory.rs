@@ -22,7 +22,7 @@ use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelBackend, ChannelConfig, ChannelStats,
+    channel_config, ChannelProvider, ChannelConfig, ChannelStats,
 };
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
@@ -131,7 +131,7 @@ impl InMemoryChannel {
     /// # async fn example() -> ChannelResult<()> {
     /// let config = ChannelConfig {
     ///     name: "work-queue".to_string(),
-    ///     backend: ChannelBackend::ChannelBackendInMemory as i32,
+    ///     provider: ChannelProvider::ChannelProviderInMemory as i32,
     ///     capacity: 100,
     ///     delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
     ///     ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
@@ -144,10 +144,10 @@ impl InMemoryChannel {
     /// ```
     pub async fn new(config: ChannelConfig) -> ChannelResult<Self> {
         // Validate config
-        if config.backend() != ChannelBackend::ChannelBackendInMemory {
+        if config.provider() != ChannelProvider::ChannelProviderInMemory {
             return Err(ChannelError::InvalidConfiguration(format!(
                 "Invalid backend for InMemoryChannel: {:?}",
-                config.backend()
+                config.provider()
             )));
         }
 
@@ -377,7 +377,7 @@ impl Channel for InMemoryChannel {
 
         Ok(ChannelStats {
             name: self.config.name.clone(),
-            backend: self.config.backend,
+            provider: self.config.provider,
             messages_sent: stats.messages_sent,
             messages_received: stats.messages_received,
             messages_pending: stats.messages_pending,
@@ -416,7 +416,7 @@ mod tests {
     fn create_test_config(capacity: u64) -> ChannelConfig {
         ChannelConfig {
             name: "test-channel".to_string(),
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

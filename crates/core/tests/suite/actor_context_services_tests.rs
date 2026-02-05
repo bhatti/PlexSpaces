@@ -163,11 +163,11 @@ impl IntegrationChannelService {
         }
 
         use plexspaces_proto::channel::v1::{
-            ChannelBackend, ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
+            ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
         };
         let config = ChannelConfig {
             name: name.to_string(),
-            backend: ChannelBackend::ChannelBackendInMemory as i32,
+            provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 1000,
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,

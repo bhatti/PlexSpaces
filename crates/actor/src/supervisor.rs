@@ -354,14 +354,28 @@ impl Supervisor {
     pub async fn add_child(&self, spec: crate::ChildSpec) -> Result<ActorActorRef, SupervisorError> {
         use crate::child_spec::StartedChild;
         
-        debug!(
-            supervisor_id = %self.id,
-            child_id = %spec.child_id,
-            restart_strategy = ?spec.restart_strategy,
-            child_type = ?spec.child_type,
-            facet_count = spec.facets.len(),
-            "Adding child to supervisor"
-        );
+        // Record facets on span for observability (which facets are attached when creating actor)
+        let facet_count = spec.facets.len();
+        let facet_list: String = spec.facets.iter()
+            .map(|f| f.r#type.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        tracing::Span::current().record("facet_count", facet_count);
+        if !facet_list.is_empty() {
+            tracing::Span::current().record("facets", facet_list.as_str());
+        }
+        
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!(
+                supervisor_id = %self.id,
+                child_id = %spec.child_id,
+                restart_strategy = ?spec.restart_strategy,
+                child_type = ?spec.child_type,
+                facet_count = spec.facets.len(),
+                facets = %facet_list,
+                "Adding child to supervisor"
+            );
+        }
 
         let child_id = ActorId::from(spec.actor_or_supervisor_id.clone());
         
@@ -432,7 +446,7 @@ impl Supervisor {
                 registry.register_parent_child(&supervisor_id, &child_id).await;
                 
                 // OBSERVABILITY: Log parent-child registration
-                debug!(
+                trace!(
                     supervisor_id = %self.id,
                     child_id = %child_id,
                     "Registered parent-child relationship in ActorRegistry"
@@ -660,7 +674,7 @@ impl Supervisor {
                 registry.register_parent_child(&supervisor_id, &child_supervisor_id).await;
                 
                 // OBSERVABILITY: Log parent-child registration
-                debug!(
+                trace!(
                     supervisor_id = %self.id,
                     child_supervisor_id = %child_id,
                     "Registered parent-child relationship for supervisor child in ActorRegistry"

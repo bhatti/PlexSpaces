@@ -133,13 +133,6 @@ impl WasmDeploymentService {
         }
 
         // Compile WASM module
-        tracing::debug!(
-            module_name = name,
-            module_version = version,
-            module_size = module_bytes.len(),
-            "Compiling WASM module"
-        );
-
         let module_any = self
             .runtime
             .load_module(name, version, module_bytes)

@@ -1,0 +1,17 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'lineColor': '#94a3b8'}}}%%
+stateDiagram-v2
+    [*] --> Creating: spawn_actor
+    Creating --> Activating: init succeeds
+    Creating --> Failed: init fails
+    Activating --> Active: activation complete
+    Active --> Deactivating: idle timeout
+    Active --> Stopping: stop called
+    Active --> Migrating: migration started
+    Active --> Failed: crash
+    Deactivating --> Inactive: deactivation complete
+    Inactive --> Activating: first message arrives
+    Stopping --> Terminated: shutdown complete
+    Migrating --> Active: migration complete
+    Failed --> Active: supervisor restarts
+    Failed --> Terminated: permanent failure
+    Terminated --> [*]

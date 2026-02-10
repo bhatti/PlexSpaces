@@ -1,0 +1,12 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'lineColor': '#94a3b8'}}}%%
+graph LR
+    S1["Stage 1<br/>Ingestion"] --> C1["Channel"]
+    C1 --> S2["Stage 2<br/>Processing"]
+    S2 --> C2["Channel"]
+    C2 --> S3["Stage 3<br/>Output"]
+
+    style S1 fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+    style S2 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style S3 fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+    style C1 fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style C2 fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff

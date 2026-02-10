@@ -1,0 +1,20 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'lineColor': '#94a3b8'}}}%%
+graph TB
+    Client["Client"] --> SG["ShardGroup<br/>Worker Pool"]
+    SG -->|"Partition by key"| S0["Shard 0"]
+    SG -->|"Partition by key"| S1["Shard 1"]
+    SG -->|"Broadcast query"| S2["Shard 2"]
+    SG -->|"Broadcast query"| S3["Shard 3"]
+
+    S0 -->|"Results"| SG
+    S1 -->|"Results"| SG
+    S2 -->|"Results"| SG
+    S3 -->|"Results"| SG
+    SG -->|"Aggregated"| Client
+
+    style Client fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+    style SG fill:#a78bfa,stroke:#c4b5fd,stroke-width:2px,color:#000
+    style S0 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style S1 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style S2 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style S3 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000

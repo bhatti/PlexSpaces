@@ -1,0 +1,21 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'lineColor': '#94a3b8'}}}%%
+sequenceDiagram
+    participant A as Actor
+    participant D as DurabilityFacet
+    participant J as Journal
+    participant C as Checkpoint
+
+    Note over A,C: Normal Operation
+    A->>D: before_method()
+    D->>J: Journal: MessageReceived
+    A->>A: Execute business logic
+    D->>J: Journal: SideEffectExecuted (cached)
+    D->>J: Journal: MessageProcessed
+    D->>C: Save checkpoint (periodic)
+
+    Note over A,C: After Crash
+    A->>D: on_attach() (restart)
+    D->>C: Load latest checkpoint
+    D->>J: Replay from checkpoint+1
+    J-->>D: Cached side effects (no duplicate calls)
+    D->>A: State restored exactly

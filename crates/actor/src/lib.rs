@@ -38,6 +38,19 @@ pub mod resource;
 pub mod actor_ref;
 pub use actor_ref::{ActorRef, ActorRefError};
 
+// High-level typed actor references (WorkflowRef, GenServerRef, FsmRef, EventRef)
+pub mod typed_refs;
+pub use typed_refs::{
+    // Workflow
+    WorkflowRef, WorkflowRefError, DEFAULT_OPERATION_TIMEOUT, DEFAULT_RUN_TIMEOUT,
+    // GenServer
+    GenServerRef, GenServerError, DEFAULT_CALL_TIMEOUT,
+    // FSM
+    FsmRef, FsmError, DEFAULT_FSM_TIMEOUT,
+    // Event
+    EventRef, EventError,
+};
+
 // TTL tests
 #[cfg(test)]
 mod actor_ref_ttl_tests;
@@ -85,6 +98,12 @@ pub mod facet_helpers;
 pub use facet_helpers::{
     create_facet_from_proto, create_facets_from_proto,
     LockFacetFactory, RegistryFacetFactory, ProcessGroupFacetFactory,
+};
+
+// Unified routing module
+pub mod routing;
+pub use routing::{
+    extract_node_id, is_actor_local, ask_helper, route_local, route_remote, route_message,
 };
 
 // Re-export SupervisorStats from proto (for public API)

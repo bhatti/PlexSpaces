@@ -263,10 +263,9 @@
 //! - Sending is lock-free (tokio::mpsc channel)
 //! - No shared mutable state (immutable after creation)
 
-use plexspaces_core::{ActorId, ReplyWaiter, MessageSender};
+use plexspaces_core::{ActorId, ReplyWaiter, MessageSender, RequestContext};
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -279,6 +278,7 @@ use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
 use plexspaces_proto::actor::v1::{
     actor_service_client::ActorServiceClient, SendMessageRequest,
 };
+use prost_types;
 // Message alias removed - using Message directly
 
 /// Error types for ActorRef operations
@@ -327,6 +327,18 @@ pub struct ActorRef {
     /// Actor identifier
     id: ActorId,
 
+    /// Tenant ID for multi-tenancy (CRITICAL: flows from API → ActorBuilder → ActorRef → RequestContext)
+    ///
+    /// ## Purpose
+    /// Stores the tenant_id for tenant isolation. The tenant_id comes from:
+    /// - API request (extracted from auth headers/metadata)
+    /// - ActorBuilder::with_tenant_id() or ActorBuilder::spawn() with RequestContext
+    ///
+    /// ## Multi-tenancy Design
+    /// - **CRITICAL**: tenant_id MUST flow from API → ActorBuilder → ActorRef → RequestContext
+    /// - Used when ActorRef creates RequestContext for internal routing (ask(), tell(), etc.)
+    tenant_id: String,
+
     /// Namespace for this actor (source of truth for namespace in RequestContext).
     ///
     /// ## Purpose
@@ -335,18 +347,13 @@ pub struct ActorRef {
     /// - Direct actor creation (namespace specified in CreateActorRequest)
     ///
     /// ## Multi-tenancy Design
-    /// - **Tenant-id**: Comes from auth (JWT/mTLS), stored externally. Without auth, can be empty.
-    /// - **Namespace**: Stored here. Source of truth is application (if deployed) or actor creation.
-    /// - **RequestContext**: get_default_request_context() uses tenant_id from caller + namespace from here.
+    /// - **tenant_id**: Stored here (from API → ActorBuilder → ActorRef).
+    /// - **namespace**: Stored here. Source of truth is application (if deployed) or actor creation.
+    /// - **RequestContext**: Uses tenant_id and namespace from ActorRef.
     namespace: String,
 
     /// Location-specific implementation (local vs remote)
     inner: ActorRefInner,
-    
-    /// Per-ActorRef reply waiters (keyed by correlation_id)
-    /// **Note**: This is primarily used as a fallback. The main mechanism uses ReplyWaiterRegistry
-    /// for global reply routing, which handles cases where ActorRef instances differ.
-    pub(crate) reply_waiters: Arc<RwLock<HashMap<String, ReplyWaiter>>>,
     
     /// Current temporary sender ID (if any)
     /// 
@@ -404,22 +411,23 @@ impl ActorRef {
     /// - Future features (circuit breakers, retry policies, etc.)
     ///
     /// ## Multi-tenancy Design
+    /// - **tenant_id**: Stored in ActorRef. Source of truth is API → ActorBuilder → ActorRef.
     /// - **namespace**: Stored in ActorRef. Source of truth is application (if deployed) or actor creation.
-    /// - **tenant_id**: NOT stored in ActorRef. Comes from auth (JWT/mTLS) at request time.
     pub fn local(
         id: impl Into<ActorId>,
+        tenant_id: impl Into<String>,
         namespace: impl Into<String>,
         mailbox: Arc<Mailbox>,
         service_locator: Arc<dyn ServiceLocatorTrait>,
     ) -> Self {
         Self {
             id: id.into(),
+            tenant_id: tenant_id.into(),
             namespace: namespace.into(),
             inner: ActorRefInner::Local {
                 mailbox,
                 service_locator,
             },
-            reply_waiters: Arc::new(RwLock::new(HashMap::new())),
             temporary_sender: Arc::new(RwLock::new(None)),
         }
     }
@@ -449,22 +457,23 @@ impl ActorRef {
     /// This is more scalable than creating a client per ActorRef.
     ///
     /// ## Multi-tenancy Design
+    /// - **tenant_id**: Stored in ActorRef. Source of truth is API → ActorBuilder → ActorRef.
     /// - **namespace**: Stored in ActorRef. Source of truth is application (if deployed) or actor creation.
-    /// - **tenant_id**: NOT stored in ActorRef. Comes from auth (JWT/mTLS) at request time.
     pub fn remote(
         id: impl Into<ActorId>,
+        tenant_id: impl Into<String>,
         namespace: impl Into<String>,
         node_id: impl Into<String>,
         service_locator: Arc<dyn ServiceLocatorTrait>,
     ) -> Self {
         Self {
             id: id.into(),
+            tenant_id: tenant_id.into(),
             namespace: namespace.into(),
             inner: ActorRefInner::Remote {
                 node_id: node_id.into(),
                 service_locator,
             },
-            reply_waiters: Arc::new(RwLock::new(HashMap::new())),
             temporary_sender: Arc::new(RwLock::new(None)),
         }
     }
@@ -486,18 +495,64 @@ impl ActorRef {
     /// - true if waiter was found and notified
     /// - false if no waiter found for this correlation_id
     pub async fn try_notify_reply_waiter(&self, correlation_id: &str, reply: Message) -> bool {
-        let mut waiters = self.reply_waiters.write().await;
-        if let Some(waiter) = waiters.remove(correlation_id) {
-            drop(waiters); // Release lock before notifying
-            if waiter.notify(reply).await.is_ok() {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::trace!("ActorRef::try_notify_reply_waiter: Notified waiter for correlation_id: {}", correlation_id);
+        let message_id = reply.id.clone();
+        let message_type = reply.message_type.clone();
+        let sender_id = reply.sender_id.clone();
+        let receiver_id = reply.receiver_id.clone();
+        // Always use ReplyWaiterRegistry - no fallback
+        if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
+            let notified = waiter_registry.notify(correlation_id, reply).await;
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                if notified {
+                    tracing::debug!(
+                        "[TRY_NOTIFY_REPLY_WAITER] Successfully notified waiter: message_id={}, message_type={}, correlation_id={}, sender_id={}, receiver_id={}",
+                        message_id, message_type, correlation_id, sender_id, receiver_id
+                    );
+                } else {
+                    tracing::debug!(
+                        "[TRY_NOTIFY_REPLY_WAITER] No waiter found: message_id={}, message_type={}, correlation_id={}, sender_id={}, receiver_id={}",
+                        message_id, message_type, correlation_id, sender_id, receiver_id
+                    );
                 }
-                return true;
             }
+            return notified;
         }
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[TRY_NOTIFY_REPLY_WAITER] ReplyWaiterRegistry not available: message_id={}, message_type={}, correlation_id={}, sender_id={}, receiver_id={}",
+                message_id, message_type, correlation_id, sender_id, receiver_id
+            );
+        }
+        tracing::warn!("ReplyWaiterRegistry not available - cannot notify waiter for correlation_id: {}", correlation_id);
         false
     }
+
+    /// Cleanup reply waiter and temporary sender after ask() (success or error).
+    async fn cleanup_ask_resources(
+        service_locator: &Arc<dyn ServiceLocatorTrait>,
+        correlation_id: &str,
+        temp_sender_id: &str,
+        actor_id: &str,
+        node_id: &str,
+    ) {
+        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
+            waiter_registry.remove(correlation_id).await;
+        }
+        if let Some(registry) = service_locator.actor_registry().await {
+            registry.remove_temporary_sender(temp_sender_id).await;
+        }
+        metrics::counter!("plexspaces_actor_ref_temporary_sender_cleaned_total",
+            "actor_id" => actor_id.to_string(),
+            "node_id" => node_id.to_string()
+        )
+        .increment(1);
+        metrics::gauge!("plexspaces_actor_ref_temporary_sender_mappings",
+            "actor_id" => actor_id.to_string(),
+            "node_id" => node_id.to_string()
+        )
+        .set(0.0);
+    }
+
 
     /// Check if this is a local actor
     pub fn is_local(&self) -> bool {
@@ -509,28 +564,30 @@ impl ActorRef {
         matches!(self.inner, ActorRefInner::Remote { .. })
     }
     
-    /// Check if an actor ID is a temporary sender ID (format: "ask-{correlation_id}@{node_id}")
+    /// Check if an actor ID is a temporary sender ID (format: "{TEMP_SENDER_PREFIX}-{correlation_id}@{node_id}")
     /// 
     /// ## Purpose
     /// Temporary sender IDs are used when ask() is called from outside an actor context
     /// to prevent self-messaging. They have a distinct format that never matches actor IDs.
     fn is_temporary_sender_id(actor_id: &str) -> bool {
-        actor_id.starts_with("ask-") && actor_id.contains('@')
+        use plexspaces_core::TEMP_SENDER_PREFIX;
+        actor_id.starts_with(&format!("{}-", TEMP_SENDER_PREFIX)) && actor_id.contains('@')
     }
     
     /// Extract correlation_id from a temporary sender ID
     /// 
     /// ## Format
-    /// Temporary sender ID format: "ask-{correlation_id}@{node_id}"
+    /// Temporary sender ID format: "{TEMP_SENDER_PREFIX}-{correlation_id}@{node_id}"
     /// 
     /// ## Returns
     /// - Some(correlation_id) if the ID is a valid temporary sender ID
     /// - None otherwise
-    ///
+    /// 
     /// ## Design Note
     /// This is a simple helper - we extract correlation_id from the temporary sender ID format.
     fn extract_correlation_id_from_temporary_sender(temporary_sender_id: &str) -> Option<String> {
-        if let Some(prefix_removed) = temporary_sender_id.strip_prefix("ask-") {
+        use plexspaces_core::TEMP_SENDER_PREFIX;
+        if let Some(prefix_removed) = temporary_sender_id.strip_prefix(&format!("{}-", TEMP_SENDER_PREFIX)) {
             if let Some((corr_id, _node_id)) = prefix_removed.split_once('@') {
                 return Some(corr_id.to_string());
             }
@@ -585,28 +642,33 @@ impl ActorRef {
     /// This method enforces the correct pattern for multi-tenancy:
     /// - Tenant isolation comes from auth (external to ActorRef)
     /// - Namespace isolation comes from ActorRef (stored at creation)
-    pub fn get_request_context(&self, tenant_id: impl Into<String>) -> plexspaces_core::RequestContext {
-        use plexspaces_core::RequestContext;
-        RequestContext::new_without_auth(tenant_id.into(), self.namespace.clone())
-    }
-    
-    /// Get default RequestContext with tenant_id from caller and namespace from this ActorRef.
-    /// 
-    /// ## Purpose
-    /// Creates a RequestContext combining:
-    /// - **tenant_id**: From caller (auth source - JWT/mTLS). Pass empty string if auth disabled.
-    /// - **namespace**: From this ActorRef (source of truth is application/actor).
-    /// 
-    /// ## Arguments
-    /// - `tenant_id`: Tenant identifier from auth (JWT/mTLS). Can be empty if auth is disabled.
+    /// Get tenant_id for this actor
     ///
-    /// ## Returns
-    /// RequestContext with caller's tenant_id and this actor's namespace.
+    /// ## Purpose
+    /// Returns the tenant_id stored in this ActorRef. The tenant_id flows from API → ActorBuilder → ActorRef.
     ///
     /// ## Multi-tenancy Design
-    /// This method enforces the correct pattern for multi-tenancy:
-    /// - Tenant isolation comes from auth (external call, propagated here)
-    /// - Namespace isolation comes from ActorRef (stored at creation)
+    /// - **tenant_id**: Stored in ActorRef. Source of truth is API → ActorBuilder → ActorRef.
+    pub fn tenant_id(&self) -> &str {
+        &self.tenant_id
+    }
+
+    /// Create RequestContext with tenant_id and namespace from this ActorRef.
+    ///
+    /// ## Purpose
+    /// Helper to create RequestContext for operations that need tenant isolation.
+    /// Uses tenant_id and namespace stored in ActorRef (from ActorBuilder → API).
+    ///
+    /// ## Multi-tenancy Design
+    /// - **tenant_id**: From ActorRef (source: API → ActorBuilder → ActorRef).
+    /// - **namespace**: From ActorRef (source: application/actor creation).
+    ///
+    /// ## Returns
+    /// RequestContext with this ActorRef's tenant_id and namespace.
+    pub fn get_request_context(&self) -> plexspaces_core::RequestContext {
+        use plexspaces_core::RequestContext;
+        RequestContext::new_without_auth(self.tenant_id.clone(), self.namespace.clone())
+    }
     ///
     /// ## When to Use
     /// - Always pass tenant_id from the external call/auth when available
@@ -747,11 +809,14 @@ impl ActorRef {
         let message_type = message.message_type.clone();
         let start = std::time::Instant::now();
 
-        // Ensure message has an ID (use ULID if not set)
+        // Ensure message has an ID (use ULID if not set, prefix with "req-" for requests)
         let mut message = message;
         if message.id.is_empty() {
             use ulid::Ulid;
-            message.id = Ulid::new().to_string();
+            message.id = format!("req-{}", Ulid::new().to_string());
+        } else if !message.id.starts_with("req-") && !message.id.starts_with("res-") {
+            // If ID exists but doesn't have prefix, add req- prefix for requests
+            message.id = format!("req-{}", message.id);
         }
 
         // VALIDATION: Check for self-messaging (sender == receiver)
@@ -830,7 +895,7 @@ impl ActorRef {
         // - If receiver is temporary sender → REPLY → route to ReplyWaiter (bypass mailbox)
         // - Otherwise → REQUEST or normal message → send to mailbox
         // Route replies to temporary senders via ReplyWaiter
-        // Check if receiver is a temporary sender ID (format: "ask-{correlation_id}@{node_id}")
+        // Check if receiver is a temporary sender ID (format: "{TEMP_SENDER_PREFIX}-{correlation_id}@{node_id}")
         if Self::is_temporary_sender_id(&message.receiver_id) {
             // Prefer correlation_id from message, fallback to extracting from temporary sender ID
             // Store extracted correlation_id in a variable to avoid lifetime issues
@@ -846,10 +911,11 @@ impl ActorRef {
                     let message_clone = message.clone();
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
-                            "[TELL] Attempting to route reply to temporary sender: correlation_id={}, receiver={}, message_correlation_id={:?}",
-                            corr_id, message.receiver_id, message.correlation_id
+                            "[TELL] Attempting to route reply to temporary sender: message_id={}, message_type={}, correlation_id={}, receiver={}, message_correlation_id={:?}, sender={}",
+                            message.id, message.message_type, corr_id, message.receiver_id, message.correlation_id, message.sender_id
                         );
                     }
+                    
                     if waiter_registry.notify(corr_id, message_clone).await {
                         if tracing::enabled!(tracing::Level::TRACE) {
                             tracing::trace!(
@@ -912,10 +978,10 @@ impl ActorRef {
                 // (Reply routing to temporary sender is handled above before this match)
                 let msg_sender = message.sender_id.clone();
                 let msg_receiver = message.receiver_id.clone();
-                let _msg_correlation_id = message.correlation_id.clone();
-                // Convert proto Message to mailbox Message for mailbox storage
-                let mailbox_msg = plexspaces_mailbox::Message::from_proto(&message);
-                let send_result = mailbox.send(mailbox_msg).await
+                let msg_correlation_id = message.correlation_id.clone();
+                // Convert proto Message to mailbox Message
+                // Use proto Message directly - no conversion needed
+                let send_result = mailbox.send(message).await
                     .map_err(|e| {
                         tracing::error!(
                             "🟢 [TELL] MAILBOX SEND FAILED: actor_ref_id={}, sender={:?}, receiver={}, error={}",
@@ -1096,16 +1162,9 @@ impl ActorRef {
         }
     }
 
-    /// Extract node_id from actor ID (format: "actor_name@node_id" or just "actor_name")
-    ///
-    /// ## Returns
-    /// Tuple of (actor_name, node_id). If no @node_id is present, returns (actor_id, None).
+    /// Extract node_id from actor ID (delegates to routing module)
     fn extract_node_id(actor_id: &str) -> (String, Option<String>) {
-        if let Some((name, node)) = actor_id.split_once('@') {
-            (name.to_string(), Some(node.to_string()))
-        } else {
-            (actor_id.to_string(), None)
-        }
+        crate::routing::extract_node_id(actor_id)
     }
 
     /// Send a message and wait for a reply (request-reply pattern)
@@ -1162,6 +1221,7 @@ impl ActorRef {
     /// - `ActorRefError::SendFailed` - Failed to send request message
     /// - `ActorRefError::ActorTerminated` - Actor terminated before reply
     pub async fn ask(
+
         &self,
         mut message: Message,
         timeout: Duration,
@@ -1182,658 +1242,41 @@ impl ActorRef {
         );
         let _guard = span.enter();
 
-        // Ensure message has an ID (use ULID if not set)
+        // Ensure message has an ID (use ULID if not set, prefix with "req-" for requests)
         if message.id.is_empty() {
             use ulid::Ulid;
-            message.id = Ulid::new().to_string();
+            message.id = format!("req-{}", Ulid::new().to_string());
+        } else if !message.id.starts_with("req-") && !message.id.starts_with("res-") {
+            // If ID exists but doesn't have prefix, add req- prefix for requests
+            message.id = format!("req-{}", message.id);
         }
 
-        let result = match &self.inner {
-            ActorRefInner::Local { mailbox: _, service_locator: _ } => {
-                // LOCAL PATH: Use ReplyWaiterRegistry (global registry) for all cases
-                // Generate unique correlation_id for this request
-                let correlation_id = Ulid::new().to_string();
+        // Determine target actor_id (from message.receiver_id or self.id())
+        let target_actor_id = if message.receiver_id.is_empty() {
+            actor_id.clone()
+        } else {
+            message.receiver_id.clone()
+        };
+        message.receiver_id = target_actor_id.clone();
 
-                // Create reply waiter (like Erlang temporary process, Akka temporary actor)
-                let waiter = ReplyWaiter::new();
-
-                // IMPORTANT: Store ReplyWaiter in ReplyWaiterRegistry (global registry) for all cases
-                // This ensures correct routing regardless of where ask() is called from:
-                // - External callers: ReplyWaiterRegistry routes via temporary sender ID
-                // - Actor callers: send_reply() routes to sender's ActorRef, tell() uses ReplyWaiterRegistry
-                // This is more robust than storing on per-ActorRef maps, which can have issues when
-                // ActorRef instances are different (e.g., when ask() is called on target's ActorRef
-                // but reply is routed to caller's ActorRef)
-                if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
-                    waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
-                } else {
-                    // Fallback: Store on self if ReplyWaiterRegistry not available (shouldn't happen in production)
-                    tracing::warn!(
-                        "🔵 [ASK] ReplyWaiterRegistry not available, storing ReplyWaiter on target ActorRef as fallback"
-                    );
-                    let mut waiters = self.reply_waiters.write().await;
-                    waiters.insert(correlation_id.clone(), waiter.clone());
-                }
-
-                // Set receiver to self.id() if not set (Message::new() defaults to "unknown")
-                // Production-grade: ask() on ActorRef targets that actor
-                if message.receiver_id.is_empty() {
-                    message.receiver_id = actor_id.clone();
-                }
-                
-                // CRITICAL: Always override sender to temporary sender ID for ask() pattern
-                // This ensures replies are routed back to the ReplyWaiter via the temporary sender
-                // Even if the message already has a sender set, we must override it for ask()
-                // SIMPLIFIED DESIGN: Always create temporary sender for ask() calls
-                // This simplifies the code by removing conditional logic.
-                // Temporary sender is always local (created on the node where ask() is called),
-                // but receiver can be local or remote (extracted from message.receiver_id).
-                // When reply is received by temporary sender, it routes to ReplyWaiter and cleans itself up.
-                let caller_node_id = self.get_caller_node_id().await?;
-                let temp_sender_id = format!("ask-{}@{}", correlation_id, caller_node_id);
-                
-                // Override sender to temporary sender ID (CRITICAL for reply routing)
-                let old_sender = message.sender_id.clone();
-                message.sender_id = temp_sender_id.clone();
-                // Set correlation_id in message for reply routing
-                message.correlation_id = correlation_id.clone();
-                
-                // Store temporary sender ID for cleanup
-                let expires_at = Instant::now() + (timeout * 2);
-                {
-                    let mut temp_sender = self.temporary_sender.write().await;
-                    *temp_sender = Some(temp_sender_id.clone());
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                        "[ASK] Created temporary sender: temporary_sender_id={}, correlation_id={}, expires_at={:?}",
-                        temp_sender_id, correlation_id, expires_at
-                        );
-                    }
-                }
-                
-                // Create temporary sender ActorRef.
-                // When tell() is called on this ActorRef, it routes messages to ReplyWaiter
-                // (see tell_impl for routing logic). The mailbox is created but never used
-                // because tell_impl routes to ReplyWaiter before reaching the mailbox.
-                use plexspaces_mailbox::{Mailbox, MailboxConfig};
-                let dummy_mailbox = Arc::new(
-                    Mailbox::new(MailboxConfig::default(), temp_sender_id.clone()).await
-                        .map_err(|e| ActorRefError::SendFailed(format!("Failed to create temporary sender mailbox: {}", e)))?
-                );
-                let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
-                    temp_sender_id.clone(),
-                    String::new(), // Temporary sender namespace (internal)
-                    dummy_mailbox,
-                    self.service_locator().clone(),
-                ));
-                
-                // Register temporary sender ActorRef in ActorRegistry (so it can be looked up)
-                if let Some(registry) = self.service_locator().actor_registry().await {
-                    // Create RequestContext for temporary sender registration
-                    // Temporary senders are always local, so use empty tenant/namespace
-                    let ctx = plexspaces_core::RequestContext::new_without_auth(
-                        String::new(), // Empty tenant
-                        String::new(), // Empty namespace
-                    );
-                    registry.register_temporary_sender(
-                        &ctx,
-                        temp_sender_id.clone(),
-                        temp_sender_ref,
-                        correlation_id.clone(),
-                        expires_at,
-                    ).await;
-                }
-                
-                // Register ReplyWaiter in ReplyWaiterRegistry for global routing
-                // This allows routing replies even when ActorRef instances are different
-                if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
-                    waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
-                } else {
-                    tracing::warn!("[ASK] ReplyWaiterRegistry not available!");
-                }
-                
-                // OBSERVABILITY: Track temporary sender creation
-                metrics::counter!("plexspaces_actor_ref_temporary_sender_created_total",
-                    "actor_id" => actor_id.clone(),
-                    "node_id" => caller_node_id.clone()
-                ).increment(1);
-                metrics::gauge!("plexspaces_actor_ref_temporary_sender_mappings",
-                    "actor_id" => actor_id.clone(),
-                    "node_id" => caller_node_id.clone()
-                ).set(1.0);
-                
-                // Set sender to temporary sender ID
-                message.sender_id = temp_sender_id.clone();
-                
-                // Clone for cleanup
-                let temp_sender_id_for_cleanup = temp_sender_id.clone();
-                
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                    "🔵 [ASK] Message prepared: sender={} (caller ActorRef), receiver={} (target actor), correlation_id={}",
-                    actor_id, message.receiver_id, correlation_id
-                );
-                }
-                
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                    "🔵 [ASK] Message prepared: correlation_id={}, sender={:?}, receiver={}, message_type={}",
-                    correlation_id, message.sender_id, message.receiver_id, message_type
-                );
-                }
-
-                // IMPORTANT: When ask() is called on an ActorRef, that ActorRef represents the target actor
-                // The ReplyWaiter is stored on self (the ActorRef ask() was called on)
-                // If message.receiver_id matches self.id, we can use self.tell() directly
-                // Otherwise, we need to look up the target ActorRef
-                let target_actor_id = message.receiver_id.clone();
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                    "🔵 [ASK] Comparing target_actor_id={} with actor_id={} (self.id())",
-                    target_actor_id, actor_id
-                );
-                }
-                if target_actor_id == actor_id {
-                    // Target matches self - use self.tell() directly
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                        "🔵 [ASK] Target matches self, using self.tell(): target={}, sender={:?}, receiver={}, correlation_id={}",
-                        target_actor_id, message.sender_id, message.receiver_id, correlation_id
-                    );
-                    }
-                    if let Err(e) = self.tell(message).await {
-                        // Clean up on error
-                        if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
-                            waiter_registry.remove(&correlation_id).await;
-                        } else {
-                            let mut waiters = self.reply_waiters.write().await;
-                            waiters.remove(&correlation_id);
-                        }
-                        // Cleanup temporary sender from ActorRegistry
-                        if let Some(registry) = self.service_locator().actor_registry().await {
-                            registry.remove_temporary_sender(&temp_sender_id_for_cleanup).await;
-                        }
-                        // Also remove from ActorRef's local Option
-                        let mut temp_sender = self.temporary_sender.write().await;
-                        if temp_sender.as_ref().map(|s| s == &temp_sender_id_for_cleanup).unwrap_or(false) {
-                            *temp_sender = None;
-                        }
-                        tracing::error!("ActorRef::ask: Failed to send message: {}", e);
-                        return Err(ActorRefError::SendFailed(format!("Failed to send message: {}", e)));
-                    }
-                } else {
-                    // Target is different - look up target ActorRef from registry
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                        "🔵 [ASK] Target is different from self, looking up target actor: target={}, self={}",
-                        target_actor_id, actor_id
-                    );
-                    }
-                    
-                    
-                    // Try to get MessageSender from registry (for activated actors and lazy virtual actors)
-                    // If found, send message directly and skip the rest of the logic
-                    // IMPORTANT: message.sender_id and message.correlation_id are already set above (lines 1197, 1127)
-                    let message_sent = if let Some(registry) = self.service_locator().actor_registry().await {
-                        // Try to get MessageSender first (for activated actors and lazy virtual actors)
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!("[ASK] Looking up actor in registry: target={}, sender={:?}, correlation_id={:?}", target_actor_id, message.sender_id, message.correlation_id);
-                        }
-                        if let Some(sender) = registry.lookup_actor(&target_actor_id).await {
-                            if tracing::enabled!(tracing::Level::DEBUG) {
-                                tracing::debug!("[ASK] Found actor in registry: target={}", target_actor_id);
-                            }
-                            // IMPORTANT: After activation, VirtualActorWrapper is replaced by ActorRef in registry
-                            // The MessageSender (sender) is already an ActorRef for activated actors
-                            // We should use it directly instead of getting mailbox from actor instance
-                            // This maintains proper encapsulation - MessageSender is the public interface
-                            // Send message via MessageSender (works for both regular and activated virtual actors)
-                            // VirtualActorWrapper handles lazy activation automatically
-                            // Message already has sender and correlation_id set (lines 1197, 1127)
-                            if let Err(e) = sender.tell(message.clone()).await {
-                                // Clean up on error
-                                if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
-                                    waiter_registry.remove(&correlation_id).await;
-                                } else {
-                                    let mut waiters = self.reply_waiters.write().await;
-                                    waiters.remove(&correlation_id);
-                                }
-                                if let Some(registry) = self.service_locator().actor_registry().await {
-                                    registry.remove_temporary_sender(&temp_sender_id_for_cleanup).await;
-                                }
-                                let mut temp_sender = self.temporary_sender.write().await;
-                                if temp_sender.as_ref().map(|s| s == &temp_sender_id_for_cleanup).unwrap_or(false) {
-                                    *temp_sender = None;
-                                }
-                                tracing::error!("ActorRef::ask: Failed to send message: {}", e);
-                                return Err(ActorRefError::SendFailed(format!("Failed to send message: {}", e)));
-                            }
-                            // Message sent successfully - skip the rest and go straight to waiting for reply
-                            true
-                        } else {
-                            // No actor found in registry - need to create ActorRef
-                            tracing::warn!("[ASK] Actor NOT found in registry: target={}", target_actor_id);
-                            false
-                        }
-                    } else {
-                        // No registry - need to create ActorRef
-                        tracing::warn!("[ASK] ActorRegistry not available");
-                        false
-                    };
-                    
-                    // If message was not sent via MessageSender, create ActorRef and send via tell()
-                    if !message_sent {
-                        let target_actor_ref = if let Some(registry) = self.service_locator().actor_registry().await {
-                            // Actor not found - try to create remote ActorRef based on routing
-                            if tracing::enabled!(tracing::Level::DEBUG) {
-                                tracing::debug!("🔵 [ASK] Actor not found in registry, trying routing lookup: target={}", target_actor_id);
-                            }
-                            // Build RequestContext: empty tenant when no auth, namespace from this ActorRef
-                            let ctx = self.get_default_request_context("").await?;
-                            if let Ok(Some(routing)) = registry.lookup_routing(&ctx, &target_actor_id).await {
-                                if tracing::enabled!(tracing::Level::DEBUG) {
-                                    tracing::debug!("🔵 [ASK] Found routing for actor: target={}, node={}", target_actor_id, routing.node_id);
-                                }
-                                ActorRef::remote(
-                                    target_actor_id.clone(),
-                                    String::new(), // TODO: get namespace from routing
-                                    routing.node_id,
-                                    self.service_locator().clone(),
-                                )
-                            } else {
-                                if tracing::enabled!(tracing::Level::DEBUG) {
-                                    tracing::debug!("🔵 [ASK] No routing found for actor: target={}", target_actor_id);
-                                }
-                                return Err(ActorRefError::ActorNotFound(target_actor_id));
-                            }
-                        } else {
-                            // No registry - create remote ActorRef with same node as self
-                            if tracing::enabled!(tracing::Level::DEBUG) {
-                                tracing::debug!("🔵 [ASK] No ActorRegistry available, extracting node_id from target_actor_id: target={}", target_actor_id);
-                            }
-                            // Extract node_id from target_actor_id or use local node
-                            let (_, node_id_opt) = Self::extract_node_id(&target_actor_id);
-                            let node_id = if let Some(node_id) = node_id_opt {
-                                if tracing::enabled!(tracing::Level::DEBUG) {
-                                    tracing::debug!("🔵 [ASK] Extracted node_id from target_actor_id: node={}", node_id);
-                                }
-                                node_id
-                            } else {
-                                // If no node_id in actor ID, use caller's node_id
-                                let caller_node_id = self.get_caller_node_id().await.unwrap_or_else(|e| {
-                                    tracing::warn!("🔵 [ASK] Failed to get caller node_id: {:?}, using 'unknown'", e);
-                                    "unknown".to_string()
-                                });
-                                if tracing::enabled!(tracing::Level::DEBUG) {
-                                    tracing::debug!("🔵 [ASK] Using caller node_id: node={}", caller_node_id);
-                                }
-                                caller_node_id
-                            };
-                            ActorRef::remote(
-                                target_actor_id.clone(),
-                                String::new(), // TODO: get namespace from context
-                                node_id,
-                                self.service_locator().clone(),
-                            )
-                        };
-                        
-                        // Send message via tell() on target ActorRef
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(
-                            "🔵 [ASK] Calling tell() on target ActorRef: target={}, sender={:?}, receiver={}, correlation_id={}",
-                            target_actor_id, message.sender_id, message.receiver_id, correlation_id
-                        );
-                        }
-                        if let Err(e) = target_actor_ref.tell(message).await {
-                        // Clean up on error
-                        if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
-                            waiter_registry.remove(&correlation_id).await;
-                        } else {
-                            let mut waiters = self.reply_waiters.write().await;
-                            waiters.remove(&correlation_id);
-                        }
-                        // Cleanup temporary sender from ActorRegistry
-                        if let Some(registry) = self.service_locator().actor_registry().await {
-                            registry.remove_temporary_sender(&temp_sender_id_for_cleanup).await;
-                        }
-                        // Also remove from ActorRef's local Option
-                        let mut temp_sender = self.temporary_sender.write().await;
-                        if temp_sender.as_ref().map(|s| s == &temp_sender_id_for_cleanup).unwrap_or(false) {
-                            *temp_sender = None;
-                        }
-                        tracing::error!("ActorRef::ask: Failed to send message: {}", e);
-                        return Err(ActorRefError::SendFailed(format!("Failed to send message: {}", e)));
-                        }
-                    }
-                }
-                
-                // Wait for reply (async)
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                    "🔵 [ASK] Waiting for reply: correlation_id={}, caller_actor_ref_id={}, timeout={:?}",
-                    correlation_id, actor_id, timeout
-                );
-                }
-                let result = waiter.wait(timeout).await;
-                
-                // Cleanup (remove from ReplyWaiterRegistry)
-                if let Some(waiter_registry) = self.service_locator().reply_waiter_registry().await {
-                    waiter_registry.remove(&correlation_id).await;
-                } else {
-                    // Fallback: Remove from self if ReplyWaiterRegistry not available
-                    let mut waiters = self.reply_waiters.write().await;
-                    waiters.remove(&correlation_id);
-                }
-                // Cleanup temporary sender from ActorRegistry
-                if let Some(registry) = self.service_locator().actor_registry().await {
-                    registry.remove_temporary_sender(&temp_sender_id_for_cleanup).await;
-                }
-                // Also remove from ActorRef's local Option
-                {
-                    let mut temp_sender = self.temporary_sender.write().await;
-                    if temp_sender.as_ref().map(|s| s == &temp_sender_id_for_cleanup).unwrap_or(false) {
-                        *temp_sender = None;
-                    }
-                }
-                
-                // OBSERVABILITY: Track temporary sender cleanup
-                {
-                    let caller_node_id = self.get_caller_node_id().await.unwrap_or_else(|_| "unknown".to_string());
-                    metrics::counter!("plexspaces_actor_ref_temporary_sender_cleaned_total",
-                        "actor_id" => actor_id.clone(),
-                        "node_id" => caller_node_id.clone()
-                    ).increment(1);
-                    metrics::gauge!("plexspaces_actor_ref_temporary_sender_mappings",
-                        "actor_id" => actor_id.clone(),
-                        "node_id" => caller_node_id.clone()
-                    ).set(0.0);
-                }
-                
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    match &result {
-                        Ok(msg) => {
-                            tracing::debug!(
-                                "[ASK] Reply received: correlation_id={}, caller_actor_ref_id={}, reply_sender={:?}, reply_receiver={}",
-                                correlation_id, actor_id, msg.sender_id, msg.receiver_id
-                            );
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "[ASK] Reply wait failed: correlation_id={}, caller_actor_ref_id={}, error={:?}",
-                                correlation_id, actor_id, e
-                            );
-                        }
-                    }
-                }
-                
-                result.map_err(|e| match e {
-                    plexspaces_core::ReplyWaiterError::Timeout => ActorRefError::Timeout,
-                    _ => ActorRefError::SendFailed(format!("Reply waiter error: {}", e)),
-                })
-            }
-            ActorRefInner::Remote { node_id, service_locator } => {
-                // Get local node ID once (for validation and routing)
-                let local_node_id = self.get_local_node_id().await;
-                
-                // Extract target node_id from message.receiver_id (use self.id() if receiver is unset)
-                let target_actor_id = if message.receiver_id.is_empty() {
-                    self.id().as_str().to_string()
-                } else {
-                    message.receiver_id.clone()
-                };
-                // Ensure message.receiver_id is set
-                message.receiver_id = target_actor_id.clone();
-                
-                // Extract node_id from target actor ID (fallback to ActorRef's node_id)
-                let (_, target_node_id_opt) = Self::extract_node_id(&target_actor_id);
-                
-                // LOCAL VIA REMOTE PATH: If target actor is on local node, route locally
-                // This handles the case where a Remote ActorRef points to a local actor
-                // (e.g., when actor location changes or for testing "local via remote" behavior)
-                // Check if target is local BEFORE consuming target_node_id_opt
-                let is_target_local = if let (Some(local_id), Some(target_id)) = (local_node_id.as_ref(), target_node_id_opt.as_ref()) {
-                    local_id == target_id
-                } else {
-                    false
-                };
-                
-                // Now consume target_node_id_opt to get target_node_id (for remote path)
-                let target_node_id = target_node_id_opt.unwrap_or_else(|| node_id.clone());
-                            
-                            if is_target_local {
-                                // Target is local - use Local path logic: create temporary sender, send via tell(), wait for reply
-                                // This reuses the same pattern as the Local path but from Remote ActorRef context
-                                
-                                if let Some(registry) = service_locator.actor_registry().await {
-                                    if let Some(local_actor_sender) = registry.lookup_actor(&target_actor_id).await {
-                                        // Generate correlation_id
-                                        let correlation_id = Ulid::new().to_string();
-                                        message.correlation_id = correlation_id.clone();
-                                        
-                                        // Create ReplyWaiter
-                                        let waiter = ReplyWaiter::new();
-                                        
-                                        // Register ReplyWaiter
-                                        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-                                            waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
-                                        }
-                                        
-                                        // Create temporary sender
-                                        let caller_node_id = self.get_caller_node_id().await?;
-                                        let temp_sender_id = format!("ask-{}@{}", correlation_id, caller_node_id);
-                                        let expires_at = Instant::now() + (timeout * 2);
-                                        
-                                        // Store temporary sender ID
-                                        {
-                                            let mut temp_sender = self.temporary_sender.write().await;
-                                            *temp_sender = Some(temp_sender_id.clone());
-                                        }
-                                        
-                                        // Create and register temporary sender ActorRef
-                                        use plexspaces_mailbox::{Mailbox, MailboxConfig};
-                                        let dummy_mailbox = Arc::new(
-                                            Mailbox::new(MailboxConfig::default(), temp_sender_id.clone()).await
-                                                .map_err(|e| ActorRefError::SendFailed(format!("Failed to create temporary sender mailbox: {}", e)))?
-                                        );
-                                        let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
-                                            temp_sender_id.clone(),
-                                            String::new(), // Temporary sender namespace (internal)
-                                            dummy_mailbox,
-                                            service_locator.clone(),
-                                        ));
-                                        
-                                        // Tenant comes from auth, not config
-                                        let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
-                                        registry.register_temporary_sender(
-                                            &ctx,
-                                            temp_sender_id.clone(),
-                                            temp_sender_ref,
-                                            correlation_id.clone(),
-                                            expires_at,
-                                        ).await;
-                                        
-                                        // Set sender to temporary sender ID
-                                        message.sender_id = temp_sender_id.clone();
-                                        message.receiver_id = target_actor_id.clone();
-                                        
-                                        // Send message via tell() on local actor's MessageSender
-                                        if let Err(e) = local_actor_sender.tell(message).await {
-                                            // Cleanup on error
-                                            if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-                                                waiter_registry.remove(&correlation_id).await;
-                                            }
-                                            registry.remove_temporary_sender(&temp_sender_id).await;
-                                            let mut temp_sender = self.temporary_sender.write().await;
-                                            *temp_sender = None;
-                                            return Err(ActorRefError::SendFailed(format!("Failed to send message to local actor: {}", e)));
-                                        }
-                                        
-                                        // Wait for reply
-                                        let result = waiter.wait(timeout).await;
-                                        
-                                        // Cleanup
-                                        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-                                            waiter_registry.remove(&correlation_id).await;
-                                        }
-                                        registry.remove_temporary_sender(&temp_sender_id).await;
-                                        let mut temp_sender = self.temporary_sender.write().await;
-                                        *temp_sender = None;
-                                        
-                                        return result.map_err(|e| match e {
-                                            plexspaces_core::ReplyWaiterError::Timeout => ActorRefError::Timeout,
-                                            _ => ActorRefError::SendFailed(format!("Reply waiter error: {}", e)),
-                                        });
-                                    }
-                                }
-                                // If actor not found, fall through to remote path (will fail with appropriate error)
-                            }
-                            
-                            // VALIDATION: Remote ActorRef's node_id should not match local node (unless target is local, handled above)
-                            if let Some(ref local_id) = local_node_id {
-                                if local_id == node_id && !is_target_local {
-                                    return Err(ActorRefError::SendFailed(format!(
-                                        "Invalid Remote ActorRef: node_id={} matches local_node_id={} but target actor is not local. Use ActorRef::local() for local actors.",
-                                        node_id, local_id
-                                    )));
-                                }
-                            }
-                            
-                            // REMOTE PATH: Use gRPC with wait_for_response=true (not ActorService)
-                            // ActorRef uses gRPC directly because it already knows it's remote.
-                            // ActorService is the gRPC gateway for external clients.
-                            
-                            // Generate unique correlation_id for this request
-                            let correlation_id = Ulid::new().to_string();
-                            message.correlation_id = correlation_id.clone();
-                            
-                            // Create reply waiter
-                            let waiter = ReplyWaiter::new();
-                            
-                            // Register ReplyWaiter before creating temporary sender
-                            if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-                                waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
-                            }
-                            
-                            // Always create temporary sender (always local, receiver can be local or remote)
-                            let caller_node_id = self.get_caller_node_id().await?;
-                            let temp_sender_id = format!("ask-{}@{}", correlation_id, caller_node_id);
-                            
-                            let expires_at = Instant::now() + (timeout * 2);
-                            
-                            // Store temporary sender ID for cleanup
-                            {
-                                let mut temp_sender = self.temporary_sender.write().await;
-                                *temp_sender = Some(temp_sender_id.clone());
-                            }
-                            
-                            // Create temporary sender ActorRef and register in ActorRegistry for reply routing
-                            use plexspaces_mailbox::{Mailbox, MailboxConfig};
-                            let dummy_mailbox = Arc::new(
-                                Mailbox::new(MailboxConfig::default(), temp_sender_id.clone()).await
-                                    .map_err(|e| ActorRefError::SendFailed(format!("Failed to create temporary sender mailbox: {}", e)))?
-                            );
-                            let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
-                                temp_sender_id.clone(),
-                                String::new(), // Temporary sender namespace (internal)
-                                dummy_mailbox,
-                                service_locator.clone(),
-                            ));
-                            
-                            // Register temporary sender ActorRef in ActorRegistry
-                            if let Some(registry) = service_locator.actor_registry().await {
-                                // Tenant comes from auth, not config
-                                let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
-                                registry.register_temporary_sender(
-                                    &ctx,
-                                    temp_sender_id.clone(),
-                                    temp_sender_ref,
-                                    correlation_id.clone(),
-                                    expires_at,
-                                ).await;
-                            }
-                            
-                            // Set sender to temporary sender ID
-                            message.sender_id = temp_sender_id.clone();
-                            
-                            let temp_sender_id_clone = temp_sender_id.clone();
-                            
-                            // Get ActorServiceClient using ServiceLocator helper (handles ObjectRegistry lookup and connection pooling)
-                            let channel = service_locator.get_actor_service_client(&target_node_id).await
-                                .map_err(|e| ActorRefError::SendFailed(format!("Failed to get ActorServiceClient: {}", e)))?;
-                            
-                            let mut client_ref = ActorServiceClient::new(channel);
-                            
-                            // Convert message to proto
-                            let proto_message = Self::to_proto_message(&message, &self.id)?;
-                            
-                            // Convert timeout to proto Duration
-                            let proto_timeout = Some(prost_types::Duration {
-                                seconds: timeout.as_secs() as i64,
-                                nanos: timeout.subsec_nanos() as i32,
-                            });
-                            
-                            // Create request with wait_for_response=true
-                            let request = tonic::Request::new(SendMessageRequest {
-                                message: Some(proto_message),
-                                wait_for_response: true,
-                                timeout: proto_timeout,
-                            });
-                            
-                            // Send via gRPC and wait for reply
-                            let response = match client_ref.send_message(request).await {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    // Cleanup temporary sender from ActorRegistry on error
-                                    if let Some(registry) = service_locator.actor_registry().await {
-                                        registry.remove_temporary_sender(&temp_sender_id_clone).await;
-                                    }
-                                    let mut temp_sender = self.temporary_sender.write().await;
-                                    if temp_sender.as_ref().map(|s| s == &temp_sender_id_clone).unwrap_or(false) {
-                                        *temp_sender = None;
-                                    }
-                                    // Map timeout error
-                                    if e.code() == tonic::Code::DeadlineExceeded {
-                                        return Err(ActorRefError::Timeout);
-                                    }
-                                    return Err(ActorRefError::SendFailed(format!("gRPC ask failed: {}", e)));
-                                }
-                            };
-                            
-                            let response_inner = response.into_inner();
-                            let reply_proto = match response_inner.response {
-                                Some(r) => r,
-                                None => {
-                                    // Cleanup temporary sender from ActorRegistry on error
-                                    if let Some(registry) = service_locator.actor_registry().await {
-                                        registry.remove_temporary_sender(&temp_sender_id_clone).await;
-                                    }
-                                    let mut temp_sender = self.temporary_sender.write().await;
-                                    if temp_sender.as_ref().map(|s| s == &temp_sender_id_clone).unwrap_or(false) {
-                                        *temp_sender = None;
-                                    }
-                                    return Err(ActorRefError::SendFailed("No reply received".to_string()));
-                                }
-                            };
-                            
-                            // Cleanup temporary sender from ActorRegistry
-                            if let Some(registry) = service_locator.actor_registry().await {
-                                registry.remove_temporary_sender(&temp_sender_id_clone).await;
-                            }
-                            let mut temp_sender = self.temporary_sender.write().await;
-                            if temp_sender.as_ref().map(|s| s == &temp_sender_id_clone).unwrap_or(false) {
-                                *temp_sender = None;
-                            }
-                            
-                            // Verify correlation_id matches
-                            if reply_proto.correlation_id == correlation_id {
-                                Ok(reply_proto)
-                            } else {
-                                Err(ActorRefError::SendFailed(
-                                    "Reply correlation_id mismatch".to_string(),
-                                ))
-                            }
-                        }
-                    };
+        // Use unified route_message for both local and remote routing
+        // CRITICAL: Use tenant_id from ActorRef (flows from API → ActorBuilder → ActorRef)
+        let ctx = self.get_request_context();
+        
+        // Use unified routing (returns Future for parallel operations)
+        let routing_result = crate::routing::route_message(
+            ctx,
+            self.service_locator().clone(),
+            target_actor_id.clone(),
+            message,
+            true, // wait_for_response = true for ask()
+            Some(timeout),
+        ).await;
+        
+        // Extract message from routing result
+        let result = routing_result.map(|(_message_id, reply_opt)| {
+            reply_opt.ok_or_else(|| ActorRefError::SendFailed("No reply received".to_string()))
+        }).and_then(|r| r);
         
         // OBSERVABILITY: Track ask result and latency
         let duration = start.elapsed();
@@ -2020,7 +1463,7 @@ mod tests {
     async fn test_create_local_actor_ref() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor", "test", mailbox, service_locator.clone());
+        let actor_ref = ActorRef::local("test-actor", "", "test", mailbox, service_locator.clone());
 
         assert_eq!(actor_ref.id(), "test-actor");
         assert!(actor_ref.is_local());
@@ -2033,7 +1476,7 @@ mod tests {
     async fn test_create_remote_actor_ref() {
         use plexspaces_node::create_default_service_locator;
         let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-        let actor_ref = ActorRef::remote("remote-actor@node1", "test", "node1", service_locator);
+        let actor_ref = ActorRef::remote("remote-actor@node1", "", "test", "node1", service_locator);
 
         assert_eq!(actor_ref.id(), "remote-actor@node1");
         assert!(!actor_ref.is_local());
@@ -2046,7 +1489,7 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox.clone(), service_locator.clone());
+        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox.clone(), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
@@ -2091,6 +1534,18 @@ impl MockActorService {
             self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
             Ok("msg-id".to_string())
         }
+        async fn create_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::CreateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            Err("MockActorService: create_shard_group not implemented".into())
+        }
+        async fn bulk_update_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            Err("MockActorService: bulk_update_shard_group not implemented".into())
+        }
+        async fn map_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::MapShardGroupRequest) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            Err("MockActorService: map_shard_group not implemented".into())
+        }
+        async fn scatter_gather(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::ScatterGatherRequest) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+            Err("MockActorService: scatter_gather not implemented".into())
+        }
     }
 
     /// Helper to create test ActorContext
@@ -2120,7 +1575,7 @@ impl MockActorService {
     async fn test_try_tell_not_supported() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor", "", "test", mailbox, service_locator);
 
         let msg = create_test_message(b"data".to_vec());
         let result = actor_ref.try_tell(msg);
@@ -2134,7 +1589,7 @@ impl MockActorService {
     async fn test_try_tell_not_supported_terminated() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor", "", "test", mailbox, service_locator);
 
         let message = create_test_message(b"hello".to_vec());
         let result = actor_ref.try_tell(message);
@@ -2149,7 +1604,7 @@ impl MockActorService {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref1 = ActorRef::local("test-actor@node1", "test", mailbox.clone(), service_locator.clone());
+        let actor_ref1 = ActorRef::local("test-actor@node1", "", "test", mailbox.clone(), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
@@ -2189,9 +1644,9 @@ impl MockActorService {
         let mailbox2 = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
 
-        let ref1 = ActorRef::local("actor-1", "test", mailbox1.clone(), service_locator.clone());
-        let ref2 = ActorRef::local("actor-1", "test", mailbox1.clone(), service_locator.clone());
-        let ref3 = ActorRef::local("actor-2", "test", mailbox2.clone(), service_locator.clone());
+        let ref1 = ActorRef::local("actor-1", "", "test", mailbox1.clone(), service_locator.clone());
+        let ref2 = ActorRef::local("actor-1", "", "test", mailbox1.clone(), service_locator.clone());
+        let ref3 = ActorRef::local("actor-2", "", "test", mailbox2.clone(), service_locator.clone());
 
         assert_eq!(ref1, ref2); // Same ID and location
         assert_ne!(ref1, ref3); // Different ID
@@ -2202,7 +1657,7 @@ impl MockActorService {
     async fn test_debug_formatting() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor", "", "test", mailbox, service_locator);
 
         let debug_str = format!("{:?}", actor_ref);
         assert!(debug_str.contains("test-actor"));
@@ -2270,7 +1725,7 @@ impl MockActorService {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("target-actor@node1", "test", mailbox.clone(), service_locator.clone());
+        let actor_ref = ActorRef::local("target-actor@node1", "", "test", mailbox.clone(), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
@@ -2310,6 +1765,18 @@ impl MockActorService {
                 self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
                 Ok("msg-id".to_string())
             }
+            async fn create_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::CreateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("TrackingActorService: create_shard_group not implemented".into())
+            }
+            async fn bulk_update_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("TrackingActorService: bulk_update_shard_group not implemented".into())
+            }
+            async fn map_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::MapShardGroupRequest) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("TrackingActorService: map_shard_group not implemented".into())
+            }
+            async fn scatter_gather(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::ScatterGatherRequest) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("TrackingActorService: scatter_gather not implemented".into())
+            }
         }
 
         // Create remote ActorRef with ServiceLocator
@@ -2318,7 +1785,8 @@ impl MockActorService {
         // Use actor crate's ActorRef for remote actors
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
-            "test".to_string(),
+            "test".to_string(), // tenant_id
+            "test".to_string(), // namespace
             "node2".to_string(),
             service_locator,
         );
@@ -2372,7 +1840,7 @@ impl MockActorService {
         // Create a local ActorRef that will receive the reply
         let target_mailbox_arc = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let target_ref = ActorRef::local("target@node1".to_string(), "test".to_string(), Arc::clone(&target_mailbox_arc), service_locator.clone());
+        let target_ref = ActorRef::local("target@node1".to_string(), "".to_string(), "test".to_string(), Arc::clone(&target_mailbox_arc), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
@@ -2395,7 +1863,7 @@ impl MockActorService {
 
         // Verify message was received
         let received = target_mailbox_arc.dequeue().await.unwrap();
-        assert_eq!(received.correlation_id, Some(correlation_id));
+        assert_eq!(received.correlation_id, correlation_id);
         assert_eq!(received.payload, b"reply");
     }
 
@@ -2406,7 +1874,7 @@ impl MockActorService {
         // Full ask() pattern with replies is tested in integration tests (ask_pattern_tests.rs)
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1".to_string(), "test".to_string(), mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1".to_string(), "".to_string(), "test".to_string(), mailbox, service_locator);
 
         // Use unified ask() API - sends to self and waits for reply
         let request = create_test_message(b"request".to_vec());
@@ -2442,6 +1910,18 @@ impl MockActorService {
             async fn send(&self, _actor_id: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
                 Ok("msg-id".to_string())
             }
+            async fn create_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::CreateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("MockActorService: create_shard_group not implemented".into())
+            }
+            async fn bulk_update_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("MockActorService: bulk_update_shard_group not implemented".into())
+            }
+            async fn map_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::MapShardGroupRequest) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("MockActorService: map_shard_group not implemented".into())
+            }
+            async fn scatter_gather(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::ScatterGatherRequest) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("MockActorService: scatter_gather not implemented".into())
+            }
         }
 
         // Create remote ActorRef using actor crate's ActorRef
@@ -2449,7 +1929,8 @@ impl MockActorService {
         let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
-            "test".to_string(),
+            "test".to_string(), // tenant_id
+            "test".to_string(), // namespace
             "node2".to_string(),
             service_locator,
         );
@@ -2472,7 +1953,7 @@ impl MockActorService {
         let service_locator = create_test_service_locator().await;
         // ActorRef manages its own reply_waiters via ReplyWaiterRegistry
 
-        let actor_ref = ActorRef::local("target-actor@node1", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("target-actor@node1", "", "test", mailbox, service_locator);
         let request = create_test_message(b"request".to_vec());
         let result = actor_ref
             .ask(request, Duration::from_millis(10))
@@ -2503,7 +1984,7 @@ impl MockActorService {
         let service_locator = create_test_service_locator().await;
         // ActorRef manages its own reply_waiters via ReplyWaiterRegistry
 
-        let actor_ref = ActorRef::local("target-actor@node1", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("target-actor@node1", "", "test", mailbox, service_locator);
         // Send request but no one will reply (simulates terminated actor)
         let request = create_test_message(b"request".to_vec());
         let result = actor_ref
@@ -2549,7 +2030,7 @@ impl MockActorService {
         let mailbox1 = create_test_mailbox().await;
         let mailbox1_clone = mailbox1.clone();
         let service_locator = create_test_service_locator().await;
-        let actor_ref1 = ActorRef::local("actor@node1", "test", mailbox1.clone(), service_locator.clone());
+        let actor_ref1 = ActorRef::local("actor@node1", "", "test", mailbox1.clone(), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
@@ -2580,13 +2061,25 @@ impl MockActorService {
                 self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
                 Ok("msg-id".to_string())
             }
+            async fn create_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::CreateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("TrackingActorService: create_shard_group not implemented".into())
+            }
+            async fn bulk_update_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("TrackingActorService: bulk_update_shard_group not implemented".into())
+            }
+            async fn map_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::MapShardGroupRequest) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("TrackingActorService: map_shard_group not implemented".into())
+            }
+            async fn scatter_gather(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::ScatterGatherRequest) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+                Err("TrackingActorService: scatter_gather not implemented".into())
+            }
         }
 
         // Remote actor testing is now done in integration tests
         // For unit tests, we verify local behavior
         let mailbox2 = create_test_mailbox().await;
         let mailbox2_clone = Arc::clone(&mailbox2);
-        let actor_ref2 = ActorRef::local("actor@node1", "test", mailbox2, service_locator);
+        let actor_ref2 = ActorRef::local("actor@node1", "", "test", mailbox2, service_locator);
         actor_ref2.tell(create_test_message(b"remote".to_vec())).await.unwrap();
         assert!(mailbox2_clone.dequeue().await.is_some());
     }
@@ -2604,6 +2097,14 @@ impl MockActorService {
         assert_ne!(node1, node2);
         assert_eq!(node1, Some("node1".to_string()));
         assert_eq!(node2, Some("node2".to_string()));
+        
+        // Test is_actor_local logic
+        let service_locator = create_test_service_locator().await;
+        let is_local1 = crate::routing::is_actor_local("actor@node1", &service_locator).await;
+        let is_local2 = crate::routing::is_actor_local("actor@node2", &service_locator).await;
+        // Both should be false if node1/node2 don't match local_node_id, or true if they exist locally
+        // This test just verifies the function doesn't panic
+        let _ = (is_local1, is_local2);
     }
 
     // ============================================================================
@@ -2615,17 +2116,15 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_basic() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
 
-        // Create a ReplyWaiter and register it
+        // Create a ReplyWaiter and register it in ReplyWaiterRegistry
         let correlation_id = "corr-123".to_string();
         let waiter = plexspaces_core::ReplyWaiter::new();
         let waiter_clone = waiter.clone();
 
-        // Register waiter in ActorRef's reply_waiters map
-        {
-            let mut waiters = actor_ref.reply_waiters.write().await;
-            waiters.insert(correlation_id.clone(), waiter);
+        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
+            waiter_registry.register(correlation_id.clone(), waiter).await;
         }
 
         // Spawn task to wait for reply
@@ -2636,7 +2135,7 @@ impl MockActorService {
         // Give the waiter time to start waiting
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-        // Notify the waiter
+        // Notify the waiter (uses ReplyWaiterRegistry)
         let reply = create_test_message(b"reply".to_vec());
         let notified = actor_ref.try_notify_reply_waiter(&correlation_id, reply.clone()).await;
         assert!(notified, "Waiter should be notified");
@@ -2644,11 +2143,6 @@ impl MockActorService {
         // Verify reply was received
         let received_reply = wait_handle.await.unwrap().unwrap();
         assert_eq!(received_reply.payload, reply.payload);
-
-        // Verify waiter was removed from map
-        let waiters = actor_ref.reply_waiters.read().await;
-        assert!(!waiters.contains_key(&correlation_id), "Waiter should be removed after notification");
-        drop(waiters); // Explicitly drop to avoid unused warning
     }
 
     /// TEST 22: try_notify_reply_waiter - unknown correlation_id
@@ -2656,7 +2150,7 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_unknown_correlation_id() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
 
         // Try to notify with unknown correlation_id
         let reply = create_test_message(b"reply".to_vec());
@@ -2669,9 +2163,9 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_multiple_correlation_ids() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
 
-        // Register multiple waiters
+        // Register multiple waiters in ReplyWaiterRegistry
         let corr_id1 = "corr-1".to_string();
         let corr_id2 = "corr-2".to_string();
         let corr_id3 = "corr-3".to_string();
@@ -2684,11 +2178,10 @@ impl MockActorService {
         let waiter2_clone = waiter2.clone();
         let waiter3_clone = waiter3.clone();
 
-        {
-            let mut waiters = actor_ref.reply_waiters.write().await;
-            waiters.insert(corr_id1.clone(), waiter1);
-            waiters.insert(corr_id2.clone(), waiter2);
-            waiters.insert(corr_id3.clone(), waiter3);
+        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
+            waiter_registry.register(corr_id1.clone(), waiter1).await;
+            waiter_registry.register(corr_id2.clone(), waiter2).await;
+            waiter_registry.register(corr_id3.clone(), waiter3).await;
         }
 
         // Spawn tasks to wait for replies
@@ -2718,10 +2211,6 @@ impl MockActorService {
         assert_eq!(wait_handle1.await.unwrap().unwrap().payload, reply1.payload);
         assert_eq!(wait_handle2.await.unwrap().unwrap().payload, reply2.payload);
         assert_eq!(wait_handle3.await.unwrap().unwrap().payload, reply3.payload);
-
-        // Verify all waiters were removed
-        let waiters = actor_ref.reply_waiters.read().await;
-        assert_eq!(waiters.len(), 0, "All waiters should be removed");
     }
 
     /// TEST 24: try_notify_reply_waiter - concurrent notifications
@@ -2729,20 +2218,18 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_concurrent() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
+        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
 
-        // Register multiple waiters
+        // Register multiple waiters in ReplyWaiterRegistry
         let mut handles: Vec<(tokio::task::JoinHandle<bool>, String)> = Vec::new();
-        let mut correlation_ids: Vec<String> = Vec::new();
 
         for i in 0..10 {
             let corr_id = format!("corr-{}", i);
             let waiter = plexspaces_core::ReplyWaiter::new();
             let waiter_clone = waiter.clone();
 
-            {
-                let mut waiters = actor_ref.reply_waiters.write().await;
-                waiters.insert(corr_id.clone(), waiter);
+            if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
+                waiter_registry.register(corr_id.clone(), waiter).await;
             }
 
             let actor_ref_clone = actor_ref.clone();
@@ -2760,10 +2247,6 @@ impl MockActorService {
             let notified = handle.await.unwrap();
             assert!(notified, "Waiter for {} should be notified", corr_id);
         }
-
-        // Verify all waiters were removed
-        let waiters = actor_ref.reply_waiters.read().await;
-        assert_eq!(waiters.len(), 0, "All waiters should be removed");
     }
 
     /// TEST 25: try_notify_reply_waiter - timeout handling
@@ -2771,16 +2254,15 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_timeout() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "test", mailbox, service_locator);
+        let _actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
 
-        // Register a waiter
+        // Register a waiter in ReplyWaiterRegistry
         let correlation_id = "corr-timeout".to_string();
         let waiter = plexspaces_core::ReplyWaiter::new();
         let waiter_clone = waiter.clone();
 
-        {
-            let mut waiters = actor_ref.reply_waiters.write().await;
-            waiters.insert(correlation_id.clone(), waiter);
+        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
+            waiter_registry.register(correlation_id.clone(), waiter).await;
         }
 
         // Spawn task that will timeout
@@ -2791,13 +2273,6 @@ impl MockActorService {
         // Wait for timeout
         let result = wait_handle.await.unwrap();
         assert!(result.is_err(), "Should timeout");
-
-        // Verify waiter was removed from map (timeout should clean it up)
-        // Note: The waiter is removed when ask() times out, not when wait() times out
-        // So it might still be in the map. Let's verify it's still there.
-        let _waiters = actor_ref.reply_waiters.read().await;
-        // The waiter might still be in the map if ask() hasn't cleaned it up yet
-        // This is expected behavior - ask() is responsible for cleanup
     }
 }
 

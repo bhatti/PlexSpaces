@@ -259,7 +259,8 @@ async fn register_test_actor(
     use plexspaces_core::MessageSender;
     let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         actor_id.clone(),
-        "system".to_string(),
+        "test".to_string(), // tenant_id
+        "system".to_string(), // namespace
         mailbox,
         service_locator,
     ));
@@ -319,7 +320,8 @@ impl GenServer for ForwarderActor {
         let node_id = self.target_actor_id.split('@').nth(1).unwrap_or("unknown").to_string();
         let target_ref = ActorRef::remote(
             self.target_actor_id.clone(),
-            ctx.namespace.clone(),
+            ctx.tenant_id.clone(), // tenant_id
+            ctx.namespace.clone(), // namespace
             node_id,
             ctx.service_locator.clone(),
         );
@@ -496,7 +498,8 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
-        "default".to_string(),
+        "test".to_string(), // tenant_id
+        "default".to_string(), // namespace
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
     ));
@@ -524,15 +527,14 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
                 // Send reply using ActorRegistry to get temporary sender's ActorRef and call tell()
                 // This routes correctly to ReplyWaiter for ask() pattern
                 // Note: msg is plexspaces_mailbox::Message from dequeue(), use sender_id() method
-                if let Some(sender) = msg.sender_id() {
+                if !msg.sender_id.is_empty() {
+                    let sender = &msg.sender_id;
                     if !sender.is_empty() {
                         let mut reply_msg = create_test_message(serde_json::to_vec(&reply).unwrap());
                         reply_msg.receiver_id = sender.to_string();
                         reply_msg.sender_id = counter_id_for_spawn.clone();
-                        if let Some(corr_id) = &msg.correlation_id {
-                            if !corr_id.is_empty() {
-                                reply_msg.correlation_id = corr_id.clone();
-                            }
+                        if !msg.correlation_id.is_empty() {
+                            reply_msg.correlation_id = msg.correlation_id.clone();
                         }
                         // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
                         // This ensures proper routing to ReplyWaiter
@@ -616,7 +618,8 @@ async fn test_chained_asks_multi_node() {
     let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
-        "default".to_string(),
+        "test".to_string(), // tenant_id
+        "default".to_string(), // namespace
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
     ));
@@ -644,15 +647,14 @@ async fn test_chained_asks_multi_node() {
                 // Send reply using ActorRegistry to get temporary sender's ActorRef and call tell()
                 // This routes correctly to ReplyWaiter for ask() pattern
                 // Note: msg is plexspaces_mailbox::Message from dequeue(), use sender_id() method
-                if let Some(sender) = msg.sender_id() {
+                if !msg.sender_id.is_empty() {
+                    let sender = &msg.sender_id;
                     if !sender.is_empty() {
                         let mut reply_msg = create_test_message(serde_json::to_vec(&reply).unwrap());
                         reply_msg.receiver_id = sender.to_string();
                         reply_msg.sender_id = counter_id_for_spawn.clone();
-                        if let Some(corr_id) = &msg.correlation_id {
-                            if !corr_id.is_empty() {
-                                reply_msg.correlation_id = corr_id.clone();
-                            }
+                        if !msg.correlation_id.is_empty() {
+                            reply_msg.correlation_id = msg.correlation_id.clone();
                         }
                         // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
                         // This ensures proper routing to ReplyWaiter
@@ -734,7 +736,8 @@ async fn test_concurrent_asks_multi_node() {
     let mailbox_counter = Arc::new(Mailbox::new(mailbox_config, counter_id.clone()).await.unwrap());
     let sender_counter: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         counter_id.clone(),
-        "default".to_string(),
+        "test".to_string(), // tenant_id
+        "default".to_string(), // namespace
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
     ));
@@ -762,15 +765,14 @@ async fn test_concurrent_asks_multi_node() {
                 // Send reply using ActorRegistry to get temporary sender's ActorRef and call tell()
                 // This routes correctly to ReplyWaiter for ask() pattern
                 // Note: msg is plexspaces_mailbox::Message from dequeue(), use sender_id() method
-                if let Some(sender) = msg.sender_id() {
+                if !msg.sender_id.is_empty() {
+                    let sender = &msg.sender_id;
                     if !sender.is_empty() {
                         let mut reply_msg = create_test_message(serde_json::to_vec(&reply).unwrap());
                         reply_msg.receiver_id = sender.to_string();
                         reply_msg.sender_id = counter_id_for_spawn.clone();
-                        if let Some(corr_id) = &msg.correlation_id {
-                            if !corr_id.is_empty() {
-                                reply_msg.correlation_id = corr_id.clone();
-                            }
+                        if !msg.correlation_id.is_empty() {
+                            reply_msg.correlation_id = msg.correlation_id.clone();
                         }
                         // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
                         // This ensures proper routing to ReplyWaiter
@@ -786,7 +788,8 @@ async fn test_concurrent_asks_multi_node() {
     // Create ActorRef for remote counter using local_node_id (triggers "local via remote" path)
     let counter_ref = ActorRef::remote(
         counter_id.clone(),
-        "default".to_string(),
+        "test".to_string(), // tenant_id
+        "default".to_string(), // namespace
         local_node_id.to_string(), // Matches local_node_id, so "local via remote" path is used
         node1_service_locator.clone(),
     );

@@ -1,0 +1,33 @@
+# Data Parallel Worker App - Data-Parallel Actors Example
+#
+# Demonstrates data-parallel processing with ShardGroup, worker pools, and coordination metrics.
+# Deployable as WASM app to PlexSpaces nodes.
+# Build: cargo build --target wasm32-wasip2
+# Test: ./scripts/test.sh
+
+[workspace]
+
+[package]
+name = "data-parallel-worker"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Data-parallel actors example with worker pools and coordination metrics"
+
+[[bin]]
+name = "data_parallel_worker"
+path = "src/main.rs"
+
+[dependencies]
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-proto = { path = "../../../../crates/proto" }
+plexspaces-behavior = { path = "../../../../crates/behavior" }
+
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

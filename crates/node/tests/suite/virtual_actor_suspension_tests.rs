@@ -232,8 +232,12 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     
     // CRITICAL: Register CounterActor in BehaviorRegistry so it can be rebuilt after suspension
     use plexspaces_core::behavior_factory::BehaviorRegistry;
-    let mut registry = BehaviorRegistry::new();
-    registry.register_simple("GenServer", || CounterActor::new()).await;
+    let registry = BehaviorRegistry::new();
+    registry.register_simple("GenServer", || {
+        Box::pin(async move {
+            Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>)
+        })
+    }).await;
     node.service_locator().register_behavior_registry(Arc::new(registry)).await;
     
     let actor_id: ActorId = "counter-suspend-ask@test-node".to_string();
@@ -361,15 +365,15 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     // Test: Suspend an active virtual actor, then call tell() - should reactivate
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
     
-    // CRITICAL: Register CounterActor in BehaviorRegistry so it can be rebuilt after suspension
-    // When a suspended actor is rebuilt, spawn_actor uses BehaviorFactory to create the behavior
-    // If CounterActor isn't registered, it falls back to SimpleBehavior which doesn't handle messages
-    // NOTE: actor_type stored in VirtualActorManager must match the registered behavior name
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     // Create new registry and register CounterActor
     // actor_type is "GenServer" (extracted from behavior.behavior_type())
-    let mut registry = BehaviorRegistry::new();
-    registry.register_simple("GenServer", || CounterActor::new()).await;
+    let registry = BehaviorRegistry::new();
+    registry.register_simple("GenServer", || {
+        Box::pin(async move {
+            Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>)
+        })
+    }).await;
     node.service_locator().register_behavior_registry(Arc::new(registry)).await;
     eprintln!("🟢 [TEST] Registered CounterActor in BehaviorRegistry as 'GenServer'");
     

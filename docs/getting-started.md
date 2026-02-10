@@ -52,88 +52,116 @@ Let's create a simple counter actor that demonstrates the core concepts. This ex
 - Getting replies
 - Basic actor lifecycle
 
-### Rust Actor
+### Rust Actor (SDK Annotations)
+
+The [PlexSpaces Rust SDK](sdk.md#rust-sdk) provides decorator-style annotations for minimal boilerplate:
 
 ```rust
-use plexspaces::*;
-use plexspaces_behavior::GenServerBehavior;
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    NodeBuilder, RequestContext, ActorId,
+    spawn_with_facets, call_message, json,
+};
+use std::sync::Arc;
 use std::time::Duration;
 
+// Step 1: Define actor with #[gen_server_actor] annotation
+#[gen_server_actor]
 struct Counter {
     count: i32,
 }
 
-#[async_trait]
-impl GenServerBehavior for Counter {
-    type Request = CounterRequest;
-    type Reply = i32;
-
-    async fn handle_request(
-        &mut self,
-        ctx: &ActorContext,
-        request: Self::Request,
-    ) -> Result<Self::Reply, BehaviorError> {
-        match request {
-            CounterRequest::Increment(amount) => {
-                self.count += amount;
-                Ok(self.count)
-            }
-            CounterRequest::Get => Ok(self.count),
-        }
+impl Counter {
+    fn new() -> Self {
+        Self { count: 0 }
     }
 }
 
-enum CounterRequest {
-    Increment(i32),
-    Get,
+// Step 2: Define handlers with #[plexspaces_handlers]
+// GenServer defaults to "call" semantics (request-reply)
+#[plexspaces_handlers]
+impl Counter {
+    #[handler("increment")]
+    async fn increment(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        let payload: serde_json::Value = serde_json::from_slice(&msg.payload)?;
+        let amount = payload["amount"].as_i64().unwrap_or(1) as i32;
+        self.count += amount;
+        Ok(json!({ "count": self.count }))
+    }
+
+    #[handler("get")]
+    async fn get(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        Ok(json!({ "count": self.count }))
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a node
-    let node = PlexSpacesNode::new("node1".to_string()).await?;
+    // Create and start node
+    let node = Arc::new(
+        NodeBuilder::new("node1")
+            .with_clustering_enabled(false)
+            .build()
+            .await,
+    );
+    let service_locator = node.service_locator();
     
-    // Spawn a counter actor using ActorFactory
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    use std::sync::Arc;
+    // Start node in background
+    let node_for_start = node.clone();
+    tokio::spawn(async move {
+        let _ = node_for_start.start().await;
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
     
-    let actor_id = "counter@node1".to_string();
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-        .ok_or_else(|| "ActorFactory not found")?;
-    let ctx = plexspaces_core::RequestContext::internal();
-    let _message_sender = actor_factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "Counter", // actor_type
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets (empty for simple actor)
-    ).await?;
-    
-    // Get actor reference (location-transparent)
-    let actor_ref = plexspaces_actor::ActorRef::remote(
-        actor_id.clone(),
-        node.id().as_str().to_string(),
-        node.service_locator().clone(),
+    // Create request context with tenant/namespace (required for tenant isolation)
+    let ctx = RequestContext::new_without_auth(
+        "my-tenant".to_string(),
+        "default".to_string(),
     );
     
-    // Send messages
-    let reply1 = actor_ref.ask(
-        CounterRequest::Increment(5),
-        Duration::from_secs(5)
+    // Spawn actor using SDK helper
+    let actor_ref = spawn_with_facets(
+        &ctx,
+        service_locator.clone(),
+        ActorId::from("counter@node1"),
+        "default",
+        Counter::new(),
+        vec![], // facets
     ).await?;
-    println!("Count after increment: {}", reply1);
     
-    let reply2 = actor_ref.ask(
-        CounterRequest::Get,
-        Duration::from_secs(5)
-    ).await?;
-    println!("Current count: {}", reply2);
+    // Send messages using SDK message helpers
+    // call_message() creates a message with "call" semantics for ask()
+    let increment_msg = call_message(json!({ "action": "increment", "amount": 5 }));
+    let reply = actor_ref.ask(increment_msg, Duration::from_secs(5)).await?;
+    let result: serde_json::Value = serde_json::from_slice(&reply.payload)?;
+    println!("Count after increment: {}", result["count"]);
     
+    let get_msg = call_message(json!({ "action": "get" }));
+    let reply = actor_ref.ask(get_msg, Duration::from_secs(5)).await?;
+    let result: serde_json::Value = serde_json::from_slice(&reply.payload)?;
+    println!("Current count: {}", result["count"]);
+    
+    // Shutdown
+    node.shutdown(Duration::from_secs(3)).await?;
     Ok(())
 }
 ```
+
+**Key Points:**
+- Use `#[gen_server_actor]` annotation instead of implementing traits manually
+- Use `#[plexspaces_handlers]` with `#[handler("op")]` for message routing
+- Use `spawn_with_facets()` from SDK to spawn actors
+- Use `call_message()` for request-reply messages (with `ask()`)
+- Use `cast_message()` for fire-and-forget messages (with `tell()`)
+- Always use `RequestContext::new_without_auth()` with tenant/namespace (never `internal()`)
 
 ### Python Actor (WASM with SDK)
 
@@ -241,80 +269,181 @@ Facets add dynamic capabilities to actors:
 ### Durable Actor
 
 ```rust
-use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    spawn_with_storage, DurabilityFacet, SqliteJournalStorage,
+    RequestContext, ActorId, json,
+};
+use std::sync::Arc;
 
-// Create storage and durability facet
-let storage = SqliteJournalStorage::new(":memory:").await?;
-let durability_facet = Box::new(DurabilityFacet::new(
-    storage,
-    serde_json::json!({
-        "checkpoint_interval": 100,
-        "replay_on_activation": true,
-    }),
-    50, // priority
-));
+// Define durable actor with facets annotation
+#[gen_server_actor(facets = ["durability"])]
+struct DurableCounter {
+    count: i32,
+}
 
-// Spawn actor with facets
-let _message_sender = actor_factory.spawn_actor(
+#[plexspaces_handlers]
+impl DurableCounter {
+    #[handler("increment")]
+    async fn increment(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        self.count += 1;
+        Ok(json!({ "count": self.count }))
+    }
+}
+
+// Spawn with storage backend
+let storage = Arc::new(SqliteJournalStorage::new(":memory:").await?);
+let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
+
+let actor_ref = spawn_with_storage(
     &ctx,
-    &actor_id,
-    "Counter",
-    vec![],
-    None,
-    std::collections::HashMap::new(),
-    vec![durability_facet], // facets
+    service_locator.clone(),
+    ActorId::from("durable-counter@node"),
+    "default",
+    DurableCounter { count: 0 },
+    storage,
 ).await?;
 ```
 
 ### Virtual Actor
 
 ```rust
-use plexspaces_journaling::VirtualActorFacet;
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    spawn, VirtualActorFacet,
+    RequestContext, ActorId, json,
+};
 
-// Create virtual actor facet
-let virtual_facet = Box::new(VirtualActorFacet::new(
-    serde_json::json!({
-        "idle_timeout_seconds": 300,
-    }),
-    100, // priority
-));
+// Define virtual actor with facets annotation
+// Virtual actors are activated on-demand and deactivated after idle timeout
+#[gen_server_actor(facets = ["virtual_actor"])]
+struct VirtualCounter {
+    count: i32,
+}
 
-// Spawn actor with facets
-let _message_sender = actor_factory.spawn_actor(
+#[plexspaces_handlers]
+impl VirtualCounter {
+    #[handler("increment")]
+    async fn increment(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        self.count += 1;
+        Ok(json!({ "count": self.count }))
+    }
+}
+
+// Spawn using SDK spawn() - facets are auto-created from annotation
+let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
+
+let actor_ref = spawn(
     &ctx,
-    &actor_id,
-    "Counter",
-    vec![],
-    None,
-    std::collections::HashMap::new(),
-    vec![virtual_facet], // facets
+    service_locator.clone(),
+    ActorId::from("virtual-counter@node"),
+    "default",
+    VirtualCounter { count: 0 },
 ).await?;
 ```
 
 ### Workflow
 
 ```rust
-use plexspaces_behavior::WorkflowBehavior;
+use plexspaces_sdk::{
+    workflow_actor, plexspaces_handlers, run_handler, signal_handler, query_handler,
+    spawn_workflow_actor, WorkflowRef,
+    RequestContext, ActorId, json,
+};
 
+// Define workflow actor with annotations
+#[workflow_actor(facets = ["durability"])]
 struct OrderWorkflow {
     order_id: String,
+    status: String,
 }
 
-#[async_trait]
-impl WorkflowBehavior for OrderWorkflow {
-    async fn execute(&mut self, ctx: &WorkflowContext) -> Result<(), WorkflowError> {
+#[plexspaces_handlers(workflow)]
+impl OrderWorkflow {
+    // Main workflow execution
+    #[run_handler]
+    async fn run(
+        &mut self,
+        ctx: &plexspaces_sdk::ActorContext,
+        input: plexspaces_sdk::Message,
+    ) -> Result<plexspaces_sdk::Message, plexspaces_sdk::BehaviorError> {
+        let payload: serde_json::Value = serde_json::from_slice(&input.payload)?;
+        self.order_id = payload["order_id"].as_str().unwrap_or("").to_string();
+        
         // Step 1: Validate order
-        ctx.step("validate", || validate_order(&self.order_id)).await?;
+        self.status = "validating".to_string();
+        // ... validation logic ...
         
         // Step 2: Process payment
-        ctx.step("payment", || process_payment(&self.order_id)).await?;
+        self.status = "processing_payment".to_string();
+        // ... payment logic ...
         
         // Step 3: Ship order
-        ctx.step("ship", || ship_order(&self.order_id)).await?;
+        self.status = "shipping".to_string();
+        // ... shipping logic ...
         
+        self.status = "completed".to_string();
+        Ok(plexspaces_sdk::Message {
+            payload: serde_json::to_vec(&json!({ "status": "completed" }))?,
+            ..Default::default()
+        })
+    }
+    
+    // Signal handler for external events
+    #[signal_handler("cancel")]
+    async fn on_cancel(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _data: plexspaces_sdk::Message,
+    ) -> Result<(), plexspaces_sdk::BehaviorError> {
+        self.status = "cancelled".to_string();
         Ok(())
     }
+    
+    // Query handler (read-only)
+    #[query_handler("status")]
+    async fn get_status(
+        &self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _params: plexspaces_sdk::Message,
+    ) -> Result<plexspaces_sdk::Message, plexspaces_sdk::BehaviorError> {
+        Ok(plexspaces_sdk::Message {
+            payload: serde_json::to_vec(&json!({
+                "order_id": self.order_id,
+                "status": self.status,
+            }))?,
+            ..Default::default()
+        })
+    }
 }
+
+// Spawn and interact with workflow
+let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
+
+let workflow: WorkflowRef = spawn_workflow_actor(
+    &ctx,
+    service_locator.clone(),
+    ActorId::from("order-workflow-123"),
+    OrderWorkflow { order_id: String::new(), status: "pending".to_string() },
+    vec![],
+).await?;
+
+// Run workflow
+let result = workflow.run(&json!({ "order_id": "ORD-123" })).await?;
+
+// Query status
+let status: serde_json::Value = workflow.query("status").await?;
+
+// Send signal
+workflow.signal("cancel", &json!({})).await?;
 ```
 
 ## Troubleshooting
@@ -331,9 +460,50 @@ If you get an "actor not found" error:
 
 If you see connection errors:
 
-1. Verify the node is running: `curl http://localhost:8080/health`
-2. Check network connectivity between nodes
-3. Review firewall rules for gRPC port (default: 8000)
+1. **Verify node health**: The SDK uses health-aware connection (checks liveness/readiness)
+   ```rust
+   use plexspaces_sdk::NodeClient;
+   
+   // SDK automatically checks liveness and waits for readiness
+   let mut node_client = NodeClient::connect("http://localhost:8000").await?;
+   ```
+
+2. **Check node status**: Verify the node is running and healthy
+   ```bash
+   # HTTP health endpoint
+   curl http://localhost:8080/health
+   
+   # gRPC health (if grpc_health_probe available)
+   grpc_health_probe -addr=localhost:8000
+   ```
+
+3. **Review connection details**: SDK provides detailed error messages
+   - Liveness check failures: Node not alive yet (may need to wait)
+   - Readiness timeout: Node alive but not ready (check dependencies)
+   - Connection failures: Network/firewall issues
+
+4. **Check network connectivity**: Ensure nodes can reach each other
+   ```bash
+   # Test gRPC port
+   nc -z localhost 8000
+   
+   # Check firewall rules for gRPC port (default: 8000)
+   ```
+
+5. **Multi-node connection**: SDK handles partial success gracefully
+   ```rust
+   let resp = node_client.connect_nodes(
+       vec!["http://localhost:8001".to_string()],
+       None,
+       30,
+   ).await?;
+   
+   // Check which nodes connected and which failed
+   println!("Connected: {:?}", resp.connected);
+   println!("Failed: {:?}", resp.failed);
+   ```
+
+See [SDK Documentation](sdk.md#node-connectivity-health-aware-connection) for health-aware connection details.
 
 ### Build Errors
 

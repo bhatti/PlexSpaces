@@ -163,6 +163,36 @@ Node management, cluster operations, and health monitoring.
 | `ListNodeApplications` | Applications on node | `ListNodeApplicationsRequest` | `ListNodeApplicationsResponse` |
 | `GetHealth` | Node health status | `GetHealthRequest` | `GetHealthResponse` |
 | `SendHeartbeat` | Heartbeat with capacity info | `SendHeartbeatRequest` | `SendHeartbeatResponse` |
+| `ConnectNodes` | Connect to remote nodes (Erlang-style net_adm:ping) | `ConnectNodesRequest` | `ConnectNodesResponse` |
+| `DisconnectNodes` | Disconnect from nodes | `DisconnectNodesRequest` | `DisconnectNodesResponse` |
+| `Ping` | SWIM protocol ping for failure detection | `PingRequest` | `PingResponse` |
+
+#### Health-Aware Connection
+
+The SDK provides `NodeClient` with production-grade health-aware connection:
+
+- **Liveness Checks**: Uses `SystemService.liveness_probe()` before connecting
+- **Readiness Checks**: Uses `SystemService.readiness_probe()` after connecting
+- **Exponential Backoff**: Retry with jitter (prevents thundering herd)
+- **Parallel Health Checks**: Efficient multi-node connection
+- **Graceful Degradation**: Handles partial success gracefully
+
+**SDK Usage**:
+```rust
+use plexspaces_sdk::NodeClient;
+
+// Health-aware connection (checks liveness, waits for readiness)
+let mut node_client = NodeClient::connect("http://localhost:8000").await?;
+
+// Connect multiple nodes with health checks
+let resp = node_client.connect_nodes(
+    vec!["http://localhost:8001".to_string()],
+    None,
+    30,
+).await?;
+```
+
+See [SDK Documentation](sdk.md#node-connectivity-health-aware-connection) for details.
 
 #### Security Features
 

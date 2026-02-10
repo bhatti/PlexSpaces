@@ -111,6 +111,58 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 - Timeout handling
 - Automatic routing via gRPC for remote actors
 
+#### Unified Routing Module
+
+All message routing logic is centralized in `crates/actor/src/routing.rs` to ensure consistency and enable parallel operations.
+
+**Key Functions**:
+
+- **`extract_node_id(actor_id)`**: Parses actor ID to extract node_id (format: "actor_name@node_id")
+- **`is_actor_local(actor_id, service_locator)`**: Dynamically determines if actor is local by comparing node_id with local_node_id from NodeConfig
+- **`ask_helper(ctx, service_locator, ...)`**: Generic ask helper that returns `Pin<Box<dyn Future>>` for parallel operations
+- **`route_local(ctx, service_locator, ...)`**: Routes message to local actor (returns Future)
+- **`route_remote(ctx, service_locator, ...)`**: Routes message to remote actor via gRPC (returns Future)
+- **`route_message(ctx, service_locator, ...)`**: Unified routing that determines locality and routes accordingly (returns Future)
+
+**Design Principles**:
+
+1. **Generic Functions**: Not tied to specific instances (ActorRef, ActorService)
+2. **RequestContext First**: All functions take `RequestContext` as first parameter for tenant/namespace isolation
+3. **Return Futures**: All async functions return `Pin<Box<dyn Future>>` for parallel operations (map/reduce)
+4. **No Cyclic Dependencies**: Routing module doesn't depend on ActorRef or ActorService
+
+**Parallel Operations**:
+
+The `ask_helper()` function returns a Future, enabling true parallel map/reduce operations:
+
+```rust
+// Send all asks asynchronously
+let futures: Vec<_> = shard_ids.iter().map(|shard_id| {
+    ask_helper(ctx.clone(), service_locator.clone(), shard_id, message.clone(), ...)
+}).collect();
+
+// Await all replies in parallel
+let results = join_all(futures).await;
+```
+
+**Observability**:
+
+All routing functions include comprehensive metrics:
+- `plexspaces_routing_local_route_duration_seconds` - Histogram for local routing latency
+- `plexspaces_routing_remote_route_duration_seconds` - Histogram for remote routing latency
+- `plexspaces_routing_local_route_success_total` - Counter for successful local routes (by pattern: ask/tell)
+- `plexspaces_routing_local_route_error_total` - Counter for failed local routes (by error type)
+- `plexspaces_routing_remote_route_total` - Counter for remote routes (by target node)
+- `plexspaces_routing_remote_route_success_total` - Counter for successful remote routes
+- `plexspaces_routing_remote_route_error_total` - Counter for failed remote routes (by error code)
+- `plexspaces_routing_route_total` - Counter for routing decisions (by actor_id, node_id, local flag)
+
+**Tenant ID Propagation**:
+
+All routing functions accept `RequestContext` as the first parameter, ensuring proper tenant/namespace isolation. The `tenant_id` flows from API → ActorBuilder → ActorRef → RequestContext → routing functions.
+
+**See Also**: [Message Routing Design](message-routing.md) - Comprehensive documentation of routing patterns and implementation details
+
 ## Behaviors
 
 **All behaviors are defined in `crates/behavior/src/mod.rs`.** The base actor contract is `plexspaces_core::Actor` (in `crates/core`). Handler dispatching follows the Python SDK: **call** = request-reply (GET/ask), **cast** = fire-and-forget (POST/tell). **GenServer uses call by default** (routes `MessageType::Call` → `handle_request()` with reply expected).
@@ -473,26 +525,36 @@ pub struct VirtualActorFacet {
 
 **Use Cases**: Stateful services with millions of instances, user sessions, game sessions
 
-**Example**:
+**Example (SDK)**:
 ```rust
-use plexspaces_journaling::VirtualActorFacet;
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    spawn, spawn_with_facets, VirtualActorFacet,
+    RequestContext, ActorId, json,
+};
 
-let virtual_facet = Box::new(VirtualActorFacet::new(
-    serde_json::json!({
-        "idle_timeout_seconds": 300,
-    }),
-    100, // priority
-));
+// Define virtual actor with facets annotation
+#[gen_server_actor(facets = ["virtual_actor"])]
+struct UserSession {
+    user_id: String,
+    last_activity: u64,
+}
 
-let _message_sender = actor_factory.spawn_actor(
-    &ctx,
-    &actor_id,
-    "UserSession",
-    vec![],
-    None,
-    std::collections::HashMap::new(),
-    vec![virtual_facet], // facets
-).await?;
+#[plexspaces_handlers]
+impl UserSession {
+    #[handler("activity")]
+    async fn activity(&mut self, _ctx: &plexspaces_sdk::ActorContext, _msg: &plexspaces_sdk::Message) 
+        -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        self.last_activity = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        Ok(json!({ "status": "ok" }))
+    }
+}
+
+// Spawn using SDK - facets auto-created from annotation
+let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
+let actor_ref = spawn(&ctx, service_locator.clone(), ActorId::from("session@node"), "default", 
+    UserSession { user_id: "user-123".into(), last_activity: 0 }).await?;
 ```
 
 #### DurabilityFacet
@@ -523,30 +585,36 @@ pub struct DurabilityFacet {
 
 **Use Cases**: Workflows, sagas, critical business logic, financial transactions
 
-**Example**:
+**Example (SDK)**:
 ```rust
-use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    spawn_with_storage, SqliteJournalStorage,
+    RequestContext, ActorId, json,
+};
+use std::sync::Arc;
 
-let storage = SqliteJournalStorage::new(":memory:").await?;
-let durability_facet = Box::new(DurabilityFacet::new(
-    storage,
-    serde_json::json!({
-        "checkpoint_interval": 100,
-        "replay_on_activation": true,
-    }),
-    50, // priority
-));
+// Define durable actor with facets annotation
+#[gen_server_actor(facets = ["durability"])]
+struct DurableCounter {
+    count: i32,
+}
 
-// Spawn actor with durability facet
-let _message_sender = actor_factory.spawn_actor(
-    &ctx,
-    &actor_id,
-    "MyActor",
-    vec![],
-    None,
-    std::collections::HashMap::new(),
-    vec![durability_facet], // facets
-).await?;
+#[plexspaces_handlers]
+impl DurableCounter {
+    #[handler("increment")]
+    async fn increment(&mut self, _ctx: &plexspaces_sdk::ActorContext, _msg: &plexspaces_sdk::Message) 
+        -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        self.count += 1;
+        Ok(json!({ "count": self.count }))
+    }
+}
+
+// Spawn with storage backend
+let storage = Arc::new(SqliteJournalStorage::new(":memory:").await?);
+let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
+let actor_ref = spawn_with_storage(&ctx, service_locator.clone(), 
+    ActorId::from("counter@node"), "default", DurableCounter { count: 0 }, storage).await?;
 ```
 
 #### MobilityFacet
@@ -838,32 +906,39 @@ pub struct TimerFacet {
 
 **Use Cases**: Periodic tasks, cleanup jobs, heartbeats
 
-**Example**:
+**Example (SDK)**:
 ```rust
-use plexspaces_journaling::TimerFacet;
+use plexspaces_sdk::{
+    actor, plexspaces_handlers, handler,
+    spawn_with_facets, TimerFacet,
+    RequestContext, ActorId, json,
+};
 
-let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 75));
+// Define actor with timer facet annotation
+#[actor(facets = ["timer"])]
+struct CleanupActor {
+    last_cleanup: u64,
+}
 
-// Spawn actor with timer facet
-let _message_sender = actor_factory.spawn_actor(
-    &ctx,
-    &actor_id,
-    "MyActor",
-    vec![],
-    None,
-    std::collections::HashMap::new(),
-    vec![timer_facet], // facets
-).await?;
+#[plexspaces_handlers(custom)]
+impl CleanupActor {
+    // Timer fires send "timer_fired" messages
+    #[handler("timer_fired", cast)]
+    async fn on_timer(&mut self, _ctx: &plexspaces_sdk::ActorContext, _msg: &plexspaces_sdk::Message) 
+        -> Result<(), plexspaces_sdk::BehaviorError> {
+        self.last_cleanup = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        // ... cleanup logic ...
+        Ok(())
+    }
+}
 
-// Schedule periodic timer (in actor code)
-ctx.facet_service()
-    .get_facet::<TimerFacet>("timer")?
-    .schedule_periodic(
-        "cleanup",
-        Duration::from_secs(60),
-        || async { cleanup().await }
-    )
-    .await?;
+// Spawn with timer facet
+let timer_facet = TimerFacet::new(json!({}), 75);
+let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
+let actor_ref = spawn_with_facets(&ctx, service_locator.clone(), 
+    ActorId::from("cleanup@node"), "default", CleanupActor { last_cleanup: 0 }, 
+    vec![Box::new(timer_facet)]).await?;
 ```
 
 #### ReminderFacet
@@ -1087,40 +1162,36 @@ ctx.facet_service()
 
 ### Facet Lifecycle
 
-#### Attaching Facets
+#### Attaching Facets (SDK)
 
 ```rust
-use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, SqliteJournalStorage};
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    spawn, spawn_with_storage, SqliteJournalStorage,
+    RequestContext, ActorId, json,
+};
+use std::sync::Arc;
 
-// At actor creation (recommended)
-let storage = SqliteJournalStorage::new(":memory:").await?;
-let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 100));
-let durability_facet = Box::new(DurabilityFacet::new(
-    storage,
-    serde_json::json!({
-        "checkpoint_interval": 100,
-        "replay_on_activation": true,
-    }),
-    50,
-));
+// Define actor with multiple facets via annotation
+#[gen_server_actor(facets = ["virtual_actor", "durability"])]
+struct MyActor {
+    data: String,
+}
 
-let _message_sender = actor_factory.spawn_actor(
-    &ctx,
-    &actor_id,
-    "MyActor",
-    vec![],
-    None,
-    std::collections::HashMap::new(),
-    vec![virtual_facet, durability_facet], // facets
-).await?;
+#[plexspaces_handlers]
+impl MyActor {
+    #[handler("get")]
+    async fn get(&mut self, _ctx: &plexspaces_sdk::ActorContext, _msg: &plexspaces_sdk::Message) 
+        -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        Ok(json!({ "data": self.data }))
+    }
+}
 
-// At runtime (if needed)
-use plexspaces_facet::capabilities::MetricsFacet;
-let metrics_facet = Box::new(MetricsFacet::new(
-    serde_json::json!({"namespace": "myapp"}),
-    800, // priority
-));
-actor.attach_facet(metrics_facet).await?;
+// Spawn with storage backend (for durability facet)
+let storage = Arc::new(SqliteJournalStorage::new(":memory:").await?);
+let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
+let actor_ref = spawn_with_storage(&ctx, service_locator.clone(), 
+    ActorId::from("myactor@node"), "default", MyActor { data: "test".into() }, storage).await?;
 ```
 
 #### Detaching Facets
@@ -2331,25 +2402,28 @@ pub trait ActorContext: Send + Sync {
 }
 ```
 
-**Usage Example**:
+**Usage Example (SDK Handler)**:
 ```rust
-async fn handle_message(&mut self, ctx: &ActorContext, msg: Message) -> Result<(), Error> {
-    // Spawn a new actor
-    let child_id = "child@node1".to_string();
-    ctx.actor_service().spawn_actor(child_id.clone(), behavior).await?;
-    
-    // Send message to another actor
-    let target_ref = ctx.object_registry().lookup_actor(&"target@node1".to_string()).await?;
-    target_ref.tell(msg).await?;
-    
-    // Write to TupleSpace
-    let tuple = Tuple::new(vec![/* fields */]);
-    ctx.tuplespace().write(tuple).await?;
-    
-    // Publish to channel
-    ctx.channel_service().publish("topic", msg.payload()).await?;
-    
-    Ok(())
+use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, handler, cast_message, json};
+
+#[gen_server_actor]
+struct MyActor { data: String }
+
+#[plexspaces_handlers]
+impl MyActor {
+    #[handler("process")]
+    async fn process(&mut self, ctx: &plexspaces_sdk::ActorContext, msg: &plexspaces_sdk::Message) 
+        -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        // Send message to another actor via ActorRef
+        let target_ref = ctx.get_actor_ref("target@node1").await?;
+        let event = cast_message(json!({ "event": "processed" }));
+        target_ref.tell(event).await?;
+        
+        // Write to TupleSpace
+        ctx.ts_write("orders", &json!({ "id": "123", "status": "pending" })).await?;
+        
+        Ok(json!({ "status": "ok" }))
+    }
 }
 ```
 

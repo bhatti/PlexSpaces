@@ -618,6 +618,8 @@ impl Application for SpecApplication {
             
             let mut errors = Vec::new();
             {
+                use plexspaces_core::RequestContext;
+                
                 // Get ActorFactory from ApplicationNode (avoids circular dependency)
                 let actor_factory = node.actor_factory().await
                     .ok_or_else(|| ApplicationError::ActorStopFailed(
@@ -625,8 +627,15 @@ impl Application for SpecApplication {
                         "ActorFactory not available from node".to_string()
                     ))?;
                 
+                // Create RequestContext for shutdown using application's tenant_id and namespace
+                // Both are set during deployment from JWT token
+                let ctx = RequestContext::new_without_auth(
+                    self.spec.tenant_id.clone(),
+                    self.spec.namespace.clone(),
+                );
+                
                 for actor_id in actor_ids.iter().rev() {
-                    if let Err(e) = actor_factory.stop_actor(actor_id).await {
+                    if let Err(e) = actor_factory.stop_actor(&ctx, actor_id).await {
                         error!(
                             application = %self.spec.name,
                             actor_id = %actor_id,
@@ -972,6 +981,7 @@ mod tests {
             name: "test-app".to_string(),
             namespace: "test".to_string(),
             version: "0.1.0".to_string(),
+            tenant_id: "test-tenant".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeActive as i32,
             dependencies: vec![],
@@ -1026,6 +1036,7 @@ mod tests {
             name: "test-app".to_string(),
             namespace: "test".to_string(),
             version: "0.1.0".to_string(),
+            tenant_id: "test-tenant".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeLibrary as i32,
             dependencies: vec![],

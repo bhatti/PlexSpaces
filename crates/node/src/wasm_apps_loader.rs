@@ -272,16 +272,19 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
         .unwrap_or(60) as i64;
 
     // Parse children
-    // Facets are parsed from inside each child table (see parse_child_spec)
-    // The correct TOML structure is:
-    //   [[supervisor.children]]
-    //   id = "actor-id"
-    //   facets = [{ type = "locks", priority = 50, config = {} }]
     let children = if let Some(children_arr) = value.get("children").and_then(|v| v.as_array()) {
-        children_arr
-            .iter()
-            .filter_map(|child| parse_child_spec(child).ok())
-            .collect()
+        let mut parsed_children = Vec::new();
+        for (idx, child) in children_arr.iter().enumerate() {
+            match parse_child_spec(child) {
+                Ok(child_spec) => parsed_children.push(child_spec),
+                Err(e) => {
+                    return Err(WasmAppsLoaderError::Deployment(
+                        format!("Failed to parse supervisor.children[{}]: {}. ChildSpec 'id' and 'type' fields are required.", idx, e)
+                    ));
+                }
+            }
+        }
+        parsed_children
     } else {
         vec![]
     };
@@ -328,13 +331,17 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
     let id = value
         .get("id")
         .and_then(|v| v.as_str())
-        .unwrap_or("worker")
+        .ok_or_else(|| WasmAppsLoaderError::Deployment(
+            format!("ChildSpec 'id' field is required in supervisor.children[]. Found in child: {:?}", value)
+        ))?
         .to_string();
 
     let child_type_str = value
         .get("type")
         .and_then(|v| v.as_str())
-        .unwrap_or("worker");
+        .ok_or_else(|| WasmAppsLoaderError::Deployment(
+            format!("ChildSpec 'type' field is required in supervisor.children[]. Found in child with id='{}'", id)
+        ))?;
 
     let child_type = match child_type_str.to_lowercase().as_str() {
         "supervisor" => ChildType::ChildTypeSupervisor,

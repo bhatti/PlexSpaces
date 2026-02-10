@@ -10,6 +10,10 @@ This document describes the message routing design for the PlexSpaces actor syst
 2. **Request-Reply Pattern**: `ask()` provides synchronous request-reply semantics over async messaging
 3. **Simplified Design**: Always create temporary sender ActorRef for `ask()` calls (actor or non-actor) - simplifies code and ensures consistent behavior
 4. **Single Routing Rule**: If receiver is temporary sender → REPLY → route to ReplyWaiter; otherwise → send to mailbox
+5. **Unified Routing Module**: All routing logic centralized in `crates/actor/src/routing.rs` for consistency and reusability
+6. **Dynamic Locality**: Locality determined dynamically by comparing node_id, not by ActorRefInner variants
+7. **Tenant ID Propagation**: tenant_id flows from API → ActorBuilder → ActorRef → RequestContext for proper multi-tenancy
+8. **Parallel Operations**: `ask_helper()` returns Futures enabling true parallel map/reduce operations
 
 ## Core Concepts
 
@@ -256,6 +260,58 @@ Node1 → ActorRegistry lookup → Temporary Actor Mailbox → handle_message() 
 - Target can be local or remote (extracted from `message.receiver`)
 - Reply routing crosses network boundary back to temporary ActorRef
 - Temporary ActorRef's `tell()` routes replies directly to `ReplyWaiter` (bypasses mailbox)
+
+## Unified Routing Module
+
+### Overview
+
+All routing logic is centralized in `crates/actor/src/routing.rs` to avoid duplication and ensure consistency between `ActorRef` and `ActorService`.
+
+### Key Functions
+
+- **`extract_node_id(actor_id)`**: Parses actor ID to extract node_id
+- **`is_actor_local(actor_id, service_locator)`**: Dynamically determines if actor is local (uses NodeConfig primarily)
+- **`ask_helper(ctx, service_locator, ...)`**: Generic ask helper that returns Future for parallel operations
+- **`route_local(ctx, service_locator, ...)`**: Routes message to local actor
+- **`route_remote(ctx, service_locator, ...)`**: Routes message to remote actor via gRPC
+- **`route_message(ctx, service_locator, ...)`**: Unified routing that determines locality and routes accordingly
+
+### Design Principles
+
+1. **Generic Functions**: Not tied to specific instances (ActorRef, ActorService)
+2. **RequestContext First**: All functions take `RequestContext` as first parameter for tenant/namespace isolation
+3. **Return Futures**: All async functions return `Pin<Box<dyn Future>>` for parallel operations
+4. **No Cyclic Dependencies**: Routing module doesn't depend on ActorRef or ActorService
+
+### Parallel Operations
+
+The `ask_helper()` function returns a Future, enabling true parallel map/reduce operations:
+
+```rust
+// Send all asks asynchronously
+let futures: Vec<_> = shard_ids.iter().map(|shard_id| {
+    ask_helper(ctx.clone(), service_locator.clone(), shard_id, message.clone(), ...)
+}).collect();
+
+// Await all replies in parallel
+let results = join_all(futures).await;
+```
+
+## Tenant ID Propagation
+
+### Flow: API → ActorBuilder → ActorRef → RequestContext
+
+1. **API Layer**: Extracts `tenant_id` from request headers/metadata
+2. **ActorBuilder**: Stores `tenant_id` via `with_tenant_id()` or from `RequestContext` in `spawn()`
+3. **ActorRef**: Stores `tenant_id` when created via `ActorRef::local()` or `ActorRef::remote()`
+4. **RequestContext**: Created with `tenant_id` from ActorRef via `get_request_context()`
+5. **Routing**: All routing functions use RequestContext for proper tenant isolation
+
+### Critical Design Points
+
+- **ActorRef stores tenant_id**: Enables proper RequestContext creation for internal routing
+- **RequestContext always has tenant_id**: No empty tenant_id in production code (except for internal temporary senders)
+- **Consistent propagation**: tenant_id flows through entire call chain
 
 ## Request vs Reply Routing
 

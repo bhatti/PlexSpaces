@@ -610,208 +610,30 @@ message GetStatsResponse {
   plexspaces.tuplespace.v1.StorageStats stats = 1;
 }
 
-// Configuration messages for TupleSpace backend selection
+// Configuration messages for TupleSpace
 //
 // ## Purpose
-// Defines configuration for TupleSpace backend selection and connection settings.
-// Supports multiple storage backends (in-memory, SQLite, Redis, PostgreSQL) with
-// environment variable and file-based configuration.
+// Defines configuration for TupleSpace initialization.
+// Uses shared database from RuntimeConfig.db (no separate backend config).
 //
-// ## Design Decisions
-// - **Why oneof for backend**: Only one backend can be active at a time
-// - **Why separate backend config messages**: Each backend has unique connection parameters
-// - **Why pool_size**: SQL and Redis backends need connection pooling
-// - **Why default_ttl_seconds**: Global default for tuple leases
-
-// TupleSpace backend configuration
-//
-// ## Purpose
-// Main configuration structure for TupleSpace initialization.
-// Supports code-based, environment variable, and file-based configuration.
-//
-// ## Configuration Hierarchy
-// 1. CODE: Explicit TupleSpaceConfig in application code (highest priority)
-// 2. ENV: Environment variables (PLEXSPACES_TUPLESPACE_BACKEND, etc.)
-// 3. FILE: YAML/TOML configuration files
-// 4. DEFAULT: In-memory backend (lowest priority)
-//
-// ## Usage Examples
-//
-// ### In-Memory (Default)
-// ```yaml
-// backend:
-//   in_memory: {}
-// ```
-//
-// ### SQLite (Multi-Process, No External Dependencies)
-// ```yaml
-// backend:
-//   sqlite:
-//     path: "/tmp/plexspaces.db"
-// pool_size: 1
-// ```
-//
-// ### Redis (Distributed, Production)
-// ```yaml
-// backend:
-//   redis:
-//     url: "redis://localhost:6379"
-//     namespace: "plexspaces"
-// pool_size: 50
-// default_ttl_seconds: 3600
-// ```
-//
-// ### PostgreSQL (Distributed, ACID)
-// ```yaml
-// backend:
-//   postgres:
-//     connection_string: "postgres://localhost/plexspaces"
-//     table_name: "tuples"
-// pool_size: 20
-// ```
+// ## Design Notes
+// - Backend selection handled by factory methods in Rust code (create_storage)
+// - Uses shared database connection from RuntimeConfig.db
+// - Default TTL for tuple leases
 message TupleSpaceConfig {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
       title: "TupleSpace Configuration"
-      description: "Configuration for TupleSpace backend selection"
+      description: "Configuration for TupleSpace (uses shared database from RuntimeConfig)"
     }
   };
-
-  // Backend configuration (only one can be set)
-  oneof backend {
-    InMemoryBackend in_memory = 1;
-    SqliteBackend sqlite = 2;
-    RedisBackend redis = 3;
-    PostgresBackend postgres = 4;
-  }
-
-  // Connection pool size for SQL/Redis backends
-  // Default: 10 for SQL, 50 for Redis, ignored for in-memory
-  uint32 pool_size = 5 [(buf.validate.field).uint32 = {gte: 1, lte: 1000}];  // 1 to 1000 connections
 
   // Default TTL in seconds for tuples with leases
   // 0 = no default TTL (tuples must specify their own)
-  uint64 default_ttl_seconds = 6 [(buf.validate.field).uint64.lte = 2592000];  // Max 30 days
+  uint64 default_ttl_seconds = 1 [(buf.validate.field).uint64.lte = 2592000];  // Max 30 days
 
   // Enable pattern matching optimizations (indexing)
-  bool enable_indexing = 7;
-}
-
-// In-memory backend configuration
-//
-// ## Purpose
-// Simple in-memory HashMap storage for testing and single-process use.
-//
-// ## Characteristics
-// - **Performance**: Fastest (no I/O)
-// - **Scope**: Single process only
-// - **Persistence**: None (lost on restart)
-// - **Use Cases**: Unit tests, development, single-node demos
-message InMemoryBackend {
-  // No configuration needed for in-memory backend
-}
-
-// SQLite backend configuration
-//
-// ## Purpose
-// Embedded SQL database for multi-process coordination without external services.
-//
-// ## Characteristics
-// - **Performance**: Fast (local file system)
-// - **Scope**: Multiple processes on same machine
-// - **Persistence**: Durable (survives restarts)
-// - **Use Cases**: E2E tests, embedded systems, single-machine multi-process
-//
-// ## Design Notes
-// - SQLite supports concurrent readers and one writer
-// - WAL mode enables better concurrency
-// - Ideal for tests that need multi-process coordination without Redis
-message SqliteBackend {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "SQLite Backend"
-      description: "SQLite backend configuration for multi-process coordination"
-    }
-  };
-
-  // Database file path or ":memory:" for in-memory SQLite
-  // Examples:
-  //   - "/tmp/plexspaces.db" (durable file)
-  //   - ":memory:" (in-memory, process-local)
-  //   - "/var/lib/plexspaces/tuples.db" (production)
-  string path = 1 [(buf.validate.field).string.max_len = 512];
-}
-
-// Redis backend configuration
-//
-// ## Purpose
-// Distributed coordination via Redis for production multi-node deployments.
-//
-// ## Characteristics
-// - **Performance**: Sub-millisecond latency
-// - **Scope**: Distributed across multiple machines
-// - **Persistence**: Durable (AOF + RDB)
-// - **Use Cases**: Production, distributed systems, high-throughput
-//
-// ## Design Notes
-// - Namespace prevents key collisions with other applications
-// - Supports Redis Cluster for horizontal scaling
-// - TTL implemented using Redis expiry mechanism
-message RedisBackend {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Redis Backend"
-      description: "Redis backend configuration for distributed coordination"
-    }
-  };
-
-  // Redis connection URL
-  // Examples:
-  //   - "redis://localhost:6379"
-  //   - "redis://:password@localhost:6379"
-  //   - "redis://localhost:6379/0" (database 0)
-  //   - "rediss://host:6380" (TLS)
-  string url = 1 [(buf.validate.field).string.max_len = 512];
-
-  // Key namespace prefix to avoid collisions
-  // All tuple keys will be prefixed with this namespace
-  // Example: namespace "plexspaces" -> keys "plexspaces:tuple:123"
-  string namespace = 2 [(buf.validate.field).string.max_len = 128];
-}
-
-// PostgreSQL backend configuration
-//
-// ## Purpose
-// Distributed coordination via PostgreSQL for ACID-compliant persistence.
-//
-// ## Characteristics
-// - **Performance**: Millisecond latency (slower than Redis)
-// - **Scope**: Distributed across multiple machines
-// - **Persistence**: Durable with ACID guarantees
-// - **Use Cases**: Enterprise, transactional workloads, strong consistency
-//
-// ## Design Notes
-// - Supports full SQL transactions with isolation levels
-// - Better for complex queries than Redis
-// - Can use LISTEN/NOTIFY for subscriptions
-message PostgresBackend {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "PostgreSQL Backend"
-      description: "PostgreSQL backend configuration for distributed coordination"
-    }
-  };
-
-  // PostgreSQL connection string
-  // Examples:
-  //   - "postgres://localhost/plexspaces"
-  //   - "postgres://user:pass@localhost:5432/plexspaces"
-  //   - "postgres://user@localhost/plexspaces?sslmode=require"
-  string connection_string = 1 [(buf.validate.field).string.max_len = 512];
-
-  // Table name for storing tuples
-  // Default: "tuples"
-  string table_name = 2 [(buf.validate.field).string.max_len = 128];
+  bool enable_indexing = 2;
 }
 
 // TupleSpace service

@@ -86,101 +86,94 @@ pub use ddb::DynamoDBJournalStorage;
 /// ## Example
 /// ```rust,no_run
 /// use plexspaces_journaling::*;
-/// use plexspaces_proto::v1::journaling::{DurabilityConfig, JournalBackend};
 ///
 /// # async fn example() -> JournalResult<()> {
-/// let config = DurabilityConfig {
-///     backend: JournalBackend::JournalBackendSqlite as i32,
-///     checkpoint_interval: 100,
-///     ..Default::default()
-/// };
-/// let storage = create_journal_storage(config).await?;
+/// let db_url = "sqlite:///tmp/journal.db";
+/// let storage = create_journal_storage(&db_url).await?;
 /// # Ok(())
 /// # }
 /// ```
 pub async fn create_journal_storage(
-    config: plexspaces_proto::v1::journaling::DurabilityConfig,
+    db_url: &str,
 ) -> JournalResult<Arc<dyn JournalStorage>> {
-    use plexspaces_proto::v1::journaling::JournalBackend;
-    
-    let backend = JournalBackend::try_from(config.backend).map_err(|_| {
-        JournalError::InvalidConfiguration(format!(
-            "Invalid journal backend: {}",
-            config.backend
-        ))
-    })?;
-    
-    match backend {
-        // Memory backend maps to SQLite :memory:
-        JournalBackend::JournalBackendMemory => {
-            #[cfg(feature = "sqlite-backend")]
-            {
-                let storage = SqliteJournalStorage::new(":memory:").await?;
-                Ok(Arc::new(storage))
-            }
-            #[cfg(not(feature = "sqlite-backend"))]
-            {
-                Err(JournalError::InvalidConfiguration(
-                    "Memory backend requires 'sqlite-backend' feature (uses SQLite :memory:)".to_string(),
-                ))
-            }
-        }
+    // Determine backend type from connection string
+    if db_url.contains(":memory:") || db_url.starts_with("sqlite:") || db_url.starts_with("sqlite://") {
         #[cfg(feature = "sqlite-backend")]
-        JournalBackend::JournalBackendSqlite => {
-            // Extract SQLite config from backend_config
-            let path = if let Some(backend_config) = &config.backend_config {
-                match backend_config {
-                    plexspaces_proto::v1::journaling::durability_config::BackendConfig::Sqlite(sqlite_config) => {
-                        sqlite_config.db_path.clone()
-                    }
-                    _ => ":memory:".to_string(),
-                }
-            } else {
+        {
+            // Extract path from SQLite connection string
+            let path = if db_url == ":memory:" || db_url.contains(":memory:") {
                 ":memory:".to_string()
+            } else if db_url.starts_with("sqlite:///") {
+                // Format: "sqlite:///absolute/path" - preserve leading /
+                let extracted = db_url.strip_prefix("sqlite:///")
+                    .and_then(|s| s.split('?').next())
+                    .unwrap_or(db_url);
+                format!("/{}", extracted) // Restore leading /
+            } else if db_url.starts_with("sqlite://") {
+                db_url.strip_prefix("sqlite://")
+                    .and_then(|s| s.split('?').next())
+                    .unwrap_or(db_url)
+                    .to_string()
+            } else if db_url.starts_with("sqlite:") {
+                db_url.strip_prefix("sqlite:")
+                    .and_then(|s| s.split('?').next())
+                    .unwrap_or(db_url)
+                    .to_string()
+            } else {
+                return Err(JournalError::InvalidConfiguration(
+                    "Invalid SQLite connection string format".to_string(),
+                ));
             };
+            
+            // Ensure directory exists for file-based SQLite databases
+            if path != ":memory:" && !path.is_empty() {
+                if let Some(parent) = std::path::Path::new(&path).parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        JournalError::InvalidConfiguration(format!(
+                            "Failed to create database directory '{}': {}",
+                            parent.display(), e
+                        ))
+                    })?;
+                }
+            }
+            
             let storage = SqliteJournalStorage::new(&path).await?;
             Ok(Arc::new(storage))
         }
         #[cfg(not(feature = "sqlite-backend"))]
-        JournalBackend::JournalBackendSqlite => Err(JournalError::InvalidConfiguration(
-            "SQLite backend not enabled. Enable 'sqlite-backend' feature.".to_string(),
-        )),
+        {
+            Err(JournalError::InvalidConfiguration(
+                "SQLite backend requires 'sqlite-backend' feature".to_string(),
+            ))
+        }
+    } else if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
         #[cfg(feature = "postgres-backend")]
-        JournalBackend::JournalBackendPostgres => {
-            // Extract PostgreSQL config from backend_config
-            let connection_string = if let Some(backend_config) = &config.backend_config {
-                match backend_config {
-                    plexspaces_proto::v1::journaling::durability_config::BackendConfig::Postgres(postgres_config) => {
-                        postgres_config.connection_string.clone()
-                    }
-                    _ => {
-                        return Err(JournalError::InvalidConfiguration(
-                            "Missing PostgreSQL connection string".to_string(),
-                        ));
-                    }
-                }
-            } else {
-                return Err(JournalError::InvalidConfiguration(
-                    "Missing PostgreSQL connection string".to_string(),
-                ));
-            };
-            let storage = PostgresJournalStorage::new(&connection_string).await?;
+        {
+            let storage = PostgresJournalStorage::new(db_url).await?;
             Ok(Arc::new(storage))
         }
         #[cfg(not(feature = "postgres-backend"))]
-        JournalBackend::JournalBackendPostgres => Err(JournalError::InvalidConfiguration(
-            "PostgreSQL backend not enabled. Enable 'postgres-backend' feature.".to_string(),
-        )),
-        #[cfg(feature = "redis-backend")]
-        JournalBackend::JournalBackendRedis => Err(JournalError::InvalidConfiguration(
-            "Redis backend is not yet implemented".to_string(),
-        )),
-        #[cfg(not(feature = "redis-backend"))]
-        JournalBackend::JournalBackendRedis => Err(JournalError::InvalidConfiguration(
-            "Redis backend not enabled. Enable 'redis-backend' feature.".to_string(),
-        )),
-        JournalBackend::JournalBackendUnspecified => Err(JournalError::InvalidConfiguration(
-            "Journal backend not specified".to_string(),
-        )),
+        {
+            Err(JournalError::InvalidConfiguration(
+                "PostgreSQL backend requires 'postgres-backend' feature".to_string(),
+            ))
+        }
+    } else {
+        // Fallback to in-memory SQLite for unsupported databases
+        tracing::warn!(
+            db_url = %db_url,
+            "Unsupported database type for journaling, using in-memory SQLite fallback"
+        );
+        #[cfg(feature = "sqlite-backend")]
+        {
+            let storage = SqliteJournalStorage::new(":memory:").await?;
+            Ok(Arc::new(storage))
+        }
+        #[cfg(not(feature = "sqlite-backend"))]
+        {
+            Err(JournalError::InvalidConfiguration(
+                format!("Unsupported database URL: {} (and sqlite-backend not enabled)", db_url)
+            ))
+        }
     }
 }

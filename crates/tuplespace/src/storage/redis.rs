@@ -47,7 +47,7 @@ use async_trait::async_trait;
 #[cfg(feature = "redis-backend")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "redis-backend")]
-use plexspaces_proto::tuplespace::v1::{RedisStorageConfig, StorageStats};
+use plexspaces_proto::tuplespace::v1::StorageStats;
 #[cfg(feature = "redis-backend")]
 use redis::{aio::ConnectionManager, AsyncCommands, Client};
 #[cfg(feature = "redis-backend")]
@@ -111,6 +111,16 @@ pub struct RedisStorage {
     stats: Arc<std::sync::Mutex<RedisOperationStats>>,
 }
 
+/// Local config type for Redis storage (proto types removed, now using shared database)
+#[cfg(feature = "redis-backend")]
+#[derive(Debug, Clone)]
+pub struct RedisConfig {
+    pub connection_string: String,
+    pub pool_size: u32,
+    pub key_prefix: String,
+    pub enable_pubsub: bool,
+}
+
 /// Operation statistics for metrics
 #[cfg(feature = "redis-backend")]
 #[derive(Debug, Default)]
@@ -130,7 +140,7 @@ struct RedisOperationStats {
 #[cfg(feature = "redis-backend")]
 impl RedisStorage {
     /// Create new Redis storage
-    pub async fn new(config: RedisStorageConfig) -> Result<Self, TupleSpaceError> {
+    pub async fn new(config: RedisConfig) -> Result<Self, TupleSpaceError> {
         let client = Client::open(config.connection_string.as_str()).map_err(|e| {
             TupleSpaceError::ConnectionError(format!("Redis connection failed: {}", e))
         })?;
@@ -865,7 +875,7 @@ mod tests {
     /// Helper to create test Redis storage
     /// NOTE: Tests require Redis running on localhost:6379
     async fn create_test_storage() -> RedisStorage {
-        let config = RedisStorageConfig {
+        let config = RedisConfig {
             connection_string: "redis://127.0.0.1:6379".to_string(),
             pool_size: 10,
             key_prefix: format!("test:{}", ulid::Ulid::new()),
@@ -924,7 +934,7 @@ mod tests {
 
         // Spawn task to write tuple after delay
         // Create a new storage instance for the spawned task (shares same Redis instance)
-        let config = RedisStorageConfig {
+        let config = RedisConfig {
             connection_string: "redis://127.0.0.1:6379".to_string(),
             pool_size: 10,
             key_prefix: storage.key_prefix.clone(),
@@ -998,7 +1008,7 @@ mod tests {
 
         // Spawn task to write tuple after delay
         // Create a new storage instance for the spawned task (shares same Redis instance)
-        let config = RedisStorageConfig {
+        let config = RedisConfig {
             connection_string: "redis://127.0.0.1:6379".to_string(),
             pool_size: 10,
             key_prefix: storage.key_prefix.clone(),

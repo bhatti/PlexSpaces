@@ -118,6 +118,8 @@ pub mod scheduling_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Get scheduling request status (for polling)
+*/
         pub async fn get_scheduling_status(
             &mut self,
             request: impl tonic::IntoRequest<super::GetSchedulingStatusRequest>,
@@ -226,6 +228,8 @@ pub mod scheduling_service_server {
             tonic::Response<super::ScheduleActorResponse>,
             tonic::Status,
         >;
+        /** Get scheduling request status (for polling)
+*/
         async fn get_scheduling_status(
             &self,
             request: tonic::Request<super::GetSchedulingStatusRequest>,

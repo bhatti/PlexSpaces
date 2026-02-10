@@ -755,6 +755,22 @@ pub struct NodeMetrics {
     /// Connected nodes in cluster
     #[prost(uint32, tag="10")]
     pub connected_nodes: u32,
+    /// Shard group metrics (data-parallel actors)
+    /// Total shard groups created on this node
+    #[prost(uint32, tag="13")]
+    pub shard_groups_created: u32,
+    /// Total shard messages sent (to shard actors)
+    #[prost(uint64, tag="14")]
+    pub shard_messages_sent: u64,
+    /// Total shard messages received (from shard actors)
+    #[prost(uint64, tag="15")]
+    pub shard_messages_received: u64,
+    /// Total shard operations (map, scatter_gather, bulk_update)
+    #[prost(uint64, tag="16")]
+    pub shard_operations_total: u64,
+    /// Failed shard operations
+    #[prost(uint64, tag="17")]
+    pub shard_operations_failed: u64,
     /// Node identity (for components that need node info without depending on Node type)
     /// Node ID for this metrics instance
     #[prost(string, tag="11")]
@@ -1259,6 +1275,9 @@ pub struct PingResponse {
     /// Piggybacked membership updates
     #[prost(message, repeated, tag="4")]
     pub updates: ::prost::alloc::vec::Vec<MembershipUpdate>,
+    /// Cluster name (for same-cluster check on ConnectNodes; empty means no cluster)
+    #[prost(string, tag="5")]
+    pub cluster_name: ::prost::alloc::string::String,
 }
 /// Indirect ping request - Ask intermediary to ping target
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1335,6 +1354,106 @@ pub struct SyncMembershipResponse {
     /// Number of updates received that were new/updated
     #[prost(int32, tag="2")]
     pub updates_applied: i32,
+}
+// ============================================================================
+// Node Connectivity Messages - ConnectNodes/DisconnectNodes
+// ============================================================================
+
+/// ConnectNodes request - Erlang-style net_adm:ping
+///
+/// ## Purpose
+/// Connects to remote nodes by address. Each address is pinged to verify
+/// connectivity and retrieve the node's ID before adding to membership.
+///
+/// ## Address Format
+/// Addresses should be in the format "host:port" (e.g., "node2:8000", "192.168.1.10:8000").
+/// The protocol (http/https) is determined by node configuration.
+///
+/// ## Example
+/// ```json
+/// {
+///    "node_addresses": \["node2:8000", "192.168.1.10:8000"\],
+///    "cluster": "production",
+///    "timeout": "5s"
+/// }
+/// ```
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ConnectNodesRequest {
+    /// Node addresses to connect to (e.g., "node2:8000", "192.168.1.10:8000")
+    /// Each address will be pinged to verify connectivity.
+    /// At least one address is required, maximum 100 addresses per request.
+    #[prost(string, repeated, tag="1")]
+    pub node_addresses: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Optional: cluster name for grouping connected nodes.
+    /// If specified, nodes are tagged with this cluster for filtering.
+    /// Must be alphanumeric with hyphens, max 63 characters (DNS label format).
+    ///
+    /// Optional: timeout for each connection attempt.
+    #[prost(string, tag="2")]
+    pub cluster: ::prost::alloc::string::String,
+    /// Default: 5 seconds if not specified.
+    /// Range: 1 second to 60 seconds.
+    #[prost(message, optional, tag="3")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+}
+/// ConnectNodes response
+///
+/// ## Partial Success
+/// Some connections may succeed while others fail. Check both maps.
+/// A request is considered successful if at least one node connected.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ConnectNodesResponse {
+    /// Successfully connected nodes: node_id -> address.
+    /// The node_id is retrieved from the remote node via Ping RPC.
+    #[prost(map="string, string", tag="1")]
+    pub connected: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Failed connections: address -> error message.
+    /// Contains addresses that could not be connected with error details.
+    #[prost(map="string, string", tag="2")]
+    pub failed: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Total time taken for all connection attempts (parallel execution).
+    #[prost(message, optional, tag="3")]
+    pub total_time: ::core::option::Option<::prost_types::Duration>,
+}
+/// DisconnectNodes request - Erlang-style erlang:disconnect_node
+///
+/// ## Purpose
+/// Disconnects from nodes by their node_id. The nodes are removed from
+/// SWIM membership and will no longer be probed or receive gossip.
+///
+/// ## Example
+/// ```json
+/// {
+///    "node_ids": \["node2", "node3"\],
+///    "notify_remote": false
+/// }
+/// ```
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DisconnectNodesRequest {
+    /// Node IDs to disconnect from.
+    /// Use ListConnectedNodes to get current node IDs.
+    /// At least one node_id is required, maximum 100 per request.
+    #[prost(string, repeated, tag="1")]
+    pub node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Optional: graceful disconnect with notification.
+    /// If true, attempts to notify remote node before disconnecting.
+    /// Default: false (silent disconnect, remote detects via SWIM timeout).
+    #[prost(bool, tag="2")]
+    pub notify_remote: bool,
+}
+/// DisconnectNodes response
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DisconnectNodesResponse {
+    /// Successfully disconnected node IDs.
+    #[prost(string, repeated, tag="1")]
+    pub disconnected: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Failed disconnections: node_id -> error message.
+    #[prost(map="string, string", tag="2")]
+    pub failed: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// Node type enumeration
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

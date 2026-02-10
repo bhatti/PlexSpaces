@@ -494,9 +494,10 @@ The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use
 
 | Rust Annotation | Python Equivalent | Generated Code |
 |-----------------|-------------------|----------------|
-| `#[handler("op")]` | `@handler("op")` | Route `msg_type == "op"` to this method (GenServer=call) |
+| `#[handler("op")]` | `@handler("op")` | Route operation "op" to this method. Operation extracted from `payload.action`, `payload.op`, or `payload.msg_type` when `message_type` is "call"/"cast". When `message_type` is not "call"/"cast", uses `message_type` directly (GenServer=call) |
 | `#[handler("op", call)]` | `@handler("op", "call")` | Explicit call semantics (request-reply) |
 | `#[handler("op", cast)]` | `@handler("op", "cast")` | Explicit cast semantics (fire-and-forget) |
+| `#[handler("*")]` | N/A | Catch-all handler (matches any operation). Useful for worker actors that process tasks based on `payload.action` |
 | `#[init_handler]` | `@init_handler` | Called on actor initialization |
 | `#[run_handler]` | N/A | Workflow main execution handler |
 | `#[signal_handler("name")]` | N/A | Workflow signal handler |
@@ -523,15 +524,171 @@ The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use
 | `#[actor]` | Attribute on struct: generates `impl Actor` with Custom behavior |
 | `#[handler("op")]` | Attribute on method: marks as handler (GenServer defaults to call) |
 | `#[plexspaces_handlers]` | Attribute on impl block: generates dispatch from `#[handler]` methods |
-| `spawn_actor(ctx, sl, id, ns, actor, facets)` | Spawn actor with facets (like Python `@actor(facets=[...])`) |
+| `spawn(ctx, sl, id, ns, actor)` | Spawn actor using declared facets from annotation |
+| `spawn_with_facets(ctx, sl, id, ns, actor, facets)` | Spawn actor with explicit facets |
+| `spawn_with_storage(ctx, sl, id, ns, actor, storage)` | Spawn durable actor with storage backend |
 | `create_facets(&["timer", "durability"], &config)` | Create facet instances from names (convenience helper) |
+
+### Message Creation Helpers
+
+The SDK provides helper functions for creating messages with correct invocation semantics:
+
+| Function | Description | Use With |
+|----------|-------------|----------|
+| `call_message(payload)` | Create request-reply message (`message_type = "call"`) | `actor_ref.ask()` |
+| `cast_message(payload)` | Create fire-and-forget message (`message_type = "cast"`) | `actor_ref.tell()` |
+| `new_message(invocation, payload)` | Create message with custom invocation type | Either |
+
+**Example:**
+```rust
+use plexspaces_sdk::{call_message, cast_message, json};
+use std::time::Duration;
+
+// Request-reply: use call_message() with ask()
+let request = call_message(json!({ "action": "get_balance" }));
+let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+
+// Fire-and-forget: use cast_message() with tell()
+let event = cast_message(json!({ "event": "user_login", "user_id": "123" }));
+actor_ref.tell(event).await?;
+```
+
+**Message Routing Design:**
+- `message_type` = "call" or "cast" (invocation type, set by `invocation` query param or HTTP method)
+- When `message_type` is "call"/"cast", operation is extracted from `payload.action`, `payload.op`, or `payload.msg_type`
+- When `message_type` is not "call"/"cast", operation is `message_type` itself
+- Handlers match on extracted operation name, not on `message_type`
+
+**Why invocation matters:**
+- GenServer's `route_message()` dispatches based on `message_type`
+- `"call"` routes to `handle_request()` (request-reply, reply expected)
+- `"cast"` routes to `handle_request()` (fire-and-forget, reply optional)
+- `"info"` routes to `handle_info()` (async message, no reply)
+- **Note**: GenServer uses a single `handle_request()` method for both call and cast; the difference is whether a reply is expected (call) or optional (cast)
+
+### Unified ShardGroup Client (Data-Parallel Actors)
+
+The Rust SDK provides unified abstractions for ShardGroup (data-parallel actors) inspired by the [Data-Parallel Actors (DPA) paper](https://www.micahlerner.com/2022/06/04/data-parallel-actors-a-programming-model-for-scalable-query-serving-systems.html). The client works for both WASM/internal apps (ServiceLocator) and remote gRPC clients (optional feature).
+
+**Key Features**:
+- **Unified API**: Same interface for WASM and gRPC (via `UnifiedShardGroupClient`)
+- **Boilerplate Removal**: Auto RequestContext, JSON conversion, error handling
+- **Resource-Based Routing**: Labels flow to ActorResourceRequirements for intelligent node placement
+- **High-Level API**: `ParallelClient` provides map/reduce operations
+
+**Example: Unified ShardGroup Client**
+
+```rust
+use plexspaces_sdk::{UnifiedShardGroupClient, ParallelClient, PartitionStrategy};
+use std::collections::HashMap;
+
+// Option 1: WASM/internal (uses ServiceLocator directly)
+let mut client = UnifiedShardGroupClient::from_service_locator(service_locator).await?;
+
+// Option 2: Remote gRPC (requires grpc feature, enabled by default)
+#[cfg(feature = "grpc")]
+let mut client = UnifiedShardGroupClient::from_node_addr("http://localhost:8000").await?;
+
+// Create ShardGroup (worker pool)
+let mut labels = HashMap::new();
+labels.insert("cluster".to_string(), "prod".to_string());
+labels.insert("zone".to_string(), "us-west-1".to_string());
+
+let group = client.create_shard_group(
+    "worker-pool-1".to_string(),
+    "worker".to_string(),
+    4, // 4 shards
+    PartitionStrategy::PartitionStrategyHash,
+    labels,
+).await?;
+
+// Bulk update: route tasks to workers based on partition key
+let mut updates = HashMap::new();
+updates.insert("key-1".to_string(), json!({"action": "increment", "value": 1}));
+updates.insert("key-2".to_string(), json!({"action": "increment", "value": 2}));
+
+let bulk_resp = client.bulk_update(
+    "worker-pool-1".to_string(),
+    updates,
+    ConsistencyLevel::ConsistencyLevelEventual,
+    false, // fire-and-forget
+).await?;
+
+// Parallel map: query all workers
+let map_resp = client.map(
+    "worker-pool-1".to_string(),
+    json!({"action": "get_all_keys"}),
+).await?;
+
+// Scatter-gather: aggregate results
+let scatter_resp = client.scatter_gather(
+    "worker-pool-1".to_string(),
+    json!({"action": "get_total_count"}),
+    ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
+    2, // min responses
+).await?;
+```
+
+**Example: High-Level Parallel Processing**
+
+```rust
+use plexspaces_sdk::{ParallelClient, PartitionStrategy, ShardGroupAggregationStrategy};
+use std::collections::HashMap;
+
+// Connect to node (or use from_service_locator for WASM)
+// Uses health-aware connection: checks liveness, waits for readiness
+let mut parallel_client = ParallelClient::connect("http://localhost:8000").await?;
+
+// Create worker pool (ShardGroup with worker actors)
+let mut labels = HashMap::new();
+labels.insert("cluster".to_string(), "prod".to_string());
+let pool_id = parallel_client.create_worker_pool(
+    "pool-1",
+    "worker",
+    4,
+    PartitionStrategy::PartitionStrategyHash,
+    labels,
+).await?;
+
+// Parallel map: query all workers
+let results = parallel_client.parallel_map(
+    &pool_id,
+    json!({"action": "get_all"}),
+).await?;
+
+// Parallel reduce: aggregate results
+let aggregated = parallel_client.parallel_reduce(
+    &pool_id,
+    json!({"action": "get_total"}),
+    ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
+    2,
+).await?;
+
+// Parallel update: bulk writes
+let mut updates = HashMap::new();
+updates.insert("key-1".to_string(), json!({"action": "increment"}));
+let stats = parallel_client.parallel_update(
+    &pool_id,
+    updates,
+    ConsistencyLevel::ConsistencyLevelEventual,
+    false,
+).await?;
+```
+
+**Architecture**:
+- **Core Functionality**: Lives in `crates/services/src/actor_service/mod.rs` (ActorService trait)
+- **SDK Decorators**: `UnifiedShardGroupClient` wraps ActorService and removes boilerplate
+- **Feature Flags**: `grpc` feature (enabled by default) for remote clients; WASM builds can disable it
+- **Labels Flow**: ShardGroup labels → ActorResourceRequirements → NodeSelector → Node placement
+
+See [Firecracker Multi-Tenant Example](../examples/rust/embedded/firecracker_multi_tenant/README.md) for a complete data-parallel actors demonstration.
 
 ### Example: GenServer with annotations (webhook_handler-style)
 
 ```rust
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers, handler,
-    ActorContext, BehaviorError, Message, spawn_actor, json, Value,
+    ActorContext, BehaviorError, Message, spawn_with_facets, call_message, json, Value,
 };
 
 // Step 1: Annotate struct with #[gen_server_actor]
@@ -560,8 +717,12 @@ impl WebhookHandler {
     }
 }
 
-// Spawn with facets
-let actor_ref = spawn_actor(&ctx, service_locator, actor_id, "webhooks", WebhookHandler::new(), vec![]).await?;
+// Spawn with facets using SDK helper
+let actor_ref = spawn_with_facets(&ctx, service_locator, actor_id, "webhooks", WebhookHandler::new(), vec![]).await?;
+
+// Send request-reply message using call_message()
+let request = call_message(json!({ "action": "deliver", "url": "https://example.com" }));
+let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 ```
 
 ### Example: Custom actor with fire-and-forget handlers (session_manager-style)
@@ -569,7 +730,7 @@ let actor_ref = spawn_actor(&ctx, service_locator, actor_id, "webhooks", Webhook
 ```rust
 use plexspaces_sdk::{
     actor, plexspaces_handlers, handler,
-    ActorContext, BehaviorError, Message, spawn_actor, TimerFacet, json,
+    ActorContext, BehaviorError, Message, spawn_with_facets, cast_message, TimerFacet, json,
 };
 
 // Step 1: Annotate struct with #[actor]
@@ -601,9 +762,13 @@ impl SessionActor {
     }
 }
 
-// Spawn with TimerFacet
+// Spawn with TimerFacet using SDK helper
 let timer_facet = TimerFacet::new(json!({}), 50);
-let actor_ref = spawn_actor(&ctx, sl, actor_id, "sessions", SessionActor::new("user-123"), vec![Box::new(timer_facet)]).await?;
+let actor_ref = spawn_with_facets(&ctx, sl, actor_id, "sessions", SessionActor::new("user-123"), vec![Box::new(timer_facet)]).await?;
+
+// Send fire-and-forget message using cast_message()
+let activity_event = cast_message(json!({ "event": "user_activity" }));
+actor_ref.tell(activity_event).await?;
 ```
 
 ### Timer vs Reminder: Transient vs Durable Scheduling
@@ -613,6 +778,147 @@ PlexSpaces follows the **Orleans model** for time-based operations:
 | Facet | Durability | Storage | Message Type | Use Case |
 |-------|------------|---------|--------------|----------|
 | `TimerFacet` | **Transient** (in-memory) | None | `timer_fired` | Heartbeats, timeouts, health checks |
+
+---
+
+## Node Connectivity (Health-Aware Connection)
+
+The SDK provides `NodeClient` for production-grade node connectivity with health checks, retry logic, and graceful error handling.
+
+### Health-Aware Connection (Kubernetes + Erlang-inspired)
+
+**Architecture**:
+- **Core Logic**: `NodeService` and `SystemService` in `crates/services` (core APIs)
+- **SDK Wrapper**: `NodeClient` in `sdks/rust/plexspaces-sdk` (convenience with retry/backoff)
+
+**Health Check Flow**:
+1. **Liveness Check** (optional): Uses core `SystemService.liveness_probe()` API
+2. **Connection**: Uses core `NodeServiceClient.connect()` API  
+3. **Ping Verification**: Uses core `NodeService.ping()` API
+4. **Readiness Wait** (optional): Uses core `SystemService.readiness_probe()` API
+
+**Production-Grade Features**:
+- ✅ Exponential backoff with jitter (prevents thundering herd)
+- ✅ Health-aware retries (checks liveness before retrying)
+- ✅ Readiness polling (waits for node to be ready)
+- ✅ Parallel health checks for multiple nodes
+- ✅ Graceful degradation (partial success handling)
+- ✅ Detailed error messages for troubleshooting
+
+### Basic Usage
+
+```rust
+use plexspaces_sdk::NodeClient;
+use std::time::Duration;
+
+// Simple: Uses defaults (checks liveness, waits for readiness)
+let mut node_client = NodeClient::connect("http://localhost:8000").await?;
+
+// Connect to multiple nodes with health checks
+let resp = node_client.connect_nodes(
+    vec![
+        "http://localhost:8001".to_string(),
+        "http://localhost:8002".to_string(),
+    ],
+    None, // cluster name (optional)
+    30,   // timeout seconds
+).await?;
+
+// Check results
+println!("Connected: {:?}", resp.connected);
+println!("Failed: {:?}", resp.failed);
+
+// List connected nodes
+let list_resp = node_client.list_connected_nodes(None).await?;
+for node in list_resp.nodes {
+    println!("Node: {} @ {}", node.node_id, node.node_address);
+}
+```
+
+### Advanced Configuration
+
+```rust
+use plexspaces_sdk::{NodeClient, HealthCheckConfig};
+use std::time::Duration;
+
+// Custom health check configuration
+let config = HealthCheckConfig {
+    max_retries: 10,
+    initial_delay: Duration::from_millis(500),
+    max_delay: Duration::from_secs(10),
+    health_check_timeout: Duration::from_secs(5),
+    check_liveness: true,        // Check liveness before connecting
+    wait_for_readiness: true,    // Wait for readiness after connecting
+    readiness_timeout: Duration::from_secs(60),
+    readiness_poll_interval: Duration::from_millis(500),
+};
+
+let mut node_client = NodeClient::connect_with_health_check(
+    "http://localhost:8000",
+    config,
+).await?;
+
+// Connect multiple nodes with custom config
+let resp = node_client.connect_nodes_with_health_check(
+    vec!["http://localhost:8001".to_string()],
+    None,
+    30,
+    config,
+).await?;
+```
+
+### Health Check Semantics (Kubernetes-inspired)
+
+- **Liveness**: Is the node alive? (should we retry?)
+  - Checks: gRPC server responsive, not deadlocked
+  - Used for: Retry decisions, failure detection
+  - Endpoint: `SystemService.liveness_probe()`
+
+- **Readiness**: Is the node ready? (can we use it?)
+  - Checks: Critical dependencies healthy, not overloaded
+  - Used for: Connection decisions, load balancing
+  - Endpoint: `SystemService.readiness_probe()`
+
+### Retry Strategy (Erlang-inspired)
+
+- **Exponential Backoff**: `delay = min(initial * 2^attempt, max) + jitter`
+- **Jitter**: 0-25% of delay (prevents thundering herd)
+- **Parallel Health Checks**: Uses `futures::join_all` for efficiency
+- **Graceful Degradation**: Continues with available nodes if some fail
+
+### Error Handling
+
+```rust
+match NodeClient::connect("http://localhost:8000").await {
+    Ok(client) => {
+        println!("Connected successfully");
+    }
+    Err(e) => {
+        eprintln!("Connection failed: {}", e);
+        // Error messages include:
+        // - Liveness check failures
+        // - Connection timeouts
+        // - Readiness timeout details
+    }
+}
+```
+
+### Multi-Node Connection Flow
+
+When connecting to multiple nodes, the SDK:
+
+1. **Pre-checks liveness** for all nodes in parallel (avoids unnecessary attempts)
+2. **Filters out dead nodes** before calling core API
+3. **Calls core ConnectNodes API** for alive nodes (handles ping, registration, SWIM)
+4. **Returns combined results** (connected + failed with detailed reasons)
+
+This production-grade approach ensures:
+- ✅ Efficient connection attempts (only alive nodes)
+- ✅ Detailed error reporting (why each node failed)
+- ✅ Partial success handling (some nodes may connect while others fail)
+- ✅ Better user experience (clear error messages for troubleshooting)
+
+See [Firecracker Multi-Tenant Example](../examples/rust/apps/firecracker_multi_tenant/README.md) for a complete demonstration of health-aware node connectivity.
 | `ReminderFacet` | **Durable** (persisted) | `Arc<dyn JournalStorage>` | `reminder_fired` | Billing, SLA, scheduled tasks |
 
 **The naming convention IS the API contract:**

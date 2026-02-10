@@ -83,10 +83,7 @@ pub use ddb::DynamoDBStorage;
 
 use async_trait::async_trait;
 #[allow(unused_imports)]
-use plexspaces_proto::tuplespace::v1::{StorageProvider, StorageStats};
-
-#[allow(unused_imports)]
-use plexspaces_proto::tuplespace::v1::{PostgresStorageConfig, SqliteStorageConfig};
+use plexspaces_proto::tuplespace::v1::StorageStats;
 
 /// Memory storage configuration (used for SQLite :memory: backend)
 #[derive(Debug, Clone)]
@@ -299,49 +296,21 @@ pub trait TupleSpaceStorage: Send + Sync {
     }
 }
 
-/// Storage configuration enum for create_storage factory
-///
-/// Used to specify which storage backend to create and its configuration.
-/// This replaces the previous proto-based TupleSpaceStorageConfig.
-#[derive(Debug, Clone)]
-pub enum StorageConfig {
-    /// In-memory storage (default for single-process)
-    Memory(MemoryStorageConfig),
-    /// Redis storage (for distributed)
-    #[cfg(feature = "redis-backend")]
-    Redis(plexspaces_proto::tuplespace::v1::RedisStorageConfig),
-    /// PostgreSQL storage (for persistence)
-    #[cfg(feature = "sql-backend")]
-    Postgres(plexspaces_proto::tuplespace::v1::PostgresStorageConfig),
-    /// SQLite storage (for embedded persistence)
-    #[cfg(feature = "sql-backend")]
-    Sqlite(plexspaces_proto::tuplespace::v1::SqliteStorageConfig),
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        StorageConfig::Memory(MemoryStorageConfig {
-            initial_capacity: 1000,
-            cleanup_interval_ms: 60000,
-        })
-    }
-}
-
-/// Create storage backend from configuration
+/// Create storage backend from shared database URL
 ///
 /// ## Purpose
 /// Factory function that creates appropriate storage backend based on
-/// StorageConfig enum.
+/// the shared database connection string from RuntimeConfig.db.
 ///
 /// ## Arguments
-/// - `config`: StorageConfig specifying backend type and configuration
+/// - `db_url`: Database connection string (e.g., "sqlite:///path/to/db", "postgres://...")
 ///
 /// ## Returns
 /// Boxed storage backend implementing TupleSpaceStorage trait
 ///
 /// ## Errors
-/// - InvalidConfiguration if config is malformed
-/// - ConnectionError if backend can't connect (Redis, PostgreSQL)
+/// - InvalidConfiguration if db_url is malformed
+/// - ConnectionError if backend can't connect
 ///
 /// ## Example
 /// ```rust
@@ -349,55 +318,112 @@ impl Default for StorageConfig {
 /// use plexspaces_tuplespace::TupleSpaceError;
 ///
 /// # async fn example() -> Result<(), TupleSpaceError> {
-/// let config = StorageConfig::Memory(MemoryStorageConfig {
-///     initial_capacity: 1000,
-///     cleanup_interval_ms: 60000,
-/// });
-///
-/// let storage = create_storage(config).await?;
+/// let db_url = "sqlite:///tmp/tuplespace.db";
+/// let storage = create_storage(&db_url).await?;
 /// # Ok(())
 /// # }
 /// ```
 pub async fn create_storage(
-    config: StorageConfig,
+    db_url: &str,
 ) -> Result<Box<dyn TupleSpaceStorage>, TupleSpaceError> {
-    match config {
-        // Memory maps to SQLite :memory:
-        StorageConfig::Memory(_memory_config) => {
-            #[cfg(feature = "sql-backend")]
-            {
-                let sqlite_config = SqliteStorageConfig {
-                    database_path: ":memory:".to_string(),
-                    enable_wal: false,
-                    cache_size_kb: 2000,
-                };
-                let storage = sql::SqlStorage::new_sqlite(sqlite_config).await?;
-                Ok(Box::new(storage))
-            }
-            #[cfg(not(feature = "sql-backend"))]
-            {
-                Err(TupleSpaceError::NotSupported(
-                    "Memory backend requires 'sql-backend' feature (uses SQLite :memory:)".to_string(),
-                ))
-            }
-        }
-        #[cfg(feature = "redis-backend")]
-        StorageConfig::Redis(redis_config) => {
-            // Create Redis storage
-            let storage = redis::RedisStorage::new(redis_config).await?;
-            Ok(Box::new(storage))
-        }
+    // Determine backend type from connection string
+    if db_url.contains(":memory:") || db_url.starts_with("sqlite:") || db_url.starts_with("sqlite://") {
         #[cfg(feature = "sql-backend")]
-        StorageConfig::Postgres(postgres_config) => {
-            // Create PostgreSQL storage
-            let storage = sql::SqlStorage::new_postgres(postgres_config).await?;
+        {
+            // Extract path from SQLite connection string
+            let path = if db_url == ":memory:" || db_url.contains(":memory:") {
+                ":memory:".to_string()
+            } else if db_url.starts_with("sqlite:///") {
+                // Format: "sqlite:///absolute/path" - preserve leading /
+                let extracted = db_url.strip_prefix("sqlite:///")
+                    .and_then(|s| s.split('?').next())
+                    .unwrap_or(db_url);
+                format!("/{}", extracted) // Restore leading /
+            } else if db_url.starts_with("sqlite://") {
+                db_url.strip_prefix("sqlite://")
+                    .and_then(|s| s.split('?').next())
+                    .unwrap_or(db_url)
+                    .to_string()
+            } else if db_url.starts_with("sqlite:") {
+                db_url.strip_prefix("sqlite:")
+                    .and_then(|s| s.split('?').next())
+                    .unwrap_or(db_url)
+                    .to_string()
+            } else {
+                return Err(TupleSpaceError::InvalidConfiguration(
+                    "Invalid SQLite connection string format".to_string(),
+                ));
+            };
+            
+            // Ensure directory exists for file-based SQLite databases
+            if path != ":memory:" && !path.is_empty() {
+                if let Some(parent) = std::path::Path::new(&path).parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        TupleSpaceError::InvalidConfiguration(format!(
+                            "Failed to create database directory '{}': {}",
+                            parent.display(), e
+                        ))
+                    })?;
+                }
+            }
+            
+            use sql::{SqlStorage, SqliteConfig};
+            // Create SQLite storage config
+            let sqlite_config = SqliteConfig {
+                database_path: path,
+                enable_wal: true,
+                cache_size_kb: 2000,
+            };
+            let storage = SqlStorage::new_sqlite(sqlite_config).await?;
             Ok(Box::new(storage))
         }
+        #[cfg(not(feature = "sql-backend"))]
+        {
+            Err(TupleSpaceError::NotSupported(
+                "SQLite backend requires 'sql-backend' feature".to_string(),
+            ))
+        }
+    } else if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
         #[cfg(feature = "sql-backend")]
-        StorageConfig::Sqlite(sqlite_config) => {
-            // Create SQLite storage
-            let storage = sql::SqlStorage::new_sqlite(sqlite_config).await?;
+        {
+            use sql::{SqlStorage, PostgresConfig};
+            // Create PostgreSQL storage config
+            let postgres_config = PostgresConfig {
+                connection_string: db_url.to_string(),
+                pool_size: 10, // Default pool size
+                table_name: "tuples".to_string(),
+            };
+            let storage = SqlStorage::new_postgres(postgres_config).await?;
             Ok(Box::new(storage))
+        }
+        #[cfg(not(feature = "sql-backend"))]
+        {
+            Err(TupleSpaceError::NotSupported(
+                "PostgreSQL backend requires 'sql-backend' feature".to_string(),
+            ))
+        }
+    } else {
+        // Fallback to in-memory SQLite for unsupported databases
+        tracing::warn!(
+            db_url = %db_url,
+            "Unsupported database type for tuplespace, using in-memory SQLite fallback"
+        );
+        #[cfg(feature = "sql-backend")]
+        {
+            use sql::{SqlStorage, SqliteConfig};
+            let sqlite_config = SqliteConfig {
+                database_path: ":memory:".to_string(),
+                enable_wal: false,
+                cache_size_kb: 2000,
+            };
+            let storage = SqlStorage::new_sqlite(sqlite_config).await?;
+            Ok(Box::new(storage))
+        }
+        #[cfg(not(feature = "sql-backend"))]
+        {
+            Err(TupleSpaceError::NotSupported(
+                format!("Unsupported database URL: {} (and sql-backend not enabled)", db_url)
+            ))
         }
     }
 }
@@ -407,13 +433,7 @@ pub async fn create_storage(
 /// Convenience function for tests and simple use cases
 #[cfg(feature = "sql-backend")]
 pub async fn create_memory_storage() -> Result<Box<dyn TupleSpaceStorage>, TupleSpaceError> {
-    let sqlite_config = SqliteStorageConfig {
-        database_path: ":memory:".to_string(),
-        enable_wal: false,
-        cache_size_kb: 2000,
-    };
-    let storage = sql::SqlStorage::new_sqlite(sqlite_config).await?;
-    Ok(Box::new(storage))
+    create_storage(":memory:").await
 }
 
 /// Create default in-memory storage - requires sql-backend feature

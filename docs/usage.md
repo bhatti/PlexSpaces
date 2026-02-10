@@ -34,71 +34,75 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Creating and Using Actors
+### Creating and Using Actors (SDK)
 
 ```rust
-use plexspaces::*;
-use plexspaces_behavior::GenServerBehavior;
-use plexspaces_core::RequestContext;
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    NodeBuilder, RequestContext, ActorId,
+    spawn_with_facets, call_message, json,
+};
+use std::sync::Arc;
+use std::time::Duration;
 
+// Define actor with SDK annotations
+#[gen_server_actor]
 struct Counter {
     count: i32,
 }
 
-#[async_trait]
-impl GenServerBehavior for Counter {
-    type Request = CounterRequest;
-    type Reply = i32;
+impl Counter {
+    fn new() -> Self { Self { count: 0 } }
+}
 
-    async fn handle_request(
+// Define handlers - GenServer defaults to "call" (request-reply)
+#[plexspaces_handlers]
+impl Counter {
+    #[handler("increment")]
+    async fn increment(
         &mut self,
-        ctx: &ActorContext,
-        request: Self::Request,
-    ) -> Result<Self::Reply, BehaviorError> {
-        match request {
-            CounterRequest::Increment(amount) => {
-                self.count += amount;
-                Ok(self.count)
-            }
-            CounterRequest::Get => Ok(self.count),
-        }
+        _ctx: &plexspaces_sdk::ActorContext,
+        msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        let payload: serde_json::Value = serde_json::from_slice(&msg.payload)?;
+        self.count += payload["amount"].as_i64().unwrap_or(1) as i32;
+        Ok(json!({ "count": self.count }))
+    }
+    
+    #[handler("get")]
+    async fn get(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        Ok(json!({ "count": self.count }))
     }
 }
 
-enum CounterRequest {
-    Increment(i32),
-    Get,
-}
-
 // Usage
-let node = PlexSpacesNode::new("node1".to_string()).await?;
-let actor_id = "counter@node1".to_string();
-let counter = Counter { count: 0 };
-// Spawn using ActorFactory
-use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
-use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-use std::sync::Arc;
+let node = Arc::new(NodeBuilder::new("node1").build().await);
+let service_locator = node.service_locator();
 
-let behavior = Box::new(counter);
-let mut mailbox_config = mailbox_config_default();
-mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
-let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await?;
-let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(), None);
+// Start node in background
+let node_clone = node.clone();
+tokio::spawn(async move { node_clone.start().await });
+tokio::time::sleep(Duration::from_millis(500)).await;
 
-let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-    .ok_or_else(|| "ActorFactory not found")?;
-let ctx = plexspaces_core::RequestContext::internal();
-let _message_sender = actor_factory.spawn_actor(
-    &ctx,
-    &actor_id,
-    "Counter", // actor_type
-    vec![], // initial_state
-    None, // config
-    std::collections::HashMap::new(), // labels
+// Create request context (tenant isolation required - NEVER use internal())
+let ctx = RequestContext::new_without_auth("my-tenant".into(), "default".into());
+
+// Spawn actor using SDK helper
+let actor_ref = spawn_with_facets(
+    &ctx, service_locator.clone(),
+    ActorId::from("counter@node1"), "default",
+    Counter::new(), vec![],
 ).await?;
 
-let actor_ref = node.get_actor_ref(&actor_id).await?;
-let reply = actor_ref.ask(CounterRequest::Get, Duration::from_secs(5)).await?;
+// Send request-reply message using SDK helper
+let request = call_message(json!({ "action": "get" }));
+let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+let result: serde_json::Value = serde_json::from_slice(&reply.payload)?;
+println!("Count: {}", result["count"]);
 ```
 
 ## Security and Tenant Isolation

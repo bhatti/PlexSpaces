@@ -19,11 +19,11 @@
 //! Task router for Layer 2 (task-level scheduling).
 //!
 //! ## Purpose
-//! Routes tasks to appropriate actors based on actor groups and routing strategies.
+//! Routes tasks to appropriate actors based on shard groups and routing strategies.
 //! Uses existing channels for message distribution.
 //!
 //! ## Design
-//! - **Actor Group Management**: Tracks which actors belong to which groups
+//! - **Shard Group Management**: Tracks which actors belong to which shard groups
 //! - **Channel-Based Routing**: Uses channels for task distribution
 //! - **Routing Strategies**: Round-robin, least-loaded, random, hash, broadcast
 //! - **Load Tracking**: Monitors actor queue depth for least-loaded routing
@@ -31,7 +31,7 @@
 use plexspaces_channel::Channel;
 use plexspaces_proto::{
     common::v1::Message,
-    scheduling::v1::ActorGroup,
+    actor::v1::ShardGroup,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,7 +57,7 @@ pub enum RoutingStrategy {
 #[derive(Debug, thiserror::Error)]
 pub enum TaskRouterError {
     /// Group not found
-    #[error("Actor group not found: {0}")]
+    #[error("Shard group not found: {0}")]
     GroupNotFound(String),
 
     /// No actors in group
@@ -87,10 +87,11 @@ struct ActorLoad {
     last_update: std::time::SystemTime,
 }
 
-/// Task router for routing tasks to actor groups
+/// Task router for routing tasks to shard groups
+/// Uses ShardGroup from actor_runtime.proto for Layer 2 task routing
 pub struct TaskRouter {
-    /// Actor groups (group_name -> ActorGroup)
-    groups: Arc<RwLock<HashMap<String, ActorGroup>>>,
+    /// Shard groups (group_id -> ShardGroup)
+    groups: Arc<RwLock<HashMap<String, ShardGroup>>>,
     /// Actor load tracking (actor_id -> ActorLoad)
     actor_loads: Arc<RwLock<HashMap<String, ActorLoad>>>,
     /// Round-robin counters (group_name -> next_index)
@@ -119,64 +120,64 @@ impl TaskRouter {
         }
     }
 
-    /// Register an actor group
+    /// Register a shard group
     ///
     /// ## Arguments
-    /// * `group`: Actor group to register
-    pub async fn register_group(&self, group: ActorGroup) -> TaskRouterResult<()> {
-        let group_name = group.group_name.clone();
+    /// * `group`: Shard group to register
+    pub async fn register_group(&self, group: ShardGroup) -> TaskRouterResult<()> {
+        let group_id = group.group_id.clone();
         let mut groups = self.groups.write().await;
-        groups.insert(group_name.clone(), group);
-        info!("Registered actor group: {}", group_name);
+        groups.insert(group_id.clone(), group);
+        info!("Registered shard group: {}", group_id);
         Ok(())
     }
 
-    /// Unregister an actor group
+    /// Unregister a shard group
     ///
     /// ## Arguments
-    /// * `group_name`: Name of group to unregister
-    pub async fn unregister_group(&self, group_name: &str) -> TaskRouterResult<()> {
+    /// * `group_id`: ID of group to unregister
+    pub async fn unregister_group(&self, group_id: &str) -> TaskRouterResult<()> {
         let mut groups = self.groups.write().await;
-        groups.remove(group_name);
+        groups.remove(group_id);
         let mut counters = self.round_robin_counters.write().await;
-        counters.remove(group_name);
-        info!("Unregistered actor group: {}", group_name);
+        counters.remove(group_id);
+        info!("Unregistered shard group: {}", group_id);
         Ok(())
     }
 
-    /// Add actor to group
+    /// Add actor to shard group
     ///
     /// ## Arguments
-    /// * `group_name`: Group to add actor to
+    /// * `group_id`: Group to add actor to
     /// * `actor_id`: Actor ID to add
-    pub async fn add_actor_to_group(&self, group_name: &str, actor_id: String) -> TaskRouterResult<()> {
+    pub async fn add_actor_to_group(&self, group_id: &str, actor_id: String) -> TaskRouterResult<()> {
         let mut groups = self.groups.write().await;
-        if let Some(group) = groups.get_mut(group_name) {
-            if !group.actor_ids.contains(&actor_id) {
-                group.actor_ids.push(actor_id.clone());
-                info!("Added actor {} to group {}", actor_id, group_name);
+        if let Some(group) = groups.get_mut(group_id) {
+            if !group.shard_actor_ids.contains(&actor_id) {
+                group.shard_actor_ids.push(actor_id.clone());
+                info!("Added actor {} to shard group {}", actor_id, group_id);
             }
             Ok(())
         } else {
-            Err(TaskRouterError::GroupNotFound(group_name.to_string()))
+            Err(TaskRouterError::GroupNotFound(group_id.to_string()))
         }
     }
 
-    /// Remove actor from group
+    /// Remove actor from shard group
     ///
     /// ## Arguments
-    /// * `group_name`: Group to remove actor from
+    /// * `group_id`: Group to remove actor from
     /// * `actor_id`: Actor ID to remove
-    pub async fn remove_actor_from_group(&self, group_name: &str, actor_id: &str) -> TaskRouterResult<()> {
+    pub async fn remove_actor_from_group(&self, group_id: &str, actor_id: &str) -> TaskRouterResult<()> {
         let mut groups = self.groups.write().await;
-        if let Some(group) = groups.get_mut(group_name) {
-            group.actor_ids.retain(|id| id != actor_id);
+        if let Some(group) = groups.get_mut(group_id) {
+            group.shard_actor_ids.retain(|id| id != actor_id);
             let mut loads = self.actor_loads.write().await;
             loads.remove(actor_id);
-            info!("Removed actor {} from group {}", actor_id, group_name);
+            info!("Removed actor {} from shard group {}", actor_id, group_id);
             Ok(())
         } else {
-            Err(TaskRouterError::GroupNotFound(group_name.to_string()))
+            Err(TaskRouterError::GroupNotFound(group_id.to_string()))
         }
     }
 
@@ -194,10 +195,10 @@ impl TaskRouter {
         });
     }
 
-    /// Route task to actor group
+    /// Route task to shard group
     ///
     /// ## Arguments
-    /// * `group_name`: Group to route to
+    /// * `group_id`: Group to route to
     /// * `task_payload`: Task payload
     /// * `strategy`: Routing strategy
     ///
@@ -205,23 +206,23 @@ impl TaskRouter {
     /// Number of actors that received the task
     pub async fn route_task(
         &self,
-        group_name: &str,
+        group_id: &str,
         task_payload: Vec<u8>,
         strategy: RoutingStrategy,
     ) -> TaskRouterResult<u32> {
         // Get group and actor IDs
         let actor_ids = {
             let groups = self.groups.read().await;
-            let group = groups.get(group_name)
-                .ok_or_else(|| TaskRouterError::GroupNotFound(group_name.to_string()))?;
-            if group.actor_ids.is_empty() {
-                return Err(TaskRouterError::NoActorsInGroup(group_name.to_string()));
+            let group = groups.get(group_id)
+                .ok_or_else(|| TaskRouterError::GroupNotFound(group_id.to_string()))?;
+            if group.shard_actor_ids.is_empty() {
+                return Err(TaskRouterError::NoActorsInGroup(group_id.to_string()));
             }
-            group.actor_ids.clone()
+            group.shard_actor_ids.clone()
         };
 
         // Get or create channel for group
-        let channel = (self.channel_factory)(group_name)
+        let channel = (self.channel_factory)(group_id)
             .await
             .map_err(|e| TaskRouterError::ChannelError(e))?;
 
@@ -231,7 +232,7 @@ impl TaskRouter {
             id: message_id.clone(),
             sender_id: String::new(),
             receiver_id: String::new(),
-            channel: group_name.to_string(),
+            channel: group_id.to_string(),
             message_type: "task".to_string(),
             payload: task_payload,
             timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(std::time::SystemTime::now())),
@@ -258,7 +259,7 @@ impl TaskRouter {
             RoutingStrategy::RoundRobin => {
                 // Select actor using round-robin, then send to channel
                 // Channel will deliver to that actor's subscription
-                let actor_id = self.select_round_robin(group_name, &actor_ids).await?;
+                let actor_id = self.select_round_robin(group_id, &actor_ids).await?;
                 channel.send(channel_msg).await
                     .map_err(|e| TaskRouterError::ChannelError(e.to_string()))?;
                 // Update load (message sent, queue depth increases)
@@ -300,9 +301,9 @@ impl TaskRouter {
     }
 
     /// Select actor using round-robin
-    async fn select_round_robin(&self, group_name: &str, actor_ids: &[String]) -> TaskRouterResult<String> {
+    async fn select_round_robin(&self, group_id: &str, actor_ids: &[String]) -> TaskRouterResult<String> {
         let mut counters = self.round_robin_counters.write().await;
-        let counter = counters.entry(group_name.to_string()).or_insert(0);
+        let counter = counters.entry(group_id.to_string()).or_insert(0);
         let idx = *counter % actor_ids.len();
         *counter += 1;
         Ok(actor_ids[idx].clone())
@@ -344,11 +345,11 @@ impl TaskRouter {
         hasher.finish()
     }
 
-    /// Get group information
-    pub async fn get_group(&self, group_name: &str) -> TaskRouterResult<ActorGroup> {
+    /// Get shard group information
+    pub async fn get_group(&self, group_id: &str) -> TaskRouterResult<ShardGroup> {
         let groups = self.groups.read().await;
-        groups.get(group_name)
-            .ok_or_else(|| TaskRouterError::GroupNotFound(group_name.to_string()))
+        groups.get(group_id)
+            .ok_or_else(|| TaskRouterError::GroupNotFound(group_id.to_string()))
             .map(|g| g.clone())
     }
 
@@ -385,11 +386,18 @@ mod tests {
         })
     }
 
-    fn create_test_group(name: &str, actor_ids: Vec<String>) -> ActorGroup {
-        ActorGroup {
-            group_name: name.to_string(),
-            actor_ids,
+    fn create_test_group(group_id: &str, actor_ids: Vec<String>) -> ShardGroup {
+        ShardGroup {
+            group_id: group_id.to_string(),
+            actor_type: "test-actor".to_string(),
+            shard_count: actor_ids.len() as u32,
+            partition_strategy: plexspaces_proto::actor::v1::PartitionStrategy::PartitionStrategyHash as i32,
+            shard_actor_ids: actor_ids,
+            state: plexspaces_proto::actor::v1::ShardGroupState::ShardGroupStateActive as i32,
+            created_at: Some(plexspaces_proto::prost_types::Timestamp::from(std::time::SystemTime::now())),
             metadata: HashMap::new(),
+            labels: HashMap::new(),
+            rebalance_status: None,
         }
     }
 
@@ -401,8 +409,8 @@ mod tests {
         router.register_group(group.clone()).await.unwrap();
 
         let retrieved = router.get_group("test-group").await.unwrap();
-        assert_eq!(retrieved.group_name, "test-group");
-        assert_eq!(retrieved.actor_ids.len(), 1);
+        assert_eq!(retrieved.group_id, "test-group");
+        assert_eq!(retrieved.shard_actor_ids.len(), 1);
     }
 
     #[tokio::test]
@@ -426,9 +434,9 @@ mod tests {
         router.add_actor_to_group("test-group", "actor-2".to_string()).await.unwrap();
 
         let retrieved = router.get_group("test-group").await.unwrap();
-        assert_eq!(retrieved.actor_ids.len(), 2);
-        assert!(retrieved.actor_ids.contains(&"actor-1".to_string()));
-        assert!(retrieved.actor_ids.contains(&"actor-2".to_string()));
+        assert_eq!(retrieved.shard_actor_ids.len(), 2);
+        assert!(retrieved.shard_actor_ids.contains(&"actor-1".to_string()));
+        assert!(retrieved.shard_actor_ids.contains(&"actor-2".to_string()));
     }
 
     #[tokio::test]
@@ -440,8 +448,8 @@ mod tests {
         router.remove_actor_from_group("test-group", "actor-1").await.unwrap();
 
         let retrieved = router.get_group("test-group").await.unwrap();
-        assert_eq!(retrieved.actor_ids.len(), 1);
-        assert_eq!(retrieved.actor_ids[0], "actor-2");
+        assert_eq!(retrieved.shard_actor_ids.len(), 1);
+        assert_eq!(retrieved.shard_actor_ids[0], "actor-2");
     }
 
     #[tokio::test]

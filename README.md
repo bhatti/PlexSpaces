@@ -66,6 +66,13 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 
 ### 🚀 Advanced Features
 
+- **Data-Parallel Actors (DPA-inspired)**: ShardGroup for data-parallel sharding with bulk updates, parallel map, and scatter-gather operations
+  - **ShardGroup**: Partition data across multiple shards/actors with hash/consistent-hash/range strategies
+  - **BulkUpdateShardGroup**: Bulk writes with eventual consistency (DPA UpdateFunction)
+  - **MapShardGroup**: Parallel queries across all shards (DPA Map operator)
+  - **ScatterGather**: Aggregation queries with fault tolerance (DPA Scatter-Gather)
+  - **Unified SDK**: `ParallelClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC (optional feature)
+  - **Resource-Based Routing**: Labels flow through to ActorResourceRequirements for intelligent node placement
 - **FaaS-Style Invocation**: HTTP-based actor invocation via `InvokeActor` RPC (GET for reads, POST/PUT for updates, DELETE for deletes)
   - **RESTful API**: `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` endpoint (or `/api/v1/actors/{namespace}/{actor_type}` without tenant_id)
   - **Namespace Support**: Organize actors by namespace for better isolation (defaults to "default")
@@ -134,62 +141,68 @@ git clone https://github.com/plexobject/plexspaces.git
 cd plexspaces && make build
 ```
 
-### 2. Your First Actor
+### 2. Your First Actor (Rust SDK)
 
 ```rust
-use plexspaces::*;
-use plexspaces_behavior::GenServerBehavior;
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    NodeBuilder, RequestContext, ActorId,
+    spawn_with_facets, call_message, json,
+};
+use std::sync::Arc;
+use std::time::Duration;
 
+// Define actor with SDK annotations (like Python decorators)
+#[gen_server_actor]
 struct Counter {
     count: i32,
 }
 
-#[async_trait]
-impl GenServerBehavior for Counter {
-    type Request = i32;
-    type Reply = i32;
+impl Counter {
+    fn new() -> Self { Self { count: 0 } }
+}
 
-    async fn handle_request(
+// Define handlers - GenServer defaults to "call" (request-reply)
+#[plexspaces_handlers]
+impl Counter {
+    #[handler("increment")]
+    async fn increment(
         &mut self,
-        ctx: &ActorContext,
-        request: Self::Request,
-    ) -> Result<Self::Reply, BehaviorError> {
-        self.count += request;
-        Ok(self.count)
+        _ctx: &plexspaces_sdk::ActorContext,
+        msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        let payload: serde_json::Value = serde_json::from_slice(&msg.payload)?;
+        self.count += payload["amount"].as_i64().unwrap_or(1) as i32;
+        Ok(json!({ "count": self.count }))
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a node
-    let node = PlexSpacesNode::new("node1".to_string()).await?;
+    // Create and start node
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
+    let service_locator = node.service_locator();
     
-    // Spawn a counter actor using ActorFactory
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    use std::sync::Arc;
+    // Spawn node in background
+    let node_clone = node.clone();
+    tokio::spawn(async move { node_clone.start().await });
+    tokio::time::sleep(Duration::from_millis(500)).await;
     
-    let actor_id = "counter@node1".to_string();
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-        .ok_or_else(|| "ActorFactory not found")?;
-    let ctx = plexspaces_core::RequestContext::internal();
-    let _message_sender = actor_factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "Counter", // actor_type
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets (empty for simple actor)
+    // Create request context (tenant isolation required)
+    let ctx = RequestContext::new_without_auth("my-tenant".into(), "default".into());
+    
+    // Spawn actor using SDK helper
+    let actor_ref = spawn_with_facets(
+        &ctx, service_locator.clone(),
+        ActorId::from("counter@node1"), "default",
+        Counter::new(), vec![],
     ).await?;
     
-    // Get actor reference (location-transparent)
-    let actor_ref = plexspaces_actor::ActorRef::remote(
-        actor_id.clone(),
-        node.id().as_str().to_string(),
-        node.service_locator().clone(),
-    );
-    let reply = actor_ref.ask(5, Duration::from_secs(5)).await?;
-    println!("Count: {}", reply);
+    // Send request-reply message using SDK helper
+    let request = call_message(json!({ "action": "increment", "amount": 5 }));
+    let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+    let result: serde_json::Value = serde_json::from_slice(&reply.payload)?;
+    println!("Count: {}", result["count"]);
     
     Ok(())
 }
@@ -203,25 +216,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - 🚀 [Examples](examples/README.md) - Explore real-world patterns
 - 🏗️ [Architecture](docs/architecture.md) - Understand the system design
 
-### Python Actor Example
+### Python Actor Example (SDK)
 
 ```python
-# counter_actor.py
-from plexspaces import Actor, tell, ask
+# counter_actor.py - Build to WASM with: plexspaces-py build counter_actor.py -o counter.wasm
+from plexspaces import actor, state, handler
 
-class CounterActor(Actor):
-    def __init__(self):
-        self.count = 0
+@actor
+class CounterActor:
+    count: int = state(default=0)
     
-    async def handle_increment(self, amount: int):
+    @handler("increment")
+    def increment(self, amount: int = 1) -> dict:
         self.count += amount
-        return self.count
+        return {"count": self.count}
+    
+    @handler("get")
+    def get(self) -> dict:
+        return {"count": self.count}
+```
 
-# Deploy and use
-actor = CounterActor()
-await actor.start("counter@node1")
-result = await ask(actor, "increment", 5)
-print(f"Count: {result}")
+```bash
+# Build and deploy
+plexspaces-py build counter_actor.py -o counter.wasm
+curl -X POST http://localhost:8094/api/v1/deploy \
+  -F "namespace=default" -F "actor_type=counter" -F "wasm=@counter.wasm"
+
+# Invoke via HTTP
+curl "http://localhost:8094/api/v1/actors/default/counter/invoke?msg_type=increment" \
+  -d '{"amount": 5}'
 ```
 
 See the [Getting Started Guide](docs/getting-started.md) for detailed tutorials and the [Concepts Guide](docs/concepts.md) to understand the fundamentals.

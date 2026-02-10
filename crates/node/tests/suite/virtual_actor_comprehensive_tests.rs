@@ -1267,8 +1267,12 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
     
     // Register behavior for actor recreation
     use plexspaces_core::behavior_factory::BehaviorRegistry;
-    let mut registry = BehaviorRegistry::new();
-    registry.register_simple("GenServer", || DurableCounterActor::new()).await;
+    let registry = BehaviorRegistry::new();
+    registry.register_simple("GenServer", || {
+        Box::pin(async move {
+            Ok(Box::new(DurableCounterActor::new()) as Box<dyn plexspaces_core::Actor>)
+        })
+    }).await;
     node.service_locator().register_behavior_registry(Arc::new(registry)).await;
     
     let actor_id: ActorId = "durable-counter-eager@test-node".to_string();
@@ -1427,8 +1431,12 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     
     // Register behavior for actor recreation
     use plexspaces_core::behavior_factory::BehaviorRegistry;
-    let mut registry = BehaviorRegistry::new();
-    registry.register_simple("GenServer", || DurableCounterActor::new()).await;
+    let registry = BehaviorRegistry::new();
+    registry.register_simple("GenServer", || {
+        Box::pin(async move {
+            Ok(Box::new(DurableCounterActor::new()) as Box<dyn plexspaces_core::Actor>)
+        })
+    }).await;
     node.service_locator().register_behavior_registry(Arc::new(registry)).await;
     
     let actor_id: ActorId = "durable-counter-lazy@test-node".to_string();

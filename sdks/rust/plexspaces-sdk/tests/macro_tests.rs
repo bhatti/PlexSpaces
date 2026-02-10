@@ -509,3 +509,91 @@ fn test_all_facets() {
     assert!(TestAllFacetsActor::FACETS.contains(&"metrics"));
     assert!(TestAllFacetsActor::FACETS.contains(&"event_emitter"));
 }
+
+// ============================================================================
+// Test: Message creation helpers (call_message, cast_message, new_message)
+// ============================================================================
+
+use plexspaces_sdk::{call_message, cast_message, new_message};
+
+#[test]
+fn test_call_message_sets_message_type() {
+    let msg = call_message(json!({ "action": "deposit", "amount": 100 }));
+    
+    // Verify message_type is set to "call" for request-reply semantics
+    assert_eq!(msg.message_type, "call");
+    
+    // Verify payload is serialized correctly
+    let payload: Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(payload["action"], "deposit");
+    assert_eq!(payload["amount"], 100);
+    
+    // Verify message has a unique ID (ULID format)
+    assert!(!msg.id.is_empty());
+    assert!(msg.id.len() >= 26); // ULID is 26 characters
+}
+
+#[test]
+fn test_cast_message_sets_message_type() {
+    let msg = cast_message(json!({ "event": "user_login", "user_id": "user-123" }));
+    
+    // Verify message_type is set to "cast" for fire-and-forget semantics
+    assert_eq!(msg.message_type, "cast");
+    
+    // Verify payload is serialized correctly
+    let payload: Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(payload["event"], "user_login");
+    assert_eq!(payload["user_id"], "user-123");
+    
+    // Verify message has a unique ID
+    assert!(!msg.id.is_empty());
+}
+
+#[test]
+fn test_new_message_with_custom_invocation() {
+    // Test "call" invocation
+    let call_msg = new_message("call", json!({ "op": "get" }));
+    assert_eq!(call_msg.message_type, "call");
+    
+    // Test "cast" invocation
+    let cast_msg = new_message("cast", json!({ "op": "notify" }));
+    assert_eq!(cast_msg.message_type, "cast");
+    
+    // Test custom invocation type (for extensibility)
+    let info_msg = new_message("info", json!({ "op": "status" }));
+    assert_eq!(info_msg.message_type, "info");
+}
+
+#[test]
+fn test_message_ids_are_unique() {
+    let msg1 = call_message(json!({}));
+    let msg2 = call_message(json!({}));
+    let msg3 = cast_message(json!({}));
+    
+    // Each message should have a unique ID
+    assert_ne!(msg1.id, msg2.id);
+    assert_ne!(msg2.id, msg3.id);
+    assert_ne!(msg1.id, msg3.id);
+}
+
+#[test]
+fn test_message_payload_serialization() {
+    // Test complex nested payload
+    let msg = call_message(json!({
+        "user": {
+            "name": "John",
+            "age": 30,
+            "roles": ["admin", "user"]
+        },
+        "metadata": {
+            "timestamp": 1234567890,
+            "source": "test"
+        }
+    }));
+    
+    let payload: Value = serde_json::from_slice(&msg.payload).unwrap();
+    assert_eq!(payload["user"]["name"], "John");
+    assert_eq!(payload["user"]["age"], 30);
+    assert_eq!(payload["user"]["roles"][0], "admin");
+    assert_eq!(payload["metadata"]["timestamp"], 1234567890);
+}

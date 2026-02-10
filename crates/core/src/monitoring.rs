@@ -51,6 +51,21 @@ pub trait NodeMetricsAccessor: Send + Sync {
     
     /// Increment failed_deliveries counter
     async fn increment_failed_deliveries(&self);
+    
+    /// Increment shard_groups_created counter
+    async fn increment_shard_groups_created(&self);
+    
+    /// Increment shard_messages_sent counter
+    async fn increment_shard_messages_sent(&self);
+    
+    /// Increment shard_messages_received counter
+    async fn increment_shard_messages_received(&self);
+    
+    /// Increment shard_operations_total counter
+    async fn increment_shard_operations_total(&self);
+    
+    /// Increment shard_operations_failed counter
+    async fn increment_shard_operations_failed(&self);
 }
 
 /// Trait for accessing node connection information

@@ -32,11 +32,13 @@ mod r#mod;
 mod messages;
 mod builder;
 mod lru_cache;
+mod message_helpers;
 
 // Re-export all public items
 pub use r#mod::*;
 pub use messages::*;
 pub use builder::MailboxBuilder;
+// message_helpers are re-exported from r#mod::* above, no need to re-export again
 
 // TTL tests
 #[cfg(test)]

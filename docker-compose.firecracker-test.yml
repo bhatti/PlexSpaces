@@ -10,7 +10,7 @@ services:
   plexspaces-firecracker-test:
     build:
       context: .
-      dockerfile: Dockerfile.firecracker-test
+      dockerfile: Dockerfile.firecracker
     container_name: plexspaces-firecracker-test
     hostname: firecracker-test-node
     ports:
@@ -18,6 +18,7 @@ services:
     environment:
       - PLEXSPACES_NODE_ID=firecracker-test-node
       - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+      - PLEXSPACES_BASE_DIR=/app/data
       - RUST_LOG=info
     # Required capabilities for Firecracker
     cap_add:

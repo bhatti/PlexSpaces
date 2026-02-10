@@ -1,0 +1,39 @@
+# Entity Recognition App - Showcases FSM, GenServer, and GenEvent patterns
+#
+# Demonstrates PlexSpaces SDK annotations for multiple actor behavior types:
+# - DocumentProcessor (FSM): State machine for document processing pipeline
+# - EntityExtractor (GenServer): Request-reply entity extraction service
+# - AuditLogger (GenEvent): Fire-and-forget audit event logging
+#
+# Build: cargo build
+# Run: cargo run
+# Test: ./test.sh
+
+[workspace]
+
+[package]
+name = "entity-recognition"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Entity recognition pipeline showcasing FSM, GenServer, and GenEvent patterns"
+
+[[bin]]
+name = "entity_recognition"
+path = "src/main.rs"
+
+[dependencies]
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
+plexspaces-behavior = { path = "../../../../crates/behavior" }
+plexspaces-journaling = { path = "../../../../crates/journaling" }
+plexspaces-proto = { path = "../../../../crates/proto" }
+plexspaces-facet = { path = "../../../../crates/facet" }
+
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

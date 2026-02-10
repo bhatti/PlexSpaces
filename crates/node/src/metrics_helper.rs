@@ -167,6 +167,16 @@ impl CoordinationComputeTracker {
         self.current_step_message_count = 0;
     }
 
+    /// Get current compute duration (without finalizing)
+    pub fn compute_duration(&self) -> Duration {
+        self.compute_duration
+    }
+
+    /// Get current coordinate duration (without finalizing)
+    pub fn coordinate_duration(&self) -> Duration {
+        self.coordinate_duration
+    }
+
     /// Finalize metrics and return report
     pub fn finalize(mut self) -> CoordinationComputeMetrics {
         // Finalize any remaining step

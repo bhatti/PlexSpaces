@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Optimized Dockerfile for PlexSpaces Node with Firecracker support
+# Uses BuildKit cache mounts for faster rebuilds
+# Build with: DOCKER_BUILDKIT=1 docker build -f Dockerfile.firecracker.optimized -t plexspaces:firecracker .
+
+# Build for linux/amd64 (Firecracker only supports x86_64)
+FROM --platform=linux/amd64 rust:1-bookworm AS builder
+
+# Install exact Rust version to match rust-toolchain.toml (1.93.0)
+RUN rustup install 1.93.0 && rustup default 1.93.0
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    pkg-config \
+    libssl-dev \
+    cmake \
+    build-essential \
+    clang \
+    llvm \
+    libclang-dev \
+    git \
+    curl \
+    ca-certificates \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files first (for better caching - cached unless Cargo.toml/Cargo.lock changes)
+COPY Cargo.toml Cargo.lock ./
+
+# Copy SDKs (workspace members required for cargo build)
+COPY sdks/ ./sdks/
+
+# Stage 1: Build dependencies only (cached unless Cargo.toml/Cargo.lock changes)
+# This creates a dummy main.rs to build dependencies without building the actual code
+RUN mkdir -p crates/cli/src && \
+    echo "fn main() {}" > crates/cli/src/main.rs && \
+    echo 'fn main() {}' > src/main.rs 2>/dev/null || true
+
+# Copy all crates (but we'll use the dummy main.rs for dependency build)
+COPY crates/ ./crates/
+
+# Build dependencies only (this layer will be cached unless Cargo.toml/Cargo.lock changes)
+# Use BuildKit cache mount for Cargo registry and git cache
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --features firecracker -p plexspaces-cli || true
+
+# Stage 2: Build actual application code
+# Copy real source code (this invalidates only the final build layer)
+COPY crates/cli/src/main.rs crates/cli/src/main.rs
+COPY src/main.rs src/main.rs 2>/dev/null || true
+
+# Build the actual application (uses cached dependencies from previous stage)
+# Use BuildKit cache mount for incremental compilation
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --features firecracker -p plexspaces-cli
+
+# Runtime stage - must be linux/amd64 for Firecracker
+FROM --platform=linux/amd64 debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies (including netcat for health checks)
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    wget \
+    netcat-openbsd \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install grpc_health_probe for K8s health checks
+RUN curl -sSL "https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.24/grpc_health_probe-linux-amd64" \
+    -o "/usr/local/bin/grpc_health_probe" && \
+    chmod +x /usr/local/bin/grpc_health_probe
+
+# Install Firecracker binary (v1.0.4.0)
+RUN mkdir -p /usr/bin /var/lib/firecracker && \
+    wget -q https://github.com/firecracker-microvm/firecracker/releases/download/v1.0.4.0/firecracker-v1.0.4.0-x86_64.tgz && \
+    tar -xzf firecracker-v1.0.4.0-x86_64.tgz && \
+    mv release-v1.0.4.0-x86_64/firecracker-v1.0.4.0-x86_64 /usr/bin/firecracker && \
+    chmod +x /usr/bin/firecracker && \
+    rm -rf firecracker-v1.0.4.0-x86_64.tgz release-v1.0.4.0-x86_64 && \
+    firecracker --version
+
+# Create app user (non-root)
+RUN useradd -m -u 1000 plexspaces
+
+# Copy CLI binary from builder
+COPY --from=builder /app/target/release/plexspaces /usr/local/bin/plexspaces
+
+# Create config and data directories
+RUN mkdir -p /app/config /app/data /app/data/db /app/data/blob /app/certs && \
+    chown -R plexspaces:plexspaces /app && \
+    chmod -R 755 /app/data
+
+# Copy default release configuration (if exists)
+RUN if [ -f config/release.yaml ]; then \
+        cp config/release.yaml /app/config/release.yaml && \
+        chown plexspaces:plexspaces /app/config/release.yaml; \
+    else \
+        echo "# Default release config" > /app/config/release.yaml && \
+        chown plexspaces:plexspaces /app/config/release.yaml; \
+    fi
+
+# Switch to non-root user
+USER plexspaces
+
+# Expose the default gRPC port
+EXPOSE 8000
+
+# Default environment variables
+ENV PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
+ENV PLEXSPACES_NODE_ID=node1
+ENV PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+ENV PLEXSPACES_BASE_DIR=/app/data
+
+# Health check using gRPC health probe
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD grpc_health_probe -addr=:8000 -service=readiness || nc -z localhost 8000 || exit 1
+
+# Run the PlexSpaces node using CLI start command
+ENTRYPOINT ["plexspaces", "start"]
+CMD ["--node-id", "${PLEXSPACES_NODE_ID}", "--listen-addr", "${PLEXSPACES_LISTEN_ADDR}", "--release-config", "${PLEXSPACES_RELEASE_CONFIG}"]

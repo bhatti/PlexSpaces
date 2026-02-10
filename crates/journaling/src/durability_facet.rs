@@ -49,23 +49,23 @@
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Configure durability
+//! // Uses shared database from RuntimeConfig.db (no backend config needed)
 //! let config = DurabilityConfig {
-//!     backend: JournalBackend::JournalBackendSqlite as i32,
 //!     checkpoint_interval: 100,
 //!     checkpoint_timeout: None,
 //!     replay_on_activation: true,
 //!     cache_side_effects: true,
 //!     compression: CompressionType::CompressionTypeNone as i32,
 //!     state_schema_version: 1,
-//!     backend_config: None,
 //! };
 //!
-//! // Create storage backend
-//! let storage = SqliteJournalStorage::new(":memory:").await?;
+//! // Create storage backend using shared database URL
+//! use plexspaces_journaling::storage::create_journal_storage;
+//! let db_url = "sqlite:///tmp/journal.db";
+//! let storage = create_journal_storage(&db_url).await?;
 //!
 //! // Create durability facet
 //! let config_value = serde_json::json!({
-//!     "backend": config.backend,
 //!     "checkpoint_interval": config.checkpoint_interval,
 //!     "replay_on_activation": config.replay_on_activation,
 //! });
@@ -88,7 +88,7 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
 use plexspaces_proto::prost_types;
-use plexspaces_proto::v1::journaling::{CompressionType, JournalBackend};
+use plexspaces_proto::v1::journaling::CompressionType;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -238,12 +238,8 @@ impl DurabilityFacet {
     /// Parse Value to DurabilityConfig
     fn parse_config(config: Value) -> DurabilityConfig {
         // Extract values from JSON config or use defaults
+        // DurabilityConfig no longer has backend/backend_config fields - uses shared database
         DurabilityConfig {
-            backend: config
-                .get("backend")
-                .and_then(|v| v.as_i64())
-                .map(|v| v as i32)
-                .unwrap_or(JournalBackend::JournalBackendMemory as i32),
             checkpoint_interval: config
                 .get("checkpoint_interval")
                 .and_then(|v| v.as_i64())
@@ -279,7 +275,6 @@ impl DurabilityFacet {
                 .and_then(|v| v.as_i64())
                 .map(|v| v as u32)
                 .unwrap_or(1),
-            backend_config: None, // BackendConfig doesn't implement Deserialize, skip for now
         }
     }
 
@@ -1368,21 +1363,18 @@ mod tests {
 
     fn create_test_config() -> DurabilityConfig {
         DurabilityConfig {
-            backend: JournalBackend::JournalBackendMemory as i32,
             checkpoint_interval: 10, // Checkpoint every 10 messages
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
             state_schema_version: 1,
-            backend_config: None,
         }
     }
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
         let mut json = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,

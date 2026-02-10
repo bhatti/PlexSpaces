@@ -765,6 +765,7 @@ impl WasmApplication {
     /// - If actor not found, treats as success (already stopped)
     async fn stop_actor_gracefully(&self, actor_id: &str) -> Result<(), ApplicationError> {
         use tokio::time::{timeout, Duration};
+        use plexspaces_core::RequestContext;
         
         // Get node reference
         let node_ref = {
@@ -786,7 +787,7 @@ impl WasmApplication {
             }
             
             // Use ActorFactory directly from ServiceLocator
-            let service_locator = node.service_locator()
+            let _service_locator = node.service_locator()
                 .ok_or_else(|| ApplicationError::ActorStopFailed(
                     actor_id.to_string(),
                     "ServiceLocator not available from node".to_string()
@@ -800,8 +801,14 @@ impl WasmApplication {
                     "ActorFactory not found in ServiceLocator".to_string()
                 ))?;
             
+            // Create RequestContext for stop operation using application's tenant/namespace
+            // Application owns its actors, so it can stop them
+            let tenant_id = self.tenant_id.read().await.clone();
+            let namespace = self.namespace.read().await.clone();
+            let ctx = RequestContext::new_without_auth(tenant_id, namespace);
+            
             let actor_id_string = actor_id.to_string();
-            match timeout(timeout_duration, actor_factory.stop_actor(&actor_id_string)).await {
+            match timeout(timeout_duration, actor_factory.stop_actor(&ctx, &actor_id_string)).await {
                 Ok(Ok(())) => {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(

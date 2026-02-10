@@ -59,7 +59,7 @@ use async_trait::async_trait;
 #[cfg(feature = "sql-backend")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "sql-backend")]
-use plexspaces_proto::tuplespace::v1::{PostgresStorageConfig, SqliteStorageConfig, StorageStats};
+use plexspaces_proto::tuplespace::v1::StorageStats;
 #[cfg(feature = "sql-backend")]
 use sqlx::{postgres::PgPoolOptions, sqlite::SqlitePoolOptions, PgPool, Row, SqlitePool};
 #[cfg(feature = "sql-backend")]
@@ -67,11 +67,22 @@ use std::time::Duration;
 #[cfg(feature = "sql-backend")]
 use std::sync::Arc;
 
-// Re-export config types for external use
+// Local config types (proto types removed, now using shared database)
 #[cfg(feature = "sql-backend")]
-pub use plexspaces_proto::tuplespace::v1::{
-    PostgresStorageConfig as PostgresConfig, SqliteStorageConfig as SqliteConfig,
-};
+#[derive(Debug, Clone)]
+pub struct SqliteConfig {
+    pub database_path: String,
+    pub enable_wal: bool,
+    pub cache_size_kb: u32,
+}
+
+#[cfg(feature = "sql-backend")]
+#[derive(Debug, Clone)]
+pub struct PostgresConfig {
+    pub connection_string: String,
+    pub pool_size: u32,
+    pub table_name: String,
+}
 
 #[cfg(feature = "sql-backend")]
 use super::{TupleSpaceStorage, WatchEventMessage};
@@ -162,7 +173,7 @@ struct SqlOperationStats {
 #[cfg(feature = "sql-backend")]
 impl SqlStorage {
     /// Create new PostgreSQL storage
-    pub async fn new_postgres(config: PostgresStorageConfig) -> Result<Self, TupleSpaceError> {
+    pub async fn new_postgres(config: PostgresConfig) -> Result<Self, TupleSpaceError> {
         let pg_pool = PgPoolOptions::new()
             .max_connections(config.pool_size)
             .connect(&config.connection_string)
@@ -189,7 +200,7 @@ impl SqlStorage {
     }
 
     /// Create new SQLite storage
-    pub async fn new_sqlite(config: SqliteStorageConfig) -> Result<Self, TupleSpaceError> {
+    pub async fn new_sqlite(config: SqliteConfig) -> Result<Self, TupleSpaceError> {
         // SQLite connection string format: sqlite://path/to/db.sqlite or sqlite::memory:
         let connection_string = if config.database_path == ":memory:" {
             "sqlite::memory:".to_string()
@@ -1182,7 +1193,7 @@ mod tests {
 
     /// Helper to create test SQLite storage (in-memory)
     async fn create_test_storage() -> SqlStorage {
-        let config = SqliteStorageConfig {
+        let config = SqliteConfig {
             database_path: ":memory:".to_string(),
             enable_wal: false,
             cache_size_kb: 2000,
@@ -1341,7 +1352,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let db_path = temp_file.path().to_str().unwrap().to_string();
 
-        let config = SqliteStorageConfig {
+        let config = SqliteConfig {
             database_path: db_path.clone(),
             enable_wal: false,
             cache_size_kb: 2000,
@@ -1486,7 +1497,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let db_path = temp_file.path().to_str().unwrap().to_string();
 
-        let config = SqliteStorageConfig {
+        let config = SqliteConfig {
             database_path: db_path.clone(),
             enable_wal: false,
             cache_size_kb: 2000,
@@ -1565,7 +1576,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let db_path = temp_file.path().to_str().unwrap().to_string();
 
-        let config = SqliteStorageConfig {
+        let config = SqliteConfig {
             database_path: db_path.clone(),
             enable_wal: false,
             cache_size_kb: 2000,

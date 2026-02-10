@@ -44,7 +44,7 @@
 // - **Example**: All actors subscribed to "config-updates" receive new config
 // - **When to Use**: Need broadcast/coordination, not horizontal scaling
 //
-// ### 2. Actor Groups (Sharding) - actor_groups.proto
+// ### 2. Shard Groups (Sharding) - See actor_runtime.proto ShardGroup
 // - **Purpose**: Data-parallel horizontal scaling (NSDI'22 lattice actors)
 // - **Pattern**: Partition key → specific shard (1-to-one routing)
 // - **Use Cases**: Sharded counters, distributed cache, time-series indexes
@@ -170,7 +170,7 @@
 // - **Tracking**: join_count field ensures balanced join/leave operations
 //
 // ### Why No Scatter-Gather?
-// - **Purpose Mismatch**: Scatter-gather belongs in actor_groups.proto (sharding)
+// - **Purpose Mismatch**: Scatter-gather belongs in ShardGroup (sharding) - see actor_runtime.proto
 // - **Process Groups**: Focus is pub/sub, not distributed aggregation
 // - **User Control**: Users implement custom aggregation if needed
 // - **Simplicity**: Keep process groups simple and focused

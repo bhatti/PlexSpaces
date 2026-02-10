@@ -150,7 +150,11 @@ enum Commands {
         #[arg(short, long, default_value = "localhost:8000")]
         node: String,
     },
-    
+
+    /// Node connectivity: connect, disconnect, list connected nodes
+    #[command(subcommand)]
+    Node(node::NodeCommands),
+
     /// Start a PlexSpaces node instance
     Start {
         /// Node ID (unique identifier for this node)
@@ -277,6 +281,9 @@ async fn main() -> Result<()> {
         }
         Commands::Status { node } => {
             node::status(&node).await
+        }
+        Commands::Node(cmd) => {
+            node::handle_node_command(cmd).await
         }
         Commands::Start { node_id, listen_addr, release_config } => {
             node::start(&node_id, &listen_addr, release_config.as_deref()).await

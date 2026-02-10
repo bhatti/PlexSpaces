@@ -117,15 +117,14 @@
 //! let storage = SqliteJournalStorage::new("/var/lib/plexspaces/journal.db").await?;
 //!
 //! // Configure durability with checkpointing
+//! // Uses shared database from RuntimeConfig.db (no backend config needed)
 //! let config = DurabilityConfig {
-//!     backend: JournalBackend::JournalBackendSqlite as i32,
 //!     checkpoint_interval: 1000,  // Checkpoint every 1000 messages
 //!     checkpoint_timeout: None,
 //!     replay_on_activation: true,
 //!     cache_side_effects: true,
 //!     compression: CompressionType::CompressionTypeZstd as i32,  // Enable compression
 //!     state_schema_version: 1,
-//!     backend_config: None,
 //! };
 //!
 //! let config_value = serde_json::json!({
@@ -149,15 +148,14 @@
 //! let storage = SqliteJournalStorage::new(":memory:").await?;
 //!
 //! // Configure durability
+//! // Uses shared database from RuntimeConfig.db (no backend config needed)
 //! let config = DurabilityConfig {
-//!     backend: JournalBackend::JournalBackendSqlite as i32,
 //!     checkpoint_interval: 100,  // Checkpoint every 100 messages
 //!     checkpoint_timeout: None,
 //!     replay_on_activation: true,  // Replay journal on restart
 //!     cache_side_effects: true,    // Cache external calls during replay
 //!     compression: CompressionType::CompressionTypeNone as i32,
 //!     state_schema_version: 1,
-//!     backend_config: None,
 //! };
 //!
 //! // Create durability facet
@@ -264,23 +262,19 @@ pub use plexspaces_proto::journaling::v1::{
     EventSourcingConfig,
     GetLatestCheckpointRequest,
     GetStatsRequest,
-    JournalBackend,
     JournalEntry,
     JournalStats,
     MessageProcessed,
     MessageReceived,
-    PostgresJournalConfig,
     ProcessingResult,
     PromiseCreated,
     PromiseResolved,
-    RedisJournalConfig,
     ReplayFromRequest,
     SaveCheckpointRequest,
     SaveCheckpointResponse,
     SideEffectEntry,
     SideEffectExecuted,
     SideEffectType,
-    SqliteJournalConfig,
     StateChanged,
     TimerFired,
     TimerScheduled,

@@ -63,19 +63,21 @@ impl Application for ByzantineApplication {
         // BehaviorRegistry maps actor_type -> behavior factory function
         // This is needed for spawn() to create the right behavior
         
-        let mut behavior_registry = BehaviorRegistry::new();
+        let behavior_registry = BehaviorRegistry::new();
         behavior_registry.register("ByzantineGeneral", |initial_state: &[u8]| {
-            let state: serde_json::Value = serde_json::from_slice(initial_state)
-                .map_err(|e| plexspaces_core::BehaviorFactoryError::InvalidArguments(
-                    "ByzantineGeneral".to_string(),
-                    format!("Invalid JSON: {}", e),
-                ))?;
-            
-            let id = state["id"].as_u64().unwrap_or(0) as usize;
-            let source_id = state["source_id"].as_u64().unwrap_or(0) as usize;
-            let num_rounds = state["num_rounds"].as_u64().unwrap_or(1) as usize;
-            
-            Ok(Box::new(General::new(id, source_id, num_rounds)) as Box<dyn plexspaces_core::Actor>)
+            Box::pin(async move {
+                let state: serde_json::Value = serde_json::from_slice(initial_state)
+                    .map_err(|e| plexspaces_core::BehaviorFactoryError::InvalidArguments(
+                        "ByzantineGeneral".to_string(),
+                        format!("Invalid JSON: {}", e),
+                    ))?;
+                
+                let id = state["id"].as_u64().unwrap_or(0) as usize;
+                let source_id = state["source_id"].as_u64().unwrap_or(0) as usize;
+                let num_rounds = state["num_rounds"].as_u64().unwrap_or(1) as usize;
+                
+                Ok(Box::new(General::new(id, source_id, num_rounds)) as Box<dyn plexspaces_core::Actor>)
+            })
         }).await;
         
         // Use strongly-typed method (object-safe)

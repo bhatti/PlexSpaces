@@ -109,7 +109,7 @@ pub struct Node {
     /// Processes scheduling requests asynchronously with lease-based coordination
     background_scheduler: Arc<RwLock<Option<Arc<plexspaces_scheduler::background::BackgroundScheduler>>>>,
     /// Task router (Phase 5: Task routing)
-    /// Routes tasks to actor groups using channels
+    /// Routes tasks to shard groups using channels
     task_router: Arc<RwLock<Option<Arc<plexspaces_scheduler::TaskRouter>>>>,
     /// WASM runtime for dynamic actor deployment (created in start())
     wasm_runtime: Arc<RwLock<Option<Arc<plexspaces_wasm_runtime::WasmRuntime>>>>,
@@ -169,6 +169,11 @@ fn default_node_metrics(node_id: &str, cluster_name: &str) -> NodeMetrics {
         failed_deliveries: 0,
         active_actors: 0,
         connected_nodes: 0,
+        shard_groups_created: 0,
+        shard_messages_sent: 0,
+        shard_messages_received: 0,
+        shard_operations_total: 0,
+        shard_operations_failed: 0,
         node_id: node_id.to_string(),
         cluster_name: cluster_name.to_string(),
     }
@@ -212,17 +217,25 @@ impl Node {
     /// ## Idempotent
     /// Safe to call multiple times - uses a OnceCell-like pattern internally.
     pub async fn initialize_services(&self) -> Result<(), NodeError> {
-        // Determine NodeConfig: priority is release_spec.node > defaults
-        let proto_node_config = {
+        // CRITICAL: Node ID from NodeBuilder/CLI takes priority over release.yaml
+        // This ensures --node-id "node1" overrides release.yaml's "my-node"
+        let actual_node_id = self.id.as_str().to_string();
+        
+        // Determine NodeConfig: use release_spec.node for other fields, but override id with actual_node_id
+        let mut proto_node_config = {
             let release_spec = self.release_spec.read().await;
             if let Some(ref spec) = *release_spec {
-                // Use NodeConfig from ReleaseSpec if available
+                // Use NodeConfig from ReleaseSpec if available, but override id
                 if let Some(ref node_config) = spec.node {
-                    node_config.clone()
+                    let mut config = node_config.clone();
+                    // CRITICAL: Override node ID with actual node ID from NodeBuilder/CLI
+                    // This ensures actor IDs use the correct node suffix for routing
+                    config.id = actual_node_id.clone();
+                    config
                 } else {
                     // ReleaseSpec exists but node is None - create default
                     plexspaces_proto::node::v1::NodeConfig {
-                        id: self.id.as_str().to_string(),
+                        id: actual_node_id.clone(),
                         listen_addr: self.config.listen_addr.clone(),
                         cluster_seed_nodes: vec![],
                         cluster_name: String::new(),
@@ -238,7 +251,7 @@ impl Node {
             } else {
                 // No ReleaseSpec - create default from Node config
                 plexspaces_proto::node::v1::NodeConfig {
-                    id: self.id.as_str().to_string(),
+                    id: actual_node_id.clone(),
                     listen_addr: self.config.listen_addr.clone(),
                     cluster_seed_nodes: vec![],
                     cluster_name: String::new(),
@@ -252,11 +265,19 @@ impl Node {
                 }
             }
         };
+        
+        // CRITICAL: Ensure node ID matches actual node ID (defensive check)
+        proto_node_config.id = actual_node_id.clone();
 
+        // CRITICAL: Set PLEXSPACES_NODE_ID env var so config_manager::initialize() uses correct node ID
+        // This ensures ActorRegistry and all components use the correct node ID (from CLI args, not release.yaml)
+        std::env::set_var("PLEXSPACES_NODE_ID", &actual_node_id);
+        
         // Initialize all services in ServiceLocator (centralized initialization)
         // ServiceLocator now creates ActorFactoryImpl, facet factories, ActorServiceImpl, and TupleSpaceProvider
+        // CRITICAL: Pass actual_node_id (from NodeBuilder/CLI) not proto_node_config.id (which may be from release.yaml)
         self.service_locator.initialize_services(
-            Some(self.id.as_str().to_string()),
+            Some(actual_node_id.clone()),
             Some(proto_node_config.clone()),
             self.release_spec.read().await.clone(),
         ).await;
@@ -741,6 +762,36 @@ impl Node {
     pub(crate) async fn increment_failed_deliveries(&self) {
         let mut metrics = self.metrics.write().await;
         metrics.failed_deliveries += 1;
+    }
+    
+    /// Increment shard_groups_created counter (for NodeMetricsAccessor)
+    pub(crate) async fn increment_shard_groups_created(&self) {
+        let mut metrics = self.metrics.write().await;
+        metrics.shard_groups_created += 1;
+    }
+    
+    /// Increment shard_messages_sent counter (for NodeMetricsAccessor)
+    pub(crate) async fn increment_shard_messages_sent(&self) {
+        let mut metrics = self.metrics.write().await;
+        metrics.shard_messages_sent += 1;
+    }
+    
+    /// Increment shard_messages_received counter (for NodeMetricsAccessor)
+    pub(crate) async fn increment_shard_messages_received(&self) {
+        let mut metrics = self.metrics.write().await;
+        metrics.shard_messages_received += 1;
+    }
+    
+    /// Increment shard_operations_total counter (for NodeMetricsAccessor)
+    pub(crate) async fn increment_shard_operations_total(&self) {
+        let mut metrics = self.metrics.write().await;
+        metrics.shard_operations_total += 1;
+    }
+    
+    /// Increment shard_operations_failed counter (for NodeMetricsAccessor)
+    pub(crate) async fn increment_shard_operations_failed(&self) {
+        let mut metrics = self.metrics.write().await;
+        metrics.shard_operations_failed += 1;
     }
 
 
@@ -1357,7 +1408,7 @@ impl Node {
 
         // Create scheduling components (Phase 4 & 5)
         use plexspaces_scheduler::{
-            SchedulingServiceImpl, TaskRouter, SqliteSchedulingStateStore,
+            SchedulingServiceImpl, TaskRouter,
             background::BackgroundScheduler,
             capacity_tracker::CapacityTracker,
             state_store::SchedulingStateStore,
@@ -1365,40 +1416,22 @@ impl Node {
         use plexspaces_channel::InMemoryChannel;
         use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee};
         
-        // Get database URL from RuntimeConfig.db (already initialized by config_manager)
-        let db_url = {
-            let release_spec = self.release_spec.read().await;
-            release_spec.as_ref()
-                .and_then(|r| r.runtime.as_ref())
-                .and_then(|rt| rt.db.as_ref())
-                .map(|db| db.connection_string.clone())
-                .filter(|s| !s.is_empty())
-        };
+        // Get shared database URL from RuntimeConfig.db (already initialized by config_manager)
+        // Scheduler uses the same shared database as other components (blob, etc.)
+        let db_url = self.get_shared_database_url().await;
         
-        // Use in-memory if URL contains ":memory:"
-        let use_memory = db_url.as_ref()
-            .map(|s| s.contains(":memory:"))
-            .unwrap_or(false);
-        
-        // Create state store using SQLite (use :memory: for in-memory mode)
-        let state_store: Arc<dyn SchedulingStateStore> = {
-            let db_path = if use_memory { ":memory:".to_string() } else {
-                // Use the same SQLite database path as KV store but with different table
-                let node_id = self.id().as_str()
-                    .replace(['@', '/', '\\', ':'], "-");
-                format!("/tmp/plexspaces-scheduler-{}.db", node_id)
-            };
-            match SqliteSchedulingStateStore::new(&db_path).await {
-                Ok(store) => Arc::new(store),
-                Err(e) => {
-                    tracing::error!(error = %e, "Failed to create SQLite scheduler state store, using in-memory");
-                    match SqliteSchedulingStateStore::new(":memory:").await {
-                        Ok(store) => Arc::new(store),
-                        Err(e2) => {
-                            return Err(NodeError::ConfigError(format!("Failed to create scheduler state store: {}", e2)));
-                        }
-                    }
-                }
+        // Create state store using factory method (uses shared database)
+        use plexspaces_scheduler::state_store::create_state_store;
+        let state_store: Arc<dyn SchedulingStateStore> = match create_state_store(&db_url).await {
+            Ok(store) => store,
+            Err(e) => {
+                // FATAL: Cannot create state store - fail startup
+                let error_msg = format!(
+                    "FATAL: Failed to create scheduler state store with database '{}': {}. Cannot proceed without database access.",
+                    db_url, e
+                );
+                tracing::error!(error = %e, db_url = %db_url, "{}", error_msg);
+                return Err(NodeError::ConfigError(error_msg));
             }
         };
         
@@ -1492,6 +1525,12 @@ impl Node {
         {
             let mut router = self.task_router.write().await;
             *router = Some(task_router.clone());
+        }
+        
+        // Register TaskRouter in ServiceLocator for ShardGroup integration
+        self.service_locator_impl().register_task_router(task_router.clone()).await;
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("✅ TaskRouter registered in ServiceLocator");
         }
         
         tracing::warn!("Node {}: Scheduling service initialized", self.id.as_str());
@@ -1819,7 +1858,18 @@ impl Node {
                 ProcessGroupServiceServer::new(process_group_service)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
-            );
+            )
+            .add_service({
+                use plexspaces_proto::node::v1::node_service_server::NodeServiceServer;
+                use plexspaces_services::node_service::NodeServiceImpl;
+                let node_service = NodeServiceImpl::new(
+                    self.service_locator.clone(),
+                    self.id.as_str().to_string(),
+                );
+                NodeServiceServer::new(node_service)
+                    .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
+                    .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
+            });
         
         // Add dashboard service if feature enabled
         #[cfg(feature = "dashboard")]

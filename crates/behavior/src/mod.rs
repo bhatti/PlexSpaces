@@ -239,36 +239,50 @@ pub trait GenServer: Actor {
         match msg_type {
             MessageType::Call => {
                 // DEBUG: Check if sender is temporary sender
+                use plexspaces_core::TEMP_SENDER_PREFIX;
                 let sender_is_temp = !msg.sender_id.is_empty() 
-                    && msg.sender_id.starts_with("ask-") 
+                    && msg.sender_id.starts_with(&format!("{}-", TEMP_SENDER_PREFIX)) 
                     && msg.sender_id.contains('@');
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        "[ROUTE_MESSAGE] Routing to handle_request: message_id={}, sender={}, is_temporary_sender={}, target_actor_id={}, correlation_id={}",
-                        msg.id, msg.sender_id, sender_is_temp, target_actor_id, msg.correlation_id
-                    );
-                }
                 
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
-                let _sender_id = msg.sender_id.clone();
+                let message_type = msg.message_type.clone();
+                let sender_id = msg.sender_id.clone();
+                let receiver_id = msg.receiver_id.clone();
                 let correlation_id = msg.correlation_id.clone();
+                
+                // Log route_message at debug level (consolidated to reduce noise, guarded)
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[ROUTE_MESSAGE] Call: message_id={}, target={}, correlation_id={}",
+                        message_id, target_actor_id, correlation_id
+                    );
+                }
                 
                 // Call handle_request with Message (handler will use ActorService::send() to send reply)
                 let result = self.handle_request(ctx, msg).await;
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        "[ROUTE_MESSAGE] handle_request completed: message_id={}, target_actor_id={}, correlation_id={:?}, result={:?}",
-                        message_id, target_actor_id, correlation_id, result.is_ok()
+                    match &result {
+                        Ok(_) => {
+                            tracing::debug!(
+                                "[ROUTE_MESSAGE] Completed: message_id={}, target={}, correlation_id={}",
+                                message_id, target_actor_id, correlation_id
+                            );
+                        }
+                        Err(_) => {
+                            // Errors are logged at warn level below
+                        }
+                    }
+                }
+                
+                // Always log errors at warn level
+                if let Err(e) = &result {
+                    tracing::warn!(
+                        "[ROUTE_MESSAGE] Failed: message_id={}, target={}, correlation_id={}, error={}",
+                        message_id, target_actor_id, correlation_id, e
                     );
                 }
                 result?;
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        "[ROUTE_MESSAGE] handle_request COMPLETED: message_id={}, target_actor_id={}, correlation_id={:?}",
-                        message_id, target_actor_id, correlation_id
-                    );
-                }
                 
                 metrics::counter!("plexspaces_behavior_genserver_replies_sent_total", "behavior" => "genserver").increment(1);
                 
@@ -777,6 +791,16 @@ pub trait Workflow: Actor {
                         reply_msg.correlation_id = msg.correlation_id.clone();
                     } else if let Some(corr_id) = msg.headers.get("correlation_id") {
                         reply_msg.correlation_id = corr_id.clone();
+                    }
+                    
+                    // Ensure reply message ID has "res-" prefix
+                    // Note: Message IDs are managed by send_reply() in actor_context.rs, but we ensure prefix here for consistency
+                    if reply_msg.id.is_empty() || (!reply_msg.id.starts_with("res-") && !reply_msg.id.starts_with("req-")) {
+                        // Generate new ID with res- prefix if empty or missing prefix
+                        // Use timestamp-based ID generation since ulid may not be available
+                        use std::time::{SystemTime, UNIX_EPOCH};
+                        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                        reply_msg.id = format!("res-{:x}", timestamp);
                     }
                     
                     // Use ActorService::send() to send reply (handles local/remote automatically)

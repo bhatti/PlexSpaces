@@ -48,12 +48,18 @@ use std::sync::Arc;
 use wasmtime::Result as WasmtimeResult;
 
 // Generate bindings from simplified WIT files
+// The bindgen macro generates types like ActorWorld for the "actor-world" world
 #[cfg(feature = "component-model")]
 wasmtime::component::bindgen!({
     world: "actor-world",
     path: "../../wit/plexspaces-simple-actor",
     async: true,
 });
+
+// Note: The bindgen macro generates types directly in this module:
+// - ActorWorld: Main instantiation type (available as ActorWorld in this module)
+// - plexspaces::simple_actor::*: Interface types
+// ActorWorld is used via crate::simple_component_host::ActorWorld
 
 /// Simple host implementation for Python-compatible WASM actors
 #[cfg(feature = "component-model")]

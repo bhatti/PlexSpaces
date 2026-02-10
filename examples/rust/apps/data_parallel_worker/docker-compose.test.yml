@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Docker Compose for Data Parallel Worker App Testing
+# Deploys 3 empty PlexSpaces nodes for WASM app deployment
+# Uses base Dockerfile from workspace root
+
+services:
+  # Node 1 - Primary node
+  node1:
+    build:
+      context: ../../../../
+      dockerfile: Dockerfile
+    container_name: plexspaces-node1
+    hostname: node1
+    command: ["--node-id", "node1", "--listen-addr", "0.0.0.0:8000", "--release-config", "/app/config/release.yaml"]
+    ports:
+      - "8000:8000"
+      - "8092:8092"  # HTTP health endpoint
+    environment:
+      - PLEXSPACES_NODE_ID=node1
+      - PLEXSPACES_NODE_LISTEN_ADDRESS=0.0.0.0:8000
+      - PLEXSPACES_BASE_DIR=/app/data
+      - PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
+      - PLEXSPACES_DISABLE_AUTH=true
+      - PLEXSPACES_DATABASE_URL=sqlite:///app/data/db/plexspaces.db?mode=rwc
+      - RUST_LOG=warn,plexspaces_actor=info,plexspaces_node=info,plexspaces_services=info,plexspaces_core=info
+      - WASMTIME_BACKTRACE_DETAILS=1
+    volumes:
+      - ./release.yaml:/app/config/release.yaml:ro
+      - node1-data:/app/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - plexspaces-net
+
+  # Node 2 - Secondary node
+  node2:
+    build:
+      context: ../../../../
+      dockerfile: Dockerfile
+    container_name: plexspaces-node2
+    hostname: node2
+    command: ["--node-id", "node2", "--listen-addr", "0.0.0.0:8000", "--release-config", "/app/config/release.yaml"]
+    ports:
+      - "8001:8000"
+      - "8093:8092"  # HTTP health endpoint
+    environment:
+      - PLEXSPACES_NODE_ID=node2
+      - PLEXSPACES_NODE_LISTEN_ADDRESS=0.0.0.0:8000
+      - PLEXSPACES_BASE_DIR=/app/data
+      - PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
+      - PLEXSPACES_DISABLE_AUTH=true
+      - PLEXSPACES_DATABASE_URL=sqlite:///app/data/db/plexspaces.db?mode=rwc
+      - RUST_LOG=warn,plexspaces_actor=info,plexspaces_node=info,plexspaces_services=info,plexspaces_core=info
+      - WASMTIME_BACKTRACE_DETAILS=1
+    volumes:
+      - ./release.yaml:/app/config/release.yaml:ro
+      - node2-data:/app/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - plexspaces-net
+    depends_on:
+      - node1
+
+  # Node 3 - Tertiary node
+  node3:
+    build:
+      context: ../../../../
+      dockerfile: Dockerfile
+    container_name: plexspaces-node3
+    hostname: node3
+    command: ["--node-id", "node3", "--listen-addr", "0.0.0.0:8000", "--release-config", "/app/config/release.yaml"]
+    ports:
+      - "8002:8000"
+      - "8094:8092"  # HTTP health endpoint
+    environment:
+      - PLEXSPACES_NODE_ID=node3
+      - PLEXSPACES_NODE_LISTEN_ADDRESS=0.0.0.0:8000
+      - PLEXSPACES_BASE_DIR=/app/data
+      - PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
+      - PLEXSPACES_DISABLE_AUTH=true
+      - PLEXSPACES_DATABASE_URL=sqlite:///app/data/db/plexspaces.db?mode=rwc
+      - RUST_LOG=warn,plexspaces_actor=info,plexspaces_node=info,plexspaces_services=info,plexspaces_core=info
+      - WASMTIME_BACKTRACE_DETAILS=1
+    volumes:
+      - ./release.yaml:/app/config/release.yaml:ro
+      - node3-data:/app/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - plexspaces-net
+    depends_on:
+      - node1
+      - node2
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+
+networks:
+  plexspaces-net:
+    driver: bridge

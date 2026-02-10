@@ -349,7 +349,7 @@ impl ActorBuilder {
     /// Set the actor configuration (from proto)
     ///
     /// ## Arguments
-    /// * `config` - Actor configuration (resource requirements, actor groups, etc.)
+    /// * `config` - Actor configuration (resource requirements, shard groups, etc.)
     ///
     /// ## Example
     /// ```rust,ignore
@@ -371,7 +371,7 @@ impl ActorBuilder {
     /// * `disk_bytes` - Disk space in bytes (stored in config properties)
     /// * `gpu_count` - GPU count (stored in config properties)
     /// * `labels` - Labels map (stored in config properties)
-    /// * `actor_groups` - Actor groups list (stored in config properties)
+    /// * `actor_groups` - Shard groups list (stored in config properties)
     ///
     /// ## Example
     /// ```rust,ignore
@@ -591,7 +591,7 @@ impl ActorBuilder {
     /// ```
     pub async fn build(self) -> Result<Actor, std::io::Error> {
         // Generate actor ID if not provided
-        let actor_id = self.actor_id.unwrap_or_else(|| {
+        let mut actor_id = self.actor_id.unwrap_or_else(|| {
             use std::time::{SystemTime, UNIX_EPOCH};
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -599,6 +599,32 @@ impl ActorBuilder {
                 .as_millis();
             format!("actor@{}", timestamp)
         });
+        
+        // CRITICAL: Normalize actor ID to include @node suffix if node_id is available
+        // If actor_id already has @node, validate it matches node_id (or error if mismatch)
+        if let Some(ref node_id) = self.node_id {
+            if let Ok((actor_name, existing_node_id)) = plexspaces_core::ActorRef::parse_actor_id(&actor_id) {
+                // Actor ID already has @node format
+                if !existing_node_id.is_empty() && existing_node_id != *node_id {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "Actor ID '{}' specifies node '{}' but builder has node_id '{}'. Actor IDs must match the node they're created on.",
+                            actor_id, existing_node_id, node_id
+                        )
+                    ));
+                }
+                // If node_id matches or is empty, keep as is (will be normalized during spawn)
+                // For now, ensure it has the correct node_id
+                if existing_node_id != *node_id {
+                    actor_id = format!("{}@{}", actor_name, node_id);
+                }
+            } else {
+                // Actor ID doesn't have @node format - append node_id
+                actor_id = format!("{}@{}", actor_id, node_id);
+            }
+        }
+        // Note: If node_id is None, actor_id will be normalized during spawn_actor() or spawn()
 
         // Namespace is required - must be set via with_namespace()
         // Namespace can be empty - no validation needed
@@ -612,7 +638,7 @@ impl ActorBuilder {
             mailbox_config_default()
         });
         // Mailbox::new() is async, so build() must be async too
-        let mailbox_id = format!("mailbox-{}", actor_id);
+        let mailbox_id = format!("mailbox_{}", actor_id);
         let mailbox = Mailbox::new(mailbox_config, mailbox_id)
             .await
             .expect("Failed to create mailbox");
@@ -691,6 +717,10 @@ impl ActorBuilder {
         self.tenant_id = ctx.tenant_id().to_string();
         self.namespace = ctx.namespace().to_string();
         
+        // CRITICAL: Clone tenant_id before self is moved by build()
+        let tenant_id_for_ref = self.tenant_id.clone();
+        let namespace_for_ref = ctx.namespace().to_string();
+        
         // Extract actor_type from behavior before building
         let behavior_type = self.behavior.behavior_type();
         let actor_type = match behavior_type {
@@ -750,10 +780,12 @@ impl ActorBuilder {
         facet_manager.store_facets(&actor_id, facets_clone).await;
         
         // Create ActorRef (implements MessageSender)
+        // CRITICAL: Pass tenant_id from ActorBuilder to ActorRef
         use crate::ActorRef;
         let actor_ref: std::sync::Arc<dyn plexspaces_core::MessageSender> = std::sync::Arc::new(ActorRef::local(
             actor_id.clone(),
-            ctx.namespace().to_string(),
+            tenant_id_for_ref.clone(), // CRITICAL: tenant_id from ActorBuilder (from API)
+            namespace_for_ref.clone(),
             mailbox.clone(),
             service_locator.clone(),
         ));
@@ -774,7 +806,8 @@ impl ActorBuilder {
         ).await;
         
         // Return ActorRef
-        Ok(ActorRef::local(actor_id, ctx.namespace().to_string(), mailbox, service_locator))
+        // CRITICAL: Pass tenant_id from ActorBuilder to ActorRef
+        Ok(ActorRef::local(actor_id, tenant_id_for_ref, namespace_for_ref, mailbox, service_locator))
     }
 }
 

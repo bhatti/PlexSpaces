@@ -78,6 +78,7 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 | **timers** | In-memory timers with TimerFacet | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]` | [embedded](../examples/rust/embedded/timers/README.md) |
 | **reminders** | Durable reminders with ReminderFacet | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]` | [embedded](../examples/rust/embedded/reminders/README.md) |
 | **timeseries_forecasting** | Pipeline via ActorFactory (type-name spawn); see README for Factory vs SDK | ActorFactory pattern | [embedded](../examples/rust/embedded/timeseries_forecasting/README.md) |
+| **firecracker_multi_tenant** | Data-parallel actors (DPA-inspired) with worker pools, **health-aware node connectivity** (liveness/readiness checks, exponential backoff retry), resource-based routing, coordination/compute metrics | `ParallelClient`, `UnifiedShardGroupClient`, `NodeClient` (with health checks) | [embedded](../examples/rust/embedded/firecracker_multi_tenant/README.md) |
 
 **Annotations Quick Reference**:
 | Annotation | Description |
@@ -89,7 +90,13 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 | `#[handler("op")]` | Route message to handler (GenServer defaults to call) |
 | `#[handler("op", cast)]` | Fire-and-forget handler (no reply) |
 
-**Conventions**: Use `plexspaces_sdk::spawn_actor(..., behavior, facets)` for single-actor apps; use ActorFactory with type names for pipeline-style multi-actor setups. GenServer uses **call by default** (like Python).
+**Conventions**: 
+- ✅ **Use SDK patterns** (`spawn`, `spawn_with_facets`, `spawn_with_storage`, `call_message`, `cast_message`) for examples and user code
+- ✅ **Use SDK annotations** (`#[gen_server_actor]`, `#[handler]`, `#[plexspaces_handlers]`) for actor definitions
+- ⚠️ **ActorFactory** is for framework code only (e.g., `ActorServiceImpl` internal implementation) or pipeline-style multi-actor setups (see `timeseries_forecasting` example)
+- ✅ GenServer uses **call by default** (like Python)
+
+**Note**: For examples, prefer SDK patterns over low-level APIs. SDK removes boilerplate and provides better developer experience.
 
 ## Examples by Core Functionality
 

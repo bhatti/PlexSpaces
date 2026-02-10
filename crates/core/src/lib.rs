@@ -55,7 +55,6 @@ pub use application_node_trait::ApplicationNode;
 pub mod grpc_connection_manager;
 pub use grpc_connection_manager::{GrpcConnectionManager, ServiceType};
 pub mod object_registry_helpers;
-pub mod patterns;
 pub mod actor_trait;
 pub mod exit_reason;
 pub mod virtual_actor_manager;
@@ -89,6 +88,8 @@ pub mod secret_masker;
 pub use secret_masker::{SecretMasker, mask_release_spec, mask_map_secrets, DEFAULT_MASK};
 pub mod actor_factory;
 pub use actor_factory::ActorFactory;
+pub mod constants;
+pub use constants::TEMP_SENDER_PREFIX;
 
 // Re-export enhanced ActorContext
 pub use actor_context::{

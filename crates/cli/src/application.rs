@@ -132,6 +132,7 @@ pub async fn deploy(
         // For now, create minimal config
         Some(ApplicationSpec {
             name: name.to_string(),
+            tenant_id: String::new(), // Set by server from JWT
             namespace: app_id.to_string(), // Use app_id as namespace
             version: version.to_string(),
             description: format!("Application {}", name),
@@ -152,6 +153,7 @@ pub async fn deploy(
         // For WASM apps, create minimal config
         Some(ApplicationSpec {
             name: name.to_string(),
+            tenant_id: String::new(), // Set by server from JWT
             namespace: app_id.to_string(), // Use app_id as namespace
             version: version.to_string(),
             description: format!("WASM application {}", name),

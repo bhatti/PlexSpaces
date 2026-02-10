@@ -23,6 +23,30 @@
 //! - GenEvent: Event handling
 //! - GenStateMachine: Finite state machines
 //! - Workflow: Restate-inspired durable workflows
+//!
+//! ## High-Level Actor References
+//! For cleaner APIs, use the typed actor references from `plexspaces-actor`:
+//! - `WorkflowRef`: Durable workflow operations (run/signal/query)
+//! - `GenServerRef`: Request-reply (call/cast) operations
+//! - `FsmRef`: State machine transitions and queries
+//! - `EventRef`: Fire-and-forget event emission
+//!
+//! ## Example
+//! ```ignore
+//! use plexspaces_actor::{WorkflowRef, GenServerRef, FsmRef, EventRef};
+//!
+//! // Workflow: durable execution
+//! let result: Output = workflow.run(&input).await?;
+//!
+//! // GenServer: request-reply
+//! let result: Response = server.call("operation", &request).await?;
+//!
+//! // FSM: state transitions
+//! fsm.transition("event", &data).await?;
+//!
+//! // Event: fire-and-forget
+//! logger.emit("user_login", &event).await?;
+//! ```
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

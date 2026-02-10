@@ -618,7 +618,7 @@ impl Application for SpecApplication {
             
             let mut errors = Vec::new();
             {
-                use plexspaces_core::ActorFactory;
+                use plexspaces_core::{ActorFactory, RequestContext};
 
                 let actor_factory = service_locator.get_actor_factory().await
                     .ok_or_else(|| ApplicationError::ActorStopFailed(
@@ -626,8 +626,16 @@ impl Application for SpecApplication {
                         "ActorFactory not found in ServiceLocator".to_string()
                     ))?;
                 
+                // Create RequestContext for shutdown using application's namespace
+                // Tenant comes from auth (empty for internal operations)
+                // Application owns its actors, so it can stop them
+                let ctx = RequestContext::new_without_auth(
+                    String::new(), // tenant_id - empty for internal operations
+                    self.spec.namespace.clone(), // namespace from application spec
+                );
+                
                 for actor_id in actor_ids.iter().rev() {
-                    if let Err(e) = actor_factory.stop_actor(actor_id).await {
+                    if let Err(e) = actor_factory.stop_actor(&ctx, actor_id).await {
                         error!(
                             application = %self.spec.name,
                             actor_id = %actor_id,

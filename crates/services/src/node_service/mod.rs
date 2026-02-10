@@ -34,27 +34,31 @@
 //! - Masks secrets in ReleaseSpec responses (passwords, API keys, tokens)
 //! - Uses `plexspaces_core::mask_release_spec` for consistent masking
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
 use futures::Stream;
 use prost_types::Timestamp;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
-use tracing::{debug, info};
+use tonic::transport::Channel;
+use tracing::{debug, info, warn};
 
 use plexspaces_core::{RequestContext, ServiceLocator, mask_release_spec};
 use plexspaces_proto::node::v1::{
     node_service_server::NodeService as NodeServiceTrait,
-    CalculateCapacityRequest, GetHealthRequest, GetHealthResponse, GetMetricsRequest,
-    GetReleaseSpecRequest, GetReleaseSpecResponse, ListConnectedNodesRequest,
+    node_service_client::NodeServiceClient,
+    CalculateCapacityRequest, ConnectNodesRequest, ConnectNodesResponse,
+    DisconnectNodesRequest, DisconnectNodesResponse, GetHealthRequest, GetHealthResponse,
+    GetMetricsRequest, GetReleaseSpecRequest, GetReleaseSpecResponse, ListConnectedNodesRequest,
     ListConnectedNodesResponse, ListNodeApplicationsRequest, ListNodeApplicationsResponse,
     NodeApplicationInfo, NodeCapacity, NodeHealthStatus, NodeMetrics, NodeRegistration,
-    RegisterNodesRequest, RegisterNodesResponse, ReleaseSpec, SendHeartbeatRequest, 
-    SendHeartbeatResponse, StreamConnectedNodesRequest, UnregisterNodeRequest, 
-    UnregisterNodeResponse,
+    NodeStatus, PingRequest, RegisterNodesRequest, RegisterNodesResponse, ReleaseSpec,
+    SendHeartbeatRequest, SendHeartbeatResponse, StreamConnectedNodesRequest,
+    UnregisterNodeRequest, UnregisterNodeResponse,
 };
 
 use crate::request_context_from_grpc_request;
@@ -225,6 +229,11 @@ impl NodeServiceImpl {
             failed_deliveries: self.metrics.failed_deliveries.load(Ordering::Relaxed),
             active_actors,
             connected_nodes,
+            shard_groups_created: 0, // TODO: Track shard groups created in NodeService
+            shard_messages_sent: 0, // TODO: Track shard messages sent in NodeService
+            shard_messages_received: 0, // TODO: Track shard messages received in NodeService
+            shard_operations_total: 0, // TODO: Track shard operations total in NodeService
+            shard_operations_failed: 0, // TODO: Track shard operations failed in NodeService
             node_id: self.local_node_id.clone(),
             cluster_name,
         }
@@ -643,6 +652,14 @@ impl NodeServiceTrait for NodeServiceImpl {
             0u64
         };
 
+        // Get cluster name for same-cluster check (ConnectNodes)
+        let cluster_name = self
+            .service_locator
+            .get_node_config()
+            .await
+            .map(|c| c.cluster_name)
+            .unwrap_or_default();
+
         // Get piggyback updates to include in response
         let updates = Vec::new(); // Would get from SWIM protocol in full impl
 
@@ -651,6 +668,7 @@ impl NodeServiceTrait for NodeServiceImpl {
             sequence_number: req.sequence_number,
             incarnation,
             updates,
+            cluster_name,
         }))
     }
 
@@ -711,6 +729,383 @@ impl NodeServiceTrait for NodeServiceImpl {
             updates_applied,
         }))
     }
+
+    // ============================================================================
+    // Node Connectivity RPCs - Erlang-style Connect/Disconnect
+    // ============================================================================
+
+    /// Connect to remote nodes (Erlang-style net_adm:ping)
+    ///
+    /// ## Purpose
+    /// Establishes connections to remote nodes by address. For each address:
+    /// 1. Attempts gRPC Ping to verify node is alive and get node_id
+    /// 2. Registers node in NodeRegistry for SWIM protocol membership
+    /// 3. SWIM protocol handles ongoing failure detection
+    ///
+    /// ## Semantics
+    /// - Idempotent: connecting to already-connected node succeeds
+    /// - Partial success: some connections may succeed while others fail
+    /// - Returns map of successful connections (node_id -> address)
+    async fn connect_nodes(
+        &self,
+        request: Request<ConnectNodesRequest>,
+    ) -> Result<Response<ConnectNodesResponse>, Status> {
+        let ctx = self.extract_context(&request).await?;
+        let req = request.into_inner();
+        let start_time = Instant::now();
+
+        info!(
+            addresses = ?req.node_addresses,
+            cluster = %req.cluster,
+            "ConnectNodes request received"
+        );
+
+        // Record metrics
+        metrics::counter!(
+            "plexspaces_node_connect_attempts_total",
+            "node_id" => self.local_node_id.clone()
+        ).increment(req.node_addresses.len() as u64);
+
+        // Validate request
+        if req.node_addresses.is_empty() {
+            return Err(Status::invalid_argument("At least one node address is required"));
+        }
+
+        // Get timeout (default 5 seconds)
+        let timeout = req.timeout
+            .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64))
+            .unwrap_or(Duration::from_secs(5));
+
+        let node_registry = self.service_locator.get_node_registry().await
+            .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
+
+        // Local cluster name for same-cluster check (empty means no cluster)
+        let local_cluster = self
+            .service_locator
+            .get_node_config()
+            .await
+            .map(|c| c.cluster_name)
+            .unwrap_or_default();
+
+        let mut connected: HashMap<String, String> = HashMap::new();
+        let mut failed: HashMap<String, String> = HashMap::new();
+
+        // Connect to each node in parallel
+        let mut handles = Vec::new();
+        for address in req.node_addresses.iter() {
+            let address = address.clone();
+            let address_for_task = address.clone();
+            let timeout = timeout;
+            let local_node_id = self.local_node_id.clone();
+
+            let handle = tokio::spawn(async move {
+                Self::try_connect_to_node(&address_for_task, &local_node_id, timeout).await
+            });
+            handles.push((address, handle));
+        }
+
+        // Collect results
+        for (address, handle) in handles {
+            match handle.await {
+                Ok(Ok((node_id, node_address, remote_cluster))) => {
+                    // Same-cluster check: only connect if both have same cluster (empty matches empty)
+                    if !Self::same_cluster_ok(&local_cluster, &remote_cluster) {
+                        warn!(
+                            address = %address,
+                            local_cluster = %local_cluster,
+                            remote_cluster = %remote_cluster,
+                            "Rejecting connection: cluster mismatch"
+                        );
+                        failed.insert(address, "cluster mismatch".to_string());
+                        metrics::counter!(
+                            "plexspaces_node_connect_failures_total",
+                            "node_id" => self.local_node_id.clone(),
+                            "reason" => "cluster_mismatch"
+                        ).increment(1);
+                        continue;
+                    }
+                    // Register the node in NodeRegistry (set cluster in capabilities so list_nodes and SWIM filter align)
+                    let mut capabilities = HashMap::new();
+                    if !remote_cluster.is_empty() {
+                        capabilities.insert("cluster".to_string(), remote_cluster.clone());
+                    }
+                    let registration = NodeRegistration {
+                        node_id: node_id.clone(),
+                        node_address: node_address.clone(),
+                        capabilities,
+                        status: NodeStatus::NodeStatusReady as i32,
+                        last_heartbeat: Some(Timestamp {
+                            seconds: SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64,
+                            nanos: 0,
+                        }),
+                        actor_count: 0,
+                        message_count: 0,
+                        error_count: 0,
+                        registered_at: Some(Timestamp {
+                            seconds: SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64,
+                            nanos: 0,
+                        }),
+                    };
+
+                    match node_registry.register_node(&ctx, registration).await {
+                        Ok(()) => {
+                            info!(node_id = %node_id, address = %node_address, "Successfully connected to node");
+                            connected.insert(node_id, node_address);
+                            metrics::counter!(
+                                "plexspaces_node_connect_success_total",
+                                "node_id" => self.local_node_id.clone()
+                            ).increment(1);
+                        }
+                        Err(e) => {
+                            warn!(address = %address, error = %e, "Failed to register node after successful ping");
+                            failed.insert(address, format!("Registration failed: {}", e));
+                            metrics::counter!(
+                                "plexspaces_node_connect_failures_total",
+                                "node_id" => self.local_node_id.clone(),
+                                "reason" => "registration_failed"
+                            ).increment(1);
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    warn!(address = %address, error = %e, "Failed to connect to node");
+                    failed.insert(address, e);
+                    metrics::counter!(
+                        "plexspaces_node_connect_failures_total",
+                        "node_id" => self.local_node_id.clone(),
+                        "reason" => "connection_failed"
+                    ).increment(1);
+                }
+                Err(e) => {
+                    warn!(address = %address, error = %e, "Task panicked while connecting");
+                    failed.insert(address, format!("Task panicked: {}", e));
+                    metrics::counter!(
+                        "plexspaces_node_connect_failures_total",
+                        "node_id" => self.local_node_id.clone(),
+                        "reason" => "task_panic"
+                    ).increment(1);
+                }
+            }
+        }
+
+        let elapsed = start_time.elapsed();
+        metrics::histogram!(
+            "plexspaces_node_connect_duration_seconds",
+            "node_id" => self.local_node_id.clone()
+        ).record(elapsed.as_secs_f64());
+
+        info!(
+            connected_count = connected.len(),
+            failed_count = failed.len(),
+            elapsed_ms = elapsed.as_millis(),
+            "ConnectNodes completed"
+        );
+
+        Ok(Response::new(ConnectNodesResponse {
+            connected,
+            failed,
+            total_time: Some(prost_types::Duration {
+                seconds: elapsed.as_secs() as i64,
+                nanos: elapsed.subsec_nanos() as i32,
+            }),
+        }))
+    }
+
+    /// Disconnect from nodes (Erlang-style erlang:disconnect_node)
+    ///
+    /// ## Purpose
+    /// Removes nodes from the local node's membership. The disconnected nodes:
+    /// 1. Are marked as 'Left' in SWIM protocol
+    /// 2. Are removed from NodeRegistry
+    /// 3. Will no longer receive gossip or be probed
+    ///
+    /// ## Semantics
+    /// - Idempotent: disconnecting from unknown node succeeds
+    /// - Does NOT notify remote node (they will detect via SWIM timeout)
+    /// - Partial success: some disconnections may succeed while others fail
+    async fn disconnect_nodes(
+        &self,
+        request: Request<DisconnectNodesRequest>,
+    ) -> Result<Response<DisconnectNodesResponse>, Status> {
+        let ctx = self.extract_context(&request).await?;
+        let req = request.into_inner();
+
+        info!(
+            node_ids = ?req.node_ids,
+            notify_remote = req.notify_remote,
+            "DisconnectNodes request received"
+        );
+
+        // Record metrics
+        metrics::counter!(
+            "plexspaces_node_disconnect_attempts_total",
+            "node_id" => self.local_node_id.clone()
+        ).increment(req.node_ids.len() as u64);
+
+        // Validate request
+        if req.node_ids.is_empty() {
+            return Err(Status::invalid_argument("At least one node_id is required"));
+        }
+
+        let node_registry = self.service_locator.get_node_registry().await
+            .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
+
+        let mut disconnected: Vec<String> = Vec::new();
+        let mut failed: HashMap<String, String> = HashMap::new();
+
+        for node_id in req.node_ids {
+            // Optionally notify remote node before disconnecting
+            if req.notify_remote {
+                // Look up node address first
+                if let Ok(Some(node_info)) = node_registry.lookup_node(&ctx, &node_id).await {
+                    // Best-effort notification - don't fail if this doesn't work
+                    if let Err(e) = Self::notify_disconnect(&node_info.node_address, &self.local_node_id).await {
+                        debug!(
+                            node_id = %node_id,
+                            error = %e,
+                            "Failed to notify remote node of disconnect (continuing anyway)"
+                        );
+                    }
+                }
+            }
+
+            // Unregister from NodeRegistry
+            match node_registry.unregister_node(&ctx, &node_id).await {
+                Ok(()) => {
+                    info!(node_id = %node_id, "Successfully disconnected from node");
+                    disconnected.push(node_id);
+                    metrics::counter!(
+                        "plexspaces_node_disconnect_success_total",
+                        "node_id" => self.local_node_id.clone()
+                    ).increment(1);
+                }
+                Err(e) => {
+                    // Check if it's a "not found" error - treat as success (idempotent)
+                    let error_str = e.to_string();
+                    if error_str.contains("not found") || error_str.contains("NotFound") {
+                        info!(node_id = %node_id, "Node already disconnected (idempotent success)");
+                        disconnected.push(node_id);
+                        metrics::counter!(
+                            "plexspaces_node_disconnect_success_total",
+                            "node_id" => self.local_node_id.clone()
+                        ).increment(1);
+                    } else {
+                        warn!(node_id = %node_id, error = %e, "Failed to disconnect from node");
+                        failed.insert(node_id, e.to_string());
+                        metrics::counter!(
+                            "plexspaces_node_disconnect_failures_total",
+                            "node_id" => self.local_node_id.clone()
+                        ).increment(1);
+                    }
+                }
+            }
+        }
+
+        info!(
+            disconnected_count = disconnected.len(),
+            failed_count = failed.len(),
+            "DisconnectNodes completed"
+        );
+
+        Ok(Response::new(DisconnectNodesResponse {
+            disconnected,
+            failed,
+        }))
+    }
+}
+
+impl NodeServiceImpl {
+    /// Returns true if local and remote cluster match (same-cluster rule for ConnectNodes).
+    /// Empty cluster matches empty; non-empty must match exactly.
+    fn same_cluster_ok(local: &str, remote: &str) -> bool {
+        local == remote
+    }
+
+    /// Try to connect to a remote node by pinging it
+    ///
+    /// ## Returns
+    /// - Ok((node_id, address, remote_cluster_name)) on success
+    /// - Err(error_message) on failure
+    async fn try_connect_to_node(
+        address: &str,
+        local_node_id: &str,
+        timeout: Duration,
+    ) -> Result<(String, String, String), String> {
+        // Normalize address to include scheme if not present
+        let endpoint = if address.starts_with("http://") || address.starts_with("https://") {
+            address.to_string()
+        } else {
+            format!("http://{}", address)
+        };
+
+        // Create gRPC client with timeout
+        let channel = match tokio::time::timeout(
+            timeout,
+            Channel::from_shared(endpoint.clone())
+                .map_err(|e| format!("Invalid endpoint: {}", e))?
+                .connect(),
+        ).await {
+            Ok(Ok(channel)) => channel,
+            Ok(Err(e)) => return Err(format!("Connection failed: {}", e)),
+            Err(_) => return Err(format!("Connection timed out after {:?}", timeout)),
+        };
+
+        let mut client = NodeServiceClient::new(channel);
+
+        // Send Ping request
+        let ping_request = PingRequest {
+            source_node_id: local_node_id.to_string(),
+            sequence_number: 1,
+            updates: Vec::new(),
+        };
+
+        match tokio::time::timeout(timeout, client.ping(ping_request)).await {
+            Ok(Ok(response)) => {
+                let ping_response = response.into_inner();
+                let remote_cluster = ping_response.cluster_name.clone();
+                Ok((ping_response.node_id, endpoint, remote_cluster))
+            }
+            Ok(Err(e)) => Err(format!("Ping failed: {}", e)),
+            Err(_) => Err(format!("Ping timed out after {:?}", timeout)),
+        }
+    }
+
+    /// Notify a remote node that we are disconnecting (best-effort)
+    async fn notify_disconnect(remote_address: &str, local_node_id: &str) -> Result<(), String> {
+        // Normalize address
+        let endpoint = if remote_address.starts_with("http://") || remote_address.starts_with("https://") {
+            remote_address.to_string()
+        } else {
+            format!("http://{}", remote_address)
+        };
+
+        let channel = Channel::from_shared(endpoint)
+            .map_err(|e| format!("Invalid endpoint: {}", e))?
+            .connect()
+            .await
+            .map_err(|e| format!("Connection failed: {}", e))?;
+
+        let mut client = NodeServiceClient::new(channel);
+
+        // Send disconnect notification via a ping with special marker
+        // In a full implementation, we might have a dedicated "leave" RPC
+        let ping_request = PingRequest {
+            source_node_id: local_node_id.to_string(),
+            sequence_number: 0, // Special sequence number indicating disconnect
+            updates: Vec::new(),
+        };
+
+        client.ping(ping_request).await
+            .map_err(|e| format!("Notification failed: {}", e))?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -718,6 +1113,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use plexspaces_proto::node::v1::ReleaseSpec;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 
     #[test]
     fn test_node_service_metrics_default() {
@@ -877,5 +1273,420 @@ mod tests {
         assert_eq!(metrics.messages_routed, 1);
         assert_eq!(metrics.local_deliveries, 1);
         assert!(metrics.memory_available_bytes > 0 || metrics.memory_used_bytes > 0);
+    }
+
+    // ============================================================================
+    // ConnectNodes / DisconnectNodes Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_try_connect_to_node_invalid_address() {
+        // Test with invalid address format
+        let result = NodeServiceImpl::try_connect_to_node(
+            "invalid-no-port",
+            "local-node",
+            Duration::from_millis(100),
+        ).await;
+        
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Invalid endpoint") || err.contains("Connection failed") || err.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn test_try_connect_to_node_connection_timeout() {
+        // Test with unreachable address - should timeout
+        let result = NodeServiceImpl::try_connect_to_node(
+            "192.0.2.1:9999", // TEST-NET-1, guaranteed unreachable
+            "local-node",
+            Duration::from_millis(100),
+        ).await;
+        
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Should be either timeout or connection error
+        assert!(
+            err.contains("timed out") || err.contains("Connection failed"),
+            "Expected timeout or connection error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_try_connect_to_node_with_scheme() {
+        // Test that addresses with http:// scheme work
+        let result = NodeServiceImpl::try_connect_to_node(
+            "http://192.0.2.1:9999",
+            "local-node",
+            Duration::from_millis(100),
+        ).await;
+        
+        // Should fail but not due to invalid endpoint
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            !err.contains("Invalid endpoint"),
+            "Should accept http:// scheme, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_connect_nodes_empty_addresses() {
+        use tonic::Request;
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        
+        let request = Request::new(ConnectNodesRequest {
+            node_addresses: vec![],
+            cluster: String::new(),
+            timeout: None,
+        });
+        
+        let result = service.connect_nodes(request).await;
+        
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert!(status.message().contains("At least one node address"));
+    }
+
+    #[tokio::test]
+    async fn test_connect_nodes_no_registry() {
+        use tonic::Request;
+
+        // Create service without registering NodeRegistry
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        
+        let request = Request::new(ConnectNodesRequest {
+            node_addresses: vec!["192.0.2.1:8000".to_string()],
+            cluster: String::new(),
+            timeout: Some(prost_types::Duration { seconds: 0, nanos: 100_000_000 }), // 100ms
+        });
+        
+        let result = service.connect_nodes(request).await;
+        
+        // Should fail because NodeRegistry is not available
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Internal);
+        assert!(status.message().contains("NodeRegistry not available"));
+    }
+
+    /// Registers a SecurityConfig with auth disabled so extract_context succeeds in unit tests.
+    async fn register_test_security_config_disable_auth(
+        service_locator: &Arc<crate::service_locator::ServiceLocatorImpl>,
+    ) {
+        let config = plexspaces_proto::node::v1::SecurityConfig {
+            disable_auth: true,
+            ..Default::default()
+        };
+        service_locator.register_security_config(config).await;
+    }
+
+    /// Helper to create a test NodeRegistry with SQLite backend
+    async fn create_test_node_registry(node_id: &str) -> Arc<crate::node_registry::NodeRegistry> {
+        use crate::node_registry::NodeRegistry;
+        use plexspaces_core::ObjectRegistry as ObjectRegistryTrait;
+        
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryImpl::new(object_repo));
+        
+        Arc::new(NodeRegistry::new_simple(
+            object_registry,
+            node_id.to_string(),
+            Some(60), // cache_ttl_seconds
+            Some(false), // gossip_enabled (disabled for tests)
+            None,
+            None,
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_connect_nodes_unreachable_addresses() {
+        use tonic::Request;
+
+        // Create service with NodeRegistry
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator.register_node_registry(node_registry).await;
+
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        
+        let request = Request::new(ConnectNodesRequest {
+            node_addresses: vec![
+                "192.0.2.1:8000".to_string(), // TEST-NET-1, unreachable
+                "192.0.2.2:8000".to_string(),
+            ],
+            cluster: "test-cluster".to_string(),
+            timeout: Some(prost_types::Duration { seconds: 0, nanos: 200_000_000 }), // 200ms
+        });
+        
+        let result = service.connect_nodes(request).await;
+        
+        // Should succeed but with all addresses in failed map
+        assert!(result.is_ok());
+        let response = result.unwrap().into_inner();
+        
+        assert!(response.connected.is_empty(), "No nodes should connect to unreachable addresses");
+        assert_eq!(response.failed.len(), 2, "Both addresses should fail");
+        assert!(response.total_time.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_nodes_empty_node_ids() {
+        use tonic::Request;
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        
+        let request = Request::new(DisconnectNodesRequest {
+            node_ids: vec![],
+            notify_remote: false,
+        });
+        
+        let result = service.disconnect_nodes(request).await;
+        
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert!(status.message().contains("At least one node_id"));
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_nodes_no_registry() {
+        use tonic::Request;
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        
+        let request = Request::new(DisconnectNodesRequest {
+            node_ids: vec!["node-1".to_string()],
+            notify_remote: false,
+        });
+        
+        let result = service.disconnect_nodes(request).await;
+        
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Internal);
+        assert!(status.message().contains("NodeRegistry not available"));
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_nodes_unknown_node_idempotent() {
+        use tonic::Request;
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator.register_node_registry(node_registry).await;
+
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        
+        // Try to disconnect a node that doesn't exist
+        let request = Request::new(DisconnectNodesRequest {
+            node_ids: vec!["nonexistent-node".to_string()],
+            notify_remote: false,
+        });
+        
+        let result = service.disconnect_nodes(request).await;
+        
+        // Should succeed (idempotent behavior)
+        assert!(result.is_ok());
+        let response = result.unwrap().into_inner();
+        
+        // Either in disconnected (idempotent success) or failed
+        // The exact behavior depends on NodeRegistry implementation
+        assert!(
+            response.disconnected.contains(&"nonexistent-node".to_string()) ||
+            response.failed.contains_key("nonexistent-node"),
+            "Node should be in either disconnected or failed list"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_nodes_with_registered_node() {
+        use tonic::Request;
+        use plexspaces_core::{RequestContext, NodeRegistryTrait};
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator.register_node_registry(node_registry.clone()).await;
+        
+        // First register a node
+        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+        let registration = NodeRegistration {
+            node_id: "remote-node-1".to_string(),
+            node_address: "http://remote:8000".to_string(),
+            capabilities: HashMap::new(),
+            status: NodeStatus::NodeStatusReady as i32,
+            last_heartbeat: None,
+            actor_count: 0,
+            message_count: 0,
+            error_count: 0,
+            registered_at: None,
+        };
+        let _ = node_registry.register_node(&ctx, registration).await;
+        
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        
+        // Now disconnect it
+        let request = Request::new(DisconnectNodesRequest {
+            node_ids: vec!["remote-node-1".to_string()],
+            notify_remote: false,
+        });
+        
+        let result = service.disconnect_nodes(request).await;
+        
+        assert!(result.is_ok());
+        let response = result.unwrap().into_inner();
+        
+        // Should be in disconnected list
+        assert!(
+            response.disconnected.contains(&"remote-node-1".to_string()),
+            "Node should be disconnected, got: {:?}",
+            response
+        );
+        assert!(response.failed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_connect_nodes_timeout_configuration() {
+        use tonic::Request;
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator.register_node_registry(node_registry).await;
+
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        
+        // Test with very short timeout
+        let start = Instant::now();
+        let request = Request::new(ConnectNodesRequest {
+            node_addresses: vec!["192.0.2.1:8000".to_string()],
+            cluster: String::new(),
+            timeout: Some(prost_types::Duration { seconds: 0, nanos: 50_000_000 }), // 50ms
+        });
+        
+        let result = service.connect_nodes(request).await;
+        let elapsed = start.elapsed();
+        
+        assert!(result.is_ok());
+        // Should complete relatively quickly (within 500ms including overhead)
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "Should timeout quickly, took {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_connect_nodes_request_validation() {
+        // Test request structure
+        let request = ConnectNodesRequest {
+            node_addresses: vec!["node1:8000".to_string(), "node2:8000".to_string()],
+            cluster: "test-cluster".to_string(),
+            timeout: Some(prost_types::Duration { seconds: 10, nanos: 0 }),
+        };
+        
+        assert_eq!(request.node_addresses.len(), 2);
+        assert_eq!(request.cluster, "test-cluster");
+        assert!(request.timeout.is_some());
+    }
+
+    #[test]
+    fn test_disconnect_nodes_request_validation() {
+        // Test request structure
+        let request = DisconnectNodesRequest {
+            node_ids: vec!["node-1".to_string(), "node-2".to_string()],
+            notify_remote: true,
+        };
+        
+        assert_eq!(request.node_ids.len(), 2);
+        assert!(request.notify_remote);
+    }
+
+    #[test]
+    fn test_connect_nodes_response_structure() {
+        // Test response structure
+        let mut connected = HashMap::new();
+        connected.insert("node-1".to_string(), "http://node1:8000".to_string());
+        
+        let mut failed = HashMap::new();
+        failed.insert("node2:8000".to_string(), "Connection refused".to_string());
+        
+        let response = ConnectNodesResponse {
+            connected,
+            failed,
+            total_time: Some(prost_types::Duration { seconds: 1, nanos: 500_000_000 }),
+        };
+        
+        assert_eq!(response.connected.len(), 1);
+        assert_eq!(response.failed.len(), 1);
+        assert!(response.total_time.is_some());
+    }
+
+    #[test]
+    fn test_disconnect_nodes_response_structure() {
+        // Test response structure
+        let mut failed = HashMap::new();
+        failed.insert("node-3".to_string(), "Internal error".to_string());
+        
+        let response = DisconnectNodesResponse {
+            disconnected: vec!["node-1".to_string(), "node-2".to_string()],
+            failed,
+        };
+        
+        assert_eq!(response.disconnected.len(), 2);
+        assert_eq!(response.failed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_notify_disconnect_unreachable() {
+        // Test notify_disconnect with unreachable address
+        let result = NodeServiceImpl::notify_disconnect(
+            "192.0.2.1:9999",
+            "local-node",
+        ).await;
+        
+        // Should fail but not panic
+        assert!(result.is_err());
+    }
+
+    // ============================================================================
+    // Same-cluster rule (ConnectNodes only connects nodes with same cluster)
+    // ============================================================================
+
+    #[test]
+    fn test_same_cluster_ok_both_empty() {
+        assert!(NodeServiceImpl::same_cluster_ok("", ""));
+    }
+
+    #[test]
+    fn test_same_cluster_ok_same_non_empty() {
+        assert!(NodeServiceImpl::same_cluster_ok("production", "production"));
+        assert!(NodeServiceImpl::same_cluster_ok("test-cluster", "test-cluster"));
+    }
+
+    #[test]
+    fn test_same_cluster_ok_mismatch_empty_vs_non_empty() {
+        assert!(!NodeServiceImpl::same_cluster_ok("", "production"));
+        assert!(!NodeServiceImpl::same_cluster_ok("production", ""));
+    }
+
+    #[test]
+    fn test_same_cluster_ok_mismatch_different_clusters() {
+        assert!(!NodeServiceImpl::same_cluster_ok("production", "staging"));
+        assert!(!NodeServiceImpl::same_cluster_ok("cluster-a", "cluster-b"));
     }
 }

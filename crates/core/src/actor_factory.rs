@@ -107,13 +107,56 @@ pub trait ActorFactory: Send + Sync {
     /// Stops and unregisters an actor from the ActorRegistry.
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation (validates caller has permission)
     /// * `actor_id` - Actor ID to stop
     ///
     /// ## Returns
     /// Ok(()) on success, error otherwise
     ///
+    /// ## Tenant Isolation
+    /// The caller's tenant_id and namespace from `ctx` must match the actor's stored
+    /// tenant_id and namespace. This prevents cross-tenant access.
+    ///
     /// ## Note
     /// This method unregisters the actor from ActorRegistry and performs cleanup.
     /// The actor will be garbage collected after unregistration.
-    async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn stop_actor(&self, ctx: &RequestContext, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    
+    /// Create a temporary sender for ask() pattern
+    ///
+    /// ## Purpose
+    /// Creates and registers a temporary sender ActorRef used for request-reply (ask) pattern.
+    /// The temporary sender receives replies and routes them to the ReplyWaiter by correlation_id.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext with proper tenant/namespace
+    /// * `temp_sender_id` - Temporary sender ID (format: "ask-{correlation_id}@{node_id}")
+    /// * `correlation_id` - Correlation ID for matching replies
+    /// * `expires_at` - Expiration time for the temporary sender
+    ///
+    /// ## Returns
+    /// `Arc<dyn MessageSender>` - The temporary sender ActorRef
+    async fn create_temporary_sender(
+        &self,
+        ctx: &RequestContext,
+        temp_sender_id: String,
+        correlation_id: String,
+        expires_at: std::time::Instant,
+    ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
+    
+    /// Returns self as Any for downcasting to concrete implementation
+    ///
+    /// ## Purpose
+    /// Enables downcasting `Arc<dyn ActorFactory>` to concrete types like `ActorFactoryImpl`
+    /// when access to implementation-specific methods is needed (e.g., typed spawn methods).
+    ///
+    /// ## Example
+    /// ```ignore
+    /// let factory: Arc<dyn ActorFactory> = service_locator.get_actor_factory().await?;
+    /// let factory_impl = factory.as_any()
+    ///     .downcast_ref::<ActorFactoryImpl>()
+    ///     .ok_or("Expected ActorFactoryImpl")?;
+    /// factory_impl.spawn_workflow(ctx, id, behavior, facets).await?;
+    /// ```
+    fn as_any(&self) -> &dyn std::any::Any;
 }

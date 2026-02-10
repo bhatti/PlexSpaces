@@ -206,7 +206,8 @@ async fn test_activate_virtual_actor_success() {
         let ctx = plexspaces_core::RequestContext::new_without_auth("test".to_string(), "test".to_string());
         let actor_ref = plexspaces_actor::ActorRef::local(
             actor_id.clone(),
-            "test".to_string(),
+            "test".to_string(), // tenant_id
+            "test".to_string(), // namespace
             actor.mailbox().clone(),
             service_locator.clone(),
         );
@@ -271,9 +272,11 @@ async fn test_activate_virtual_actor_already_active() {
     
     // Register the actor instance in the registry
     use plexspaces_core::MessageSender;
+    let actor_id = "test-actor@test-node".to_string();
     let actor_ref = ActorRef::local(
-        "test-actor@test-node".to_string(),
-        "test".to_string(),
+        actor_id.clone(),
+        "test".to_string(), // tenant_id
+        "test".to_string(), // namespace
         actor.mailbox().clone(),
         service_locator.clone(),
     );

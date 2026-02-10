@@ -294,8 +294,8 @@ async fn test_init_called_before_any_messages() {
         payload: b"test".to_vec(),
         ..Default::default()
     };
-    // Convert proto Message to mailbox Message for enqueueing
-    let msg = plexspaces_mailbox::Message::from_proto(&proto_msg);
+    // Use proto Message directly (mailbox uses proto Message)
+    let msg = proto_msg;
     // Mailbox might be full, so we handle that gracefully
     if let Err(e) = actor.mailbox().enqueue(msg).await {
         // If mailbox is full, that's okay - the key test is that init() was called
@@ -593,8 +593,38 @@ async fn test_exit_message_terminates_actor_when_not_trapping() {
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
     
-    // Send EXIT message (using mailbox's exit message factory)
-    let exit_msg = plexspaces_mailbox::Message::exit("linked-actor".to_string(), "Error:crashed");
+    // Send EXIT message (create proto Message directly)
+    use plexspaces_proto::common::v1::Message;
+    use ulid::Ulid;
+    use chrono::Utc;
+    use prost_types::Timestamp;
+    let mut headers = std::collections::HashMap::new();
+    headers.insert("type".to_string(), "__EXIT__".to_string());
+    headers.insert("exit_from".to_string(), "linked-actor".to_string());
+    headers.insert("exit_reason".to_string(), "Error:crashed".to_string());
+    let now = Utc::now();
+    let exit_msg = Message {
+        id: Ulid::new().to_string(),
+        sender_id: "linked-actor".to_string(),
+        receiver_id: "unknown".to_string(),
+        channel: String::new(),
+        message_type: "__EXIT__".to_string(),
+        payload: b"__EXIT__".to_vec(),
+        timestamp: Some(Timestamp {
+            seconds: now.timestamp(),
+            nanos: now.timestamp_subsec_nanos() as i32,
+        }),
+        headers,
+        priority: 3,
+        ttl: None,
+        delivery_count: 0,
+        idempotency_key: String::new(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        partition_key: String::new(),
+        uri_path: String::new(),
+        uri_method: String::new(),
+    };
     // Mailbox might be full, so we handle that gracefully
     match actor.mailbox().enqueue(exit_msg).await {
         Ok(_) => {

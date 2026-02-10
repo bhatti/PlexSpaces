@@ -105,13 +105,26 @@ fn gen_facets_const(name: &syn::Ident, facets: &[String]) -> TokenStream2 {
                 /// Facets declared for this actor (empty if none)
                 pub const FACETS: &'static [&'static str] = &[];
             }
+            
+            impl plexspaces_sdk::DeclaredFacets for #name {
+                fn declared_facets() -> &'static [&'static str] {
+                    &[]
+                }
+            }
         }
     } else {
         let facet_strs: Vec<_> = facets.iter().map(|f| quote! { #f }).collect();
+        let facet_strs2: Vec<_> = facets.iter().map(|f| quote! { #f }).collect();
         quote! {
             impl #name {
                 /// Facets declared for this actor
                 pub const FACETS: &'static [&'static str] = &[#(#facet_strs),*];
+            }
+            
+            impl plexspaces_sdk::DeclaredFacets for #name {
+                fn declared_facets() -> &'static [&'static str] {
+                    &[#(#facet_strs2),*]
+                }
             }
         }
     }
@@ -941,46 +954,112 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
     }
     
     // Generate dispatch match arms
-    let match_arms: Vec<TokenStream2> = handlers.iter().map(|h| {
-        let op = &h.op;
-        let method = &h.method_name;
-        let is_call = h.invocation == "call";
+    // Check for catch-all handler ("*" or "_")
+    let catch_all_handler = handlers.iter().find(|h| h.op == "*" || h.op == "_");
+    
+    let match_arms: Vec<TokenStream2> = handlers.iter()
+        .filter(|h| h.op != "*" && h.op != "_") // Exclude catch-all from match arms
+        .map(|h| {
+            let op = &h.op;
+            let method = &h.method_name;
+            let is_call = h.invocation == "call";
+            
+            if is_call {
+                // Call semantics: handler returns Result<Value, BehaviorError>, we send reply
+                quote! {
+                    #op => {
+                        // Log handler match at debug level
+                        tracing::debug!(
+                            "[HANDLER_DISPATCH] Matched handler: op={:?}, method={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}",
+                            #op, stringify!(#method), msg.id, msg.message_type, msg.sender_id, msg.receiver_id, msg.correlation_id
+                        );
+                        let result = self.#method(ctx, &msg).await?;
+                        // Send reply for call semantics
+                        if !msg.sender_id.is_empty() {
+                            let reply_payload = serde_json::to_vec(&result)
+                                .unwrap_or_else(|_| b"{}".to_vec());
+                            let mut reply = plexspaces_core::Message::default();
+                            reply.payload = reply_payload;
+                            reply.receiver_id = msg.sender_id.clone();
+                            reply.sender_id = msg.receiver_id.clone();
+                            if !msg.correlation_id.is_empty() {
+                                reply.correlation_id = msg.correlation_id.clone();
+                            }
+                            // Note: reply.id will be set by send_reply() with "res-" prefix
+                            ctx.send_reply(
+                                Some(&msg.correlation_id),
+                                &msg.sender_id,
+                                msg.receiver_id.clone(),
+                                reply,
+                            ).await.map_err(|e| plexspaces_core::BehaviorError::ProcessingError(e.to_string()))?;
+                        }
+                        Ok(())
+                    }
+                }
+            } else {
+                // Cast semantics: fire-and-forget, no reply
+                quote! {
+                    #op => {
+                        self.#method(ctx, &msg).await
+                    }
+                }
+            }
+        }).collect();
+    
+    // Add catch-all handler as default case if present
+    let default_arm = if let Some(catch_all) = catch_all_handler {
+        let method = &catch_all.method_name;
+        let is_call = catch_all.invocation == "call";
         
         if is_call {
-            // Call semantics: handler returns Result<Value, BehaviorError>, we send reply
             quote! {
-                #op => {
+                _ => {
+                    // Log catch-all handler match at debug level (guarded)
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
+                            "[HANDLER_DISPATCH] Matched catch-all handler (*): method={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}, op={:?}",
+                            stringify!(#method), msg.id, msg.message_type, msg.sender_id, msg.receiver_id, msg.correlation_id, op
+                        );
+                    }
                     let result = self.#method(ctx, &msg).await?;
-                    // Send reply for call semantics
+                    // Send reply for call semantics (GenServer default)
+                    // CRITICAL: For GenServer, handlers default to "call" (request-reply)
+                    // Only send reply if sender_id is not empty (indicates request-reply pattern)
                     if !msg.sender_id.is_empty() {
                         let reply_payload = serde_json::to_vec(&result)
                             .unwrap_or_else(|_| b"{}".to_vec());
                         let mut reply = plexspaces_core::Message::default();
                         reply.payload = reply_payload;
-                        reply.receiver_id = msg.sender_id.clone();
-                        reply.sender_id = msg.receiver_id.clone();
+                        reply.receiver_id = msg.sender_id.clone(); // Reply goes TO sender (temporary sender)
+                        reply.sender_id = msg.receiver_id.clone(); // Reply comes FROM this actor
                         if !msg.correlation_id.is_empty() {
                             reply.correlation_id = msg.correlation_id.clone();
                         }
+                        // Note: reply.id will be set by send_reply() with "res-" prefix
                         ctx.send_reply(
                             Some(&msg.correlation_id),
                             &msg.sender_id,
                             msg.receiver_id.clone(),
                             reply,
-                        ).await.map_err(|e| plexspaces_core::BehaviorError::ProcessingError(e.to_string()))?;
+                        ).await.map_err(|e| {
+                            plexspaces_core::BehaviorError::ProcessingError(e.to_string())
+                        })?;
                     }
                     Ok(())
                 }
             }
         } else {
-            // Cast semantics: fire-and-forget, no reply
             quote! {
-                #op => {
+                _ => {
                     self.#method(ctx, &msg).await
                 }
             }
         }
-    }).collect();
+    } else {
+        quote! {
+            _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+        }
+    };
     
     // Generate the trait impl
     let gen_server_impl = if is_gen_server {
@@ -1010,9 +1089,18 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                             }
                         });
                     
+                    // Log operation extraction at debug level (guarded)
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
+                            "[HANDLER_DISPATCH] Operation extracted: op={:?}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}, payload_keys={:?}",
+                            op, msg.id, msg.message_type, msg.sender_id, msg.receiver_id, msg.correlation_id,
+                            payload.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                        );
+                    }
+                    
                     match op {
                         #(#match_arms)*
-                        _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+                        #default_arm
                     }
                 }
             }
@@ -1039,7 +1127,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                     
                     match op {
                         #(#match_arms)*
-                        _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+                        #default_arm
                     }
                 }
             }
@@ -1097,7 +1185,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                     
                     match op {
                         #(#match_arms)*
-                        _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+                        #default_arm
                     }
                 }
             }

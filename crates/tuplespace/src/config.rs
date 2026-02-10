@@ -39,16 +39,11 @@
 //! ### From Code (Highest Priority)
 //! ```rust
 //! use plexspaces_tuplespace::TupleSpace;
-//! use plexspaces_proto::tuplespace::v1::{TupleSpaceConfig, SqliteBackend};
+//! use plexspaces_proto::tuplespace::v1::TupleSpaceConfig;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // TupleSpaceConfig uses shared database from RuntimeConfig.db (no backend config needed)
 //! let config = TupleSpaceConfig {
-//!     backend: Some(plexspaces_proto::v1::tuplespace::tuple_space_config::Backend::Sqlite(
-//!         SqliteBackend {
-//!             path: "/tmp/test.db".to_string(),
-//!         }
-//!     )),
-//!     pool_size: 1,
 //!     default_ttl_seconds: 0,
 //!     enable_indexing: false,
 //! };
@@ -103,10 +98,7 @@
 //! ```
 
 use crate::{TupleSpace, TupleSpaceError};
-use plexspaces_proto::tuplespace::v1::{
-    tuple_space_config::Backend, InMemoryBackend, PostgresBackend, RedisBackend, SqliteBackend,
-    TupleSpaceConfig,
-};
+use plexspaces_proto::tuplespace::v1::TupleSpaceConfig;
 
 impl TupleSpace {
     /// Create TupleSpace from explicit configuration (CODE - highest priority)
@@ -128,14 +120,11 @@ impl TupleSpace {
     /// ## Examples
     /// ```rust
     /// use plexspaces_tuplespace::TupleSpace;
-    /// use plexspaces_proto::tuplespace::v1::{TupleSpaceConfig, SqliteBackend};
+    /// use plexspaces_proto::tuplespace::v1::TupleSpaceConfig;
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// // TupleSpaceConfig uses shared database from RuntimeConfig.db (no backend config needed)
     /// let config = TupleSpaceConfig {
-    ///     backend: Some(plexspaces_proto::v1::tuplespace::tuple_space_config::Backend::Sqlite(
-    ///         SqliteBackend { path: "/tmp/test.db".to_string() }
-    ///     )),
-    ///     pool_size: 1,
     ///     default_ttl_seconds: 0,
     ///     enable_indexing: false,
     /// };
@@ -144,98 +133,10 @@ impl TupleSpace {
     /// # }
     /// ```
     pub async fn from_config(config: TupleSpaceConfig) -> Result<Self, TupleSpaceError> {
-        match config.backend {
-            None => {
-                // No backend specified, use in-memory default with empty tenant/namespace
-                // Note: tenant_id/namespace should be provided by caller from node config
-                // For backward compatibility, use empty strings (caller should provide proper values)
-                Ok(Self::with_tenant_namespace("", ""))
-            }
-            Some(Backend::InMemory(_)) => {
-                // In-memory backend with empty tenant/namespace
-                // Note: tenant_id/namespace should be provided by caller from node config
-                Ok(Self::with_tenant_namespace("", ""))
-            }
-            Some(Backend::Sqlite(_sqlite_config)) => {
-                // SQLite backend
-                #[cfg(feature = "sql-backend")]
-                {
-                    use crate::storage::sql::{SqlStorage, SqliteConfig as SqliteStorageConfig};
-                    let storage_config = SqliteStorageConfig {
-                        database_path: _sqlite_config.path.clone(),
-                        enable_wal: true, // Enable Write-Ahead Logging for better concurrency
-                        cache_size_kb: 2000, // 2MB cache
-                    };
-                    let storage = SqlStorage::new_sqlite(storage_config).await?;
-                    // Note: tenant_id/namespace should be provided by caller from node config
-                    // For backward compatibility, use empty strings
-                    Ok(Self::with_storage_and_tenant(Box::new(storage), "", ""))
-                }
-                #[cfg(not(feature = "sql-backend"))]
-                {
-                    Err(TupleSpaceError::InvalidConfiguration(
-                        "SQLite backend requires 'sql-backend' feature".to_string(),
-                    ))
-                }
-            }
-            Some(Backend::Redis(_redis_config)) => {
-                // Redis backend
-                #[cfg(feature = "redis-backend")]
-                {
-                    use crate::storage::redis::RedisStorage;
-                    use plexspaces_proto::tuplespace::v1::RedisStorageConfig as RedisStorageProtoConfig;
-
-                    let storage_config = RedisStorageProtoConfig {
-                        connection_string: _redis_config.url.clone(),
-                        key_prefix: _redis_config.namespace.clone(),
-                        enable_pubsub: false, // Disable pub/sub for now
-                        pool_size: 5,         // Default pool size
-                    };
-                    let storage = RedisStorage::new(storage_config).await?;
-                    // Note: tenant_id/namespace should be provided by caller from node config
-                    // For backward compatibility, use empty strings
-                    Ok(Self::with_storage_and_tenant(Box::new(storage), "", ""))
-                }
-                #[cfg(not(feature = "redis-backend"))]
-                {
-                    Err(TupleSpaceError::InvalidConfiguration(
-                        "Redis backend requires 'redis-backend' feature".to_string(),
-                    ))
-                }
-            }
-            Some(Backend::Postgres(_postgres_config)) => {
-                // PostgreSQL backend
-                #[cfg(feature = "sql-backend")]
-                {
-                    use crate::storage::sql::{
-                        PostgresConfig as PostgresStorageConfig, SqlStorage,
-                    };
-                    let storage_config = PostgresStorageConfig {
-                        connection_string: _postgres_config.connection_string.clone(),
-                        pool_size: if config.pool_size > 0 {
-                            config.pool_size
-                        } else {
-                            10 // Default for PostgreSQL
-                        },
-                        table_name: if _postgres_config.table_name.is_empty() {
-                            "tuples".to_string()
-                        } else {
-                            _postgres_config.table_name.clone()
-                        },
-                    };
-                    let storage = SqlStorage::new_postgres(storage_config).await?;
-                    // Note: tenant_id/namespace should be provided by caller from node config
-                    // For backward compatibility, use empty strings
-                    Ok(Self::with_storage_and_tenant(Box::new(storage), "", ""))
-                }
-                #[cfg(not(feature = "sql-backend"))]
-                {
-                    Err(TupleSpaceError::InvalidConfiguration(
-                        "PostgreSQL backend requires 'sql-backend' feature".to_string(),
-                    ))
-                }
-            }
-        }
+        // TupleSpaceConfig no longer has backend field - uses shared database from RuntimeConfig.db
+        // For backward compatibility, use in-memory default
+        // Note: tenant_id/namespace should be provided by caller from node config
+        Ok(Self::with_tenant_namespace("", ""))
     }
 
     /// Create TupleSpace from environment variables (ENV - medium priority)
@@ -276,94 +177,13 @@ impl TupleSpace {
     /// # }
     /// ```
     pub async fn from_env() -> Result<Self, TupleSpaceError> {
-        let backend_type = std::env::var("PLEXSPACES_TUPLESPACE_BACKEND")
-            .unwrap_or_else(|_| "in-memory".to_string())
-            .to_lowercase();
-
-        let pool_size = std::env::var("PLEXSPACES_POOL_SIZE")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0); // 0 = use backend default
-
-        match backend_type.as_str() {
-            "in-memory" | "in_memory" | "memory" => {
-                // In-memory backend (no configuration needed)
-                let config = TupleSpaceConfig {
-                    backend: Some(Backend::InMemory(InMemoryBackend {})),
-                    pool_size: 0,
-                    default_ttl_seconds: 0,
-                    enable_indexing: false,
-                };
-                Self::from_config(config).await
-            }
-            "sqlite" => {
-                let path = std::env::var("PLEXSPACES_SQLITE_PATH").map_err(|_| {
-                    TupleSpaceError::InvalidConfiguration(
-                        "PLEXSPACES_SQLITE_PATH environment variable required for SQLite backend"
-                            .to_string(),
-                    )
-                })?;
-
-                let config = TupleSpaceConfig {
-                    backend: Some(Backend::Sqlite(SqliteBackend { path })),
-                    pool_size,
-                    default_ttl_seconds: 0,
-                    enable_indexing: false,
-                };
-                Self::from_config(config).await
-            }
-            "redis" => {
-                let url = std::env::var("PLEXSPACES_REDIS_URL").map_err(|_| {
-                    TupleSpaceError::InvalidConfiguration(
-                        "PLEXSPACES_REDIS_URL environment variable required for Redis backend"
-                            .to_string(),
-                    )
-                })?;
-
-                let namespace = std::env::var("PLEXSPACES_REDIS_NAMESPACE")
-                    .unwrap_or_else(|_| "plexspaces".to_string());
-
-                let config = TupleSpaceConfig {
-                    backend: Some(Backend::Redis(RedisBackend { url, namespace })),
-                    pool_size,
-                    default_ttl_seconds: 0,
-                    enable_indexing: false,
-                };
-                Self::from_config(config).await
-            }
-            "postgres" | "postgresql" => {
-                let connection_string = std::env::var("PLEXSPACES_POSTGRES_URL").map_err(|_| {
-                    TupleSpaceError::InvalidConfiguration(
-                        "PLEXSPACES_POSTGRES_URL environment variable required for PostgreSQL backend"
-                            .to_string(),
-                    )
-                })?;
-
-                let table_name = std::env::var("PLEXSPACES_POSTGRES_TABLE")
-                    .unwrap_or_else(|_| "tuples".to_string());
-
-                let config = TupleSpaceConfig {
-                    backend: Some(Backend::Postgres(PostgresBackend {
-                        connection_string,
-                        table_name,
-                    })),
-                    pool_size,
-                    default_ttl_seconds: 0,
-                    enable_indexing: false,
-                };
-                Self::from_config(config).await
-            }
-            _ => {
-                // Default: in-memory (handles "in-memory" and all other cases)
-                let config = TupleSpaceConfig {
-                    backend: Some(Backend::InMemory(InMemoryBackend {})),
-                    pool_size: 0,
-                    default_ttl_seconds: 0,
-                    enable_indexing: false,
-                };
-                Self::from_config(config).await
-            }
-        }
+        // TupleSpaceConfig no longer uses backend-specific env vars - uses shared database from RuntimeConfig.db
+        // All backend types now use the same default config
+        let config = TupleSpaceConfig {
+            default_ttl_seconds: 0,
+            enable_indexing: false,
+        };
+        Self::from_config(config).await
     }
 
     /// Create TupleSpace from configuration file (FILE - low priority)
@@ -496,8 +316,6 @@ fn parse_config_from_json(json: &serde_json::Value) -> Result<TupleSpaceConfig, 
         TupleSpaceError::InvalidConfiguration("Config must be a JSON object".to_string())
     })?;
 
-    let pool_size = obj.get("pool_size").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-
     let default_ttl_seconds = obj
         .get("default_ttl_seconds")
         .and_then(|v| v.as_u64())
@@ -508,73 +326,9 @@ fn parse_config_from_json(json: &serde_json::Value) -> Result<TupleSpaceConfig, 
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // Parse backend (required)
-    let backend_obj = obj
-        .get("backend")
-        .and_then(|v| v.as_object())
-        .ok_or_else(|| {
-            TupleSpaceError::InvalidConfiguration("Missing 'backend' field in config".to_string())
-        })?;
-
-    let backend = if backend_obj.contains_key("in_memory") || backend_obj.contains_key("in-memory")
-    {
-        Some(Backend::InMemory(InMemoryBackend {}))
-    } else if let Some(sqlite_obj) = backend_obj.get("sqlite").and_then(|v| v.as_object()) {
-        let path = sqlite_obj
-            .get("path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                TupleSpaceError::InvalidConfiguration(
-                    "SQLite backend requires 'path' field".to_string(),
-                )
-            })?
-            .to_string();
-        Some(Backend::Sqlite(SqliteBackend { path }))
-    } else if let Some(redis_obj) = backend_obj.get("redis").and_then(|v| v.as_object()) {
-        let url = redis_obj
-            .get("url")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                TupleSpaceError::InvalidConfiguration(
-                    "Redis backend requires 'url' field".to_string(),
-                )
-            })?
-            .to_string();
-        let namespace = redis_obj
-            .get("namespace")
-            .and_then(|v| v.as_str())
-            .unwrap_or("plexspaces")
-            .to_string();
-        Some(Backend::Redis(RedisBackend { url, namespace }))
-    } else if let Some(postgres_obj) = backend_obj.get("postgres").and_then(|v| v.as_object()) {
-        let connection_string = postgres_obj
-            .get("connection_string")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                TupleSpaceError::InvalidConfiguration(
-                    "PostgreSQL backend requires 'connection_string' field".to_string(),
-                )
-            })?
-            .to_string();
-        let table_name = postgres_obj
-            .get("table_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("tuples")
-            .to_string();
-        Some(Backend::Postgres(PostgresBackend {
-            connection_string,
-            table_name,
-        }))
-    } else {
-        return Err(TupleSpaceError::InvalidConfiguration(
-            "Unknown backend type in config. Use 'in_memory', 'sqlite', 'redis', or 'postgres'"
-                .to_string(),
-        ));
-    };
-
+    // TupleSpaceConfig no longer has backend field - uses shared database from RuntimeConfig.db
+    // Backend config in JSON files is ignored (for backward compatibility)
     Ok(TupleSpaceConfig {
-        backend,
-        pool_size,
         default_ttl_seconds,
         enable_indexing,
     })
@@ -587,8 +341,6 @@ mod tests {
     #[tokio::test]
     async fn test_from_config_in_memory() {
         let config = TupleSpaceConfig {
-            backend: Some(Backend::InMemory(InMemoryBackend {})),
-            pool_size: 0,
             default_ttl_seconds: 0,
             enable_indexing: false,
         };
@@ -645,10 +397,6 @@ mod tests {
     #[cfg(feature = "sql-backend")]
     async fn test_from_config_sqlite() {
         let config = TupleSpaceConfig {
-            backend: Some(Backend::Sqlite(SqliteBackend {
-                path: ":memory:".to_string(),
-            })),
-            pool_size: 1,
             default_ttl_seconds: 0,
             enable_indexing: false,
         };

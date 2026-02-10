@@ -176,6 +176,11 @@ impl DashboardServiceImpl {
                 failed_deliveries: metrics.failed_deliveries,
                 active_actors: metrics.active_actors,
                 connected_nodes: metrics.connected_nodes,
+                shard_groups_created: metrics.shard_groups_created,
+                shard_messages_sent: metrics.shard_messages_sent,
+                shard_messages_received: metrics.shard_messages_received,
+                shard_operations_total: metrics.shard_operations_total,
+                shard_operations_failed: metrics.shard_operations_failed,
             }),
             mtls_identity: None,
             public_certificate: vec![],
@@ -365,6 +370,12 @@ impl DashboardServiceImpl {
                 // Parent-child metrics (Phase 3)
                 parent_child_registered_total: metrics.parent_child_registered_total,
                 parent_child_unregistered_total: metrics.parent_child_unregistered_total,
+                // Shard group metrics (Data-Parallel Actors)
+                shard_groups_created_total: metrics.shard_groups_created_total,
+                shard_messages_sent_total: metrics.shard_messages_sent_total,
+                shard_messages_received_total: metrics.shard_messages_received_total,
+                shard_operations_total: metrics.shard_operations_total,
+                shard_operations_failed_total: metrics.shard_operations_failed_total,
             })
         } else {
             None
@@ -672,6 +683,11 @@ impl DashboardService for DashboardServiceImpl {
             failed_deliveries: metrics.failed_deliveries,
             active_actors: metrics.active_actors,
             connected_nodes: metrics.connected_nodes,
+            shard_groups_created: metrics.shard_groups_created,
+            shard_messages_sent: metrics.shard_messages_sent,
+            shard_messages_received: metrics.shard_messages_received,
+            shard_operations_total: metrics.shard_operations_total,
+            shard_operations_failed: metrics.shard_operations_failed,
         });
 
         // Get applications count

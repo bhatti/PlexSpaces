@@ -206,7 +206,7 @@ impl Actor for WasmActorBehavior {
                     let correlation_id = message.correlation_id.clone();
                     
                     let mut reply_message = Message {
-                        id: ulid::Ulid::new().to_string(),
+                        id: format!("res-{}", ulid::Ulid::new().to_string()), // Ensure reply has "res-" prefix
                         payload: response,
                         sender_id: message.receiver_id.clone(), // Use receiver as sender of reply
                         message_type: "reply".to_string(),
@@ -357,6 +357,235 @@ impl WasmApplication {
     pub async fn set_tenant_namespace(&self, tenant_id: String, namespace: String) {
         *self.tenant_id.write().await = tenant_id;
         *self.namespace.write().await = namespace;
+    }
+
+    /// Create a WASM instance for behavior registration
+    ///
+    /// ## Purpose
+    /// Extracts WASM instance creation logic for reuse in behavior registration.
+    /// Creates a WASM instance with all required services wired up.
+    ///
+    /// ## Returns
+    /// WasmInstance ready for use in WasmActorBehavior
+    async fn create_wasm_instance_for_behavior(
+        node: Arc<dyn ApplicationNode>,
+        child_spec: &plexspaces_proto::application::v1::ChildSpec,
+        module_hash: &str,
+        runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
+        actor_id: &str,
+    ) -> Result<Arc<WasmInstance>, ApplicationError> {
+        // Get ServiceLocator from node
+        let service_locator = node.service_locator()
+            .ok_or_else(|| ApplicationError::Other("ServiceLocator not available".to_string()))?;
+
+        // Resolve module by hash
+        let module_any = runtime.get_module(module_hash).await
+            .ok_or_else(|| ApplicationError::Other(format!("WASM module not found: {}", module_hash)))?;
+        let module = plexspaces_wasm_runtime::wasm_runtime_helpers::extract_wasm_module(module_any)
+            .map_err(|e| ApplicationError::Other(format!("Failed to extract WasmModule: {}", e)))?;
+
+        // Wire up all services (reused from build_wasm_actor)
+        use plexspaces_core::ChannelService;
+        use crate::service_wrappers::ChannelServiceWrapper;
+        let channel_service: Arc<dyn ChannelService> = Arc::new(ChannelServiceWrapper::new());
+        
+        let tuplespace_provider = service_locator.get_tuplespace_provider().await;
+        let object_registry = service_locator.get_object_registry().await;
+        let lock_manager = service_locator.get_lock_manager().await;
+        
+        use plexspaces_journaling::JournalStorage;
+        let journal_storage: Option<Arc<dyn JournalStorage>> = {
+            let journal_db_path = std::env::var("PLEXSPACES_DATABASE_URL")
+                .or_else(|_| std::env::var("PLEXSPACES_JOURNAL_DB"))
+                .unwrap_or_else(|_| {
+                    let node_id = node.id().replace(['@', '/', '\\', ':'], "-");
+                    format!("/tmp/plexspaces-journal-{}.db", node_id)
+                });
+            
+            if journal_db_path == ":memory:" || journal_db_path.contains(":memory:") {
+                plexspaces_journaling::SqliteJournalStorage::new(":memory:").await
+                    .map(|s| Arc::new(s) as Arc<dyn JournalStorage>)
+                    .ok()
+            } else {
+                plexspaces_journaling::SqliteJournalStorage::new(&journal_db_path).await
+                    .map(|s| Arc::new(s) as Arc<dyn JournalStorage>)
+                    .ok()
+            }
+        };
+        
+        let blob_service = node.blob_service().await;
+        
+        let module_any: Arc<dyn std::any::Any + Send + Sync> = module.clone();
+        let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(
+            plexspaces_wasm_runtime::WasmConfig::default()
+        );
+        
+        let instance_any = runtime.instantiate(
+            module_any,
+            actor_id.to_string(),
+            &[],
+            config_any,
+            Some(channel_service),
+            None,
+            tuplespace_provider,
+            None,
+            None,
+            lock_manager,
+            object_registry,
+            journal_storage,
+            blob_service,
+        ).await.map_err(|e| ApplicationError::Other(format!("WASM instantiation failed: {}", e)))?;
+        
+        let wasm_instance = plexspaces_wasm_runtime::wasm_runtime_helpers::extract_wasm_instance(instance_any)
+            .map_err(|e| ApplicationError::Other(format!("Failed to extract WasmInstance: {}", e)))?;
+        
+        Ok(wasm_instance)
+    }
+
+    /// Register behaviors from supervisor tree in BehaviorRegistry
+    ///
+    /// ## Purpose
+    /// Registers behaviors for each ChildSpec.id in the supervisor tree, enabling ShardGroups
+    /// to spawn actors using actor_type="worker" (or any ChildSpec.id).
+    ///
+    /// ## Design
+    /// - Extracts all ChildSpec.id values from supervisor tree
+    /// - Registers each as a behavior in BehaviorRegistry
+    /// - Behavior constructor creates WasmActorBehavior wrapping WASM instance
+    /// - Works for both embedded (explicit registration) and WASM (auto-registration) apps
+    /// - Reuses `create_wasm_instance_for_behavior` helper to avoid code duplication
+    ///
+    /// ## Returns
+    /// Ok(()) if registration succeeds, ApplicationError otherwise
+    async fn register_behaviors_from_supervisor_tree(
+        &self,
+        node: Arc<dyn ApplicationNode>,
+    ) -> Result<(), ApplicationError> {
+        use plexspaces_core::{BehaviorRegistry, BehaviorFactoryError, Actor as CoreActor};
+
+        // Get ServiceLocator
+        let service_locator = node.service_locator()
+            .ok_or_else(|| ApplicationError::Other("ServiceLocator not available".to_string()))?;
+
+        // Get or create BehaviorRegistry
+        let behavior_registry_opt = service_locator.get_behavior_registry().await;
+        let registry = if let Some(existing) = behavior_registry_opt.clone() {
+            existing
+        } else {
+            Arc::new(BehaviorRegistry::new())
+        };
+
+        // Get supervisor tree (from spec or WASM module)
+        let supervisor_spec = if let Some(spec) = &self.spec {
+            spec.supervisor.clone()
+        } else {
+            let module_any = self.runtime.get_module(&self.module_hash).await;
+            if let Some(module_any) = module_any {
+                let module = plexspaces_wasm_runtime::wasm_runtime_helpers::extract_wasm_module(module_any)
+                    .map_err(|e| ApplicationError::Other(format!("Failed to extract WASM module: {}", e)))?;
+                match self.call_get_supervisor_tree(&module).await {
+                    Ok(spec) => Some(spec),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        };
+
+        let supervisor_spec = match supervisor_spec {
+            Some(spec) => spec,
+            None => {
+                tracing::debug!(
+                    application = %self.name,
+                    "No supervisor tree found - skipping behavior registration"
+                );
+                return Ok(());
+            }
+        };
+
+        // Extract all ChildSpec.id values recursively
+        let mut child_specs = Vec::new();
+        fn collect_child_specs(
+            spec: &SupervisorSpec,
+            acc: &mut Vec<plexspaces_proto::application::v1::ChildSpec>,
+        ) {
+            for child in &spec.children {
+                acc.push(child.clone());
+                if let Some(nested_supervisor) = &child.supervisor {
+                    collect_child_specs(nested_supervisor, acc);
+                }
+            }
+        }
+        collect_child_specs(&supervisor_spec, &mut child_specs);
+
+        // Register each child spec as a behavior
+        let module_hash = self.module_hash.clone();
+        let runtime = self.runtime.clone();
+        let node_id = node.id().to_string();
+
+        for child_spec in &child_specs {
+            let behavior_name = child_spec.id.clone();
+            let child_spec_clone = child_spec.clone();
+            let node_clone = node.clone();
+            let module_hash_clone = module_hash.clone();
+            let runtime_clone = runtime.clone();
+            let node_id_clone = node_id.clone();
+
+            // Register async behavior constructor
+            let behavior_name_for_error = behavior_name.clone();
+            registry.register(behavior_name.clone(), move |_initial_state: &[u8]| {
+                // Clone captured variables for async block
+                let rt = runtime_clone.clone();
+                let hash = module_hash_clone.clone();
+                let spec = child_spec_clone.clone();
+                let node_ref = node_clone.clone();
+                let nid = node_id_clone.clone();
+                let name_for_error = behavior_name_for_error.clone();
+
+                // Create WASM instance asynchronously (no block_on deadlock)
+                Box::pin(async move {
+                    // Generate unique actor_id for this instance
+                    let actor_id = format!("{}@{}", spec.id, nid);
+                    
+                    let instance = Self::create_wasm_instance_for_behavior(
+                        node_ref,
+                        &spec,
+                        &hash,
+                        rt,
+                        &actor_id,
+                    ).await.map_err(|e| BehaviorFactoryError::CreationFailed(
+                        name_for_error.clone(),
+                        format!("Failed to create WASM instance: {}", e)
+                    ))?;
+
+                    Ok(Box::new(WasmActorBehavior {
+                        instance,
+                        actor_type: spec.id.clone(),
+                        behavior_kind: parse_behavior_kind(spec.behavior_kind.as_deref()),
+                    }) as Box<dyn CoreActor>)
+                })
+            }).await;
+
+            tracing::info!(
+                application = %self.name,
+                behavior_name = %behavior_name,
+                "Registered WASM behavior for ShardGroup support"
+            );
+        }
+
+        // Register the registry with ServiceLocator if not already registered
+        if behavior_registry_opt.is_none() {
+            service_locator.register_behavior_registry(registry).await;
+        }
+
+        tracing::info!(
+            application = %self.name,
+            behavior_count = child_specs.len(),
+            "Registered {} behaviors from supervisor tree",
+            child_specs.len()
+        );
+
+        Ok(())
     }
 
     /// Load supervisor tree OR spawn a simple actor
@@ -874,106 +1103,16 @@ impl WasmApplication {
         let service_locator = node.service_locator()
             .ok_or_else(|| ApplicationError::Other("ServiceLocator not available".to_string()))?;
 
-        // Resolve module by hash
-        let module_any = runtime.get_module(module_hash).await
-            .ok_or_else(|| ApplicationError::Other(format!("WASM module not found: {}", module_hash)))?;
-        let module = plexspaces_wasm_runtime::wasm_runtime_helpers::extract_wasm_module(module_any)
-            .map_err(|e| ApplicationError::Other(format!("Failed to extract WasmModule: {}", e)))?;
-
-        // Wire up all services (same as spawn_worker_actor_internal)
-        use plexspaces_core::ChannelService;
-        use crate::service_wrappers::ChannelServiceWrapper;
-        let channel_service: Arc<dyn ChannelService> = Arc::new(ChannelServiceWrapper::new());
-        
-        let tuplespace_provider = service_locator.get_tuplespace_provider().await;
-        let object_registry = service_locator.get_object_registry().await;
-        // Get LockManager so WASM actors can use host.lock_acquire/renew/release (e.g. leader election)
-        let lock_manager = service_locator.get_lock_manager().await;
-
-        // Get JournalStorage - use SQLite file-based storage for durability
-        // Note: Env var handling is centralized in config_manager::initialize()
-        // TODO: Get database URL from ServiceLocator instead of env vars
-        // For now, keeping env var fallback for backward compatibility until
-        // ServiceLocator exposes the configured database URL
-        use plexspaces_journaling::JournalStorage;
-        let journal_storage: Option<Arc<dyn JournalStorage>> = {
-            let journal_db_path = std::env::var("PLEXSPACES_DATABASE_URL")
-                .or_else(|_| std::env::var("PLEXSPACES_JOURNAL_DB"))
-                .unwrap_or_else(|_| {
-                    // Use node ID to support multiple nodes on same machine
-                    let node_id = node.id().replace(['@', '/', '\\', ':'], "-");
-                    format!("/tmp/plexspaces-journal-{}.db", node_id)
-                });
-            
-            // Check if we should use in-memory
-            if journal_db_path == ":memory:" || journal_db_path.contains(":memory:") {
-                match plexspaces_journaling::SqliteJournalStorage::new(":memory:").await {
-                    Ok(storage) => {
-                        tracing::info!(
-                            node_id = %node.id(),
-                            "Journal storage initialized (SQLite :memory: - non-persistent)"
-                        );
-                        Some(Arc::new(storage) as Arc<dyn JournalStorage>)
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            "Failed to create SQLite :memory: journal storage"
-                        );
-                        None
-                    }
-                }
-            } else {
-                match plexspaces_journaling::SqliteJournalStorage::new(&journal_db_path).await {
-                    Ok(storage) => {
-                        tracing::info!(
-                            db_path = %journal_db_path,
-                            node_id = %node.id(),
-                            "Journal storage initialized (SQLite - persistent)"
-                        );
-                        Some(Arc::new(storage) as Arc<dyn JournalStorage>)
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            db_path = %journal_db_path,
-                            "FATAL: Failed to create SQLite journal storage"
-                        );
-                        // Don't fall back to InMemory - fail fast so persistence issues are caught
-                        None
-                    }
-                }
-            }
-        };
-
-        // Get BlobService from node if available
-        let blob_service = node.blob_service().await;
-
-        // Create WASM instance with all services
-        // TODO(instance-pool): When config.use_instance_pool is true, checkout from per-module InstancePool
-        // instead of runtime.instantiate() for faster spawn. Lightweight actors + worker pools fit well:
-        // pool of actors can share a pool of pre-instantiated WASM instances. See PROJECT_TRACKER.md.
-        let module_any: Arc<dyn std::any::Any + Send + Sync> = module.clone();
-        let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(plexspaces_wasm_runtime::WasmConfig::default());
-        
-        let instance_any = runtime.instantiate(
-            module_any,
-            format!("{}@{}", child_spec.id, node.id()),
-            &[],
-            config_any,
-            Some(channel_service),
-            None, // message_sender
-            tuplespace_provider,
-            None, // keyvalue_store
-            None, // process_group_registry
-            lock_manager,
-            object_registry,
-            journal_storage,
-            blob_service,
-        ).await.map_err(|e| ApplicationError::Other(format!("WASM instantiation failed: {}", e)))?;
-        
-        let wasm_instance = plexspaces_wasm_runtime::wasm_runtime_helpers::extract_wasm_instance(instance_any)
-            .map_err(|e| ApplicationError::Other(format!("Failed to extract WasmInstance: {}", e)))?;
+        // Resolve module by hash and create WASM instance using helper
+        let node_id = node.id().to_string();
+        let actor_id_for_instance = format!("{}@{}", child_spec.id, node_id);
+        let wasm_instance = Self::create_wasm_instance_for_behavior(
+            node.clone(),
+            child_spec,
+            module_hash,
+            runtime,
+            &actor_id_for_instance,
+        ).await?;
 
         // Create behavior (behavior_kind from spec for logging)
         // Include namespace in actor_id so multiple apps (e.g. leader-election-term1, leader-election-term2)
@@ -985,7 +1124,7 @@ impl WasmApplication {
         };
         let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
         let behavior: Box<dyn CoreActor> = Box::new(WasmActorBehavior {
-            instance: wasm_instance,
+            instance: wasm_instance.clone(),
             actor_type: child_spec.id.clone(),
             behavior_kind,
         });
@@ -1126,7 +1265,8 @@ impl WasmApplication {
             // Create ActorRef for registry
             let mailbox = actor.mailbox().clone();
             let actor_ref_for_registry: Arc<dyn plexspaces_core::MessageSender> = Arc::new(
-                plexspaces_actor::ActorRef::local(actor_id.clone(), namespace.clone(), mailbox, service_locator.clone())
+                // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for WASM applications)
+                plexspaces_actor::ActorRef::local(actor_id.clone(), String::new(), namespace.clone(), mailbox, service_locator.clone())
             );
             
             registry.register_actor(
@@ -1253,6 +1393,7 @@ impl WasmApplication {
     /// - If actor not found, treats as success (already stopped)
     async fn stop_actor_gracefully(&self, actor_id: &str) -> Result<(), ApplicationError> {
         use tokio::time::{timeout, Duration};
+        use plexspaces_core::RequestContext;
         
         // Get node reference
         let node_ref = {
@@ -1274,7 +1415,7 @@ impl WasmApplication {
             }
             
             // Use ActorFactory directly from ServiceLocator
-            let service_locator = node.service_locator()
+            let _service_locator = node.service_locator()
                 .ok_or_else(|| ApplicationError::ActorStopFailed(
                     actor_id.to_string(),
                     "ServiceLocator not available from node".to_string()
@@ -1288,8 +1429,14 @@ impl WasmApplication {
                     "ActorFactory not found in ServiceLocator".to_string()
                 ))?;
             
+            // Create RequestContext for stop operation using application's tenant/namespace
+            // Application owns its actors, so it can stop them
+            let tenant_id = self.tenant_id.read().await.clone();
+            let namespace = self.namespace.read().await.clone();
+            let ctx = RequestContext::new_without_auth(tenant_id, namespace);
+            
             let actor_id_string = actor_id.to_string();
-            match timeout(timeout_duration, actor_factory.stop_actor(&actor_id_string)).await {
+            match timeout(timeout_duration, actor_factory.stop_actor(&ctx, &actor_id_string)).await {
                 Ok(Ok(())) => {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
@@ -1382,6 +1529,17 @@ impl Application for WasmApplication {
         {
             let mut node_ref = self.node.write().await;
             *node_ref = Some(node.clone());
+        }
+
+        // Register behaviors from supervisor tree (for ShardGroup support)
+        // This allows ShardGroups to spawn actors using actor_type="worker" (or ChildSpec.id)
+        if let Err(e) = self.register_behaviors_from_supervisor_tree(node.clone()).await {
+            tracing::warn!(
+                application = %self.name,
+                error = %e,
+                "Failed to register behaviors from supervisor tree (ShardGroups may not work)"
+            );
+            // Don't fail startup - behavior registration is optional for simple apps
         }
 
         // Try to load supervisor tree OR spawn simple actor

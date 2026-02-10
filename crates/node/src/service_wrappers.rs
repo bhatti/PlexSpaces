@@ -517,6 +517,26 @@ impl plexspaces_core::NodeMetricsAccessor for NodeMetricsAccessorWrapper {
     async fn increment_failed_deliveries(&self) {
         self.node.increment_failed_deliveries().await;
     }
+    
+    async fn increment_shard_groups_created(&self) {
+        self.node.increment_shard_groups_created().await;
+    }
+    
+    async fn increment_shard_messages_sent(&self) {
+        self.node.increment_shard_messages_sent().await;
+    }
+    
+    async fn increment_shard_messages_received(&self) {
+        self.node.increment_shard_messages_received().await;
+    }
+    
+    async fn increment_shard_operations_total(&self) {
+        self.node.increment_shard_operations_total().await;
+    }
+    
+    async fn increment_shard_operations_failed(&self) {
+        self.node.increment_shard_operations_failed().await;
+    }
 }
 
 /// NodeConnectionInfo wrapper - provides access to node connection information

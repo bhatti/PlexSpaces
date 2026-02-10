@@ -409,6 +409,10 @@ pub struct ServiceLocatorImpl {
     /// This allows components to retrieve NodeRegistry for node discovery with caching
     node_registry: Arc<RwLock<Option<Arc<dyn plexspaces_core::NodeRegistryTrait>>>>,
     
+    /// Registered TaskRouter (stored separately for type-safe access)
+    /// This allows components to register shard groups for task routing
+    task_router: Arc<RwLock<Option<Arc<plexspaces_scheduler::TaskRouter>>>>,
+    
     /// Node configuration (for accessing node_id, cluster_name, auth settings)
     /// Read-only after initialization, uses Mutex for one-time initialization
     node_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::NodeConfig>>>,
@@ -447,6 +451,7 @@ impl ServiceLocatorImpl {
             process_group_service: Arc::new(RwLock::new(None)),
             blob_service: Arc::new(RwLock::new(None)),
             node_registry: Arc::new(RwLock::new(None)),
+            task_router: Arc::new(RwLock::new(None)),
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
             security_config: Arc::new(tokio::sync::Mutex::new(None)),
             shutdown_flag: Arc::new(RwLock::new(false)),
@@ -1628,6 +1633,34 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     }
 }
 
+impl ServiceLocatorImpl {
+    /// Get TaskRouter
+    ///
+    /// ## Purpose
+    /// Retrieves TaskRouter for registering actor groups and routing tasks.
+    /// TaskRouter is registered by Node when it initializes scheduling services.
+    ///
+    /// ## Returns
+    /// `Some(Arc<TaskRouter>)` if registered, `None` otherwise
+    pub async fn get_task_router(&self) -> Option<Arc<plexspaces_scheduler::TaskRouter>> {
+        let router = self.task_router.read().await;
+        router.clone()
+    }
+    
+    /// Register TaskRouter
+    ///
+    /// ## Purpose
+    /// Registers TaskRouter for shard group management and task routing.
+    /// Called by Node when initializing scheduling services.
+    ///
+    /// ## Arguments
+    /// * `router` - TaskRouter to register
+    pub async fn register_task_router(&self, router: Arc<plexspaces_scheduler::TaskRouter>) {
+        let mut task_router = self.task_router.write().await;
+        *task_router = Some(router);
+    }
+}
+
 
 
 /// Internal helper function that implements service initialization
@@ -1922,6 +1955,17 @@ async fn initialize_services_impl(
     service_locator_impl.register_service_by_name(service_names::FACET_MANAGER, facet_manager_wrapper).await;
     service_locator.register_facet_registry(facet_registry_wrapper).await;
     tracing::info!(registered_types = ?facet_registry.list_types(), "📦 FacetRegistry initialized with {} facet types", facet_registry.list_types().len());
+    
+    // Create and register NodeRegistry (required for node connectivity and SWIM protocol)
+    // NodeRegistry needs ObjectRegistry (concrete type), not trait object
+    use crate::node_registry::NodeRegistry;
+    let node_registry = Arc::new(NodeRegistry::from_config(
+        object_registry.clone(), // Use concrete ObjectRegistryImpl, not trait object
+        &final_node_config,
+    ));
+    let node_registry_trait: Arc<dyn plexspaces_core::NodeRegistryTrait> = node_registry.clone();
+    service_locator.register_node_registry(node_registry_trait).await;
+    tracing::info!("📡 NodeRegistry initialized for node discovery and SWIM protocol");
     
     // Create and register ActorFactoryImpl (services crate depends on actor crate, so this is safe)
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;

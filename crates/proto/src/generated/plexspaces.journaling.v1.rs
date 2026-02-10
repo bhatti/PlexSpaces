@@ -268,6 +268,10 @@ pub struct Checkpoint {
     #[prost(uint32, tag="7")]
     pub state_schema_version: u32,
 }
+// ============================================================================
+// Configuration Messages (Proto-First)
+// ============================================================================
+
 /// / Durability configuration (used by DurabilityFacet)
 /// /
 /// / ## Purpose
@@ -283,170 +287,41 @@ pub struct Checkpoint {
 /// / - checkpoint_interval = 0 disables checkpointing (pure journal replay)
 /// / - cache_side_effects = false disables caching (every replay re-executes)
 /// / - replay_on_activation = false skips replay (fresh start)
-/// / - backend_config is oneof for type safety (cannot mix configs)
+/// / - Uses shared database from RuntimeConfig.db (no separate backend config)
 /// /
 /// / ## Usage
 /// / ```rust
 /// / let config = DurabilityConfig {
-/// /     backend: JournalBackend::Postgres,
 /// /     checkpoint_interval: 100,  // Checkpoint every 100 messages
 /// /     replay_on_activation: true,  // Replay journal on actor restart
 /// /     cache_side_effects: true,  // Cache external calls during replay
 /// /     compression: CompressionType::Zstd,
-/// /     backend_config: Some(postgres_config),
 /// / };
 /// / actor.attach_facet(DurabilityFacet::new(config));
 /// / ```
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DurabilityConfig {
-    /// Backend type
-    #[prost(enumeration="JournalBackend", tag="1")]
-    pub backend: i32,
     /// Checkpoint interval (every N messages, 0 = disabled)
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="1")]
     pub checkpoint_interval: u64,
     /// Checkpoint timeout
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="2")]
     pub checkpoint_timeout: ::core::option::Option<::prost_types::Duration>,
     /// Enable replay on activation
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag="3")]
     pub replay_on_activation: bool,
     /// Cache side effects for replay
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag="4")]
     pub cache_side_effects: bool,
     /// Compression type for checkpoints
-    #[prost(enumeration="CompressionType", tag="6")]
+    #[prost(enumeration="CompressionType", tag="5")]
     pub compression: i32,
     /// State schema version for checkpoint compatibility checking
     /// Default: 1 (initial schema version)
     /// Increment when actor state format changes (breaking changes)
-    #[prost(uint32, tag="7")]
+    #[prost(uint32, tag="6")]
     pub state_schema_version: u32,
-    /// Backend-specific config (oneof for type safety)
-    #[prost(oneof="durability_config::BackendConfig", tags="10, 11, 12")]
-    pub backend_config: ::core::option::Option<durability_config::BackendConfig>,
-}
-/// Nested message and enum types in `DurabilityConfig`.
-pub mod durability_config {
-    /// Backend-specific config (oneof for type safety)
-    #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Oneof)]
-    pub enum BackendConfig {
-        #[prost(message, tag="10")]
-        Postgres(super::PostgresJournalConfig),
-        #[prost(message, tag="11")]
-        Redis(super::RedisJournalConfig),
-        #[prost(message, tag="12")]
-        Sqlite(super::SqliteJournalConfig),
-    }
-}
-/// / PostgreSQL journal configuration
-/// /
-/// / ## Purpose
-/// / Configures PostgreSQL backend for durable journaling.
-/// /
-/// / ## Why This Exists
-/// / User requirements:
-/// / - "we need to make sure db schema doesn't require much changes"
-/// / - "framework is smart enough to apply migrations"
-/// /
-/// / ## Design Notes
-/// / - auto_migrate: Use sqlx::migrate! for compile-time checked migrations
-/// / - batch_size: Buffer N entries before COPY bulk insert (performance)
-/// / - flush_interval_ms: Max time to buffer before flush (latency vs throughput)
-/// / - pool_size: Connection pool for concurrent actors
-/// /
-/// / ## Schema Stability Strategy
-/// / - JSONB columns for extensible data (add fields without ALTER TABLE)
-/// / - Immutable entries (append-only, never UPDATE)
-/// / - Migrations only for new tables/indexes, not field additions
-/// /
-/// / ## Performance
-/// / - Batch writes: 1000 entries/batch or 1s flush = 100K+ writes/sec
-/// / - Connection pooling: Reuse connections across actors
-/// / - COPY protocol: 10x faster than INSERT for bulk data
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct PostgresJournalConfig {
-    #[prost(string, tag="1")]
-    pub connection_string: ::prost::alloc::string::String,
-    #[prost(uint32, tag="2")]
-    pub pool_size: u32,
-    /// Default: 1000
-    #[prost(uint32, tag="3")]
-    pub batch_size: u32,
-    /// Default: 1000
-    #[prost(uint32, tag="4")]
-    pub flush_interval_ms: u32,
-    /// Default: true
-    #[prost(bool, tag="5")]
-    pub auto_migrate: bool,
-}
-/// / Redis journal configuration
-/// /
-/// / ## Purpose
-/// / Configures Redis backend for distributed journaling.
-/// /
-/// / ## Why This Exists
-/// / - Distributed systems: Multiple nodes share journal state
-/// / - Fast reads: Redis in-memory performance
-/// / - TTL support: Automatic cleanup of old journal entries
-/// / - Cluster mode: Scale across multiple Redis nodes
-/// /
-/// / ## Design Notes
-/// / - cluster_mode: Use Redis Cluster for horizontal scaling
-/// / - key_prefix: Namespace journal keys (e.g., "journal:actor:")
-/// / - ttl: Auto-expire old entries after duration
-/// /
-/// / ## Trade-offs
-/// / - ✅ Fast: In-memory, low latency
-/// / - ✅ Distributed: Multi-node shared state
-/// / - ❌ Not ACID: Eventually consistent
-/// / - ❌ Data loss risk: In-memory (use persistence if needed)
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct RedisJournalConfig {
-    /// Redis nodes
-    #[prost(string, repeated, tag="1")]
-    pub nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="2")]
-    pub cluster_mode: bool,
-    #[prost(string, tag="3")]
-    pub key_prefix: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="4")]
-    pub ttl: ::core::option::Option<::prost_types::Duration>,
-}
-/// / SQLite journal configuration
-/// /
-/// / ## Purpose
-/// / Configures SQLite backend for edge deployments.
-/// /
-/// / ## Why This Exists
-/// / - Edge computing: Single-node deployments (IoT, mobile, edge servers)
-/// / - Embedded: No separate database process needed
-/// / - Zero config: Single file, no setup
-/// / - ACID: Full transaction support despite being embedded
-/// /
-/// / ## Design Notes
-/// / - wal_mode: Write-ahead logging for concurrency (recommended: true)
-/// / - synchronous: NORMAL (default), FULL (safer), OFF (faster but risky)
-/// / - db_path: File path for database (":memory:" for in-memory SQLite)
-/// /
-/// / ## Performance
-/// / - WAL mode: Concurrent reads + single writer
-/// / - NORMAL synchronous: Balance safety vs speed
-/// / - Batch transactions: Group 100s of entries in single transaction
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SqliteJournalConfig {
-    #[prost(string, tag="1")]
-    pub db_path: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
-    pub wal_mode: bool,
-    /// NORMAL, FULL, OFF
-    #[prost(string, tag="3")]
-    pub synchronous: ::prost::alloc::string::String,
 }
 /// / Checkpoint configuration
 /// /
@@ -1129,66 +1004,6 @@ impl SideEffectType {
             "SIDE_EFFECT_TYPE_DATABASE_QUERY" => Some(Self::SideEffectTypeDatabaseQuery),
             "SIDE_EFFECT_TYPE_FILE_IO" => Some(Self::SideEffectTypeFileIo),
             "SIDE_EFFECT_TYPE_RANDOM_GENERATION" => Some(Self::SideEffectTypeRandomGeneration),
-            _ => None,
-        }
-    }
-}
-// ============================================================================
-// Configuration Messages (Proto-First)
-// ============================================================================
-
-/// / Journal backend provider
-/// /
-/// / ## Purpose
-/// / Defines which storage backend to use for journal persistence.
-/// /
-/// / ## Why This Exists
-/// / - Flexibility: Choose backend based on deployment environment
-/// / - Testing: Use Memory backend for unit tests (no external dependencies)
-/// / - Production: Use PostgreSQL for durability and ACID guarantees
-/// / - Distributed: Use Redis for multi-node journaling
-/// / - Edge: Use SQLite for single-node edge deployments
-/// /
-/// / ## Design Notes
-/// / - Memory: In-process HashMap, no persistence (testing only)
-/// / - PostgreSQL: ACID transactions, auto-migration via sqlx::migrate!
-/// / - Redis: Distributed, eventually consistent, TTL support
-/// / - SQLite: Embedded, WAL mode, single-node
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum JournalBackend {
-    JournalBackendUnspecified = 0,
-    /// In-memory (testing)
-    JournalBackendMemory = 1,
-    /// PostgreSQL (production)
-    JournalBackendPostgres = 2,
-    /// Redis (distributed)
-    JournalBackendRedis = 3,
-    /// SQLite (edge)
-    JournalBackendSqlite = 4,
-}
-impl JournalBackend {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            JournalBackend::JournalBackendUnspecified => "JOURNAL_BACKEND_UNSPECIFIED",
-            JournalBackend::JournalBackendMemory => "JOURNAL_BACKEND_MEMORY",
-            JournalBackend::JournalBackendPostgres => "JOURNAL_BACKEND_POSTGRES",
-            JournalBackend::JournalBackendRedis => "JOURNAL_BACKEND_REDIS",
-            JournalBackend::JournalBackendSqlite => "JOURNAL_BACKEND_SQLITE",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "JOURNAL_BACKEND_UNSPECIFIED" => Some(Self::JournalBackendUnspecified),
-            "JOURNAL_BACKEND_MEMORY" => Some(Self::JournalBackendMemory),
-            "JOURNAL_BACKEND_POSTGRES" => Some(Self::JournalBackendPostgres),
-            "JOURNAL_BACKEND_REDIS" => Some(Self::JournalBackendRedis),
-            "JOURNAL_BACKEND_SQLITE" => Some(Self::JournalBackendSqlite),
             _ => None,
         }
     }

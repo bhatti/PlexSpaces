@@ -281,6 +281,67 @@ graph TB
     style ServiceLocator fill:#a78bfa,stroke:#c4b5fd,stroke-width:2px,color:#000
 ```
 
+### Data-Parallel Actors (ShardGroup)
+
+PlexSpaces supports data-parallel actors inspired by the [Data-Parallel Actors (DPA) paper](https://www.micahlerner.com/2022/06/04/data-parallel-actors-a-programming-model-for-scalable-query-serving-systems.html). ShardGroup provides partitioning, bulk updates, parallel queries, and scatter-gather operations.
+
+```mermaid
+graph TB
+    subgraph DPA["Data-Parallel Actors (ShardGroup)"]
+        Client["Client"]
+        ShardGroup["ShardGroup<br/>(Worker Pool)"]
+        Shard1["Shard 0<br/>(Worker Actor)"]
+        Shard2["Shard 1<br/>(Worker Actor)"]
+        Shard3["Shard 2<br/>(Worker Actor)"]
+        Shard4["Shard 3<br/>(Worker Actor)"]
+    end
+    
+    Client -->|"CreateShardGroup"| ShardGroup
+    Client -->|"BulkUpdate"| ShardGroup
+    Client -->|"Map"| ShardGroup
+    Client -->|"ScatterGather"| ShardGroup
+    
+    ShardGroup -->|"Partition by key"| Shard1
+    ShardGroup -->|"Partition by key"| Shard2
+    ShardGroup -->|"Broadcast query"| Shard3
+    ShardGroup -->|"Broadcast query"| Shard4
+    
+    Shard1 -->|"Results"| ShardGroup
+    Shard2 -->|"Results"| ShardGroup
+    Shard3 -->|"Results"| ShardGroup
+    Shard4 -->|"Results"| ShardGroup
+    
+    style DPA fill:#7c3aed,stroke:#a78bfa,stroke-width:3px,color:#fff
+    style ShardGroup fill:#a78bfa,stroke:#c4b5fd,stroke-width:2px,color:#000
+    style Client fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+```
+
+**Key Features**:
+- **Partitioning**: Hash, ConsistentHash, or Range strategies
+- **Bulk Updates**: Route updates to shards based on partition key (DPA UpdateFunction)
+- **Parallel Map**: Query all shards simultaneously (DPA Map operator)
+- **Scatter-Gather**: Aggregate results with fault tolerance (DPA Scatter-Gather)
+- **Resource-Based Routing**: Labels flow to ActorResourceRequirements for intelligent node placement
+- **Unified SDK**: `ParallelClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC
+
+**Architecture**:
+- Core functionality in `crates/services/src/actor_service/mod.rs` (ActorService trait)
+- SDK provides unified abstractions (`UnifiedShardGroupClient`, `ParallelClient`)
+- Labels flow: ShardGroup.labels → ActorResourceRequirements.required_labels → NodeSelector → Node placement
+
+**Parallel Operations**:
+- **Parallel Map**: Uses Erlang `pmap` pattern - sends query to all shards simultaneously, collects individual results
+- **Scatter-Gather**: Aggregates results using strategies (Concat, Merge/Sum) with fault tolerance
+- **Unified Implementation**: Both operations use `parallel_operation_unified()` helper for consistent behavior
+- **Temporary Sender Pattern**: Uses single temporary sender ActorRef with per-shard correlation IDs for reply routing
+- **ReplyWaiterRegistry**: Centralized registry for async reply waiting (not used for routing, only waiting)
+
+**Routing Architecture**:
+- **Unified Routing Module**: `crates/actor/src/routing.rs` centralizes all routing logic
+- **Location Transparency**: `is_actor_local()` determines locality by comparing node_id from actor_id with local_node_id
+- **RequestContext Required**: All routing functions require RequestContext for tenant/namespace isolation
+- **Ask Pattern**: Uses temporary sender ActorRef + ReplyWaiterRegistry for request-reply semantics
+
 ### Component Interaction Diagram
 
 ```mermaid
@@ -1026,6 +1087,16 @@ The `NodeService` gRPC service provides comprehensive node management operations
 | `ListNodeApplications` | Applications deployed on node |
 | `GetHealth` | Node health status |
 | `SendHeartbeat` | Heartbeat with capacity info |
+| `ConnectNodes` | Connect to remote nodes (Erlang-style net_adm:ping) |
+| `DisconnectNodes` | Disconnect from nodes |
+| `Ping` | SWIM protocol ping for failure detection |
+
+**Health-Aware Connection**: The SDK's `NodeClient` provides production-grade health-aware connection:
+- Pre-checks liveness using `SystemService.liveness_probe()` (avoids unnecessary connection attempts)
+- Waits for readiness using `SystemService.readiness_probe()` (ensures node is ready)
+- Exponential backoff with jitter for retries (prevents thundering herd)
+- Parallel health checks for multi-node connections (efficient)
+- Graceful degradation (handles partial success)
 
 **Security Feature**: The `GetReleaseSpec` RPC automatically masks all secrets (passwords, API keys, tokens) before returning the configuration via the `SecretMasker` utility.
 

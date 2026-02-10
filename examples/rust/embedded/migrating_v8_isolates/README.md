@@ -23,7 +23,7 @@ cargo test --release
 
 ## Intent: Splunk-Like Pipelining for High-Throughput Data Processing
 
-This example replicates the core architecture patterns used by **Splunk**, **Cribl**, and **Datadog** for processing massive volumes of log and metric data in real-time. The design emphasizes:
+This example replicates the core architecture patterns used by **Splunk** and **Datadog** for processing massive volumes of log and metric data in real-time. The design emphasizes:
 
 ### Splunk-Like Pipeline Architecture
 
@@ -44,7 +44,6 @@ This example replicates the core architecture patterns used by **Splunk**, **Cri
 
 This architecture pattern is used by:
 - **Splunk**: Universal Forwarders → Indexers → Search Heads pipeline
-- **Cribl**: Stream processing with multiple pipeline stages
 - **Datadog**: Log ingestion → Processing → Forwarding pipeline
 - **ELK Stack**: Beats → Logstash → Elasticsearch pipeline
 
@@ -604,12 +603,12 @@ Ingestion Actor
 - **Scalability**: Each stage can scale independently
 - **Flexibility**: Can have one actor per stage or hybrid approach
 - **Fault Isolation**: Stage failures don't affect other stages
-- **Industry Practice**: Matches Cribl, Splunk, Datadog architectures
+- **Industry Practice**: Matches Splunk, Datadog architectures
 - **Performance**: Parallel processing of stages
 
 ### Why Multiple Pipelines?
 
-**Splunk/Cribl Pattern**: Multiple independent pipelines process different data streams concurrently.
+**Splunk Pattern**: Multiple independent pipelines process different data streams concurrently.
 
 **PlexSpaces Implementation**: Creates `NUM_PIPELINES` (default: 4) independent pipelines, each with dedicated actors.
 
@@ -622,7 +621,6 @@ Ingestion Actor
 
 **Real-World Example**:
 - **Splunk**: Multiple Universal Forwarders → Multiple Indexers → Search Heads
-- **Cribl**: Multiple Stream pipelines processing different data sources
 - **Datadog**: Multiple log processing pipelines for different log types
 
 This matches the production architecture used by major log/metric processing platforms.
@@ -690,16 +688,6 @@ Example metrics structure:
 }
 ```
 
-## References
-
-- [Cribl Documentation](https://docs.cribl.io/stream/aggregations-function/)
-- [From Pipeline to Platform: The Cribl Story](https://softwareanalyst.substack.com/p/from-pipeline-to-platform-the-cribl)
-- [PlexSpaces Actor Model](../../../../crates/actor)
-- [PlexSpaces Channels](../../../../crates/channel)
-- [PlexSpaces Workflows](../../../../crates/workflow)
-- [PlexSpaces Durability](../../../../docs/durability.md)
-- [PlexSpaces Architecture](../../../../docs/architecture.md)
-
 ## Conclusion
 
 This comparison demonstrates that **PlexSpaces is production-ready** for high-throughput log/metric processing systems with:
@@ -719,7 +707,7 @@ This comparison demonstrates that **PlexSpaces is production-ready** for high-th
 2. **High Throughput**: Achieves 100,000+ events/second per node with proper pipeline configuration
 3. **Fault Tolerance**: Independent pipelines ensure system resilience
 4. **Horizontal Scaling**: Add more pipelines or nodes to scale throughput linearly
-5. **Production Patterns**: Follows established patterns from Splunk, Cribl, and Datadog
+5. **Production Patterns**: Follows established patterns from Splunk, and Datadog
 
 ### Next Steps
 

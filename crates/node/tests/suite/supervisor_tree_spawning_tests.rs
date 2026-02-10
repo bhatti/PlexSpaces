@@ -372,18 +372,18 @@ async fn get_actor_type(node: &Node, actor_id: &str) -> Option<String> {
 /// 
 /// ## Purpose
 /// Registers a BehaviorRegistry in the ServiceLocator. ActorFactory::spawn_actor looks for
-/// BehaviorRegistry in ServiceLocator. If not found, it falls back to SimpleBehavior (which is fine for tests).
+/// BehaviorRegistry in ServiceLocator. If not found or actor_type is not registered, spawn_actor
+/// will FAIL with an error.
 /// 
 /// ## Expected Behavior
 /// - Registers BehaviorRegistry in ServiceLocator
 /// - ActorFactory will use it to create behaviors for spawned actors
-/// - If BehaviorRegistry is not found, ActorFactory falls back to SimpleBehavior (acceptable for tests)
+/// - If BehaviorRegistry is not found or actor_type is unknown, spawn_actor returns an error
+/// - Tests must register behaviors before spawning actors with actor_type strings
 async fn register_mock_behavior_factory(node: &Node) -> Result<(), String> {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     use std::sync::Arc;
     
-    // Create behavior registry (empty - ActorFactory will fall back to SimpleBehavior)
-    // This is fine for tests - SimpleBehavior just consumes messages
     let registry = BehaviorRegistry::new();
     let registry_arc = Arc::new(registry);
     
@@ -391,7 +391,7 @@ async fn register_mock_behavior_factory(node: &Node) -> Result<(), String> {
     let service_locator = node.service_locator();
     service_locator.register_behavior_registry(registry_arc.clone()).await;
     
-    tracing::debug!("Registered behavior factory in ServiceLocator (fallback to SimpleBehavior for unknown types)");
+    tracing::debug!("Registered behavior factory in ServiceLocator (unknown actor_types will fail - register behaviors first)");
     
     Ok(())
 }
@@ -429,9 +429,6 @@ async fn deploy_application_mock(
         "Deploying application using SpecApplication (mock/simulated unit test mode)"
     );
     
-    // Register mock behavior factory in ServiceLocator
-    // ActorFactory::spawn_actor looks for BehaviorRegistry in ServiceLocator
-    // If not found, it falls back to SimpleBehavior (which is fine for tests)
     register_mock_behavior_factory(node).await
         .map_err(|e| format!("Failed to register behavior factory: {}", e))?;
     

@@ -19,6 +19,7 @@ plexspaces-actor = { path = "../actor" }
 plexspaces-behavior = { path = "../behavior" }
 plexspaces-persistence = { path = "../persistence" }
 plexspaces-proto = { path = "../proto" }
+plexspaces-facet = { path = "../facet" }
 
 # Async runtime
 tokio = { workspace = true }
@@ -63,6 +64,8 @@ tokio-test = { workspace = true }
 tempfile = { workspace = true }
 # Test helpers for checking DynamoDB Local availability
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
+# Node for integration tests
+plexspaces-node = { path = "../node" }
 
 [features]
 default = []

@@ -881,6 +881,246 @@ message DataParallelConfig {
   RebalancePolicy rebalance_policy = 5;
 }
 
+// ============================================================================
+// ACTOR GROUPS - Shard Group Messages (data-parallel sharding)
+// ============================================================================
+// Labels are used for node placement: ActorResourceRequirements.required_labels
+// matches NodeCapacity.labels (from NodeRegistry capabilities). See
+// docs/CLUSTER_AND_ROUTING_COHESION.md.
+
+// Shard group - collection of sharded actors with the same behavior
+message ShardGroup {
+  string group_id = 1;
+  string actor_type = 2;
+  uint32 shard_count = 3;
+  PartitionStrategy partition_strategy = 4;
+  repeated string shard_actor_ids = 5;  // Indexed by shard_id 0 to shard_count-1
+  ShardGroupState state = 6;
+  google.protobuf.Timestamp created_at = 7;
+  map<string, string> metadata = 8;
+  // Labels for node placement (required_labels in ActorResourceRequirements)
+  map<string, string> labels = 9;
+  // Rebalancing status (if currently rebalancing)
+  RebalanceStatus rebalance_status = 10;
+}
+
+enum ShardGroupState {
+  SHARD_GROUP_STATE_UNSPECIFIED = 0;
+  SHARD_GROUP_STATE_CREATING = 1;     // Shards being created
+  SHARD_GROUP_STATE_ACTIVE = 2;       // All shards active
+  SHARD_GROUP_STATE_REBALANCING = 3;  // Shards being rebalanced
+  SHARD_GROUP_STATE_DRAINING = 4;     // Shards being drained
+  SHARD_GROUP_STATE_STOPPING = 5;     // Shards being stopped
+  SHARD_GROUP_STATE_STOPPED = 6;      // All shards stopped
+}
+
+// Rebalancing status for shard groups
+message RebalanceStatus {
+  // Is currently rebalancing
+  bool is_rebalancing = 1;
+
+  // Old shard count (before rebalancing)
+  uint32 old_shard_count = 2;
+
+  // New shard count (after rebalancing)
+  uint32 new_shard_count = 3;
+
+  // Progress (0.0 to 100.0)
+  double progress_percent = 4;
+
+  // When rebalancing started
+  google.protobuf.Timestamp started_at = 5;
+
+  // Estimated completion time
+  google.protobuf.Timestamp estimated_completion = 6;
+}
+
+message CreateShardGroupRequest {
+  string group_id = 1;
+  string actor_type = 2;
+  uint32 shard_count = 3;
+  PartitionStrategy partition_strategy = 4;
+  ActorConfig shard_config = 5;
+  bytes initial_state = 6;
+  map<string, string> metadata = 7;
+  // Labels for node placement (shards placed on nodes matching required_labels)
+  map<string, string> labels = 8;
+}
+
+message CreateShardGroupResponse {
+  ShardGroup group = 1;
+}
+
+message DeleteShardGroupRequest {
+  string group_id = 1;
+  bool force = 2;
+  google.protobuf.Duration shutdown_timeout = 3;
+}
+
+message GetShardGroupRequest {
+  string group_id = 1;
+}
+
+message GetShardGroupResponse {
+  ShardGroup group = 1;
+}
+
+message ListShardGroupsRequest {
+  string actor_type = 1;
+  ShardGroupState state = 2;
+  plexspaces.common.v1.PageRequest page = 3;
+}
+
+message ListShardGroupsResponse {
+  repeated ShardGroup groups = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+message SendToShardRequest {
+  string group_id = 1;
+  bytes partition_key = 2;
+  plexspaces.common.v1.Message message = 3;
+  bool wait_for_response = 4;
+  google.protobuf.Duration timeout = 5;
+}
+
+message SendToShardResponse {
+  uint32 shard_id = 1;
+  string shard_actor_id = 2;
+  plexspaces.common.v1.Message response = 3;
+}
+
+// Aggregation strategy for scatter-gather results
+enum ShardGroupAggregationStrategy {
+  SHARD_GROUP_AGGREGATION_UNSPECIFIED = 0;
+  SHARD_GROUP_AGGREGATION_CONCAT = 1;
+  SHARD_GROUP_AGGREGATION_MERGE = 2;
+  SHARD_GROUP_AGGREGATION_FIRST = 3;
+  SHARD_GROUP_AGGREGATION_MAJORITY = 4;
+}
+
+message ScatterGatherRequest {
+  string group_id = 1;
+  plexspaces.common.v1.Message query = 2;
+  google.protobuf.Duration timeout = 3;
+  ShardGroupAggregationStrategy aggregation = 4;
+  uint32 min_responses = 5;
+}
+
+message ShardQueryResponse {
+  uint32 shard_id = 1;
+  string shard_actor_id = 2;
+  plexspaces.common.v1.Message response = 3;
+  google.protobuf.Duration latency = 4;
+  bool success = 5;
+  string error = 6;
+}
+
+message ScatterGatherStats {
+  uint32 shards_queried = 1;
+  uint32 shards_responded = 2;
+  uint32 shards_failed = 3;
+  google.protobuf.Duration max_latency = 4;
+}
+
+message ScatterGatherResponse {
+  plexspaces.common.v1.Message result = 1;
+  repeated ShardQueryResponse shard_responses = 2;
+  ScatterGatherStats stats = 3;
+}
+
+// Bulk update: send update messages to multiple shards (DPA UpdateFunction)
+// Inspired by NSDI'22 Data-Parallel Actors paper
+message BulkUpdateShardGroupRequest {
+  // Group to update
+  string group_id = 1;
+  
+  // Update messages: partition_key -> message
+  // Messages will be routed to appropriate shards based on partition_key
+  map<string, plexspaces.common.v1.Message> updates = 2;
+  
+  // Consistency level for updates
+  ConsistencyLevel consistency_level = 3;
+  
+  // Timeout for updates
+  google.protobuf.Duration timeout = 4;
+  
+  // Wait for responses (true = wait for all, false = fire-and-forget)
+  bool wait_for_responses = 5;
+}
+
+message BulkUpdateShardGroupResponse {
+  // Number of updates sent
+  uint32 updates_sent = 1;
+  
+  // Number of successful updates
+  uint32 updates_succeeded = 2;
+  
+  // Number of failed updates
+  uint32 updates_failed = 3;
+  
+  // Per-shard statistics
+  repeated ShardUpdateStats shard_stats = 4;
+  
+  // Errors (if any)
+  repeated string errors = 5;
+}
+
+message ShardUpdateStats {
+  uint32 shard_id = 1;
+  string shard_actor_id = 2;
+  uint32 updates_sent = 3;
+  uint32 updates_succeeded = 4;
+  uint32 updates_failed = 5;
+}
+
+// Map: apply function to all shards in parallel (DPA Map operator)
+// Inspired by NSDI'22 Data-Parallel Actors paper
+message MapShardGroupRequest {
+  // Group to map over
+  string group_id = 1;
+  
+  // Map function message (sent to each shard)
+  plexspaces.common.v1.Message map_function = 2;
+  
+  // Timeout for map operation
+  google.protobuf.Duration timeout = 3;
+  
+  // Minimum number of shards that must respond (0 = all required)
+  uint32 min_responses = 4;
+}
+
+message MapShardGroupResponse {
+  // Mapped results from each shard
+  repeated ShardQueryResponse shard_results = 1;
+  
+  // Statistics
+  ScatterGatherStats stats = 2;
+}
+
+// Scale shard group (add/remove shards with rebalancing)
+message ScaleShardGroupRequest {
+  // Group to scale
+  string group_id = 1;
+
+  // New shard count
+  uint32 new_shard_count = 2;
+
+  // Rebalancing policy
+  RebalancePolicy rebalance_policy = 3;
+
+  // Configuration for new shards (if scaling up)
+  ActorConfig new_shard_config = 4;
+}
+
+message ScaleShardGroupResponse {
+  // Updated shard group
+  ShardGroup group = 1;
+
+  // Rebalancing status
+  RebalanceStatus rebalance_status = 2;
+}
+
 // State management mode (lattice-based data-parallel actors)
 enum StateMgmtMode {
   STATE_MGMT_MODE_UNSPECIFIED = 0;
@@ -921,52 +1161,6 @@ message ActorMetrics {
   google.protobuf.Timestamp last_activity = 5;
   uint64 memory_usage_bytes = 6 [(buf.validate.field).uint64.lte = 1099511627776];  // Max 1TB
   double cpu_usage_percent = 7 [(buf.validate.field).double = {gte: 0.0, lte: 100.0}];
-}
-
-// Request to create an actor
-//
-// ## Design Principle
-// CreateActor ALWAYS creates actors locally on the node where the gRPC call is made.
-// There is no node_id field - the actor is always created on the node receiving the request.
-//
-// To spawn an actor on a remote node:
-// 1. Call CreateActor on that remote node's ActorService directly, OR
-// 2. Use SpawnActor RPC (which also must be called on the target node)
-//
-// ## Example
-// ```rust
-// // Create actor locally on node1
-// let client1 = ActorServiceClient::connect("http://node1:8000").await?;
-// let response = client1.create_actor(CreateActorRequest { actor_type: "worker", ... }).await?;
-// // Actor is created on node1
-//
-// // Create actor on remote node2
-// let client2 = ActorServiceClient::connect("http://node2:8001").await?;
-// let response = client2.create_actor(CreateActorRequest { actor_type: "worker", ... }).await?;
-// // Actor is created on node2
-// ```
-message CreateActorRequest {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Create Actor Request"
-      description: "Request to create a new actor instance on the local node (where this RPC is called)"
-      required: ["actor_type"]
-    }
-  };
-
-  string actor_type = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 128, pattern: "^[a-z][a-z0-9_-]*$"}
-  ];
-  bytes initial_state = 3;
-  ActorConfig config = 4;
-  map<string, string> labels = 5;
-  // Optional namespace. If not provided or empty, uses namespace from RequestContext
-  string namespace = 6;
-}
-
-message CreateActorResponse {
-  Actor actor = 1;
 }
 
 // Request to spawn an actor on a specific remote node (Erlang spawn/4 equivalent)
@@ -1118,6 +1312,15 @@ message SpawnActorRequest {
   // - MetricsFacet: Adds metrics collection
   repeated plexspaces.common.v1.Facet facets = 6;
 
+  // Namespace for actor isolation (REQUIRED for multi-tenant deployments)
+  // Tenant ID comes from gRPC auth (JWT middleware), not from request
+  // Namespace provides sub-isolation within a tenant (e.g., different apps)
+  // Examples: "production", "staging", "app-v1", "team-platform"
+  string namespace = 7 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
   // RESERVED for future WASM support (Week 11-12)
   // When WASM support is added, these fields will be used:
   // - bytes wasm_module = 10;        // WASM bytecode for dynamic deployment
@@ -1176,6 +1379,12 @@ message GetActorRequest {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {min_len: 1, max_len: 255}
   ];
+
+  // Namespace for tenant isolation (tenant_id from JWT)
+  string namespace = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128}
+  ];
 }
 
 message GetActorResponse {
@@ -1195,6 +1404,13 @@ message ListActorsRequest {
   string actor_type = 2 [(buf.validate.field).string.max_len = 128];
   ActorState state = 3;
   string node_id = 4 [(buf.validate.field).string.max_len = 255];
+
+  // Namespace for tenant isolation (tenant_id from JWT)
+  // Only actors in this namespace will be returned
+  string namespace = 5 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128}
+  ];
 }
 
 message ListActorsResponse {
@@ -1310,6 +1526,12 @@ message DeleteActorRequest {
     (buf.validate.field).string = {min_len: 1, max_len: 255}
   ];
   bool force = 2;
+
+  // Namespace for tenant isolation (tenant_id from JWT)
+  string namespace = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128}
+  ];
 }
 
 // NOTE: Facet management (AttachFacet, DetachFacet, etc.) is handled by
@@ -1830,19 +2052,6 @@ service ActorService {
     description: "Service for managing durable actors"
   };
 
-  // Create a new actor
-  rpc CreateActor(CreateActorRequest) returns (CreateActorResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actors"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Create Actor"
-      description: "Create a new durable actor instance"
-      tags: "Actors"
-    };
-  }
-
   // Spawn an actor on the node receiving this gRPC request
   //
   // ## Purpose
@@ -2210,16 +2419,59 @@ service ActorService {
         put: "/api/v1/actors/{namespace}/{actor_type}"
         body: "*"
       }
-      additional_bindings {
-        delete: "/api/v1/actors/{namespace}/{actor_type}"
-      }
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Invoke Actor"
-      description: "Invoke an actor via HTTP GET/POST/PUT/DELETE (FaaS-style interface)"
+      description: "Invoke an actor via HTTP GET/POST/PUT (FaaS-style interface)"
       tags: "Actors"
     };
   }
+
+  // Terminate an actor gracefully by ID
+  //
+  // ## Purpose
+  // Gracefully terminates an actor, allowing it to complete pending work and clean up.
+  // This is the HTTP DELETE endpoint for actors (mapped from DELETE /api/v1/actors/{namespace}/{actor_id}).
+  // Pairs with SpawnActor for complete actor lifecycle management.
+  //
+  // ## Behavior
+  // - Sends graceful shutdown signal to actor
+  // - Actor completes pending messages (with timeout)
+  // - Actor state is persisted (if DurabilityFacet attached)
+  // - Actor is removed from registry
+  //
+  // ## Difference from DeactivateActor
+  // - TerminateActor: Permanent termination (actor removed from system)
+  // - DeactivateActor: Temporary passivation (virtual actor can reactivate on next message)
+  //
+  // ## Security
+  // - Requires permission to terminate actors in the namespace
+  // - Tenant isolation enforced via JWT claims
+  rpc TerminateActor(TerminateActorRequest) returns (TerminateActorResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/actors/{namespace}/{actor_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Terminate Actor"
+      description: "Gracefully terminate an actor by ID (permanent termination, pairs with SpawnActor)"
+      tags: "Actors"
+    };
+  }
+
+  // ============================================================================
+  // ACTOR GROUPS (data-parallel sharding). See docs/ACTOR_GROUPS_DESIGN.md.
+  // ============================================================================
+  rpc CreateShardGroup(CreateShardGroupRequest) returns (CreateShardGroupResponse);
+  rpc DeleteShardGroup(DeleteShardGroupRequest) returns (plexspaces.common.v1.Empty);
+  rpc GetShardGroup(GetShardGroupRequest) returns (GetShardGroupResponse);
+  rpc ListShardGroups(ListShardGroupsRequest) returns (ListShardGroupsResponse);
+  rpc ScaleShardGroup(ScaleShardGroupRequest) returns (ScaleShardGroupResponse);
+  rpc SendToShard(SendToShardRequest) returns (SendToShardResponse);
+  rpc ScatterGather(ScatterGatherRequest) returns (ScatterGatherResponse);
+  // Bulk update: send update messages to multiple shards (DPA UpdateFunction)
+  rpc BulkUpdateShardGroup(BulkUpdateShardGroupRequest) returns (BulkUpdateShardGroupResponse);
+  // Map: apply function to all shards in parallel (DPA Map operator)
+  rpc MapShardGroup(MapShardGroupRequest) returns (MapShardGroupResponse);
 }
 
 // ============================================================================
@@ -2290,6 +2542,69 @@ message DeactivateActorRequest {
 
   // Optional: Force deactivation even if actor has pending messages
   bool force = 2;
+}
+
+// Request to terminate an actor gracefully
+//
+// ## Purpose
+// Permanently terminates an actor, completing pending work and removing from system.
+// Different from DeactivateActor which is temporary passivation for virtual actors.
+// Pairs with SpawnActorRequest for complete lifecycle management.
+message TerminateActorRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Terminate Actor Request"
+      description: "Request to gracefully terminate an actor"
+      required: ["actor_id"]
+    }
+  };
+
+  // Namespace of the actor
+  string namespace = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Actor ID to terminate
+  string actor_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+
+  // Optional: Force termination even if actor has pending messages
+  // When false (default): Actor completes pending messages before terminating
+  // When true: Actor terminates immediately, pending messages may be lost
+  bool force = 3;
+
+  // Optional: Timeout for graceful shutdown (in milliseconds)
+  // Default: 5000ms (5 seconds)
+  // After timeout, actor is forcefully terminated
+  uint64 timeout_ms = 4;
+}
+
+// Response from terminating an actor
+message TerminateActorResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Terminate Actor Response"
+      description: "Response from terminating an actor"
+    }
+  };
+
+  // Whether the actor was successfully terminated
+  bool success = 1;
+
+  // Actor ID that was terminated
+  string actor_id = 2;
+
+  // Number of pending messages that were processed before termination
+  uint64 messages_processed = 3;
+
+  // Number of pending messages that were dropped (if force=true)
+  uint64 messages_dropped = 4;
+
+  // Error message if success is false
+  string error_message = 5;
 }
 
 // Request to check if actor exists

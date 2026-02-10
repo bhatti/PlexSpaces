@@ -26,7 +26,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use plexspaces_mailbox::Message;
+use plexspaces_proto::common::v1::Message;
 
 /// Actor identifier (type alias for String)
 pub type ActorId = String;
@@ -566,8 +566,8 @@ impl Journal for MemoryJournal {
             sequence,
             timestamp: Utc::now(),
             message: MessageRecord {
-                id: message.id().to_string(),
-                payload: message.payload.to_vec(),
+                id: message.id.clone(),
+                payload: message.payload.clone(),
                 metadata: Default::default(),
             },
         };
@@ -588,7 +588,7 @@ impl Journal for MemoryJournal {
         let entry = JournalEntry::MessageProcessed {
             sequence,
             timestamp: Utc::now(),
-            message_id: message.id().to_string(),
+            message_id: message.id.clone(),
             result: processing_result,
         };
         self.entries.write().await.push(entry);

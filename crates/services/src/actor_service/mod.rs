@@ -122,13 +122,19 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
+use futures::future::join_all;
 
-use plexspaces_core::{ActorRegistry, ServiceLocator as ServiceLocatorTrait, actor_context::ObjectRegistry as ObjectRegistryTrait, MessageSender, ReplyWaiter, ReplyWaiterError};
+use plexspaces_core::{ActorRegistry, ServiceLocator as ServiceLocatorTrait, actor_context::ObjectRegistry as ObjectRegistryTrait, MessageSender, ReplyWaiter, ReplyWaiterError, RequestContext};
 use std::collections::HashMap;
-use plexspaces_actor::ActorFactory;
+use std::time::{SystemTime, Duration, Instant};
+use std::io::Write;
+use plexspaces_actor::{ActorFactory, Actor};
 use plexspaces_actor::ActorRef as ActorRefImpl;
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_core::ActorId;
 use crate::ServiceLocatorImpl;
 use plexspaces_proto::common::v1::Message;
+use ulid::Ulid;
 
 // Import proto types and gRPC service trait
 use plexspaces_proto::actor::v1::{
@@ -141,10 +147,10 @@ use plexspaces_proto::actor::v1::{
     ActivateActorResponse,
     CheckActorExistsRequest,
     CheckActorExistsResponse,
-    CreateActorRequest,
-    CreateActorResponse,
     DeleteActorRequest,
     DeactivateActorRequest,
+    TerminateActorRequest,
+    TerminateActorResponse,
     GetActorRequest,
     GetActorResponse,
     GetOrActivateActorRequest,
@@ -170,6 +176,18 @@ use plexspaces_proto::actor::v1::{
     StreamMessageResponse,
     UnlinkActorRequest,
     UnlinkActorResponse,
+    // ShardGroup types
+    CreateShardGroupRequest, CreateShardGroupResponse,
+    DeleteShardGroupRequest,
+    GetShardGroupRequest, GetShardGroupResponse,
+    ListShardGroupsRequest, ListShardGroupsResponse,
+    ScaleShardGroupRequest, ScaleShardGroupResponse,
+    SendToShardRequest, SendToShardResponse,
+    ScatterGatherRequest, ScatterGatherResponse,
+    BulkUpdateShardGroupRequest, BulkUpdateShardGroupResponse,
+    MapShardGroupRequest, MapShardGroupResponse,
+    ShardGroup, ShardGroupState, PartitionStrategy, ShardGroupAggregationStrategy,
+    ShardQueryResponse, ScatterGatherStats, ShardUpdateStats, RebalanceStatus,
 };
 use plexspaces_proto::common::v1::Empty;
 
@@ -189,6 +207,10 @@ pub struct ActorServiceImpl {
     
     /// Local node ID (for routing decisions)
     local_node_id: String,
+
+    /// ShardGroups registry: group_id -> ShardGroup metadata
+    /// Thread-safe HashMap for concurrent access
+    shard_groups: Arc<tokio::sync::RwLock<std::collections::HashMap<String, ShardGroup>>>,
 }
 
 impl ActorServiceImpl {
@@ -212,6 +234,7 @@ impl ActorServiceImpl {
         ActorServiceImpl {
             service_locator,
             local_node_id,
+            shard_groups: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
     
@@ -292,12 +315,12 @@ impl ActorServiceImpl {
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: std::collections::HashMap<String, String>,
     ) -> Result<ActorRefImpl, Box<dyn std::error::Error + Send + Sync>> {
-        // Ensure actor_id uses local node_id
+        // CRITICAL: Normalize actor_id to include @node suffix BEFORE passing to factory
         // Parse actor_id to get actor_name and node_id
         let (actor_name, node_id) = if let Some((name, node)) = actor_id.split_once('@') {
             (name.to_string(), node.to_string())
         } else {
-            (actor_id.to_string(), self.local_node_id.clone())
+            (actor_id.to_string(), String::new())
         };
         
         // Always use local node_id (ignore any node_id in actor_id)
@@ -333,14 +356,15 @@ impl ActorServiceImpl {
             vec![], // facets (empty - facets should be attached via config or separate API)
         ).await?;
         
-        // Actor is now spawned and registered - create ActorRefImpl pointing to local node
-        // ActorRefImpl::remote pointing to local node will use MessageSender from registry
-        Ok(ActorRefImpl::remote(
-            local_actor_id,
-            ctx.namespace.clone(), // Use namespace from context
-            self.local_node_id.clone(),
+        // Actor is now spawned and registered - try to create ActorRefImpl::local() if mailbox available
+        let registry = self.get_actor_registry().await;
+        Ok(Self::create_actor_ref_for_local_actor(
+            &ctx,
+            &registry,
+            &local_actor_id,
+            &self.local_node_id,
             self.service_locator.clone(),
-        ))
+        ).await)
     }
 
     /// Send a message to an actor (local or remote) - Public API for ActorContext
@@ -386,7 +410,16 @@ impl ActorServiceImpl {
                 // When MessageSender.tell() is called, it eventually calls ActorRef::tell(),
                 // which checks ReplyWaiterRegistry for the correlation_id and routes to ReplyWaiter
                 let actor_id_full = format!("{}@{}", actor_name, node_id);
-                if let Some(sender) = self.get_actor_registry().await.lookup_actor(&actor_id_full).await {
+                
+                // Try lookup with constructed ID first
+                let mut sender_opt = self.get_actor_registry().await.lookup_actor(&actor_id_full).await;
+                
+                // If not found and original actor_id already has @, try direct lookup (in case parsing was wrong)
+                if sender_opt.is_none() && actor_id.contains('@') && actor_id != actor_id_full {
+                    sender_opt = self.get_actor_registry().await.lookup_actor(&actor_id.to_string()).await;
+                }
+                
+                if let Some(sender) = sender_opt {
                     // MessageSender exists - use it directly
                     // ActorRef::tell() will check for correlation_id and route to ReplyWaiter if present
                     let message_id = message.id.to_string();
@@ -410,6 +443,9 @@ impl ActorServiceImpl {
         }
         
         // Normal message routing (no correlation_id or remote actor)
+        // Note: send_message is called from ActorContext which should provide RequestContext
+        // For now, create empty context - this should be fixed to pass ctx from caller
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
                 "🟪 [ACTOR_SERVICE::send_message] NORMAL ROUTING: message_id={}, actor_id={}, calling route_message",
@@ -417,7 +453,7 @@ impl ActorServiceImpl {
             );
         }
         let (msg_id, _) = self
-            .route_message(actor_id, message, false, None)
+            .route_message(ctx, actor_id, message, false, None)
             .await
             .map_err(|e| format!("Failed to send message: {}", e))?;
         if tracing::enabled!(tracing::Level::TRACE) {
@@ -465,21 +501,24 @@ impl ActorServiceImpl {
         if node_id == self.local_node_id {
             // LOCAL: Get ActorRef and use ask()
             let actor_id_str = actor_id.to_string();
-            // For ask(), we need ActorRef. Use MessageSender to determine if actor exists.
-            // For activated actors, we can't create ActorRef::local without mailbox.
-            // Solution: Use ActorRef::remote pointing to local node - it will use MessageSender internally.
-            let actor_ref = if self.get_actor_registry().await.lookup_actor(&actor_id_str).await.is_some() {
-                // Actor exists (activated or virtual) - create remote ActorRef pointing to local node
-                // ActorRef::ask() will use MessageSender internally
-                ActorRefImpl::remote(actor_id_str.clone(), String::new(), node_id.clone(), self.service_locator.clone()) // TODO: get namespace from context
-            } else if self.get_actor_registry().await.is_actor_activated(&actor_id_str).await {
-                // Actor is activated but no MessageSender - this shouldn't happen, but handle it
-                // Use remote ActorRef pointing to local node
-                ActorRefImpl::remote(actor_id_str.clone(), String::new(), node_id.clone(), self.service_locator.clone()) // TODO: get namespace from context
-            } else {
+            let registry = self.get_actor_registry().await;
+            
+            // Check if actor exists
+            if registry.lookup_actor(&actor_id_str).await.is_none() 
+                && !registry.is_actor_activated(&actor_id_str).await {
                 // Actor doesn't exist - return error
                 return Err("Actor not found".into());
-            };
+            }
+            
+            // Create ActorRef - try local first (with mailbox), fallback to remote
+            let ctx = RequestContext::new_without_auth(String::new(), String::new());
+            let actor_ref = Self::create_actor_ref_for_local_actor(
+                &ctx,
+                &registry,
+                &actor_id_str,
+                &self.local_node_id,
+                self.service_locator.clone(),
+            ).await;
 
             let timeout_duration = timeout.unwrap_or(std::time::Duration::from_secs(5));
             if tracing::enabled!(tracing::Level::TRACE) {
@@ -511,8 +550,11 @@ impl ActorServiceImpl {
                     message.id, actor_id
                 );
             }
+            // Note: send_message_and_wait should receive RequestContext from caller
+            // For now, create empty context - this should be fixed to pass ctx from ActorContext
+            let ctx = RequestContext::new_without_auth(String::new(), String::new());
             let (_, response) = self
-                .route_message(actor_id, message, true, timeout)
+                .route_message(ctx, actor_id, message, true, timeout)
                 .await
                 .map_err(|e| format!("Failed to send message and wait: {}", e))?;
 
@@ -526,9 +568,75 @@ impl ActorServiceImpl {
         }
     }
 
+    /// Helper function to create ActorRef for local actor
+    /// Tries to get mailbox from actor instance and create local ActorRef, falls back to remote if unavailable
+    async fn create_actor_ref_for_local_actor(
+        ctx: &RequestContext,
+        registry: &Arc<ActorRegistry>,
+        actor_id: &str,
+        local_node_id: &str,
+        service_locator: Arc<dyn ServiceLocatorTrait>,
+    ) -> ActorRefImpl {
+        // Try to get mailbox from actor instance
+        let actor_id_typed = ActorId::from(actor_id);
+        if let Some(instance) = registry.get_actor_instance(&actor_id_typed).await {
+            if let Some(actor) = instance.downcast_ref::<Actor>() {
+                let mailbox = actor.mailbox().clone();
+                // CRITICAL: Pass tenant_id from RequestContext to ActorRef
+                return ActorRefImpl::local(
+                    actor_id,
+                    ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
+                    ctx.namespace().to_string(),
+                    mailbox,
+                    service_locator,
+                );
+            }
+        }
+        // Fallback to remote pointing to local node (for virtual actors or when mailbox unavailable)
+        // CRITICAL: Pass tenant_id from RequestContext to ActorRef
+        ActorRefImpl::remote(
+            actor_id,
+            ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
+            ctx.namespace().to_string(),
+            local_node_id.to_string(),
+            service_locator,
+        )
+    }
+
+    /// Helper function to route message (can be called from spawned tasks)
+    /// Extracts routing logic so it can be used without needing &self
+    async fn route_message_helper(
+        ctx: RequestContext,
+        service_locator: &Arc<ServiceLocatorImpl>,
+        actor_id: &str,
+        message: Message,
+        wait_for_response: bool,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(String, Option<Message>), Status> {
+        // Use unified routing module (returns Future, converts ActorRefError to Status)
+        use plexspaces_actor::routing::route_message as routing_route_message;
+        let result = routing_route_message(
+            ctx,
+            service_locator.clone() as Arc<dyn ServiceLocatorTrait>,
+            actor_id.to_string(),
+            message,
+            wait_for_response,
+            timeout,
+        ).await;
+        
+        // Convert ActorRefError to Status
+        result.map_err(|e| match e {
+            plexspaces_actor::ActorRefError::Timeout => Status::deadline_exceeded("No reply received within timeout"),
+            plexspaces_actor::ActorRefError::ActorNotFound(id) => Status::not_found(format!("Actor not found: {}", id)),
+            plexspaces_actor::ActorRefError::SendFailed(msg) => Status::internal(format!("Failed to send message: {}", msg)),
+            _ => Status::internal(format!("Routing error: {}", e)),
+        })
+    }
+
     /// Route message to local or remote actor
     ///
     /// # Arguments
+    /// * `ctx` - RequestContext with tenant_id and namespace (required for proper isolation) - FIRST PARAMETER
     /// * `actor_id` - Target actor ID in format "actor@node"
     /// * `message` - Message to send
     /// * `wait_for_response` - Whether to wait for reply
@@ -540,14 +648,16 @@ impl ActorServiceImpl {
     ///
     /// ## Note
     /// Made public for use by ActorService trait implementation.
+    /// Delegates to unified routing module.
     pub async fn route_message(
         &self,
+        ctx: RequestContext,
         actor_id: &str,
         message: Message,
         wait_for_response: bool,
         timeout: Option<std::time::Duration>,
     ) -> Result<(String, Option<Message>), Status> {
-        // Extract message_id and other fields for logging before moving message
+        // Extract message_id for logging before moving message
         let message_id = message.id.clone();
         let message_sender = message.sender_id.clone();
         let message_receiver = message.receiver_id.clone();
@@ -561,57 +671,16 @@ impl ActorServiceImpl {
             );
         }
         
-        // Parse actor@node ID (or just actor name, defaults to local node)
-        let (actor_name, node_id) = if let Some((name, node)) = actor_id.split_once('@') {
-            (name.to_string(), node.to_string())
-        } else {
-            // No @node specified, default to local node
-            (actor_id.to_string(), self.local_node_id.clone())
-        };
-
-        // Check if actor exists locally first (regardless of node ID in actor name)
-        // This allows actors registered with "remote-looking" IDs to be routed locally
-        // if they're actually registered on the local node
-        let actor_registry = self.get_actor_registry().await;
-        let actor_id_string = actor_id.to_string();
-        let actor_exists_locally = actor_registry.lookup_actor(&actor_id_string).await.is_some();
-        
-        // Determine routing: local if node_id matches OR actor exists locally
-        let is_local = node_id == self.local_node_id || actor_exists_locally;
-
-        // OBSERVABILITY: Track routing decision
-        metrics::counter!("plexspaces_actor_service_route_total",
-            "actor_id" => actor_id.to_string(),
-            "node_id" => node_id.clone(),
-            "local" => if is_local { "true" } else { "false" }
-        )
-        .increment(1);
-
-        let result = if is_local {
-            // LOCAL ROUTING: Deliver to local actor
-            // If actor exists locally with original actor_id, pass that actor_id to route_local
-            // Otherwise, use the parsed node_id (which should match local_node_id)
-            if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!(
-                    "🟪 [ACTOR_SERVICE::route_message] LOCAL ROUTING: message_id={}, actor_id={}, actor_exists_locally={}",
-                    message_id, actor_id, actor_exists_locally
-                );
-            }
-            // Pass the original actor_id so route_local can look it up correctly
-            // route_local will try both the constructed ID and the original receiver ID
-            self.route_local(&actor_name, &node_id, message, wait_for_response, timeout)
-                .await
-        } else {
-            // REMOTE ROUTING: Forward to remote node
-            if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!(
-                    "🟪 [ACTOR_SERVICE::route_message] REMOTE ROUTING: message_id={}, actor_id={}, node_id={}",
-                    message_id, actor_id, node_id
-                );
-            }
-            self.route_remote(&node_id, actor_id, message, wait_for_response, timeout)
-                .await
-        };
+        // Use unified routing module (returns Future, converts ActorRefError to Status)
+        use plexspaces_actor::routing::route_message as routing_route_message;
+        let result = routing_route_message(
+            ctx,
+            self.service_locator.clone(),
+            actor_id.to_string(),
+            message,
+            wait_for_response,
+            timeout,
+        ).await;
         
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
@@ -619,292 +688,85 @@ impl ActorServiceImpl {
                 message_id, actor_id, result.is_ok()
             );
         }
-        result
+        
+        // Convert ActorRefError to Status
+        result.map_err(|e| match e {
+            plexspaces_actor::ActorRefError::Timeout => Status::deadline_exceeded("No reply received within timeout"),
+            plexspaces_actor::ActorRefError::ActorNotFound(id) => Status::not_found(format!("Actor not found: {}", id)),
+            plexspaces_actor::ActorRefError::SendFailed(msg) => Status::internal(format!("Failed to send message: {}", msg)),
+            _ => Status::internal(format!("Routing error: {}", e)),
+        })
     }
 
     /// Route message to local actor
     ///
     /// ## Design
-    /// Uses ActorRef::tell() and ActorRef::ask() instead of direct mailbox access.
+    /// Uses unified routing module. Delegates to `routing::route_local()`.
     /// This ensures proper routing, metrics, and virtual actor activation.
     async fn route_local(
         &self,
+        ctx: RequestContext,
         actor_name: &str,
         node_id: &str,
-        mut message: Message,
-        wait_for_response: bool,
-        timeout: Option<std::time::Duration>,
-    ) -> Result<(String, Option<Message>), Status> {
-        let start = std::time::Instant::now();
-
-        // Construct full actor ID
-        let actor_id = format!("{}@{}", actor_name, node_id);
-        let message_id = message.id.to_string();
-
-        // route_local is only for local actors
-        // Look up MessageSender from ActorRegistry - try constructed actor_id first,
-        // then try with original message.receiver_id if it's different (for actors registered with "remote-looking" IDs)
-        let actor_registry = self.get_actor_registry().await;
-        let sender = actor_registry.lookup_actor(&actor_id.to_string()).await
-            .or_else(|| {
-                // If not found with constructed ID and receiver is different, try original receiver ID
-                // This handles cases where actor is registered with a different node_id in its name
-                // Note: This is a sync closure, so we can't await here - we'll try below
-                None
-            });
-        
-        // If still not found, try original receiver ID (async lookup)
-        let sender = if let Some(s) = sender {
-            s
-        } else if message.receiver_id != actor_id {
-            // Try lookup with original receiver ID (may have different node_id)
-            actor_registry.lookup_actor(&message.receiver_id).await
-                .ok_or_else(|| {
-                    Status::not_found(format!("Actor not found: {} (also tried: {})", actor_id, message.receiver_id))
-                })?
-        } else {
-            return Err(Status::not_found(format!("Actor not found: {}", actor_id)));
-        };
-
-        // OBSERVABILITY: Track duration
-        let duration = start.elapsed();
-        metrics::histogram!("plexspaces_actor_service_local_route_duration_seconds")
-            .record(duration.as_secs_f64());
-
-        if wait_for_response {
-            // ASK PATTERN: Implement ask pattern directly using MessageSender::tell() and ReplyWaiterRegistry
-            // This follows the same pattern as ActorRef::ask() but works with MessageSender trait
-            let timeout_duration = timeout.unwrap_or(std::time::Duration::from_secs(5));
-            
-            // Generate unique correlation_id for this request
-            use ulid::Ulid;
-            let correlation_id = Ulid::new().to_string();
-            message.correlation_id = correlation_id.clone();
-            
-            // Create ReplyWaiter for async waiting
-            let waiter = ReplyWaiter::new();
-            
-            // Register ReplyWaiter in ReplyWaiterRegistry (global registry for reply routing)
-            if let Some(waiter_registry) = self.service_locator.reply_waiter_registry().await {
-                waiter_registry.register(correlation_id.clone(), waiter.clone()).await;
-            } else {
-                return Err(Status::internal("ReplyWaiterRegistry not available"));
-            }
-            
-            // Create temporary sender ActorRef for reply routing
-            // Temporary sender ID format: "ask-{correlation_id}@{node_id}"
-            let temp_sender_id = format!("ask-{}@{}", correlation_id, self.local_node_id);
-            let expires_at = std::time::Instant::now() + (timeout_duration * 2);
-            
-            // Create temporary sender mailbox and ActorRef
-            use plexspaces_mailbox::{Mailbox, MailboxConfig};
-            let dummy_mailbox = Arc::new(
-                Mailbox::new(MailboxConfig::default(), temp_sender_id.clone()).await
-                    .map_err(|e| Status::internal(format!("Failed to create temporary sender mailbox: {}", e)))?
-            );
-            let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRefImpl::local(
-                temp_sender_id.clone(),
-                String::new(), // temp sender uses empty namespace
-                dummy_mailbox,
-                self.service_locator.clone(),
-            ));
-            
-            // Register temporary sender in ActorRegistry
-            // Tenant comes from auth, not config - use empty strings
-            if let Some(registry) = self.service_locator.actor_registry().await {
-                let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
-                registry.register_temporary_sender(
-                    &ctx,
-                    temp_sender_id.clone(),
-                    temp_sender_ref,
-                    correlation_id.clone(),
-                    expires_at,
-                ).await;
-            }
-            
-            // Set sender to temporary sender ID
-            message.sender_id = temp_sender_id.clone();
-            
-            // Send request via MessageSender::tell()
-            let send_result = sender.tell(message).await;
-            
-            // Clean up on send error
-            if send_result.is_err() {
-                if let Some(waiter_registry) = self.service_locator.reply_waiter_registry().await {
-                    waiter_registry.remove(&correlation_id).await;
-                }
-                if let Some(registry) = self.service_locator.actor_registry().await {
-                    registry.remove_temporary_sender(&temp_sender_id).await;
-                }
-                return Err(Status::internal(format!("Failed to send ask request: {}", send_result.unwrap_err())));
-            }
-            
-            // Wait for reply with timeout (ReplyWaiter::wait() handles timeout internally)
-            match waiter.wait(timeout_duration).await {
-                Ok(reply) => {
-                    // Clean up temporary sender
-                    if let Some(registry) = self.service_locator.actor_registry().await {
-                        registry.remove_temporary_sender(&temp_sender_id).await;
-                    }
-                    
-                    // Update Node metrics on success
-                    if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-                        accessor.increment_messages_routed().await;
-                        accessor.increment_local_deliveries().await;
-                    }
-                    metrics::counter!("plexspaces_actor_service_local_route_success_total",
-                        "pattern" => "ask"
-                    )
-                    .increment(1);
-                    Ok((message_id, Some(reply)))
-                }
-                Err(e) => {
-                    // Clean up on error (timeout or other error)
-                    if let Some(waiter_registry) = self.service_locator.reply_waiter_registry().await {
-                        waiter_registry.remove(&correlation_id).await;
-                    }
-                    if let Some(registry) = self.service_locator.actor_registry().await {
-                        registry.remove_temporary_sender(&temp_sender_id).await;
-                    }
-                    
-                    // Update Node metrics on failure
-                    if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-                        accessor.increment_messages_routed().await;
-                        accessor.increment_failed_deliveries().await;
-                    }
-                    
-                    // Map error to appropriate Status
-                    let (error_type, status) = match e {
-                        ReplyWaiterError::Timeout => {
-                            ("timeout".to_string(), Status::deadline_exceeded("No reply received within timeout"))
-                        }
-                        _ => {
-                            ("other".to_string(), Status::internal(format!("Failed to wait for reply: {}", e)))
-                        }
-                    };
-                    
-                    metrics::counter!("plexspaces_actor_service_local_route_error_total",
-                        "pattern" => "ask",
-                        "error" => error_type.clone()
-                    )
-                    .increment(1);
-                    Err(status)
-                }
-            }
-        } else {
-            // TELL PATTERN: Use MessageSender::tell() directly
-            let result = sender.tell(message).await
-                .map_err(|e| {
-                    // MessageSender::tell() returns Box<dyn Error + Send + Sync>
-                    // Check error message to determine appropriate Status
-                    let error_msg = e.to_string();
-                    if error_msg.contains("not found") || error_msg.contains("Actor not found") {
-                        Status::not_found(format!("Actor not found: {}", actor_id))
-                    } else {
-                        Status::internal(format!("Failed to send message: {}", error_msg))
-                    }
-                });
-            
-            // Update Node metrics based on result
-            if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-                accessor.increment_messages_routed().await;
-                if result.is_ok() {
-                    accessor.increment_local_deliveries().await;
-                } else {
-                    accessor.increment_failed_deliveries().await;
-                }
-            }
-            
-            metrics::counter!("plexspaces_actor_service_local_route_success_total",
-                "pattern" => "tell"
-            )
-            .increment(1);
-
-            result.map(|_| (message_id, None))
-        }
-    }
-
-    /// Route message to remote actor
-    async fn route_remote(
-        &self,
-        node_id: &str,
-        _actor_id: &str,
         message: Message,
         wait_for_response: bool,
         timeout: Option<std::time::Duration>,
     ) -> Result<(String, Option<Message>), Status> {
-        let start = std::time::Instant::now();
-
-        // OBSERVABILITY: Track remote routing
-        metrics::counter!("plexspaces_actor_service_remote_route_total",
-            "target_node" => node_id.to_string()
-        )
-        .increment(1);
-
-        // Get ActorServiceClient using ServiceLocator helper (handles ObjectRegistry lookup and connection pooling)
-        let channel = self.service_locator.get_actor_service_client(node_id).await
-            .map_err(|e| Status::internal(format!("Failed to get ActorServiceClient: {}", e)))?;
+        // Construct full actor ID
+        let actor_id = format!("{}@{}", actor_name, node_id);
         
-        let mut client = ActorServiceClient::new(channel);
-
-        // Convert message to proto
-        let proto_message = message.clone();
-
-        // Convert timeout to proto Duration
-        let proto_timeout = timeout.map(|d| prost_types::Duration {
-            seconds: d.as_secs() as i64,
-            nanos: d.subsec_nanos() as i32,
-        });
-
-        // Create SendMessage request
-        let request = tonic::Request::new(SendMessageRequest {
-            message: Some(proto_message),
+        // Use unified routing module (returns Future, converts ActorRefError to Status)
+        use plexspaces_actor::routing::route_local as routing_route_local;
+        let result = routing_route_local(
+            ctx,
+            self.service_locator.clone(),
+            actor_id,
+            message,
             wait_for_response,
-            timeout: proto_timeout,
-        });
+            timeout,
+        ).await;
+        
+        // Convert ActorRefError to Status
+        result.map_err(|e| match e {
+            plexspaces_actor::ActorRefError::Timeout => Status::deadline_exceeded("No reply received within timeout"),
+            plexspaces_actor::ActorRefError::ActorNotFound(id) => Status::not_found(format!("Actor not found: {}", id)),
+            plexspaces_actor::ActorRefError::SendFailed(msg) => Status::internal(format!("Failed to send message: {}", msg)),
+            _ => Status::internal(format!("Routing error: {}", e)),
+        })
+    }
 
-        // Forward to remote ActorService
-        let response = match client.send_message(request).await {
-            Ok(r) => r,
-            Err(e) => {
-                // Update Node metrics on failure
-                if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-                    accessor.increment_messages_routed().await;
-                    accessor.increment_failed_deliveries().await;
-                }
-                metrics::counter!("plexspaces_actor_service_remote_route_error_total",
-                    "target_node" => node_id.to_string(),
-                    "error" => e.code().to_string()
-                )
-                .increment(1);
-                return Err(Status::unavailable(format!("Remote call to {} failed: {}", node_id, e)));
-            }
-        };
-
-        let response_inner = response.into_inner();
-
-        // OBSERVABILITY: Track duration
-        let duration = start.elapsed();
-        metrics::histogram!("plexspaces_actor_service_remote_route_duration_seconds")
-            .record(duration.as_secs_f64());
-
-        metrics::counter!("plexspaces_actor_service_remote_route_success_total",
-            "target_node" => node_id.to_string()
-        )
-        .increment(1);
-
-        // Update Node metrics on success
-        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-            accessor.increment_messages_routed().await;
-            accessor.increment_remote_deliveries().await;
-        }
-
-        // Convert response back to internal Message if present
-        let reply_message = response_inner
-            .response
-            .map(|proto_msg| proto_msg.clone());
-
-        Ok((response_inner.message_id, reply_message))
+    /// Route message to remote actor
+    ///
+    /// ## Design
+    /// Uses unified routing module. Delegates to `routing::route_remote()`.
+    async fn route_remote(
+        &self,
+        ctx: RequestContext,
+        node_id: &str,
+        actor_id: &str,
+        message: Message,
+        wait_for_response: bool,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(String, Option<Message>), Status> {
+        // Use unified routing module (returns Future, converts ActorRefError to Status)
+        use plexspaces_actor::routing::route_remote as routing_route_remote;
+        let result = routing_route_remote(
+            ctx,
+            self.service_locator.clone(),
+            node_id.to_string(),
+            actor_id.to_string(),
+            message,
+            wait_for_response,
+            timeout,
+        ).await;
+        
+        // Convert ActorRefError to Status
+        result.map_err(|e| match e {
+            plexspaces_actor::ActorRefError::Timeout => Status::deadline_exceeded("No reply received within timeout"),
+            plexspaces_actor::ActorRefError::ActorNotFound(id) => Status::not_found(format!("Actor not found: {}", id)),
+            plexspaces_actor::ActorRefError::SendFailed(msg) => Status::internal(format!("Failed to send message: {}", msg)),
+            _ => Status::internal(format!("Routing error: {}", e)),
+        })
     }
 
 
@@ -945,12 +807,13 @@ impl ActorServiceImpl {
     /// ```
     pub async fn send(
         &self,
+        ctx: RequestContext,
         actor_id: &str,
         message: Message,
         wait_for_response: bool,
         timeout: Option<std::time::Duration>,
     ) -> Result<(String, Option<Message>), String> {
-        self.route_message(actor_id, message, wait_for_response, timeout)
+        self.route_message(ctx, actor_id, message, wait_for_response, timeout)
             .await
             .map_err(|e| e.to_string())
     }
@@ -981,6 +844,46 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         self.send_message(actor_id, message).await
+    }
+
+    async fn create_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        self.check_accepting_requests().await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+        self.create_shard_group_internal(ctx, req).await
+    }
+
+    async fn bulk_update_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        self.check_accepting_requests().await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+        self.bulk_update_shard_group_internal(ctx, req).await
+    }
+
+    async fn map_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::MapShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        self.check_accepting_requests().await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+        self.map_shard_group_internal(ctx, req).await
+    }
+
+    async fn scatter_gather(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::ScatterGatherRequest,
+    ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+        self.check_accepting_requests().await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+        self.scatter_gather_internal(ctx, req).await
     }
 
 }
@@ -1022,9 +925,13 @@ impl ActorServiceTrait for ActorServiceImpl {
                 + std::time::Duration::from_nanos(d.nanos as u64)
         });
 
+        // Extract RequestContext from gRPC request metadata
+        // TODO: Extract tenant_id and namespace from metadata headers
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+
         // Route message
         let (message_id, response) = self
-            .route_message(actor_id, message, req.wait_for_response, timeout)
+            .route_message(ctx, actor_id, message, req.wait_for_response, timeout)
             .await?;
 
         // Response is already proto Message
@@ -1039,13 +946,6 @@ impl ActorServiceTrait for ActorServiceImpl {
     // ========================================================================
     // Actor Lifecycle Management RPCs
     // ========================================================================
-
-    async fn create_actor(
-        &self,
-        _request: Request<CreateActorRequest>,
-    ) -> Result<Response<CreateActorResponse>, Status> {
-        Err(Status::unimplemented("create_actor not yet implemented"))
-    }
 
     async fn spawn_actor(
         &self,
@@ -1538,8 +1438,14 @@ impl ActorServiceTrait for ActorServiceImpl {
         }
 
         // Create message (id from client not yet in proto; server assigns ULID for correlation)
+        // Ensure message ID has "req-" prefix for requests (ask) or "cast" for tell
+        let message_id = if use_ask {
+            format!("req-{}", ulid::Ulid::new().to_string())
+        } else {
+            format!("req-{}", ulid::Ulid::new().to_string()) // Both ask and tell use req- prefix
+        };
         let mut message = Message {
-            id: ulid::Ulid::new().to_string(),
+            id: message_id,
             payload,
             receiver_id: selected_actor_id.clone(),
             ..Default::default()
@@ -1598,7 +1504,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 "actor_type" => actor_type.clone()
             ).increment(1);
             
-            match self.route_message(&selected_actor_id, message, true, timeout).await {
+            match self.route_message(ctx.clone(), &selected_actor_id, message, true, timeout).await {
                 Ok((_, Some(reply))) => {
                     let invoke_duration = invoke_start.elapsed();
                     metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
@@ -1680,7 +1586,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 "actor_type" => actor_type.clone()
             ).increment(1);
             
-            match self.route_message(&selected_actor_id, message, false, None).await {
+            match self.route_message(ctx.clone(), &selected_actor_id, message, false, None).await {
                 Ok((_, _)) => {
                     let invoke_duration = invoke_start.elapsed();
                     let method_label = if http_method == "PUT" { "PUT" } else if is_delete { "DELETE" } else { "POST" };
@@ -1766,6 +1672,1893 @@ impl ActorServiceTrait for ActorServiceImpl {
         
         result
     }
+
+    /// Terminate an actor gracefully by ID
+    ///
+    /// ## Purpose
+    /// Permanently terminates an actor, completing pending work and removing from system.
+    /// This is the HTTP DELETE endpoint for actors (pairs with SpawnActor).
+    ///
+    /// ## Difference from DeactivateActor
+    /// - TerminateActor: Permanent termination (actor removed from system)
+    /// - DeactivateActor: Temporary passivation (virtual actor can reactivate on next message)
+    async fn terminate_actor(
+        &self,
+        request: Request<TerminateActorRequest>,
+    ) -> Result<Response<TerminateActorResponse>, Status> {
+        let start_time = std::time::Instant::now();
+        
+        // Check if service is accepting requests (not shutting down)
+        if self.service_locator.is_shutdown_requested() {
+            return Err(Status::unavailable("Service is shutting down and not accepting new requests"));
+        }
+        
+        // Create RequestContext from gRPC request
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &service_locator_trait,
+        ).await
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid request context: {}", e))
+        })?;
+        
+        let req = request.into_inner();
+        let actor_id = req.actor_id.clone();
+        let namespace = if req.namespace.is_empty() {
+            ctx.namespace().to_string()
+        } else {
+            req.namespace.clone()
+        };
+        let force = req.force;
+        let timeout_ms = if req.timeout_ms > 0 {
+            req.timeout_ms
+        } else {
+            5000 // Default 5 seconds
+        };
+        
+        tracing::info!(
+            actor_id = %actor_id,
+            namespace = %namespace,
+            force = %force,
+            timeout_ms = %timeout_ms,
+            "Terminating actor"
+        );
+        
+        // Get actor factory to stop the actor
+        let actor_factory = self.service_locator.get_actor_factory().await
+            .ok_or_else(|| Status::internal("Actor factory not available"))?;
+        
+        // Build full actor ID if needed (actor_id@node_id format)
+        let full_actor_id = if actor_id.contains('@') {
+            actor_id.clone()
+        } else {
+            let node_id = self.service_locator.get_node_id().await
+                .ok_or_else(|| Status::internal("Node ID not available"))?;
+            format!("{}@{}", actor_id, node_id)
+        };
+        
+        // Stop the actor using actor factory with tenant isolation validation
+        // Note: timeout_ms is currently not used by stop_actor, but kept for future use
+        let _timeout = std::time::Duration::from_millis(timeout_ms);
+        match actor_factory.stop_actor(&ctx, &full_actor_id).await {
+            Ok(()) => {
+                let duration = start_time.elapsed();
+                metrics::histogram!("plexspaces_actor_service_terminate_actor_duration_seconds",
+                    "namespace" => namespace.clone(),
+                    "status" => "success"
+                ).record(duration.as_secs_f64());
+                metrics::counter!("plexspaces_actor_service_terminate_actor_total",
+                    "namespace" => namespace.clone(),
+                    "status" => "success"
+                ).increment(1);
+                
+                tracing::info!(
+                    actor_id = %full_actor_id,
+                    duration_ms = %duration.as_millis(),
+                    "Actor terminated successfully"
+                );
+                
+                Ok(Response::new(TerminateActorResponse {
+                    success: true,
+                    actor_id: full_actor_id,
+                    messages_processed: 0, // TODO: Track actual count
+                    messages_dropped: 0,
+                    error_message: String::new(),
+                }))
+            }
+            Err(e) => {
+                let duration = start_time.elapsed();
+                metrics::histogram!("plexspaces_actor_service_terminate_actor_duration_seconds",
+                    "namespace" => namespace.clone(),
+                    "status" => "error"
+                ).record(duration.as_secs_f64());
+                metrics::counter!("plexspaces_actor_service_terminate_actor_total",
+                    "namespace" => namespace.clone(),
+                    "status" => "error"
+                ).increment(1);
+                
+                tracing::error!(
+                    actor_id = %full_actor_id,
+                    error = %e,
+                    "Failed to terminate actor"
+                );
+                
+                Err(Status::internal(format!("Failed to terminate actor: {}", e)))
+            }
+        }
+    }
+
+    // ========================================================================
+    // ShardGroup RPCs (data-parallel sharding)
+    // ========================================================================
+
+    async fn create_shard_group(
+        &self,
+        request: Request<CreateShardGroupRequest>,
+    ) -> Result<Response<CreateShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        ).await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+
+        let req = request.into_inner();
+        let resp = self.create_shard_group_internal(&ctx, req).await
+            .map_err(|e| Status::internal(format!("Failed to create ShardGroup: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
+    async fn bulk_update_shard_group(
+        &self,
+        request: Request<BulkUpdateShardGroupRequest>,
+    ) -> Result<Response<BulkUpdateShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        ).await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let resp = self.bulk_update_shard_group_internal(&ctx, req).await
+            .map_err(|e| Status::internal(format!("Failed to bulk update ShardGroup: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
+    async fn map_shard_group(
+        &self,
+        request: Request<MapShardGroupRequest>,
+    ) -> Result<Response<MapShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        ).await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let group_id = req.group_id.clone();
+        let resp = self.map_shard_group_internal(&ctx, req).await
+            .map_err(|e| {
+                let error_msg = format!("Failed to map ShardGroup {}: {}", group_id, e);
+                tracing::error!("{}", error_msg);
+                Status::internal(error_msg)
+            })?;
+        Ok(Response::new(resp))
+    }
+
+    async fn scatter_gather(
+        &self,
+        request: Request<ScatterGatherRequest>,
+    ) -> Result<Response<ScatterGatherResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        ).await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let resp = self.scatter_gather_internal(&ctx, req).await
+            .map_err(|e| Status::internal(format!("Failed to scatter-gather ShardGroup: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
+    async fn delete_shard_group(
+        &self,
+        request: Request<DeleteShardGroupRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        ).await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+
+        let req = request.into_inner();
+
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&req.group_id).cloned()
+        };
+
+        let group = match group {
+            Some(g) => g,
+            None => {
+                // Idempotent: succeed if group doesn't exist
+                return Ok(Response::new(Empty {}));
+            }
+        };
+
+        // Stop all shard actors
+        let actor_factory = self.service_locator.get_actor_factory().await
+            .ok_or_else(|| Status::internal("Actor factory not available"))?;
+
+        for shard_actor_id in &group.shard_actor_ids {
+            let _ = actor_factory.stop_actor(&ctx, shard_actor_id).await;
+        }
+
+        // Remove from registry
+        {
+            let mut groups = self.shard_groups.write().await;
+            groups.remove(&req.group_id);
+        }
+
+        // Unregister from TaskRouter (if registered)
+        if let Some(task_router) = self.service_locator.get_task_router().await {
+            if let Err(e) = task_router.unregister_group(&req.group_id).await {
+                tracing::warn!(
+                    group_id = %req.group_id,
+                    error = %e,
+                    "Failed to unregister ShardGroup from TaskRouter (non-fatal)"
+                );
+            } else {
+                tracing::debug!(
+                    group_id = %req.group_id,
+                    "Unregistered ShardGroup from TaskRouter"
+                );
+            }
+        }
+
+        // Emit metrics
+        metrics::counter!("plexspaces_shard_group_deleted_total", 
+            "group_id" => req.group_id.clone());
+
+        tracing::info!(group_id = %req.group_id, "Deleted ShardGroup");
+
+        Ok(Response::new(Empty {}))
+    }
+
+    async fn get_shard_group(
+        &self,
+        request: Request<GetShardGroupRequest>,
+    ) -> Result<Response<GetShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        let groups = self.shard_groups.read().await;
+        let group = groups.get(&req.group_id)
+            .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?;
+
+        Ok(Response::new(GetShardGroupResponse {
+            group: Some(group.clone()),
+        }))
+    }
+
+    async fn scale_shard_group(
+        &self,
+        request: Request<ScaleShardGroupRequest>,
+    ) -> Result<Response<ScaleShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+        
+        // Extract RequestContext from gRPC metadata
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+        
+        // TODO: Implement scale_shard_group_internal
+        // For now, return not implemented
+        Err(Status::unimplemented("ScaleShardGroup not yet implemented"))
+    }
+
+    async fn list_shard_groups(
+        &self,
+        request: Request<ListShardGroupsRequest>,
+    ) -> Result<Response<ListShardGroupsResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        let groups = self.shard_groups.read().await;
+        let filtered: Vec<ShardGroup> = groups.values()
+            .filter(|g| {
+                // Filter by actor_type if specified
+                if !req.actor_type.is_empty() && g.actor_type != req.actor_type {
+                    return false;
+                }
+                // Filter by state if specified
+                if req.state != ShardGroupState::ShardGroupStateUnspecified as i32
+                    && g.state != req.state {
+                    return false;
+                }
+                true
+            })
+            .cloned()
+            .collect();
+
+        // Apply pagination
+        let page = req.page.unwrap_or_default();
+        let offset = page.offset as usize;
+        let limit = page.limit as usize;
+        let total_size = filtered.len();
+        let has_next = offset + limit < total_size;
+
+        let paginated: Vec<ShardGroup> = filtered.into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
+
+        Ok(Response::new(ListShardGroupsResponse {
+            groups: paginated,
+            page: Some(plexspaces_proto::common::v1::PageResponse {
+                total_size: total_size as i32,
+                offset: offset as i32,
+                limit: limit as i32,
+                has_next,
+            }),
+        }))
+    }
+
+    async fn send_to_shard(
+        &self,
+        request: Request<SendToShardRequest>,
+    ) -> Result<Response<SendToShardResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&req.group_id)
+                .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?
+                .clone()
+        };
+
+        // Calculate shard_id from partition_key using partition strategy
+        use crate::actor_service::partition::calculate_shard_id;
+        let shard_id = calculate_shard_id(
+            &req.partition_key,
+            group.partition_strategy,
+            group.shard_count,
+            None, // TODO: Support range boundaries from group metadata
+        ).map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
+
+        let shard_actor_id = group.shard_actor_ids.get(shard_id as usize)
+            .ok_or_else(|| Status::internal(format!("Invalid shard_id {}", shard_id)))?
+            .clone();
+
+        // Route message to shard actor
+        let mut message = req.message.ok_or_else(|| Status::invalid_argument("message is required"))?;
+        message.receiver_id = shard_actor_id.clone();
+
+        let timeout = req.timeout.map(|d| {
+            std::time::Duration::from_secs(d.seconds as u64)
+                + std::time::Duration::from_nanos(d.nanos as u64)
+        });
+
+        // Extract RequestContext from gRPC request
+        // TODO: Extract tenant_id and namespace from metadata headers
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+
+        let response_message = if req.wait_for_response {
+            let (_, response) = self.route_message(ctx.clone(), &shard_actor_id, message, true, timeout).await?;
+            response
+        } else {
+            let _ = self.route_message(ctx.clone(), &shard_actor_id, message, false, None).await?;
+            None
+        };
+
+        // Track shard message metrics
+        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+            accessor.increment_shard_messages_sent().await;
+        }
+        if let Some(registry) = self.service_locator.actor_registry().await {
+            let actor_metrics = registry.actor_metrics();
+            use plexspaces_core::message_metrics::ActorMetricsExt;
+            let mut metrics = actor_metrics.write().await;
+            metrics.increment_shard_messages_sent_total();
+        }
+
+        // Emit metrics
+        metrics::counter!("plexspaces_send_to_shard_total",
+            "group_id" => req.group_id.clone(),
+            "shard_id" => shard_id.to_string());
+
+        Ok(Response::new(SendToShardResponse {
+            shard_id,
+            shard_actor_id,
+            response: response_message,
+        }))
+    }
+}
+
+impl ActorServiceImpl {
+    /// Internal implementation of create_shard_group (used by both gRPC and trait)
+    async fn create_shard_group_internal(
+        &self,
+        ctx: &RequestContext,
+        req: CreateShardGroupRequest,
+    ) -> Result<CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        // Validate request
+        if req.group_id.is_empty() {
+            return Err("group_id is required".into());
+        }
+        if req.actor_type.is_empty() {
+            return Err("actor_type is required".into());
+        }
+        if req.shard_count == 0 {
+            return Err("shard_count must be >= 1".into());
+        }
+        if req.shard_count > 10000 {
+            return Err("shard_count must be <= 10000".into());
+        }
+
+        // Check if group already exists
+        {
+            let groups = self.shard_groups.read().await;
+            if groups.contains_key(&req.group_id) {
+                return Err(format!("ShardGroup {} already exists", req.group_id).into());
+            }
+        }
+
+        // Spawn shard actors
+        let actor_factory = self.service_locator.get_actor_factory().await
+            .ok_or_else(|| "Actor factory not available".to_string())?;
+
+        let mut shard_actor_ids = Vec::with_capacity(req.shard_count as usize);
+        let partition_strategy = req.partition_strategy;
+
+        for shard_id in 0..req.shard_count {
+            // Generate unique actor ID using ULID (no shard-id in ID for rebalancing)
+            // Format: "{group_id}-{ulid}" - spawn_actor will normalize to add @node_id
+            let actor_id_base = format!("{}-{}", req.group_id, ulid::Ulid::new());
+            let initial_state = req.initial_state.clone();
+
+            // Build ActorConfig with labels -> ActorResourceRequirements mapping
+            let mut shard_config = req.shard_config.clone().unwrap_or_default();
+            
+            // Add group_id to actor_groups (not shard_id - actors shouldn't know their shard for rebalancing)
+            shard_config.actor_groups.push(req.group_id.clone());
+            
+            // If ShardGroup has labels, set them in ActorResourceRequirements for node placement
+            if !req.labels.is_empty() {
+                use plexspaces_proto::v1::actor::ActorResourceRequirements;
+                shard_config.resource_requirements = Some(ActorResourceRequirements {
+                    resources: shard_config.resource_requirements.as_ref()
+                        .and_then(|r| r.resources.clone()),
+                    required_labels: req.labels.clone(),
+                    placement: shard_config.resource_requirements.as_ref()
+                        .and_then(|r| r.placement.clone()),
+                    actor_groups: shard_config.resource_requirements.as_ref()
+                        .map(|r| r.actor_groups.clone())
+                        .unwrap_or_default(),
+                });
+            }
+
+            // Spawn shard actor - spawn_actor normalizes ID to include @node_id
+            match actor_factory.spawn_actor(
+                &ctx,
+                &actor_id_base,
+                &req.actor_type,
+                initial_state,
+                Some(shard_config),
+                req.labels.clone(), // Pass labels as well for compatibility
+                vec![], // facets
+            ).await {
+                Ok(_actor_ref) => {
+                    // CRITICAL: Get the actual node ID from ActorRegistry (not self.local_node_id)
+                    // spawn_actor normalizes the ID internally using the registry's local_node_id
+                    let registry = self.service_locator.actor_registry().await
+                        .ok_or_else(|| "ActorRegistry not available".to_string())?;
+                    
+                    // Get the actual local node ID from registry (this is what spawn_actor uses)
+                    let actual_node_id = registry.local_node_id();
+                    
+                    // Construct the normalized ID using the actual node ID from registry
+                    let normalized_id = if actor_id_base.contains('@') {
+                        actor_id_base.clone()
+                    } else {
+                        format!("{}@{}", actor_id_base, actual_node_id)
+                    };
+                    
+                    // Verify actor is registered by looking it up
+                    if let Some(_found_ref) = registry.lookup_actor(&normalized_id).await {
+                        shard_actor_ids.push(normalized_id);
+                    } else {
+                        // Fallback: use constructed ID (shouldn't happen, but be defensive)
+                        tracing::warn!(
+                            "Shard actor spawned but not found in registry: {}, using constructed ID",
+                            normalized_id
+                        );
+                        shard_actor_ids.push(normalized_id);
+                    }
+                }
+                Err(e) => {
+                    // Cleanup: stop already-spawned shards
+                    for spawned_id in &shard_actor_ids {
+                        let _ = actor_factory.stop_actor(ctx, spawned_id).await;
+                    }
+                    return Err(format!("Failed to spawn shard {}: {}", shard_id, e).into());
+                }
+            }
+        }
+
+        // Create ShardGroup metadata
+        let group = ShardGroup {
+            group_id: req.group_id.clone(),
+            actor_type: req.actor_type.clone(),
+            shard_count: req.shard_count,
+            partition_strategy,
+            shard_actor_ids: shard_actor_ids.clone(),
+            state: ShardGroupState::ShardGroupStateActive as i32,
+            created_at: Some(prost_types::Timestamp {
+                seconds: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
+                nanos: 0,
+            }),
+            metadata: req.metadata.clone(),
+            labels: req.labels.clone(),
+            rebalance_status: None,
+        };
+
+        // Store group
+        {
+            let mut groups = self.shard_groups.write().await;
+            groups.insert(req.group_id.clone(), group.clone());
+        }
+
+        // Integrate with TaskRouter for actor-level routing
+        // Register ShardGroup with TaskRouter (if available)
+        // This enables channel-based routing for ShardGroup operations
+        if let Some(task_router) = self.service_locator.get_task_router().await {
+            if let Err(e) = task_router.register_group(group.clone()).await {
+                tracing::warn!(
+                    group_id = %req.group_id,
+                    error = %e,
+                    "Failed to register ShardGroup in TaskRouter (non-fatal)"
+                );
+            } else {
+                tracing::debug!(
+                    group_id = %req.group_id,
+                    shard_count = shard_actor_ids.len(),
+                    "Registered ShardGroup in TaskRouter"
+                );
+            }
+        }
+
+        // Track shard group creation metrics
+        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+            accessor.increment_shard_groups_created().await;
+        }
+        if let Some(registry) = self.service_locator.actor_registry().await {
+            let actor_metrics = registry.actor_metrics();
+            use plexspaces_core::message_metrics::ActorMetricsExt;
+            let mut metrics = actor_metrics.write().await;
+            metrics.increment_shard_groups_created_total();
+        }
+
+        // Emit metrics
+        metrics::counter!("plexspaces_shard_group_created_total", 
+            "group_id" => req.group_id.clone(),
+            "actor_type" => req.actor_type.clone(),
+            "shard_count" => req.shard_count.to_string());
+
+        tracing::info!(
+            group_id = %req.group_id,
+            shard_count = req.shard_count,
+            "Created ShardGroup"
+        );
+
+        Ok(CreateShardGroupResponse { group: Some(group) })
+    }
+
+
+    /// Internal implementation of bulk_update_shard_group
+    async fn bulk_update_shard_group_internal(
+        &self,
+        ctx: &RequestContext,
+        req: BulkUpdateShardGroupRequest,
+    ) -> Result<BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        
+        // Implementation extracted from gRPC method
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&req.group_id)
+                .ok_or_else(|| format!("ShardGroup {} not found", req.group_id))?
+                .clone()
+        };
+
+        // Route updates to appropriate shards based on partition_key
+        use crate::actor_service::partition::calculate_shard_id;
+        use futures::future::join_all;
+        
+        let timeout = req.timeout.map(|d| {
+            std::time::Duration::from_secs(d.seconds as u64)
+                + std::time::Duration::from_nanos(d.nanos as u64)
+        }).unwrap_or(std::time::Duration::from_secs(30));
+
+        // Group updates by shard_id
+        let total_updates = req.updates.len();
+        let mut updates_by_shard: std::collections::HashMap<u32, Vec<(String, Message)>> = std::collections::HashMap::new();
+        for (partition_key_str, mut message) in req.updates {
+            let partition_key = partition_key_str.as_bytes();
+            let shard_id = calculate_shard_id(
+                partition_key,
+                group.partition_strategy,
+                group.shard_count,
+                None,
+            ).map_err(|e| format!("Partition calculation failed: {}", e))?;
+            
+            let shard_actor_id = group.shard_actor_ids.get(shard_id as usize)
+                .ok_or_else(|| format!("Invalid shard_id {}", shard_id))?
+                .clone();
+            
+            // Ensure message ID has "req-" prefix for requests
+            if message.id.is_empty() {
+                message.id = format!("req-{}", ulid::Ulid::new().to_string());
+            } else if !message.id.starts_with("req-") && !message.id.starts_with("res-") {
+                message.id = format!("req-{}", message.id);
+            }
+            
+            message.receiver_id = shard_actor_id.clone();
+            updates_by_shard.entry(shard_id).or_insert_with(Vec::new).push((partition_key_str, message));
+        }
+
+        // Send updates to shards in parallel (reuse existing logic from gRPC method)
+        // TODO: Extract common parallel update logic
+        let mut handles = Vec::new();
+        let mut shard_stats_map: std::collections::HashMap<u32, ShardUpdateStats> = std::collections::HashMap::new();
+
+        for (shard_id, updates) in updates_by_shard {
+            let shard_actor_id = group.shard_actor_ids.get(shard_id as usize).unwrap().clone();
+            let service_locator = self.service_locator.clone();
+            let wait_for_responses = req.wait_for_responses;
+            let consistency_level = req.consistency_level;
+            
+            let handle = tokio::spawn(async move {
+                let mut succeeded = 0u32;
+                let mut failed = 0u32;
+                
+                let updates_clone = updates.clone();
+                match consistency_level {
+                    x if x == plexspaces_proto::v1::actor::ConsistencyLevel::ConsistencyLevelEventual as i32 => {
+                        for (key, mut message) in updates_clone {
+                            // Ensure message ID has "req-" prefix
+                            if message.id.is_empty() {
+                                message.id = format!("req-{}", ulid::Ulid::new().to_string());
+                            } else if !message.id.starts_with("req-") && !message.id.starts_with("res-") {
+                                message.id = format!("req-{}", message.id);
+                            }
+                            // Clone values before moving message
+                            let message_id = message.id.clone();
+                            let receiver_id = message.receiver_id.clone();
+                            
+                            let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> = service_locator.actor_registry().await;
+                            if let Some(registry) = actor_registry {
+                                if let Some(actor_ref) = registry.lookup_actor(&receiver_id).await {
+                                    if actor_ref.tell(message).await.is_ok() {
+                                        succeeded += 1;
+                                    } else {
+                                        failed += 1;
+                                    }
+                                } else {
+                                    failed += 1;
+                                }
+                            } else {
+                                failed += 1;
+                            }
+                        }
+                    }
+                    _ => {
+                        for (_key, mut message) in updates_clone {
+                            // Ensure message ID has "req-" prefix
+                            if message.id.is_empty() {
+                                message.id = format!("req-{}", ulid::Ulid::new().to_string());
+                            } else if !message.id.starts_with("req-") && !message.id.starts_with("res-") {
+                                message.id = format!("req-{}", message.id);
+                            }
+                            let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> = service_locator.actor_registry().await;
+                            if let Some(registry) = actor_registry {
+                                if let Some(actor_ref) = registry.lookup_actor(&message.receiver_id).await {
+                                    if actor_ref.tell(message).await.is_ok() {
+                                        succeeded += 1;
+                                    } else {
+                                        failed += 1;
+                                    }
+                                } else {
+                                    failed += 1;
+                                }
+                            } else {
+                                failed += 1;
+                            }
+                        }
+                    }
+                }
+                
+                (shard_id, succeeded, failed, updates.len() as u32)
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all updates to complete
+        let results = tokio::time::timeout(timeout, join_all(handles)).await
+            .map_err(|_| "Bulk update timeout")?;
+
+        let mut total_sent = 0u32;
+        let mut total_succeeded = 0u32;
+        let mut total_failed = 0u32;
+        let mut shard_stats = Vec::new();
+
+        for result in results {
+            let (shard_id, succeeded, failed, sent) = result.unwrap_or((0, 0, 0, 0));
+            total_sent += sent;
+            total_succeeded += succeeded;
+            total_failed += failed;
+            
+            let shard_actor_id = group.shard_actor_ids.get(shard_id as usize)
+                .cloned()
+                .unwrap_or_default();
+            
+            shard_stats.push(ShardUpdateStats {
+                shard_id,
+                shard_actor_id,
+                updates_sent: sent,
+                updates_succeeded: succeeded,
+                updates_failed: failed,
+            });
+        }
+
+        Ok(BulkUpdateShardGroupResponse {
+            updates_sent: total_sent,
+            updates_succeeded: total_succeeded,
+            updates_failed: total_failed,
+            shard_stats,
+            errors: Vec::new(),
+        })
+    }
+
+    /// Unified parallel operation helper (Erlang pmap pattern)
+    ///
+    /// ## Design
+    /// Uses routing::ask_helper() for each shard: one temp sender (via ActorFactory::create_temporary_sender),
+    /// spawn one task per shard that calls ask_helper(), join all, then cleanup temp sender.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext with tenant_id and namespace (CRITICAL: flows from API → ActorBuilder → ActorRef)
+    /// * `group_id` - Shard group identifier
+    /// * `shard_actor_ids` - List of shard actor IDs to query in parallel
+    /// * `query_message` - Message to send to each shard
+    /// * `timeout` - Timeout for each shard operation
+    /// * `operation_name` - Operation name for logging/metrics
+    async fn parallel_operation_unified(
+        &self,
+        ctx: RequestContext,
+        group_id: String,
+        shard_actor_ids: Vec<String>,
+        query_message: Message,
+        timeout: Duration,
+        operation_name: &str,
+    ) -> Result<Vec<(u32, String, Duration, bool, String, Option<Message>)>, Box<dyn std::error::Error + Send + Sync>> {
+        let start_time = Instant::now();
+
+
+        tracing::info!(
+            group_id = %group_id,
+            shard_count = shard_actor_ids.len(),
+            timeout_secs = timeout.as_secs(),
+            tenant_id = %ctx.tenant_id(),
+            "🔄 [{}] Starting parallel operation (ask_helper)",
+            operation_name
+        );
+
+        // CRITICAL: Use ONE temporary sender for all shards with format "{TEMP_SENDER_PREFIX}-{operation_id}@{node_id}"
+        // Each shard gets its own correlation_id (format: "req-shard-{shard_id}-{ulid}" for debugging)
+        // All replies go to the same temporary sender ActorRef, but are routed to the correct ReplyWaiter
+        // by correlation_id via ReplyWaiterRegistry (which supports multiple correlation_ids)
+        use plexspaces_core::TEMP_SENDER_PREFIX;
+        let operation_id = Ulid::new().to_string();
+        let temp_sender_id = format!("{}-{}@{}", TEMP_SENDER_PREFIX, operation_id, self.local_node_id);
+        let expires_at = Instant::now() + (timeout * 2);
+        // CRITICAL: Use RequestContext from caller (tenant_id flows from API → ActorBuilder → ActorRef)
+
+        // Create ONE temporary sender for all shards (use operation_id as correlation_id for registration)
+        // The actual routing uses ReplyWaiterRegistry keyed by per-shard correlation_ids
+        let factory = self.service_locator.get_actor_factory().await
+            .ok_or_else(|| "ActorFactory not found in ServiceLocator".to_string())?;
+        factory
+            .create_temporary_sender(&ctx, temp_sender_id.clone(), operation_id.clone(), expires_at)
+            .await
+            .map_err(|e| format!("Failed to create temp sender: {}", e))?;
+
+        tracing::info!(
+            group_id = %group_id,
+            temp_sender_id = %temp_sender_id,
+            shard_count = shard_actor_ids.len(),
+            "✅ [{}] Created temp sender, sending {} ask_helper requests...",
+            operation_name,
+            shard_actor_ids.len()
+        );
+
+        let service_locator = self.service_locator.clone();
+        let mut handles = Vec::with_capacity(shard_actor_ids.len());
+        for (shard_id, shard_actor_id) in shard_actor_ids.iter().enumerate() {
+            // Each shard gets its own correlation_id (format: "req-shard-{shard_id}-{ulid}" for debugging)
+            // This ensures each shard's reply is routed to the correct ReplyWaiter
+            let correlation_id = format!("req-shard-{}-{}", shard_id, Ulid::new().to_string());
+            let request_start = Instant::now();
+            let mut msg = query_message.clone();
+            // Ensure message ID has "req-" prefix for requests
+            let message_id = if msg.id.is_empty() {
+                format!("req-{}", Ulid::new().to_string())
+            } else if !msg.id.starts_with("req-") && !msg.id.starts_with("res-") {
+                format!("req-{}", msg.id)
+            } else {
+                msg.id.clone()
+            };
+            msg.id = message_id.clone();
+            msg.receiver_id = shard_actor_id.clone();
+            msg.message_type = "call".to_string();
+
+            let sl = service_locator.clone();
+            let tid = temp_sender_id.clone();
+            let cid = correlation_id.clone();
+            let sid = shard_actor_id.clone();
+            let mid = message_id.clone();
+            let t = timeout;
+            // CRITICAL: Clone RequestContext for each task (tenant_id flows from API → ActorBuilder → ActorRef)
+            let ctx_task = ctx.clone();
+
+            let handle = tokio::spawn(async move {
+                use plexspaces_actor::routing::ask_helper;
+                let result = ask_helper(
+                    ctx_task,
+                    sl,
+                    sid.clone(),
+                    msg,
+                    tid,
+                    cid.clone(),
+                    t,
+                ).await;
+                (shard_id as u32, sid, request_start, result)
+            });
+            handles.push(handle);
+        }
+
+        // Await all handles in parallel using join_all (true parallel map/reduce)
+        // This enables all asks to be sent asynchronously, then all replies collected in parallel
+        // All ask_helper() calls return Futures, so we can await them all together
+        let join_results = join_all(handles).await;
+        
+        let mut results = Vec::with_capacity(join_results.len());
+        for join_result in join_results {
+            let (shard_id, shard_actor_id, request_start, result) = join_result
+                .map_err(|e| format!("Task join error: {}", e))?;
+            let latency = request_start.elapsed();
+            match result {
+                Ok(reply) => {
+                    tracing::debug!(
+                        group_id = %group_id,
+                        shard_id = shard_id,
+                        actor_id = %shard_actor_id,
+                        latency_ms = latency.as_millis(),
+                        "✅ [{}] Received reply",
+                        operation_name
+                    );
+                    results.push((shard_id, shard_actor_id, latency, true, String::new(), Some(reply)));
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    tracing::warn!(
+                        group_id = %group_id,
+                        shard_id = shard_id,
+                        actor_id = %shard_actor_id,
+                        latency_ms = latency.as_millis(),
+                        error = %error_msg,
+                        "❌ [{}] Shard failed",
+                        operation_name
+                    );
+                    results.push((shard_id, shard_actor_id, latency, false, error_msg, None));
+                }
+            }
+        }
+
+        // Sort by shard_id for consistent ordering
+        results.sort_by_key(|r| r.0);
+
+        let received_count = results.iter().filter(|r| r.3).count();
+        let failed_count = results.len() - received_count;
+        
+        // Track shard messages received (for all successful replies)
+        for result in &results {
+            if result.3 { // success = true
+                if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+                    accessor.increment_shard_messages_received().await;
+                }
+                if let Some(registry) = self.service_locator.actor_registry().await {
+                    let actor_metrics = registry.actor_metrics();
+                    use plexspaces_core::message_metrics::ActorMetricsExt;
+                    let mut metrics = actor_metrics.write().await;
+                    metrics.increment_shard_messages_received_total();
+                }
+            }
+        }
+        
+        if failed_count > 0 {
+            let errors: Vec<String> = results.iter()
+                .filter_map(|r| if !r.3 { Some(format!("Shard {} ({}): {}", r.0, r.1, r.4)) } else { None })
+                .collect();
+            tracing::warn!(
+                group_id = %group_id,
+                total_duration_ms = start_time.elapsed().as_millis(),
+                received = received_count,
+                failed = failed_count,
+                total = results.len(),
+                errors = ?errors,
+                "⚠️  [{}] Collected replies: {}/{} succeeded, {} failed",
+                operation_name,
+                received_count,
+                results.len(),
+                failed_count
+            );
+        } else {
+            tracing::info!(
+                group_id = %group_id,
+                total_duration_ms = start_time.elapsed().as_millis(),
+                received = received_count,
+                total = results.len(),
+                "✅ [{}] Collected replies: {}/{} succeeded",
+                operation_name,
+                received_count,
+                results.len()
+            );
+        }
+
+        // Cleanup: Remove the single temporary sender (all correlation_ids are cleaned up by ask_helper)
+        if let Some(registry) = self.service_locator.actor_registry().await {
+            registry.remove_temporary_sender(&temp_sender_id).await;
+        }
+
+        Ok(results)
+    }
+
+    /// Internal implementation of map_shard_group
+    /// Uses unified parallel operation helper (Erlang pmap pattern)
+    async fn map_shard_group_internal(
+        &self,
+        _ctx: &RequestContext,
+        req: MapShardGroupRequest,
+    ) -> Result<MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let start_time = Instant::now();
+        let group_id = req.group_id.clone();
+        
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&group_id)
+                .ok_or_else(|| format!("ShardGroup {} not found", group_id))?
+                .clone()
+        };
+
+        let timeout = req.timeout.map(|d| {
+            Duration::from_secs(d.seconds as u64)
+                + Duration::from_nanos(d.nanos as u64)
+        }).unwrap_or(Duration::from_secs(10));
+
+        let query_proto = req.map_function.ok_or_else(|| "map_function is required".to_string())?;
+
+        // Use unified parallel operation helper
+        // CRITICAL: Pass RequestContext with tenant_id (flows from API → ActorBuilder → ActorRef)
+        let results = self.parallel_operation_unified(
+            _ctx.clone(),
+            group_id.clone(),
+            group.shard_actor_ids.clone(),
+            query_proto,
+            timeout,
+            "MAP_SHARD_GROUP",
+        ).await?;
+
+        // Convert results to response format
+        let mut shard_responses = Vec::new();
+        let mut shards_responded = 0;
+        let mut shards_failed = 0;
+        let mut max_latency = Duration::ZERO;
+        let mut min_latency = Duration::MAX;
+
+        for (shard_id, shard_actor_id, latency, success, error, proto_response) in results {
+            if success {
+                shards_responded += 1;
+                if latency < min_latency {
+                    min_latency = latency;
+                }
+            } else {
+                shards_failed += 1;
+            }
+            if latency > max_latency {
+                max_latency = latency;
+            }
+            
+            shard_responses.push(ShardQueryResponse {
+                shard_id,
+                shard_actor_id,
+                response: proto_response,
+                latency: Some(prost_types::Duration {
+                    seconds: latency.as_secs() as i64,
+                    nanos: latency.subsec_nanos() as i32,
+                }),
+                success,
+                error,
+            });
+        }
+
+        let total_duration = start_time.elapsed();
+        
+        // Track shard operation metrics
+        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+            accessor.increment_shard_operations_total().await;
+            if shards_failed > 0 {
+                accessor.increment_shard_operations_failed().await;
+            }
+        }
+        if let Some(registry) = self.service_locator.actor_registry().await {
+            let actor_metrics = registry.actor_metrics();
+            use plexspaces_core::message_metrics::ActorMetricsExt;
+            let mut metrics = actor_metrics.write().await;
+            metrics.increment_shard_operations_total();
+            if shards_failed > 0 {
+                metrics.increment_shard_operations_failed_total();
+            }
+        }
+        
+        if shards_failed > 0 {
+            let failed_shards: Vec<String> = shard_responses.iter()
+                .filter_map(|r| if !r.success { Some(format!("Shard {} ({}): {}", r.shard_id, r.shard_actor_id, r.error)) } else { None })
+                .collect();
+            tracing::warn!(
+                group_id = %group_id,
+                total_duration_ms = total_duration.as_millis(),
+                shards_queried = group.shard_count,
+                shards_responded,
+                shards_failed,
+                failed_shards = ?failed_shards,
+                min_latency_ms = if min_latency == Duration::MAX { 0 } else { min_latency.as_millis() },
+                max_latency_ms = max_latency.as_millis(),
+                "⚠️  [MAP_SHARD_GROUP] Parallel map operation completed: {}/{} shards responded, {} failed",
+                shards_responded,
+                group.shard_count,
+                shards_failed
+            );
+        } else {
+            tracing::info!(
+                group_id = %group_id,
+                total_duration_ms = total_duration.as_millis(),
+                shards_queried = group.shard_count,
+                shards_responded,
+                min_latency_ms = if min_latency == Duration::MAX { 0 } else { min_latency.as_millis() },
+                max_latency_ms = max_latency.as_millis(),
+                "✅ [MAP_SHARD_GROUP] Parallel map operation completed: {}/{} shards responded successfully",
+                shards_responded,
+                group.shard_count
+            );
+        }
+
+        use plexspaces_proto::actor::v1::ScatterGatherStats;
+        Ok(MapShardGroupResponse {
+            shard_results: shard_responses,
+            stats: Some(ScatterGatherStats {
+                shards_queried: group.shard_count,
+                shards_responded,
+                shards_failed,
+                max_latency: Some(prost_types::Duration {
+                    seconds: max_latency.as_secs() as i64,
+                    nanos: max_latency.subsec_nanos() as i32,
+                }),
+            }),
+        })
+    }
+
+    /// Internal implementation of scatter_gather
+    /// Uses unified parallel operation helper (Erlang pmap pattern)
+    async fn scatter_gather_internal(
+        &self,
+        _ctx: &RequestContext,
+        req: ScatterGatherRequest,
+    ) -> Result<ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let start_time = Instant::now();
+        let group_id = req.group_id.clone();
+        
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&group_id)
+                .ok_or_else(|| format!("ShardGroup {} not found", group_id))?
+                .clone()
+        };
+
+        let timeout = req.timeout.map(|d| {
+            Duration::from_secs(d.seconds as u64)
+                + Duration::from_nanos(d.nanos as u64)
+        }).unwrap_or(Duration::from_secs(5));
+
+        let query = req.query.ok_or_else(|| "query is required".to_string())?;
+
+        // Use unified parallel operation helper
+        // CRITICAL: Pass RequestContext with tenant_id (flows from API → ActorBuilder → ActorRef)
+        let results = self.parallel_operation_unified(
+            _ctx.clone(),
+            group_id.clone(),
+            group.shard_actor_ids.clone(),
+            query,
+            timeout,
+            "SCATTER_GATHER",
+        ).await?;
+
+        // Convert results to response format and aggregate
+        let mut shard_responses = Vec::new();
+        let mut shards_responded = 0;
+        let mut shards_failed = 0;
+        let mut max_latency = Duration::ZERO;
+        let mut min_latency = Duration::MAX;
+        let mut successful_responses = Vec::new();
+
+        for (shard_id, shard_actor_id, latency, success, error, proto_response) in results {
+            if success {
+                shards_responded += 1;
+                if latency < min_latency {
+                    min_latency = latency;
+                }
+                if let Some(ref resp) = proto_response {
+                    successful_responses.push((shard_id, resp.clone()));
+                }
+            } else {
+                shards_failed += 1;
+            }
+            if latency > max_latency {
+                max_latency = latency;
+            }
+            
+            shard_responses.push(ShardQueryResponse {
+                shard_id,
+                shard_actor_id,
+                response: proto_response,
+                latency: Some(prost_types::Duration {
+                    seconds: latency.as_secs() as i64,
+                    nanos: latency.subsec_nanos() as i32,
+                }),
+                success,
+                error,
+            });
+        }
+
+        // Check minimum responses requirement
+        if shards_responded < req.min_responses as usize {
+            let error_msg = format!(
+                "Scatter-gather failed: only {} shards responded, minimum required: {}",
+                shards_responded,
+                req.min_responses
+            );
+            tracing::error!(
+                group_id = %group_id,
+                shards_responded,
+                min_required = req.min_responses,
+                "❌ [SCATTER_GATHER] {}",
+                error_msg
+            );
+            return Err(error_msg.into());
+        }
+
+        // Aggregate results based on strategy
+        let result = match req.aggregation {
+            x if x == ShardGroupAggregationStrategy::ShardGroupAggregationConcat as i32 => {
+                // Concatenate all successful responses
+                let mut aggregated_payloads = Vec::new();
+                for (_shard_id, resp) in successful_responses {
+                    aggregated_payloads.push(resp.payload);
+                }
+                Some(Message {
+                    id: format!("scatter-gather-{}", Ulid::new()),
+                    sender_id: "scatter-gather".to_string(),
+                    receiver_id: String::new(),
+                    channel: String::new(),
+                    message_type: "aggregated".to_string(),
+                    payload: aggregated_payloads.concat(),
+                    timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
+                    headers: std::collections::HashMap::new(),
+                    priority: 0,
+                    ttl: None,
+                    delivery_count: 0,
+                    idempotency_key: String::new(),
+                    correlation_id: String::new(),
+                    reply_to: String::new(),
+                    partition_key: String::new(),
+                    uri_path: String::new(),
+                    uri_method: String::new(),
+                })
+            }
+            x if x == ShardGroupAggregationStrategy::ShardGroupAggregationMerge as i32 => {
+                // Sum numeric values from all responses
+                let mut sum: i64 = 0;
+                for (_shard_id, resp) in successful_responses {
+                    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&resp.payload) {
+                        if let Some(num) = value.as_i64() {
+                            sum += num;
+                        } else if let Some(num) = value.as_f64() {
+                            sum += num as i64;
+                        }
+                    }
+                }
+                Some(Message {
+                    id: format!("scatter-gather-{}", Ulid::new()),
+                    sender_id: "scatter-gather".to_string(),
+                    receiver_id: String::new(),
+                    channel: String::new(),
+                    message_type: "aggregated".to_string(),
+                    payload: serde_json::json!({ "sum": sum }).to_string().into_bytes(),
+                    timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
+                    headers: std::collections::HashMap::new(),
+                    priority: 0,
+                    ttl: None,
+                    delivery_count: 0,
+                    idempotency_key: String::new(),
+                    correlation_id: String::new(),
+                    reply_to: String::new(),
+                    partition_key: String::new(),
+                    uri_path: String::new(),
+                    uri_method: String::new(),
+                })
+            }
+            _ => {
+                // Default: return first successful response or None
+                successful_responses.first().map(|(_shard_id, resp)| resp.clone())
+            }
+        };
+
+        let total_duration = start_time.elapsed();
+        
+        // Track shard operation metrics
+        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
+            accessor.increment_shard_operations_total().await;
+            if shards_failed > 0 {
+                accessor.increment_shard_operations_failed().await;
+            }
+        }
+        if let Some(registry) = self.service_locator.actor_registry().await {
+            let actor_metrics = registry.actor_metrics();
+            use plexspaces_core::message_metrics::ActorMetricsExt;
+            let mut metrics = actor_metrics.write().await;
+            metrics.increment_shard_operations_total();
+            if shards_failed > 0 {
+                metrics.increment_shard_operations_failed_total();
+            }
+        }
+        
+        tracing::info!(
+            group_id = %group_id,
+            total_duration_ms = total_duration.as_millis(),
+            shards_queried = group.shard_count,
+            shards_responded,
+            shards_failed,
+            min_latency_ms = if min_latency == Duration::MAX { 0 } else { min_latency.as_millis() },
+            max_latency_ms = max_latency.as_millis(),
+            has_aggregated_result = result.is_some(),
+            "✅ [SCATTER_GATHER] Scatter-gather operation completed: {}/{} shards responded successfully",
+            shards_responded,
+            group.shard_count
+        );
+
+        Ok(ScatterGatherResponse {
+            result,
+            shard_responses,
+            stats: Some(ScatterGatherStats {
+                shards_queried: group.shard_count,
+                shards_responded: shards_responded as u32,
+                shards_failed: shards_failed as u32,
+                max_latency: Some(prost_types::Duration {
+                    seconds: max_latency.as_secs() as i64,
+                    nanos: max_latency.subsec_nanos() as i32,
+                }),
+            }),
+        })
+    }
+
+    async fn delete_shard_group(
+        &self,
+        request: Request<DeleteShardGroupRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        ).await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+
+        let req = request.into_inner();
+
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&req.group_id).cloned()
+        };
+
+        let group = match group {
+            Some(g) => g,
+            None => {
+                // Idempotent: succeed if group doesn't exist
+                return Ok(Response::new(Empty {}));
+            }
+        };
+
+        // Stop all shard actors
+        let actor_factory = self.service_locator.get_actor_factory().await
+            .ok_or_else(|| Status::internal("Actor factory not available"))?;
+
+        for shard_actor_id in &group.shard_actor_ids {
+            let _ = actor_factory.stop_actor(&ctx, shard_actor_id).await;
+        }
+
+        // Remove from registry
+        {
+            let mut groups = self.shard_groups.write().await;
+            groups.remove(&req.group_id);
+        }
+
+        // Unregister from TaskRouter (if registered)
+        if let Some(task_router) = self.service_locator.get_task_router().await {
+            if let Err(e) = task_router.unregister_group(&req.group_id).await {
+                tracing::warn!(
+                    group_id = %req.group_id,
+                    error = %e,
+                    "Failed to unregister ShardGroup from TaskRouter (non-fatal)"
+                );
+            } else {
+                tracing::debug!(
+                    group_id = %req.group_id,
+                    "Unregistered ShardGroup from TaskRouter"
+                );
+            }
+        }
+
+        // Emit metrics
+        metrics::counter!("plexspaces_shard_group_deleted_total", 
+            "group_id" => req.group_id.clone());
+
+        tracing::info!(group_id = %req.group_id, "Deleted ShardGroup");
+
+        Ok(Response::new(Empty {}))
+    }
+
+    async fn get_shard_group(
+        &self,
+        request: Request<GetShardGroupRequest>,
+    ) -> Result<Response<GetShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        let groups = self.shard_groups.read().await;
+        let group = groups.get(&req.group_id)
+            .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?;
+
+        Ok(Response::new(GetShardGroupResponse {
+            group: Some(group.clone()),
+        }))
+    }
+
+    async fn scale_shard_group(
+        &self,
+        request: Request<ScaleShardGroupRequest>,
+    ) -> Result<Response<ScaleShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+        
+        // Extract RequestContext from gRPC metadata
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+        
+        // TODO: Implement scale_shard_group_internal
+        // For now, return not implemented
+        Err(Status::unimplemented("ScaleShardGroup not yet implemented"))
+    }
+
+    async fn list_shard_groups(
+        &self,
+        request: Request<ListShardGroupsRequest>,
+    ) -> Result<Response<ListShardGroupsResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        let groups = self.shard_groups.read().await;
+        let filtered: Vec<ShardGroup> = groups.values()
+            .filter(|g| {
+                // Filter by actor_type if specified
+                if !req.actor_type.is_empty() && g.actor_type != req.actor_type {
+                    return false;
+                }
+                // Filter by state if specified
+                if req.state != ShardGroupState::ShardGroupStateUnspecified as i32
+                    && g.state != req.state {
+                    return false;
+                }
+                true
+            })
+            .cloned()
+            .collect();
+
+        // Apply pagination
+        let page = req.page.unwrap_or_default();
+        let offset = page.offset as usize;
+        let limit = page.limit as usize;
+        let total_size = filtered.len();
+        let has_next = offset + limit < total_size;
+
+        let paginated: Vec<ShardGroup> = filtered.into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
+
+        Ok(Response::new(ListShardGroupsResponse {
+            groups: paginated,
+            page: Some(plexspaces_proto::common::v1::PageResponse {
+                total_size: total_size as i32,
+                offset: offset as i32,
+                limit: limit as i32,
+                has_next,
+            }),
+        }))
+    }
+
+    async fn send_to_shard(
+        &self,
+        request: Request<SendToShardRequest>,
+    ) -> Result<Response<SendToShardResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&req.group_id)
+                .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?
+                .clone()
+        };
+
+        // Calculate shard_id from partition_key using partition strategy
+        use crate::actor_service::partition::calculate_shard_id;
+        let shard_id = calculate_shard_id(
+            &req.partition_key,
+            group.partition_strategy,
+            group.shard_count,
+            None, // TODO: Support range boundaries from group metadata
+        ).map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
+
+        let shard_actor_id = group.shard_actor_ids.get(shard_id as usize)
+            .ok_or_else(|| Status::internal(format!("Invalid shard_id {}", shard_id)))?
+            .clone();
+
+        // Route message to shard actor
+        let mut message = req.message.ok_or_else(|| Status::invalid_argument("message is required"))?;
+        message.receiver_id = shard_actor_id.clone();
+
+        let timeout = req.timeout.map(|d| {
+            std::time::Duration::from_secs(d.seconds as u64)
+                + std::time::Duration::from_nanos(d.nanos as u64)
+        });
+
+        // Extract RequestContext from gRPC request
+        // TODO: Extract tenant_id and namespace from metadata headers
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+
+        let response_message = if req.wait_for_response {
+            let (_, response) = self.route_message(ctx.clone(), &shard_actor_id, message, true, timeout).await?;
+            response
+        } else {
+            let _ = self.route_message(ctx.clone(), &shard_actor_id, message, false, None).await?;
+            None
+        };
+
+        // Emit metrics
+        metrics::counter!("plexspaces_send_to_shard_total",
+            "group_id" => req.group_id.clone(),
+            "shard_id" => shard_id.to_string());
+
+        Ok(Response::new(SendToShardResponse {
+            shard_id,
+            shard_actor_id,
+            response: response_message,
+        }))
+    }
+}
+
+impl ActorServiceImpl {
+    // Old implementation kept for reference (can be removed later)
+    #[allow(dead_code)]
+    async fn scatter_gather_old(
+        &self,
+        request: Request<ScatterGatherRequest>,
+    ) -> Result<Response<ScatterGatherResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&req.group_id)
+                .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?
+                .clone()
+        };
+
+        let timeout = req.timeout.map(|d| {
+            std::time::Duration::from_secs(d.seconds as u64)
+                + std::time::Duration::from_nanos(d.nanos as u64)
+        }).unwrap_or(std::time::Duration::from_secs(5));
+
+        let query = req.query.ok_or_else(|| Status::invalid_argument("query is required"))?;
+
+        // Prepare messages for all shards
+        let mut query_messages = Vec::new();
+        for (shard_id, shard_actor_id) in group.shard_actor_ids.iter().enumerate() {
+            let mut query_msg = query.clone();
+            query_msg.receiver_id = shard_actor_id.clone();
+            query_messages.push((shard_id as u32, shard_actor_id.clone(), query_msg));
+        }
+
+        // Send query to all shards in parallel using tokio::spawn
+        use futures::future::join_all;
+        let mut handles = Vec::new();
+
+        for (shard_id, shard_actor_id, query_msg) in query_messages {
+            let actor_id = shard_actor_id.clone();
+            let query_msg_clone = query_msg.clone();
+            
+            // Clone what we need for routing
+            let service_locator = self.service_locator.clone();
+            let local_node_id = self.local_node_id.clone();
+            
+            let handle = tokio::spawn(async move {
+                let start = std::time::Instant::now();
+                // Route message using service_locator to get ActorRegistry
+                // This is a simplified routing - in production, we'd use the full route_message logic
+                let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> = service_locator.actor_registry().await;
+                match actor_registry {
+                    Some(registry) => {
+                        // Lookup actor and send message
+                        match registry.lookup_actor(&actor_id).await {
+                            Some(actor_ref) => {
+                                // Send message using tell (fire-and-forget)
+                                // TODO: Implement proper ask pattern with ReplyWaiter for request-reply
+                                match actor_ref.tell(query_msg_clone).await {
+                                    Ok(_) => {
+                                        let latency = start.elapsed();
+                                        // For now, return success without response (scatter-gather with COLLECT will need proper ask)
+                                        (shard_id, actor_id.clone(), latency, true, String::new(), None::<Message>)
+                                    }
+                                    Err(e) => {
+                                        let latency = start.elapsed();
+                                        (shard_id, actor_id.clone(), latency, false, e.to_string(), None::<Message>)
+                                    }
+                                }
+                            }
+                            None => {
+                                let latency = start.elapsed();
+                                (shard_id, actor_id.clone(), latency, false, format!("Actor {} not found", actor_id), None::<Message>)
+                            }
+                        }
+                    }
+                    None => {
+                        let latency = start.elapsed();
+                        (shard_id, actor_id, latency, false, "Actor registry not available".to_string(), None::<Message>)
+                    }
+                }
+            });
+            handles.push(handle);
+        }
+        
+        // Convert JoinHandles to futures
+        let futures: Vec<_> = handles.into_iter().map(|h| async move {
+            h.await.unwrap_or_else(|e| {
+                (0, String::new(), std::time::Duration::ZERO, false, format!("Task join error: {}", e), None::<Message>)
+            })
+        }).collect();
+
+        // Execute all queries with timeout
+        let results = tokio::time::timeout(timeout, join_all(futures)).await;
+
+        let mut shard_responses = Vec::new();
+        let mut shards_responded = 0;
+        let mut shards_failed = 0;
+        let mut max_latency = std::time::Duration::ZERO;
+
+        match results {
+            Ok(results_vec) => {
+                for (shard_id, shard_actor_id, latency, success, error, response) in results_vec {
+                    if success {
+                        shards_responded += 1;
+                    } else {
+                        shards_failed += 1;
+                    }
+                    if latency > max_latency {
+                        max_latency = latency;
+                    }
+                    shard_responses.push(ShardQueryResponse {
+                        shard_id,
+                        shard_actor_id,
+                        response,
+                        latency: Some(prost_types::Duration {
+                            seconds: latency.as_secs() as i64,
+                            nanos: latency.subsec_nanos() as i32,
+                        }),
+                        success,
+                        error,
+                    });
+                }
+            }
+            Err(_) => {
+                // Timeout - mark all as failed
+                shards_failed = group.shard_count;
+            }
+        }
+
+        // Aggregate results based on strategy
+        let result = match req.aggregation {
+            x if x == ShardGroupAggregationStrategy::ShardGroupAggregationConcat as i32 => {
+                // Concatenate all responses
+                let mut payload = Vec::new();
+                for resp in &shard_responses {
+                    if let Some(msg) = &resp.response {
+                        payload.extend_from_slice(&msg.payload);
+                    }
+                }
+                Some(Message {
+                    id: format!("scatter-gather-{}", ulid::Ulid::new()),
+                    sender_id: "scatter-gather".to_string(),
+                    receiver_id: String::new(),
+                    channel: String::new(),
+                    message_type: String::new(),
+                    payload,
+                    timestamp: Some(prost_types::Timestamp {
+                        seconds: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64,
+                        nanos: 0,
+                    }),
+                    headers: std::collections::HashMap::new(),
+                    priority: 0,
+                    ttl: None,
+                    delivery_count: 0,
+                    idempotency_key: String::new(),
+                    correlation_id: String::new(),
+                    reply_to: String::new(),
+                    partition_key: String::new(),
+                    uri_path: String::new(),
+                    uri_method: String::new(),
+                })
+            }
+            _ => {
+                // Default: return first response
+                shard_responses.first()
+                    .and_then(|r| r.response.clone())
+            }
+        };
+
+        // Emit metrics
+        metrics::counter!("plexspaces_scatter_gather_total",
+            "group_id" => req.group_id.clone());
+        if max_latency > std::time::Duration::ZERO {
+            metrics::histogram!("plexspaces_scatter_gather_duration_seconds",
+                "group_id" => req.group_id.clone()).record(max_latency.as_secs_f64());
+        }
+        // Note: shard_count histogram removed - use counter with labels instead if needed
+
+        Ok(Response::new(ScatterGatherResponse {
+            result,
+            shard_responses,
+            stats: Some(ScatterGatherStats {
+                shards_queried: group.shard_count,
+                shards_responded,
+                shards_failed,
+                max_latency: Some(prost_types::Duration {
+                    seconds: max_latency.as_secs() as i64,
+                    nanos: max_latency.subsec_nanos() as i32,
+                }),
+            }),
+        }))
+    }
+
+    async fn bulk_update_shard_group(
+        &self,
+        request: Request<BulkUpdateShardGroupRequest>,
+    ) -> Result<Response<BulkUpdateShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        ).await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let resp = self.bulk_update_shard_group_internal(&ctx, req).await
+            .map_err(|e| Status::internal(format!("Failed to bulk update ShardGroup: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
+    #[allow(dead_code)]
+    async fn bulk_update_shard_group_old(
+        &self,
+        request: Request<BulkUpdateShardGroupRequest>,
+    ) -> Result<Response<BulkUpdateShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        // Get group
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups.get(&req.group_id)
+                .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?
+                .clone()
+        };
+
+        // Route updates to appropriate shards based on partition_key
+        use crate::actor_service::partition::calculate_shard_id;
+        use futures::future::join_all;
+        
+        let timeout = req.timeout.map(|d| {
+            std::time::Duration::from_secs(d.seconds as u64)
+                + std::time::Duration::from_nanos(d.nanos as u64)
+        }).unwrap_or(std::time::Duration::from_secs(30));
+
+        // Group updates by shard_id
+        let mut updates_by_shard: std::collections::HashMap<u32, Vec<(String, Message)>> = std::collections::HashMap::new();
+        for (partition_key_str, mut message) in req.updates {
+            let partition_key = partition_key_str.as_bytes();
+            let shard_id = calculate_shard_id(
+                partition_key,
+                group.partition_strategy,
+                group.shard_count,
+                None,
+            ).map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
+            
+            let shard_actor_id = group.shard_actor_ids.get(shard_id as usize)
+                .ok_or_else(|| Status::internal(format!("Invalid shard_id {}", shard_id)))?
+                .clone();
+            
+            message.receiver_id = shard_actor_id.clone();
+            updates_by_shard.entry(shard_id).or_insert_with(Vec::new).push((partition_key_str, message));
+        }
+
+        // Send updates to shards in parallel
+        let mut handles = Vec::new();
+        let mut shard_stats_map: std::collections::HashMap<u32, ShardUpdateStats> = std::collections::HashMap::new();
+
+        for (shard_id, updates) in updates_by_shard {
+            let shard_actor_id = group.shard_actor_ids.get(shard_id as usize).unwrap().clone();
+            let service_locator = self.service_locator.clone();
+            let wait_for_responses = req.wait_for_responses;
+            let consistency_level = req.consistency_level;
+            
+            let handle = tokio::spawn(async move {
+                let mut succeeded = 0u32;
+                let mut failed = 0u32;
+                
+                // Send updates based on consistency level
+                // Clone updates for iteration (needed because updates is moved in first match arm)
+                let updates_clone = updates.clone();
+                match consistency_level {
+                    x if x == plexspaces_proto::v1::actor::ConsistencyLevel::ConsistencyLevelEventual as i32 => {
+                        // Eventual consistency: send all updates, don't wait
+                        for (_key, message) in updates_clone {
+                            let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> = service_locator.actor_registry().await;
+                            if let Some(registry) = actor_registry {
+                                if let Some(actor_ref) = registry.lookup_actor(&message.receiver_id).await {
+                                    if actor_ref.tell(message).await.is_ok() {
+                                        succeeded += 1;
+                                    } else {
+                                        failed += 1;
+                                    }
+                                } else {
+                                    failed += 1;
+                                }
+                            } else {
+                                failed += 1;
+                            }
+                        }
+                    }
+                    _ => {
+                        // Stronger consistency: send sequentially or with coordination
+                        // For now, send sequentially (can be optimized later)
+                        for (_key, message) in updates_clone {
+                            let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> = service_locator.actor_registry().await;
+                            if let Some(registry) = actor_registry {
+                                if let Some(actor_ref) = registry.lookup_actor(&message.receiver_id).await {
+                                    if wait_for_responses {
+                                        // Wait for response (stronger consistency)
+                                        // Use route_message via ActorService (simplified - actual implementation would use proper routing)
+                                        // For now, just send and mark as succeeded (proper ask pattern would require ReplyWaiter)
+                                        if actor_ref.tell(message).await.is_ok() {
+                                            succeeded += 1;
+                                        } else {
+                                            failed += 1;
+                                        }
+                                    } else {
+                                        // Fire-and-forget
+                                        if actor_ref.tell(message).await.is_ok() {
+                                            succeeded += 1;
+                                        } else {
+                                            failed += 1;
+                                        }
+                                    }
+                                } else {
+                                    failed += 1;
+                                }
+                            } else {
+                                failed += 1;
+                            }
+                        }
+                    }
+                }
+                
+                (shard_id, succeeded, failed, updates.len() as u32)
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all updates to complete
+        let results = tokio::time::timeout(timeout, join_all(handles)).await
+            .map_err(|_| Status::deadline_exceeded("Bulk update timeout"))?;
+
+        let mut total_sent = 0u32;
+        let mut total_succeeded = 0u32;
+        let mut total_failed = 0u32;
+        let mut shard_stats = Vec::new();
+
+        for result in results {
+            let (shard_id, succeeded, failed, sent) = result.unwrap_or((0, 0, 0, 0));
+            total_sent += sent;
+            total_succeeded += succeeded;
+            total_failed += failed;
+            
+            let shard_actor_id = group.shard_actor_ids.get(shard_id as usize)
+                .cloned()
+                .unwrap_or_default();
+            
+            shard_stats.push(ShardUpdateStats {
+                shard_id,
+                shard_actor_id,
+                updates_sent: sent,
+                updates_succeeded: succeeded,
+                updates_failed: failed,
+            });
+        }
+
+        // Emit metrics
+        metrics::counter!("plexspaces_bulk_update_shard_group_total",
+            "group_id" => req.group_id.clone());
+        metrics::histogram!("plexspaces_bulk_update_shard_group_updates",
+            "group_id" => req.group_id.clone()).record(total_sent as f64);
+
+        Ok(Response::new(BulkUpdateShardGroupResponse {
+            updates_sent: total_sent,
+            updates_succeeded: total_succeeded,
+            updates_failed: total_failed,
+            shard_stats,
+            errors: Vec::new(), // TODO: Collect actual errors
+        }))
+    }
 }
 
 impl ActorServiceImpl {
@@ -1823,13 +3616,6 @@ impl ActorServiceTrait for ActorServiceWrapper {
     ) -> Result<Response<SendMessageResponse>, Status> {
         // Use fully qualified syntax to call the trait method, not the public method
         ActorServiceTrait::send_message(&*self.0, request).await
-    }
-
-    async fn create_actor(
-        &self,
-        request: Request<CreateActorRequest>,
-    ) -> Result<Response<CreateActorResponse>, Status> {
-        self.0.create_actor(request).await
     }
 
     async fn spawn_actor(
@@ -1947,9 +3733,80 @@ impl ActorServiceTrait for ActorServiceWrapper {
     ) -> Result<Response<InvokeActorResponse>, Status> {
         self.0.invoke_actor(request).await
     }
+
+    async fn terminate_actor(
+        &self,
+        request: Request<TerminateActorRequest>,
+    ) -> Result<Response<TerminateActorResponse>, Status> {
+        self.0.terminate_actor(request).await
+    }
+
+    async fn create_shard_group(
+        &self,
+        request: Request<CreateShardGroupRequest>,
+    ) -> Result<Response<CreateShardGroupResponse>, Status> {
+        self.0.create_shard_group(request).await
+    }
+
+    async fn delete_shard_group(
+        &self,
+        request: Request<DeleteShardGroupRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        self.0.delete_shard_group(request).await
+    }
+
+    async fn get_shard_group(
+        &self,
+        request: Request<GetShardGroupRequest>,
+    ) -> Result<Response<GetShardGroupResponse>, Status> {
+        self.0.get_shard_group(request).await
+    }
+
+    async fn scale_shard_group(
+        &self,
+        request: Request<ScaleShardGroupRequest>,
+    ) -> Result<Response<ScaleShardGroupResponse>, Status> {
+        self.0.scale_shard_group(request).await
+    }
+
+    async fn list_shard_groups(
+        &self,
+        request: Request<ListShardGroupsRequest>,
+    ) -> Result<Response<ListShardGroupsResponse>, Status> {
+        self.0.list_shard_groups(request).await
+    }
+
+    async fn send_to_shard(
+        &self,
+        request: Request<SendToShardRequest>,
+    ) -> Result<Response<SendToShardResponse>, Status> {
+        self.0.send_to_shard(request).await
+    }
+
+    async fn scatter_gather(
+        &self,
+        request: Request<ScatterGatherRequest>,
+    ) -> Result<Response<ScatterGatherResponse>, Status> {
+        self.0.scatter_gather(request).await
+    }
+
+    async fn bulk_update_shard_group(
+        &self,
+        request: Request<BulkUpdateShardGroupRequest>,
+    ) -> Result<Response<BulkUpdateShardGroupResponse>, Status> {
+        self.0.bulk_update_shard_group(request).await
+    }
+
+    async fn map_shard_group(
+        &self,
+        request: Request<MapShardGroupRequest>,
+    ) -> Result<Response<MapShardGroupResponse>, Status> {
+        self.0.map_shard_group(request).await
+    }
 }
 
 pub mod get_or_activate_impl;
+pub mod partition;
 pub use get_or_activate_impl::get_or_activate_actor_impl;
 
 #[cfg(test)]
@@ -2104,8 +3961,10 @@ mod tests {
         mailbox: Arc<Mailbox>,
         service_locator: Arc<dyn ServiceLocatorTrait>,
     ) {
+        // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for tests)
         let sender: Arc<dyn MessageSender> = Arc::new(plexspaces_actor::ActorRef::local(
             actor_id.clone(),
+            String::new(), // Test context uses empty tenant_id
             String::new(), // Test context uses empty namespace
             mailbox,
             service_locator,
@@ -2154,8 +4013,9 @@ mod tests {
         let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to non-existent actor
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
-            .route_local("nonexistent", "node1", message, false, None)
+            .route_local(ctx, "nonexistent", "node1", message, false, None)
             .await;
 
         // ASSERT: Should fail with NotFound
@@ -2179,9 +4039,10 @@ mod tests {
         let message_id = message.id.to_string();
 
         // ACT: Route message (fire-and-forget)
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
             .route_local(
-                "test", "node1", message, false, // fire-and-forget
+                ctx, "test", "node1", message, false, // fire-and-forget
                 None,
             )
             .await;
@@ -2221,8 +4082,10 @@ mod tests {
         let message = create_test_message(b"hello".to_vec());
 
         // ACT: Try request-reply (ask pattern)
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
             .route_local(
+                ctx,
                 "test",
                 "node1",
                 message,
@@ -2253,8 +4116,9 @@ mod tests {
         let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to unknown node
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
-            .route_remote("node2", "actor@node2", message, false, None)
+            .route_remote(ctx, "node2", "actor@node2", message, false, None)
             .await;
 
         // ASSERT: Should fail with NotFound (or Internal if ActorRegistry not registered yet)
@@ -2331,8 +4195,9 @@ mod tests {
         // ACT: Try to route with actor ID that doesn't exist (no @node defaults to local)
         // Since actor IDs without @node are now valid (default to local node),
         // this will fail with NotFound when the actor isn't found
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
-            .route_message("invalid_no_node", message, false, None)
+            .route_message(ctx, "invalid_no_node", message, false, None)
             .await;
 
         // ASSERT: Should fail with NotFound (actor doesn't exist on local node)
@@ -2356,8 +4221,9 @@ mod tests {
         let message_id = message.id.to_string();
 
         // ACT: Route message via route_message() entry point
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
-            .route_message("test@node1", message, false, None)
+            .route_message(ctx, "test@node1", message, false, None)
             .await;
 
         // ASSERT: Should route locally
@@ -2521,8 +4387,9 @@ mod tests {
         let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to unknown node (not in registry)
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
-            .route_remote("unknown_node", "actor@unknown_node", message, false, None)
+            .route_remote(ctx, "unknown_node", "actor@unknown_node", message, false, None)
             .await;
 
         // ASSERT: Should fail with NotFound (or Internal if ActorRegistry not registered yet)
@@ -2551,8 +4418,9 @@ mod tests {
         let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to node (registry lookup will fail with NotFound)
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
-            .route_remote("node2", "actor@node2", message, false, None)
+            .route_remote(ctx, "node2", "actor@node2", message, false, None)
             .await;
 
         // ASSERT: Should fail with NotFound (or Internal if ActorRegistry not registered yet)
@@ -2578,8 +4446,9 @@ mod tests {
         let message = create_test_message(b"test".to_vec());
 
         // ACT: Try to route to unreachable node
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
         let result = service
-            .route_remote("node2", "actor@node2", message, false, None)
+            .route_remote(ctx, "node2", "actor@node2", message, false, None)
             .await;
 
         // ASSERT: Should fail with Unavailable (or Internal if ActorRegistry not registered yet)
@@ -2667,7 +4536,8 @@ mod tests {
 
         // ACT: Try to route to unreachable node
         let message = create_test_message(b"test".to_vec());
-        let result = service.route_message("actor@node2", message, false, None).await;
+        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
+        let result = service.route_message(ctx, "actor@node2", message, false, None).await;
 
         // ASSERT: Should fail with appropriate error
         assert!(result.is_err(), "Should fail when node is unreachable");

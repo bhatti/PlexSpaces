@@ -376,6 +376,317 @@ pub struct DataParallelConfig {
     #[prost(enumeration="RebalancePolicy", tag="5")]
     pub rebalance_policy: i32,
 }
+// ============================================================================
+// ACTOR GROUPS - Shard Group Messages (data-parallel sharding)
+// ============================================================================
+// Labels are used for node placement: ActorResourceRequirements.required_labels
+// matches NodeCapacity.labels (from NodeRegistry capabilities). See
+// docs/CLUSTER_AND_ROUTING_COHESION.md.
+
+/// Shard group - collection of sharded actors with the same behavior
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ShardGroup {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub actor_type: ::prost::alloc::string::String,
+    #[prost(uint32, tag="3")]
+    pub shard_count: u32,
+    #[prost(enumeration="PartitionStrategy", tag="4")]
+    pub partition_strategy: i32,
+    /// Indexed by shard_id 0 to shard_count-1
+    #[prost(string, repeated, tag="5")]
+    pub shard_actor_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(enumeration="ShardGroupState", tag="6")]
+    pub state: i32,
+    #[prost(message, optional, tag="7")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(map="string, string", tag="8")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Labels for node placement (required_labels in ActorResourceRequirements)
+    #[prost(map="string, string", tag="9")]
+    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Rebalancing status (if currently rebalancing)
+    #[prost(message, optional, tag="10")]
+    pub rebalance_status: ::core::option::Option<RebalanceStatus>,
+}
+/// Rebalancing status for shard groups
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RebalanceStatus {
+    /// Is currently rebalancing
+    #[prost(bool, tag="1")]
+    pub is_rebalancing: bool,
+    /// Old shard count (before rebalancing)
+    #[prost(uint32, tag="2")]
+    pub old_shard_count: u32,
+    /// New shard count (after rebalancing)
+    #[prost(uint32, tag="3")]
+    pub new_shard_count: u32,
+    /// Progress (0.0 to 100.0)
+    #[prost(double, tag="4")]
+    pub progress_percent: f64,
+    /// When rebalancing started
+    #[prost(message, optional, tag="5")]
+    pub started_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Estimated completion time
+    #[prost(message, optional, tag="6")]
+    pub estimated_completion: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub actor_type: ::prost::alloc::string::String,
+    #[prost(uint32, tag="3")]
+    pub shard_count: u32,
+    #[prost(enumeration="PartitionStrategy", tag="4")]
+    pub partition_strategy: i32,
+    #[prost(message, optional, tag="5")]
+    pub shard_config: ::core::option::Option<ActorConfig>,
+    #[prost(bytes="vec", tag="6")]
+    pub initial_state: ::prost::alloc::vec::Vec<u8>,
+    #[prost(map="string, string", tag="7")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Labels for node placement (shards placed on nodes matching required_labels)
+    #[prost(map="string, string", tag="8")]
+    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateShardGroupResponse {
+    #[prost(message, optional, tag="1")]
+    pub group: ::core::option::Option<ShardGroup>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub force: bool,
+    #[prost(message, optional, tag="3")]
+    pub shutdown_timeout: ::core::option::Option<::prost_types::Duration>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetShardGroupResponse {
+    #[prost(message, optional, tag="1")]
+    pub group: ::core::option::Option<ShardGroup>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListShardGroupsRequest {
+    #[prost(string, tag="1")]
+    pub actor_type: ::prost::alloc::string::String,
+    #[prost(enumeration="ShardGroupState", tag="2")]
+    pub state: i32,
+    #[prost(message, optional, tag="3")]
+    pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListShardGroupsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub groups: ::prost::alloc::vec::Vec<ShardGroup>,
+    #[prost(message, optional, tag="2")]
+    pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SendToShardRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(bytes="vec", tag="2")]
+    pub partition_key: ::prost::alloc::vec::Vec<u8>,
+    #[prost(message, optional, tag="3")]
+    pub message: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(bool, tag="4")]
+    pub wait_for_response: bool,
+    #[prost(message, optional, tag="5")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SendToShardResponse {
+    #[prost(uint32, tag="1")]
+    pub shard_id: u32,
+    #[prost(string, tag="2")]
+    pub shard_actor_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub response: ::core::option::Option<super::super::common::v1::Message>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ScatterGatherRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub query: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="3")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    #[prost(enumeration="ShardGroupAggregationStrategy", tag="4")]
+    pub aggregation: i32,
+    #[prost(uint32, tag="5")]
+    pub min_responses: u32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ShardQueryResponse {
+    #[prost(uint32, tag="1")]
+    pub shard_id: u32,
+    #[prost(string, tag="2")]
+    pub shard_actor_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub response: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="4")]
+    pub latency: ::core::option::Option<::prost_types::Duration>,
+    #[prost(bool, tag="5")]
+    pub success: bool,
+    #[prost(string, tag="6")]
+    pub error: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ScatterGatherStats {
+    #[prost(uint32, tag="1")]
+    pub shards_queried: u32,
+    #[prost(uint32, tag="2")]
+    pub shards_responded: u32,
+    #[prost(uint32, tag="3")]
+    pub shards_failed: u32,
+    #[prost(message, optional, tag="4")]
+    pub max_latency: ::core::option::Option<::prost_types::Duration>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ScatterGatherResponse {
+    #[prost(message, optional, tag="1")]
+    pub result: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, repeated, tag="2")]
+    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="3")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
+/// Bulk update: send update messages to multiple shards (DPA UpdateFunction)
+/// Inspired by NSDI'22 Data-Parallel Actors paper
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BulkUpdateShardGroupRequest {
+    /// Group to update
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    /// Update messages: partition_key -> message
+    /// Messages will be routed to appropriate shards based on partition_key
+    #[prost(map="string, message", tag="2")]
+    pub updates: ::std::collections::HashMap<::prost::alloc::string::String, super::super::common::v1::Message>,
+    /// Consistency level for updates
+    #[prost(enumeration="ConsistencyLevel", tag="3")]
+    pub consistency_level: i32,
+    /// Timeout for updates
+    #[prost(message, optional, tag="4")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    /// Wait for responses (true = wait for all, false = fire-and-forget)
+    #[prost(bool, tag="5")]
+    pub wait_for_responses: bool,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BulkUpdateShardGroupResponse {
+    /// Number of updates sent
+    #[prost(uint32, tag="1")]
+    pub updates_sent: u32,
+    /// Number of successful updates
+    #[prost(uint32, tag="2")]
+    pub updates_succeeded: u32,
+    /// Number of failed updates
+    #[prost(uint32, tag="3")]
+    pub updates_failed: u32,
+    /// Per-shard statistics
+    #[prost(message, repeated, tag="4")]
+    pub shard_stats: ::prost::alloc::vec::Vec<ShardUpdateStats>,
+    /// Errors (if any)
+    #[prost(string, repeated, tag="5")]
+    pub errors: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ShardUpdateStats {
+    #[prost(uint32, tag="1")]
+    pub shard_id: u32,
+    #[prost(string, tag="2")]
+    pub shard_actor_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="3")]
+    pub updates_sent: u32,
+    #[prost(uint32, tag="4")]
+    pub updates_succeeded: u32,
+    #[prost(uint32, tag="5")]
+    pub updates_failed: u32,
+}
+/// Map: apply function to all shards in parallel (DPA Map operator)
+/// Inspired by NSDI'22 Data-Parallel Actors paper
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MapShardGroupRequest {
+    /// Group to map over
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    /// Map function message (sent to each shard)
+    #[prost(message, optional, tag="2")]
+    pub map_function: ::core::option::Option<super::super::common::v1::Message>,
+    /// Timeout for map operation
+    #[prost(message, optional, tag="3")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    /// Minimum number of shards that must respond (0 = all required)
+    #[prost(uint32, tag="4")]
+    pub min_responses: u32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MapShardGroupResponse {
+    /// Mapped results from each shard
+    #[prost(message, repeated, tag="1")]
+    pub shard_results: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    /// Statistics
+    #[prost(message, optional, tag="2")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
+/// Scale shard group (add/remove shards with rebalancing)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ScaleShardGroupRequest {
+    /// Group to scale
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    /// New shard count
+    #[prost(uint32, tag="2")]
+    pub new_shard_count: u32,
+    /// Rebalancing policy
+    #[prost(enumeration="RebalancePolicy", tag="3")]
+    pub rebalance_policy: i32,
+    /// Configuration for new shards (if scaling up)
+    #[prost(message, optional, tag="4")]
+    pub new_shard_config: ::core::option::Option<ActorConfig>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ScaleShardGroupResponse {
+    /// Updated shard group
+    #[prost(message, optional, tag="1")]
+    pub group: ::core::option::Option<ShardGroup>,
+    /// Rebalancing status
+    #[prost(message, optional, tag="2")]
+    pub rebalance_status: ::core::option::Option<RebalanceStatus>,
+}
 /// Actor performance metrics
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -396,49 +707,6 @@ pub struct ActorMetrics {
     pub memory_usage_bytes: u64,
     #[prost(double, tag="7")]
     pub cpu_usage_percent: f64,
-}
-/// Request to create an actor
-///
-/// ## Design Principle
-/// CreateActor ALWAYS creates actors locally on the node where the gRPC call is made.
-/// There is no node_id field - the actor is always created on the node receiving the request.
-///
-/// To spawn an actor on a remote node:
-/// 1. Call CreateActor on that remote node's ActorService directly, OR
-/// 2. Use SpawnActor RPC (which also must be called on the target node)
-///
-/// ## Example
-/// ```rust
-/// // Create actor locally on node1
-/// let client1 = ActorServiceClient::connect("<http://node1:8000">).await?;
-/// let response = client1.create_actor(CreateActorRequest { actor_type: "worker", ... }).await?;
-/// // Actor is created on node1
-///
-/// // Create actor on remote node2
-/// let client2 = ActorServiceClient::connect("<http://node2:8001">).await?;
-/// let response = client2.create_actor(CreateActorRequest { actor_type: "worker", ... }).await?;
-/// // Actor is created on node2
-/// ```
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CreateActorRequest {
-    #[prost(string, tag="1")]
-    pub actor_type: ::prost::alloc::string::String,
-    #[prost(bytes="vec", tag="3")]
-    pub initial_state: ::prost::alloc::vec::Vec<u8>,
-    #[prost(message, optional, tag="4")]
-    pub config: ::core::option::Option<ActorConfig>,
-    #[prost(map="string, string", tag="5")]
-    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Optional namespace. If not provided or empty, uses namespace from RequestContext
-    #[prost(string, tag="6")]
-    pub namespace: ::prost::alloc::string::String,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CreateActorResponse {
-    #[prost(message, optional, tag="1")]
-    pub actor: ::core::option::Option<Actor>,
 }
 /// Request to spawn an actor on a specific remote node (Erlang spawn/4 equivalent)
 ///
@@ -578,6 +846,12 @@ pub struct SpawnActorRequest {
     /// - MetricsFacet: Adds metrics collection
     #[prost(message, repeated, tag="6")]
     pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
+    /// Namespace for actor isolation (REQUIRED for multi-tenant deployments)
+    /// Tenant ID comes from gRPC auth (JWT middleware), not from request
+    /// Namespace provides sub-isolation within a tenant (e.g., different apps)
+    /// Examples: "production", "staging", "app-v1", "team-platform"
+    #[prost(string, tag="7")]
+    pub namespace: ::prost::alloc::string::String,
 }
 /// Response from SpawnActor
 ///
@@ -611,6 +885,9 @@ pub struct SpawnActorResponse {
 pub struct GetActorRequest {
     #[prost(string, tag="1")]
     pub actor_id: ::prost::alloc::string::String,
+    /// Namespace for tenant isolation (tenant_id from JWT)
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -630,6 +907,10 @@ pub struct ListActorsRequest {
     pub state: i32,
     #[prost(string, tag="4")]
     pub node_id: ::prost::alloc::string::String,
+    /// Namespace for tenant isolation (tenant_id from JWT)
+    /// Only actors in this namespace will be returned
+    #[prost(string, tag="5")]
+    pub namespace: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -728,6 +1009,9 @@ pub struct DeleteActorRequest {
     pub actor_id: ::prost::alloc::string::String,
     #[prost(bool, tag="2")]
     pub force: bool,
+    /// Namespace for tenant isolation (tenant_id from JWT)
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
 }
 // NOTE: Facet management (AttachFacet, DetachFacet, etc.) is handled by
 // FacetService in facets.proto to avoid duplication.
@@ -1188,6 +1472,52 @@ pub struct DeactivateActorRequest {
     /// Optional: Force deactivation even if actor has pending messages
     #[prost(bool, tag="2")]
     pub force: bool,
+}
+/// Request to terminate an actor gracefully
+///
+/// ## Purpose
+/// Permanently terminates an actor, completing pending work and removing from system.
+/// Different from DeactivateActor which is temporary passivation for virtual actors.
+/// Pairs with SpawnActorRequest for complete lifecycle management.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TerminateActorRequest {
+    /// Namespace of the actor
+    #[prost(string, tag="1")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Actor ID to terminate
+    #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    /// Optional: Force termination even if actor has pending messages
+    /// When false (default): Actor completes pending messages before terminating
+    /// When true: Actor terminates immediately, pending messages may be lost
+    #[prost(bool, tag="3")]
+    pub force: bool,
+    /// Optional: Timeout for graceful shutdown (in milliseconds)
+    /// Default: 5000ms (5 seconds)
+    /// After timeout, actor is forcefully terminated
+    #[prost(uint64, tag="4")]
+    pub timeout_ms: u64,
+}
+/// Response from terminating an actor
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TerminateActorResponse {
+    /// Whether the actor was successfully terminated
+    #[prost(bool, tag="1")]
+    pub success: bool,
+    /// Actor ID that was terminated
+    #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    /// Number of pending messages that were processed before termination
+    #[prost(uint64, tag="3")]
+    pub messages_processed: u64,
+    /// Number of pending messages that were dropped (if force=true)
+    #[prost(uint64, tag="4")]
+    pub messages_dropped: u64,
+    /// Error message if success is false
+    #[prost(string, tag="5")]
+    pub error_message: ::prost::alloc::string::String,
 }
 /// Request to check if actor exists
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1932,6 +2262,89 @@ impl RebalancePolicy {
             "REBALANCE_POLICY_NONE" => Some(Self::RebalancePolicyNone),
             "REBALANCE_POLICY_ON_SCALE" => Some(Self::RebalancePolicyOnScale),
             "REBALANCE_POLICY_LOAD_BASED" => Some(Self::RebalancePolicyLoadBased),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ShardGroupState {
+    ShardGroupStateUnspecified = 0,
+    /// Shards being created
+    ShardGroupStateCreating = 1,
+    /// All shards active
+    ShardGroupStateActive = 2,
+    /// Shards being rebalanced
+    ShardGroupStateRebalancing = 3,
+    /// Shards being drained
+    ShardGroupStateDraining = 4,
+    /// Shards being stopped
+    ShardGroupStateStopping = 5,
+    /// All shards stopped
+    ShardGroupStateStopped = 6,
+}
+impl ShardGroupState {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ShardGroupState::ShardGroupStateUnspecified => "SHARD_GROUP_STATE_UNSPECIFIED",
+            ShardGroupState::ShardGroupStateCreating => "SHARD_GROUP_STATE_CREATING",
+            ShardGroupState::ShardGroupStateActive => "SHARD_GROUP_STATE_ACTIVE",
+            ShardGroupState::ShardGroupStateRebalancing => "SHARD_GROUP_STATE_REBALANCING",
+            ShardGroupState::ShardGroupStateDraining => "SHARD_GROUP_STATE_DRAINING",
+            ShardGroupState::ShardGroupStateStopping => "SHARD_GROUP_STATE_STOPPING",
+            ShardGroupState::ShardGroupStateStopped => "SHARD_GROUP_STATE_STOPPED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "SHARD_GROUP_STATE_UNSPECIFIED" => Some(Self::ShardGroupStateUnspecified),
+            "SHARD_GROUP_STATE_CREATING" => Some(Self::ShardGroupStateCreating),
+            "SHARD_GROUP_STATE_ACTIVE" => Some(Self::ShardGroupStateActive),
+            "SHARD_GROUP_STATE_REBALANCING" => Some(Self::ShardGroupStateRebalancing),
+            "SHARD_GROUP_STATE_DRAINING" => Some(Self::ShardGroupStateDraining),
+            "SHARD_GROUP_STATE_STOPPING" => Some(Self::ShardGroupStateStopping),
+            "SHARD_GROUP_STATE_STOPPED" => Some(Self::ShardGroupStateStopped),
+            _ => None,
+        }
+    }
+}
+/// Aggregation strategy for scatter-gather results
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ShardGroupAggregationStrategy {
+    ShardGroupAggregationUnspecified = 0,
+    ShardGroupAggregationConcat = 1,
+    ShardGroupAggregationMerge = 2,
+    ShardGroupAggregationFirst = 3,
+    ShardGroupAggregationMajority = 4,
+}
+impl ShardGroupAggregationStrategy {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ShardGroupAggregationStrategy::ShardGroupAggregationUnspecified => "SHARD_GROUP_AGGREGATION_UNSPECIFIED",
+            ShardGroupAggregationStrategy::ShardGroupAggregationConcat => "SHARD_GROUP_AGGREGATION_CONCAT",
+            ShardGroupAggregationStrategy::ShardGroupAggregationMerge => "SHARD_GROUP_AGGREGATION_MERGE",
+            ShardGroupAggregationStrategy::ShardGroupAggregationFirst => "SHARD_GROUP_AGGREGATION_FIRST",
+            ShardGroupAggregationStrategy::ShardGroupAggregationMajority => "SHARD_GROUP_AGGREGATION_MAJORITY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "SHARD_GROUP_AGGREGATION_UNSPECIFIED" => Some(Self::ShardGroupAggregationUnspecified),
+            "SHARD_GROUP_AGGREGATION_CONCAT" => Some(Self::ShardGroupAggregationConcat),
+            "SHARD_GROUP_AGGREGATION_MERGE" => Some(Self::ShardGroupAggregationMerge),
+            "SHARD_GROUP_AGGREGATION_FIRST" => Some(Self::ShardGroupAggregationFirst),
+            "SHARD_GROUP_AGGREGATION_MAJORITY" => Some(Self::ShardGroupAggregationMajority),
             _ => None,
         }
     }

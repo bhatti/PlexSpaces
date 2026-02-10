@@ -435,6 +435,25 @@ message ActorMetrics {
   
   // Total parent-child relationships unregistered
   uint64 parent_child_unregistered_total = 16;
+  
+  // ============================================================================
+  // SHARD GROUP METRICS (Data-Parallel Actors)
+  // ============================================================================
+  
+  // Total shard groups created
+  uint64 shard_groups_created_total = 17;
+  
+  // Total shard messages sent (to shard actors)
+  uint64 shard_messages_sent_total = 18;
+  
+  // Total shard messages received (from shard actors)
+  uint64 shard_messages_received_total = 19;
+  
+  // Total shard operations (map, scatter_gather, bulk_update)
+  uint64 shard_operations_total = 20;
+  
+  // Failed shard operations
+  uint64 shard_operations_failed_total = 21;
 }
 
 // ============================================================================

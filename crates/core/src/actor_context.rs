@@ -32,6 +32,7 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::io::Write;
 
 use crate::{ActorId, ActorRef, RequestContext, ServiceLocator};
 use plexspaces_proto::common::v1::Message;
@@ -308,6 +309,62 @@ pub trait ActorService: Send + Sync {
         actor_id: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Create a ShardGroup (data-parallel worker pool)
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `req` - CreateShardGroupRequest with group configuration
+    ///
+    /// ## Returns
+    /// CreateShardGroupResponse with created group
+    async fn create_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Bulk update ShardGroup (DPA UpdateFunction)
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `req` - BulkUpdateShardGroupRequest with updates
+    ///
+    /// ## Returns
+    /// BulkUpdateShardGroupResponse with update statistics
+    async fn bulk_update_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Map over ShardGroup (DPA Map operator)
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `req` - MapShardGroupRequest with map function
+    ///
+    /// ## Returns
+    /// MapShardGroupResponse with shard results
+    async fn map_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::MapShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Scatter-gather query (DPA Scatter-Gather)
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
+    /// * `req` - ScatterGatherRequest with query and aggregation
+    ///
+    /// ## Returns
+    /// ScatterGatherResponse with aggregated results
+    async fn scatter_gather(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::ScatterGatherRequest,
+    ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>>;
 
 }
 
@@ -745,9 +802,11 @@ impl ActorContext {
         mut reply_message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let target_actor_id_clone = target_actor_id.clone();
+        let reply_message_id = reply_message.id.clone();
+        
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!("[ACTOR_CONTEXT::send_reply] START: sender_id={}, target_actor_id={}, correlation_id={:?}, reply_message_id={}", 
-                sender_id, target_actor_id_clone, correlation_id, reply_message.id);
+                sender_id, target_actor_id_clone, correlation_id, reply_message_id);
         }
         
         // SIMPLIFIED: Use send() method - temporary sender behaves like normal actor
@@ -756,6 +815,15 @@ impl ActorContext {
         reply_message.sender_id = target_actor_id.clone(); // Reply comes FROM the current actor
         if let Some(corr_id) = correlation_id {
             reply_message.correlation_id = corr_id.to_string();
+        }
+        
+        // Ensure reply message has an ID with "res-" prefix for tracking
+        if reply_message.id.is_empty() {
+            use ulid::Ulid;
+            reply_message.id = format!("res-{}", Ulid::new().to_string());
+        } else if !reply_message.id.starts_with("res-") && !reply_message.id.starts_with("req-") {
+            // If ID exists but doesn't have prefix, add res- prefix for replies
+            reply_message.id = format!("res-{}", reply_message.id);
         }
         
         // Use send() method - it will route to temporary sender just like any other actor
@@ -901,6 +969,37 @@ impl ActorService for StubActorService {
         Err("StubActorService: send not implemented".into())
     }
 
+    async fn create_shard_group(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubActorService: create_shard_group not implemented".into())
+    }
+
+    async fn bulk_update_shard_group(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubActorService: bulk_update_shard_group not implemented".into())
+    }
+
+    async fn map_shard_group(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
+    ) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubActorService: map_shard_group not implemented".into())
+    }
+
+    async fn scatter_gather(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
+    ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+        Err("StubActorService: scatter_gather not implemented".into())
+    }
 
 }
 

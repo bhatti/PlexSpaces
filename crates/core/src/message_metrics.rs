@@ -90,6 +90,22 @@ pub trait ActorMetricsExt {
     /// Increment parent_child_unregistered_total counter
     fn increment_parent_child_unregistered_total(&mut self);
     
+    // Shard group metrics (Data-Parallel Actors)
+    /// Increment shard_groups_created_total counter
+    fn increment_shard_groups_created_total(&mut self);
+    
+    /// Increment shard_messages_sent_total counter
+    fn increment_shard_messages_sent_total(&mut self);
+    
+    /// Increment shard_messages_received_total counter
+    fn increment_shard_messages_received_total(&mut self);
+    
+    /// Increment shard_operations_total counter
+    fn increment_shard_operations_total(&mut self);
+    
+    /// Increment shard_operations_failed_total counter
+    fn increment_shard_operations_failed_total(&mut self);
+    
     /// Get a snapshot of current metrics
     fn snapshot(&self) -> ActorMetrics;
 }
@@ -115,6 +131,12 @@ impl ActorMetricsExt for ActorMetrics {
             // Parent-child metrics (Phase 3)
             parent_child_registered_total: 0,
             parent_child_unregistered_total: 0,
+            // Shard group metrics (Data-Parallel Actors)
+            shard_groups_created_total: 0,
+            shard_messages_sent_total: 0,
+            shard_messages_received_total: 0,
+            shard_operations_total: 0,
+            shard_operations_failed_total: 0,
         }
     }
 
@@ -184,6 +206,26 @@ impl ActorMetricsExt for ActorMetrics {
 
     fn increment_parent_child_unregistered_total(&mut self) {
         self.parent_child_unregistered_total = self.parent_child_unregistered_total.saturating_add(1);
+    }
+
+    fn increment_shard_groups_created_total(&mut self) {
+        self.shard_groups_created_total = self.shard_groups_created_total.saturating_add(1);
+    }
+
+    fn increment_shard_messages_sent_total(&mut self) {
+        self.shard_messages_sent_total = self.shard_messages_sent_total.saturating_add(1);
+    }
+
+    fn increment_shard_messages_received_total(&mut self) {
+        self.shard_messages_received_total = self.shard_messages_received_total.saturating_add(1);
+    }
+
+    fn increment_shard_operations_total(&mut self) {
+        self.shard_operations_total = self.shard_operations_total.saturating_add(1);
+    }
+
+    fn increment_shard_operations_failed_total(&mut self) {
+        self.shard_operations_failed_total = self.shard_operations_failed_total.saturating_add(1);
     }
 
     fn snapshot(&self) -> ActorMetrics {

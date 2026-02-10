@@ -45,23 +45,29 @@ Creating → Inactive → Active → Terminated
 - **Terminated**: Actor has stopped gracefully
 - **Failed**: Actor has crashed with error
 
-### Example
+### Example (SDK Annotations)
 
 ```rust
+use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, handler, json};
+
+// Define actor with SDK annotation (like Python @actor decorator)
+#[gen_server_actor]
 struct Counter {
     count: i32,
 }
 
-#[async_trait]
-impl ActorBehavior for Counter {
-    async fn handle_message(
+// Define handlers - GenServer defaults to "call" (request-reply)
+#[plexspaces_handlers]
+impl Counter {
+    #[handler("increment")]
+    async fn increment(
         &mut self,
-        ctx: &ActorContext,
-        msg: Message
-    ) -> Result<(), BehaviorError> {
-        // Process message
-        self.count += 1;
-        Ok(())
+        _ctx: &plexspaces_sdk::ActorContext,
+        msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        let payload: serde_json::Value = serde_json::from_slice(&msg.payload)?;
+        self.count += payload["amount"].as_i64().unwrap_or(1) as i32;
+        Ok(json!({ "count": self.count }))
     }
 }
 ```
@@ -78,45 +84,60 @@ impl ActorBehavior for Counter {
 ### Example
 
 ```rust
-// Get actor reference
-let actor_ref = node.get_actor_ref(&"counter@node1".to_string()).await?;
+use plexspaces_sdk::{call_message, cast_message, json};
+use std::time::Duration;
 
-// Fire-and-forget (tell)
-actor_ref.tell(message).await?;
+// Fire-and-forget (tell) - use cast_message()
+let event = cast_message(json!({ "event": "user_login" }));
+actor_ref.tell(event).await?;
 
-// Request-reply (ask)
+// Request-reply (ask) - use call_message()
+let request = call_message(json!({ "action": "get_balance" }));
 let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 ```
 
 ## Behaviors
 
-**Behaviors** define how actors process messages. They are compile-time traits (zero overhead):
+**Behaviors** define how actors process messages. Use SDK annotations for declarative definition:
 
-- **GenServerBehavior**: Erlang/OTP-style request/reply (synchronous)
-- **GenFSMBehavior**: Finite state machine (state transitions)
-- **GenEventBehavior**: Event-driven processing (fire-and-forget). WASM event-handler actors deploy with `behavior_kind=GenEvent` and appear in logs as `EventHandler`.
-- **WorkflowBehavior**: Durable workflow orchestration (Temporal/Restate-inspired)
+| Annotation | Behavior | Use Case |
+|------------|----------|----------|
+| `#[gen_server_actor]` | GenServer | Request-reply (call by default) |
+| `#[event_actor]` | GenEvent | Fire-and-forget events (cast) |
+| `#[fsm_actor]` | GenStateMachine | State machine transitions |
+| `#[workflow_actor]` | Workflow | Durable workflow orchestration |
 
-### GenServerBehavior Example
+### GenServer Example (SDK)
 
 ```rust
-#[async_trait]
-impl GenServerBehavior for Counter {
-    type Request = CounterRequest;
-    type Reply = i32;
+use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, handler, json};
 
-    async fn handle_request(
+#[gen_server_actor]
+struct Counter {
+    count: i32,
+}
+
+#[plexspaces_handlers]
+impl Counter {
+    // GenServer handlers default to "call" - returns reply automatically
+    #[handler("increment")]
+    async fn increment(
         &mut self,
-        ctx: &ActorContext,
-        request: Self::Request,
-    ) -> Result<Self::Reply, BehaviorError> {
-        match request {
-            CounterRequest::Increment(amount) => {
-                self.count += amount;
-                Ok(self.count)
-            }
-            CounterRequest::Get => Ok(self.count),
-        }
+        _ctx: &plexspaces_sdk::ActorContext,
+        msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        let payload: serde_json::Value = serde_json::from_slice(&msg.payload)?;
+        self.count += payload["amount"].as_i64().unwrap_or(1) as i32;
+        Ok(json!({ "count": self.count }))
+    }
+    
+    #[handler("get")]
+    async fn get(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _msg: &plexspaces_sdk::Message,
+    ) -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        Ok(json!({ "count": self.count }))
     }
 }
 ```
@@ -153,31 +174,43 @@ This pattern works for both Rust and WASM actors - they all send messages, and f
 ### Example
 
 ```rust
-use plexspaces_journaling::{VirtualActorFacet, DurabilityFacet, SqliteJournalStorage};
+use plexspaces_sdk::{spawn_with_storage, RequestContext};
+use plexspaces_journaling::SqliteJournalStorage;
 
-// Create facets
-let storage = SqliteJournalStorage::new(":memory:").await?;
-let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 100));
-let durability_facet = Box::new(DurabilityFacet::new(
-    storage,
-    serde_json::json!({
-        "checkpoint_interval": 100,
-        "replay_on_activation": true,
-    }),
-    50,
-));
+// Define actor with annotations (recommended)
+#[gen_server_actor(facets = ["virtual_actor", "durability"])]
+struct MyActor {
+    // actor state
+}
 
-// Spawn actor with facets
-let _message_sender = actor_factory.spawn_actor(
+// Spawn actor with storage (SDK pattern - recommended for examples)
+let storage = Arc::new(SqliteJournalStorage::new(":memory:").await?);
+let ctx = RequestContext::new_without_auth("tenant".to_string(), "namespace".to_string());
+let actor_ref = spawn_with_storage(
     &ctx,
-    &actor_id,
-    "MyActor",
-    vec![],
-    None,
-    std::collections::HashMap::new(),
-    vec![virtual_facet, durability_facet], // facets
+    service_locator,
+    actor_id,
+    "namespace",
+    MyActor::new(),
+    storage,
+).await?;
+
+// Alternative: Manual facet creation (for advanced use cases)
+use plexspaces_sdk::{spawn_with_facets, VirtualActorFacet, DurabilityFacet};
+let storage = Arc::new(SqliteJournalStorage::new(":memory:").await?);
+let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 100));
+let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
+let actor_ref = spawn_with_facets(
+    &ctx,
+    service_locator,
+    actor_id,
+    "namespace",
+    MyActor::new(),
+    vec![virtual_facet, durability_facet],
 ).await?;
 ```
+
+**Note**: For examples and user code, use SDK patterns (`spawn`, `spawn_with_facets`, `spawn_with_storage`). `ActorFactory` is for framework code only (e.g., `ActorServiceImpl` internal implementation).
 
 ## TupleSpace
 
@@ -219,22 +252,73 @@ let tuple = ctx.tuplespace().read(pattern).await?;
 - **Signals and Queries**: External control and read-only queries
 - **Time-Travel Debugging**: Replay past executions
 
-### Example
+### Example (SDK Annotations)
 
 ```rust
-#[async_trait]
-impl WorkflowBehavior for OrderWorkflow {
-    async fn execute(&mut self, ctx: &WorkflowContext) -> Result<(), WorkflowError> {
+use plexspaces_sdk::{
+    workflow_actor, plexspaces_handlers, run_handler, signal_handler, query_handler,
+    json,
+};
+
+#[workflow_actor(facets = ["durability"])]
+struct OrderWorkflow {
+    order_id: String,
+    status: String,
+}
+
+#[plexspaces_handlers(workflow)]
+impl OrderWorkflow {
+    #[run_handler]
+    async fn run(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        input: plexspaces_sdk::Message,
+    ) -> Result<plexspaces_sdk::Message, plexspaces_sdk::BehaviorError> {
+        let payload: serde_json::Value = serde_json::from_slice(&input.payload)?;
+        self.order_id = payload["order_id"].as_str().unwrap_or("").to_string();
+        
         // Step 1: Validate order
-        ctx.step("validate", || validate_order(&self.order_id)).await?;
+        self.status = "validating".to_string();
+        // ... validation logic ...
         
         // Step 2: Process payment
-        ctx.step("payment", || process_payment(&self.order_id)).await?;
+        self.status = "processing_payment".to_string();
+        // ... payment logic ...
         
         // Step 3: Ship order
-        ctx.step("ship", || ship_order(&self.order_id)).await?;
+        self.status = "shipping".to_string();
+        // ... shipping logic ...
         
+        self.status = "completed".to_string();
+        Ok(plexspaces_sdk::Message {
+            payload: serde_json::to_vec(&json!({ "status": "completed" }))?,
+            ..Default::default()
+        })
+    }
+    
+    #[signal_handler("cancel")]
+    async fn on_cancel(
+        &mut self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _data: plexspaces_sdk::Message,
+    ) -> Result<(), plexspaces_sdk::BehaviorError> {
+        self.status = "cancelled".to_string();
         Ok(())
+    }
+    
+    #[query_handler("status")]
+    async fn get_status(
+        &self,
+        _ctx: &plexspaces_sdk::ActorContext,
+        _params: plexspaces_sdk::Message,
+    ) -> Result<plexspaces_sdk::Message, plexspaces_sdk::BehaviorError> {
+        Ok(plexspaces_sdk::Message {
+            payload: serde_json::to_vec(&json!({
+                "order_id": self.order_id,
+                "status": self.status,
+            }))?,
+            ..Default::default()
+        })
     }
 }
 ```
@@ -295,12 +379,14 @@ remote_ref.tell(message).await?;
 ### Example
 
 ```rust
-// Tell (fire-and-forget)
-actor_ref.tell(Message::new(b"increment".to_vec())).await?;
+use plexspaces_sdk::{cast_message, call_message, json};
 
-// Ask (request-reply)
+// Tell (fire-and-forget) - use cast_message()
+actor_ref.tell(cast_message(json!({ "action": "increment" }))).await?;
+
+// Ask (request-reply) - use call_message()
 let reply = actor_ref.ask(
-    CounterRequest::Get,
+    call_message(json!({ "action": "get" })),
     Duration::from_secs(5)
 ).await?;
 ```
@@ -333,14 +419,14 @@ let durability_facet = Box::new(DurabilityFacet::new(
     50, // priority
 ));
 
-// Spawn actor with durability facet
-let _message_sender = actor_factory.spawn_actor(
+// Spawn actor with durability facet using SDK helper
+use plexspaces_sdk::spawn_with_facets;
+let actor_ref = spawn_with_facets(
     &ctx,
-    &actor_id,
-    "MyActor",
-    vec![],
-    None,
-    std::collections::HashMap::new(),
+    service_locator,
+    actor_id,
+    "default", // namespace
+    MyActor::new(), // actor instance
     vec![durability_facet], // facets
 ).await?;
 ```

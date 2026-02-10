@@ -65,7 +65,8 @@ pub use journal::{Journal, JournalEntry, MemoryJournal};
 pub use lattice::{
     ConsistencyLevel, CounterLattice, LWWLattice, Lattice, OrSetLattice, SetLattice, VectorClock,
 };
-pub use mailbox::{Mailbox, MailboxConfig, Message, MessagePriority, OrderingStrategy};
+pub use mailbox::{Mailbox, MailboxConfig, MessagePriority, OrderingStrategy};
+pub use plexspaces_proto::common::v1::Message;
 // TODO: Re-export node crate types when needed
 // pub use node::{Node, NodeId, NodeConfig};
 pub use supervision::{SupervisionStrategy, Supervisor};

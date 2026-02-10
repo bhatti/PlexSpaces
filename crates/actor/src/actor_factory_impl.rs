@@ -29,10 +29,12 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::time::Instant;
 use tokio::task::JoinHandle;
 use plexspaces_core::{ActorId, Service, ServiceLocator as ServiceLocatorTrait, ActorRegistry, MessageSender, VirtualActorManager, ActorContext, RequestContext, ExitReason, ActorFactory};
 use plexspaces_proto::ActorLifecycleEvent;
 use prost_types::Timestamp;
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use crate::{Actor, ActorRef};
 use crate::{VirtualActorWrapper};
 
@@ -104,6 +106,64 @@ impl ActorFactoryImpl {
             // Actor ID doesn't have @ format - append node ID
             format!("{}@{}", actor_id, local_node_id)
         }
+    }
+    
+    /// Create temporary sender ActorRef for ask() pattern
+    ///
+    /// ## Purpose
+    /// Creates a temporary sender ActorRef that routes replies to ReplyWaiter.
+    /// This is used by the ask() pattern to collect replies asynchronously.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext with proper tenant/namespace (first parameter)
+    /// * `temp_sender_id` - Temporary sender ID (format: "ask-{correlation_id}@{node_id}")
+    /// * `correlation_id` - Correlation ID for matching replies
+    /// * `expires_at` - Expiration time for the temporary sender
+    ///
+    /// ## Returns
+    /// `Arc<dyn MessageSender>` - The temporary sender ActorRef
+    ///
+    /// ## Design
+    /// - Creates mailbox (never used - tell() routes to ReplyWaiter before mailbox)
+    /// - Creates ActorRef::local() with namespace from ctx
+    /// - Registers in ActorRegistry via register_temporary_sender() with ctx
+    /// - Returns temp_sender_ref for use in ask() pattern
+    /// Internal implementation of create_temporary_sender (trait method delegates here).
+    pub async fn create_temporary_sender_impl(
+        &self,
+        ctx: &RequestContext,
+        temp_sender_id: String,
+        correlation_id: String,
+        expires_at: Instant,
+    ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
+        // Create mailbox (never used - tell() routes to ReplyWaiter before mailbox)
+        let dummy_mailbox = Arc::new(
+            Mailbox::new(MailboxConfig::default(), temp_sender_id.clone()).await
+                .map_err(|e| format!("Failed to create temporary sender mailbox: {}", e))?
+        );
+        
+        // Create ActorRef::local() with tenant_id and namespace from ctx
+        // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef → RequestContext
+        let temp_sender_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
+            temp_sender_id.clone(),
+            ctx.tenant_id().to_string(), // CRITICAL: Use tenant_id from RequestContext
+            ctx.namespace().to_string(),
+            dummy_mailbox,
+            self.service_locator.clone(),
+        ));
+        
+        // Register temporary sender ActorRef in ActorRegistry (so it can be looked up)
+        if let Some(registry) = self.service_locator.actor_registry().await {
+            registry.register_temporary_sender(
+                ctx,
+                temp_sender_id.clone(),
+                temp_sender_ref.clone(),
+                correlation_id,
+                expires_at,
+            ).await;
+        }
+        
+        Ok(temp_sender_ref)
     }
     
     /// Setup facets (TimerFacet, ReminderFacet, etc.) after actor spawn
@@ -482,8 +542,10 @@ impl ActorFactory for ActorFactoryImpl {
             let mailbox = actor_arc.mailbox().clone();
             
             // Create ActorRef (already registered by start())
+            // CRITICAL: Pass tenant_id from RequestContext to ActorRef
             let actor_ref = ActorRef::local(
                 actor_id.clone(),
+                activation_ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
                 activation_ctx.namespace().to_string(),
                 mailbox.clone(),
                 self.service_locator.clone(),
@@ -672,9 +734,9 @@ impl ActorFactory for ActorFactoryImpl {
             }
             
             // Rebuild actor using spawn_actor with stored actor_type and recreated VirtualActorFacet
-            // This will use BehaviorFactory to create the behavior, or fall back to SimpleBehavior
+            // This will use BehaviorFactory to create the behavior, or FAIL if not registered
             // CRITICAL: actor_type must match the registered behavior name in BehaviorRegistry
-            // For tests, behaviors should be registered before suspending actors
+            // For tests, behaviors must be registered before suspending actors (spawn_actor will fail otherwise)
             let actor_ref = self.spawn_actor(
                 &ctx,
                 &actor_id,
@@ -725,8 +787,10 @@ impl ActorFactory for ActorFactoryImpl {
                         
                         let actor_arc = Arc::new(actor);
                         let mailbox = actor_arc.mailbox().clone();
+                        // CRITICAL: Pass tenant_id from RequestContext to ActorRef
                         let actor_ref = ActorRef::local(
                             actor_id.clone(),
+                            activation_ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
                             activation_ctx.namespace().to_string(),
                             mailbox.clone(),
                             self.service_locator.clone(),
@@ -873,63 +937,21 @@ impl ActorFactory for ActorFactoryImpl {
         // Note: BehaviorFactory is a trait, so we need to get it as Arc<dyn BehaviorFactory>
         // But ServiceLocator stores by TypeId, so we need to check if BehaviorRegistry is registered
         let behavior: Box<dyn ActorTrait> = {
-            // Try to get BehaviorRegistry (which implements BehaviorFactory) from ServiceLocator
             if let Some(behavior_registry) = self.service_locator.get_behavior_registry().await {
-                // BehaviorFactory is registered - try to create behavior from it
                 match behavior_registry.create(actor_type, &initial_state).await {
                     Ok(b) => b,
                     Err(e) => {
-                        // BehaviorFactory couldn't create behavior - fall back to SimpleBehavior
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            actor_type = %actor_type,
-                            error = %e,
-                            "BehaviorFactory failed to create behavior, falling back to SimpleBehavior"
-                        );
-                        }
-                        // Fall through to SimpleBehavior creation below
-                        struct SimpleBehavior {
-                            actor_type: String,
-                        }
-                        #[async_trait]
-                        impl ActorTrait for SimpleBehavior {
-                            async fn handle_message(
-                                &mut self,
-                                _ctx: &plexspaces_core::ActorContext,
-                                _msg: plexspaces_proto::common::v1::Message,
-                            ) -> Result<(), plexspaces_core::BehaviorError> {
-                                Ok(())
-                            }
-                            fn behavior_type(&self) -> BehaviorType {
-                                BehaviorType::Custom(self.actor_type.clone())
-                            }
-                        }
-                        Box::new(SimpleBehavior { 
-                            actor_type: actor_type.to_string() 
-                        })
+                        return Err(format!(
+                            "Failed to create behavior for actor_type '{}': {}. Register the behavior in BehaviorRegistry before spawning.",
+                            actor_type, e
+                        ).into());
                     }
                 }
             } else {
-                // No BehaviorFactory registered - use SimpleBehavior
-                struct SimpleBehavior {
-                    actor_type: String,
-                }
-                #[async_trait]
-                impl ActorTrait for SimpleBehavior {
-                    async fn handle_message(
-                        &mut self,
-                        _ctx: &plexspaces_core::ActorContext,
-                        _msg: plexspaces_proto::common::v1::Message,
-                    ) -> Result<(), plexspaces_core::BehaviorError> {
-                        Ok(())
-                    }
-                    fn behavior_type(&self) -> BehaviorType {
-                        BehaviorType::Custom(self.actor_type.clone())
-                    }
-                }
-                Box::new(SimpleBehavior { 
-                    actor_type: actor_type.to_string() 
-                })
+                return Err(format!(
+                    "No BehaviorRegistry registered in ServiceLocator. Cannot create behavior for actor_type '{}'. Register BehaviorRegistry before spawning actors.",
+                    actor_type
+                ).into());
             }
         };
 
@@ -937,9 +959,26 @@ impl ActorFactory for ActorFactoryImpl {
         let _tenant_id = ctx.tenant_id().to_string();
         let namespace = ctx.namespace().to_string();
 
-        // Create Actor using ActorBuilder
+        // CRITICAL: Normalize actor ID BEFORE building actor (ensures @node suffix is always present)
+        // Get local node ID from registry for normalization
+        let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
+        let local_node_id = registry.local_node_id();
+        let normalized_actor_id = self.normalize_actor_id(actor_id, local_node_id);
+        
+        // Validate: If actor_id already had @node but wrong node, throw error
+        if let Ok((_actor_name, node_id)) = plexspaces_core::ActorRef::parse_actor_id(actor_id) {
+            if !node_id.is_empty() && node_id != local_node_id {
+                return Err(format!(
+                    "Actor ID '{}' specifies node '{}' but actor must be spawned on local node '{}'. ActorService always creates actors locally.",
+                    actor_id, node_id, local_node_id
+                ).into());
+            }
+        }
+
+        // Create Actor using ActorBuilder with normalized ID
         let mut builder = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
+            .with_id(normalized_actor_id.clone())
             .with_namespace(namespace); // Use namespace from RequestContext
         
         // Apply config if provided
@@ -958,13 +997,28 @@ impl ActorFactory for ActorFactoryImpl {
         }
         
         // Spawn the built actor with type information
-        // spawn_built_actor_impl returns Arc<dyn MessageSender> directly
-        self.spawn_built_actor_impl(ctx, Arc::new(actor), Some(actor_type.to_string())).await
+        // spawn_built_actor_impl returns ActorRef, wrap for trait compatibility
+        let actor_ref = self.spawn_built_actor_impl(ctx, Arc::new(actor), Some(actor_type.to_string())).await?;
+        Ok(Arc::new(actor_ref) as Arc<dyn MessageSender>)
     }
     
-    async fn stop_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Delegate to the impl method
-        self.stop_actor_impl(actor_id).await
+    async fn stop_actor(&self, ctx: &RequestContext, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Delegate to the impl method with tenant validation
+        self.stop_actor_impl(ctx, actor_id).await
+    }
+    
+    async fn create_temporary_sender(
+        &self,
+        ctx: &RequestContext,
+        temp_sender_id: String,
+        correlation_id: String,
+        expires_at: std::time::Instant,
+    ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
+        self.create_temporary_sender_impl(ctx, temp_sender_id, correlation_id, expires_at).await
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -976,13 +1030,13 @@ impl ActorFactoryImpl {
     /// in ActorFactoryExt and internally by spawn_actor.
     /// 
     /// ## Returns
-    /// ActorRef wrapped as Arc<dyn MessageSender> for trait compatibility
+    /// ActorRef directly - callers can wrap as Arc<dyn MessageSender> if needed
     pub async fn spawn_built_actor_impl(
         &self,
         ctx: &RequestContext,
         actor: Arc<Actor>,
         actor_type: Option<String>,
-    ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         // Extract actor_type from behavior if not provided
         let actor_type = if let Some(atype) = actor_type {
             Some(atype)
@@ -1020,10 +1074,27 @@ impl ActorFactoryImpl {
             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
         let facet_manager = facet_manager_wrapper.inner_clone();
         
-        // Normalize actor ID
+        // CRITICAL: Actor ID should already be normalized (done before build in spawn_actor)
+        // But verify and update actor's internal ID if needed (defensive check)
         let local_node_id = registry.local_node_id();
         let mut actor_id = actor.id().clone();
-        actor_id = self.normalize_actor_id(&actor_id, local_node_id);
+        let normalized_id = self.normalize_actor_id(&actor_id, local_node_id);
+        
+        // If actor's internal ID doesn't match normalized ID, update it
+        // This ensures actor.id() returns the correct ID with @node suffix
+        if actor_id != normalized_id {
+            // Update actor's internal ID (Actor doesn't have set_id, so we need to reconstruct)
+            // Actually, we can't change actor.id() after creation, so we'll use normalized_id for registration
+            // The actor's internal ID will be wrong, but registration will use correct ID
+            // TODO: Consider adding set_id() to Actor or ensuring ActorBuilder normalizes during build
+            actor_id = normalized_id;
+            tracing::warn!(
+                "Actor internal ID '{}' was not normalized, using '{}' for registration",
+                actor.id(),
+                actor_id
+            );
+        }
+        
         let actor_namespace = ctx.namespace().to_string();
         let actor_tenant_id = ctx.tenant_id().to_string();
 
@@ -1169,8 +1240,10 @@ impl ActorFactoryImpl {
             ));
             
             // Create ActorRef (for return value - not used for lazy virtual actors)
+            // CRITICAL: Pass tenant_id from RequestContext to ActorRef
             let _actor_ref = ActorRef::local(
                 actor_id.clone(),
+                ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
                 ctx.namespace().to_string(),
                 mailbox.clone(),
                 self.service_locator.clone(),
@@ -1185,8 +1258,10 @@ impl ActorFactoryImpl {
                 // Create ActorRef for return value
                 // Note: Registration happens INSIDE Actor::start() AFTER init() succeeds
                 let mailbox = actor.mailbox().clone();
+                // CRITICAL: Pass tenant_id from RequestContext to ActorRef
                 let actor_ref = ActorRef::local(
                     actor_id.clone(),
+                    ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
                     ctx.namespace().to_string(),
                     mailbox.clone(),
                     self.service_locator.clone(),
@@ -1269,7 +1344,7 @@ impl ActorFactoryImpl {
                         }
                     }
                 
-                return Ok(Arc::new(actor_ref) as Arc<dyn MessageSender>);
+                return Ok(actor_ref);
                 }
                 
                 if tracing::enabled!(tracing::Level::DEBUG) {
@@ -1306,14 +1381,16 @@ impl ActorFactoryImpl {
             }
             
             // Create ActorRef for return value (for lazy virtual actors, VirtualActorWrapper is already registered)
+            // CRITICAL: Pass tenant_id from RequestContext to ActorRef
             let actor_ref = ActorRef::local(
                 actor_id.clone(),
+                ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
                 ctx.namespace().to_string(),
                 mailbox.clone(),
                 self.service_locator.clone(),
             );
             
-            return Ok(Arc::new(actor_ref) as Arc<dyn MessageSender>);
+            return Ok(actor_ref);
         }
         
         // Normal actor - start immediately
@@ -1359,8 +1436,10 @@ impl ActorFactoryImpl {
         // Create ActorRef - this is what will be returned
         // Note: The ActorRef was already registered in Actor::start() via register_in_registry()
         // We just need to ensure config and instance are stored (idempotent update)
+        // CRITICAL: Pass tenant_id from RequestContext to ActorRef
         let actor_ref = ActorRef::local(
             actor_id.clone(),
+            ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
             ctx.namespace().to_string(),
             mailbox.clone(),
             self.service_locator.clone(),
@@ -1396,45 +1475,66 @@ impl ActorFactoryImpl {
         let exit_reason_arc = actor_arc.exit_reason();
         self.watch_actor_termination(actor_id.clone(), join_handle, exit_reason_arc).await;
         
-        // Return ActorRef wrapped as Arc<dyn MessageSender>
-        // ActorRef implements MessageSender, so we can wrap it
-        Ok(Arc::new(actor_ref) as Arc<dyn MessageSender>)
+        // Return ActorRef directly
+        Ok(actor_ref)
     }
 }
 
 impl ActorFactoryImpl {
-    /// stop_actor implementation
+    /// stop_actor implementation with tenant isolation validation
     /// 
     /// This method is separate because we already closed the main impl block.
     /// It implements the stop_actor functionality from ActorFactory trait.
-    async fn stop_actor_impl(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// 
+    /// ## Tenant Isolation
+    /// Validates that the caller's tenant_id and namespace match the actor's stored
+    /// tenant_id and namespace. This prevents cross-tenant access.
+    async fn stop_actor_impl(&self, ctx: &RequestContext, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Get services from ServiceLocator
         let registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
         
         let local_node_id = registry.local_node_id();
         
-        // Get actor metadata (tenant_id, namespace) for proper tenant isolation
-        // This avoids needing to access actor instance just to get context
-        let (actor_ctx, namespace): (Option<RequestContext>, String) = {
-            if let Some((tenant_id, namespace)) = registry.get_actor_metadata(actor_id).await {
-                let ctx = RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
-                (Some(ctx), namespace)
+        // CRITICAL: Validate tenant isolation
+        // Get actor's stored tenant_id and namespace, then validate against caller's context
+        let namespace: String = {
+            if let Some((actor_tenant_id, actor_namespace)) = registry.get_actor_metadata(actor_id).await {
+                // Validate tenant_id matches (unless caller is system/empty tenant)
+                let caller_tenant = ctx.tenant_id();
+                if !caller_tenant.is_empty() && caller_tenant != actor_tenant_id {
+                    return Err(format!(
+                        "Tenant isolation violation: caller tenant '{}' cannot access actor '{}' owned by tenant '{}'",
+                        caller_tenant, actor_id, actor_tenant_id
+                    ).into());
+                }
+                
+                // Validate namespace matches (unless caller is system/empty namespace)
+                let caller_namespace = ctx.namespace();
+                if !caller_namespace.is_empty() && caller_namespace != actor_namespace {
+                    return Err(format!(
+                        "Namespace isolation violation: caller namespace '{}' cannot access actor '{}' in namespace '{}'",
+                        caller_namespace, actor_id, actor_namespace
+                    ).into());
+                }
+                
+                actor_namespace
             } else {
-                // Fallback: use empty strings for routing lookup (system-level operation)
-                // Tenant comes from auth, not config
-                let default_ctx = RequestContext::new_without_auth(String::new(), String::new());
-                (Some(default_ctx), String::new())
+                // Actor not found in metadata - might be a system actor or not registered
+                // For safety, only allow if caller has empty tenant/namespace (system-level)
+                if !ctx.tenant_id().is_empty() || !ctx.namespace().is_empty() {
+                    return Err(format!(
+                        "Actor '{}' not found or metadata missing - cannot verify tenant isolation",
+                        actor_id
+                    ).into());
+                }
+                String::new()
             }
         };
         
         // Check routing to ensure actor is local
-        let routing = if let Some(ref ctx) = actor_ctx {
-            registry.lookup_routing(ctx, actor_id).await
-                .map_err(|e| format!("Failed to lookup actor routing: {}", e))?
-        } else {
-            return Err(format!("Failed to get actor context: {}", actor_id).into());
-        };
+        let routing = registry.lookup_routing(ctx, actor_id).await
+            .map_err(|e| format!("Failed to lookup actor routing: {}", e))?;
         
         if routing.is_none() || !routing.as_ref().unwrap().is_local {
             return Err(format!("Actor not found or not local: {}", actor_id).into());
@@ -1543,6 +1643,174 @@ impl ActorFactoryImpl {
         );
         
         Ok(())
+    }
+    
+    // ========================================================================
+    // Typed spawn methods - return typed refs for cleaner API
+    // ========================================================================
+    
+    /// Spawn a workflow actor and return a WorkflowRef.
+    ///
+    /// ## Example
+    /// ```ignore
+    /// let workflow: WorkflowRef = factory.spawn_workflow(
+    ///     &ctx,
+    ///     "approval-workflow-123",
+    ///     workflow_behavior,
+    ///     vec![Box::new(DurabilityFacet::new(...))],
+    /// ).await?;
+    ///
+    /// let result: Output = workflow.run(&input).await?;
+    /// workflow.signal("approve", &data).await?;
+    /// ```
+    pub async fn spawn_workflow<B>(
+        &self,
+        ctx: &RequestContext,
+        actor_id: impl Into<ActorId>,
+        behavior: B,
+        facets: Vec<Box<dyn plexspaces_facet::Facet>>,
+    ) -> Result<crate::WorkflowRef, crate::WorkflowRefError>
+    where
+        B: plexspaces_core::Actor + Send + 'static,
+    {
+        let actor_ref = self.spawn_behavior(ctx, actor_id, behavior, facets).await
+            .map_err(|e| crate::WorkflowRefError::Spawn(e.to_string()))?;
+        Ok(crate::WorkflowRef::new(actor_ref))
+    }
+    
+    /// Spawn a GenServer actor and return a GenServerRef.
+    ///
+    /// ## Example
+    /// ```ignore
+    /// let server: GenServerRef = factory.spawn_gen_server(
+    ///     &ctx,
+    ///     "entity-extractor",
+    ///     ExtractorBehavior::new(),
+    ///     vec![],
+    /// ).await?;
+    ///
+    /// let result: Response = server.call("extract", &request).await?;
+    /// ```
+    pub async fn spawn_gen_server<B>(
+        &self,
+        ctx: &RequestContext,
+        actor_id: impl Into<ActorId>,
+        behavior: B,
+        facets: Vec<Box<dyn plexspaces_facet::Facet>>,
+    ) -> Result<crate::GenServerRef, crate::GenServerError>
+    where
+        B: plexspaces_core::Actor + Send + 'static,
+    {
+        let actor_ref = self.spawn_behavior(ctx, actor_id, behavior, facets).await
+            .map_err(|e| crate::GenServerError::Spawn(e.to_string()))?;
+        Ok(crate::GenServerRef::new(actor_ref))
+    }
+    
+    /// Spawn an FSM actor and return an FsmRef.
+    ///
+    /// ## Example
+    /// ```ignore
+    /// let fsm: FsmRef = factory.spawn_fsm(
+    ///     &ctx,
+    ///     "order-workflow-123",
+    ///     OrderStateMachine::new(),
+    ///     vec![Box::new(TimerFacet::new(...))],
+    /// ).await?;
+    ///
+    /// fsm.transition("submit", &order).await?;
+    /// let state: OrderState = fsm.query_state().await?;
+    /// ```
+    pub async fn spawn_fsm<B>(
+        &self,
+        ctx: &RequestContext,
+        actor_id: impl Into<ActorId>,
+        behavior: B,
+        facets: Vec<Box<dyn plexspaces_facet::Facet>>,
+    ) -> Result<crate::FsmRef, crate::FsmError>
+    where
+        B: plexspaces_core::Actor + Send + 'static,
+    {
+        let actor_ref = self.spawn_behavior(ctx, actor_id, behavior, facets).await
+            .map_err(|e| crate::FsmError::Spawn(e.to_string()))?;
+        Ok(crate::FsmRef::new(actor_ref))
+    }
+    
+    /// Spawn a GenEvent actor and return an EventRef.
+    ///
+    /// ## Example
+    /// ```ignore
+    /// let logger: EventRef = factory.spawn_event(
+    ///     &ctx,
+    ///     "audit-logger",
+    ///     AuditLoggerBehavior::new(),
+    ///     vec![],
+    /// ).await?;
+    ///
+    /// logger.emit("user_login", &event).await?;
+    /// ```
+    pub async fn spawn_event<B>(
+        &self,
+        ctx: &RequestContext,
+        actor_id: impl Into<ActorId>,
+        behavior: B,
+        facets: Vec<Box<dyn plexspaces_facet::Facet>>,
+    ) -> Result<crate::EventRef, crate::EventError>
+    where
+        B: plexspaces_core::Actor + Send + 'static,
+    {
+        let actor_ref = self.spawn_behavior(ctx, actor_id, behavior, facets).await
+            .map_err(|e| crate::EventError::Spawn(e.to_string()))?;
+        Ok(crate::EventRef::new(actor_ref))
+    }
+    
+    /// Internal helper to spawn a behavior and return ActorRef.
+    ///
+    /// Reuses `spawn_built_actor_impl` (same code path as `spawn_actor`).
+    /// Returns ActorRef directly from spawn_built_actor_impl.
+    async fn spawn_behavior<B>(
+        &self,
+        ctx: &RequestContext,
+        actor_id: impl Into<ActorId>,
+        behavior: B,
+        facets: Vec<Box<dyn plexspaces_facet::Facet>>,
+    ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>>
+    where
+        B: plexspaces_core::Actor + Send + 'static,
+    {
+        use crate::ActorBuilder;
+        
+        let actor_id: ActorId = actor_id.into();
+        
+        // Get behavior type for logging/tracking
+        let behavior_type = behavior.behavior_type();
+        let actor_type = match behavior_type {
+            plexspaces_core::BehaviorType::GenServer => "GenServer",
+            plexspaces_core::BehaviorType::GenEvent => "GenEvent",
+            plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine",
+            plexspaces_core::BehaviorType::Workflow => "Workflow",
+            plexspaces_core::BehaviorType::Custom(ref s) => s.as_str(),
+        };
+        
+        // Build actor with the provided behavior
+        let actor = ActorBuilder::new(Box::new(behavior))
+            .with_id(actor_id.clone())
+            .with_namespace(ctx.namespace().to_string())
+            .build()
+            .await
+            .map_err(|e| format!("Failed to build actor: {}", e))?;
+        
+        // Attach facets
+        for facet in facets {
+            actor.attach_facet(facet).await
+                .map_err(|e| format!("Failed to attach facet: {}", e))?;
+        }
+        
+        // Use spawn_built_actor_impl - returns ActorRef directly
+        self.spawn_built_actor_impl(
+            ctx,
+            Arc::new(actor),
+            Some(actor_type.to_string()),
+        ).await
     }
 }
 

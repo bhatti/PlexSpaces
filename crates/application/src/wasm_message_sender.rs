@@ -89,9 +89,11 @@ impl MessageSender for ActorServiceMessageSender {
         let actor_ref = if let Some(node) = node_id {
             // Remote actor
             // TODO: get namespace from WASM context
+            // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for WASM applications)
             ActorRef::remote(
                 to.to_string(),
-                String::new(),
+                String::new(), // Empty tenant_id for WASM applications
+                String::new(), // Empty namespace for WASM applications
                 node,
                 self.service_locator.clone(),
             )
@@ -107,9 +109,11 @@ impl MessageSender for ActorServiceMessageSender {
                 if let Some(routing) = registry.lookup_routing(&ctx, &actor_id).await.ok().flatten() {
                     // Create ActorRef based on routing info
                     // TODO: get namespace from WASM context
+                    // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for WASM applications)
                     ActorRef::remote(
                         to.to_string(),
-                        String::new(),
+                        String::new(), // Empty tenant_id for WASM applications
+                        String::new(), // Empty namespace for WASM applications
                         routing.node_id,
                         self.service_locator.clone(),
                     )
@@ -119,10 +123,12 @@ impl MessageSender for ActorServiceMessageSender {
             } else {
                 // No registry available, create remote ActorRef (will fail if actor doesn't exist)
                 // TODO: get namespace from WASM context
+                // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for WASM applications)
                 ActorRef::remote(
                     to.to_string(),
-                    String::new(),
-                    "local".to_string(), // Default to local
+                    String::new(), // Empty tenant_id for WASM applications
+                    String::new(), // Empty namespace for WASM applications
+                    String::new(), // Empty node_id (will fail if actor doesn't exist)
                     self.service_locator.clone(),
                 )
             }

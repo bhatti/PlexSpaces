@@ -62,17 +62,9 @@ option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/schedulin
 option java_package = "com.bhatti.plexspaces.scheduling.v1";
 option java_multiple_files = true;
 
-// Actor group for task routing (Layer 2)
-message ActorGroup {
-  // Group name (unique identifier)
-  string group_name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
-  
-  // Actor IDs in this group
-  repeated string actor_ids = 2;
-  
-  // Group metadata (labels, annotations)
-  map<string, string> metadata = 3;
-}
+// Task routing uses ShardGroup from actor_runtime.proto
+// For Layer 2 task routing, use group_id to reference a ShardGroup
+// TaskRouter routes tasks to actors within a ShardGroup based on routing strategy
 
 // Scheduling decision made by background scheduler
 message SchedulingDecision {

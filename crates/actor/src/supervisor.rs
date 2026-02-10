@@ -412,7 +412,8 @@ impl Supervisor {
 
         // Create ActorRef from the actor crate (has tell() method) for return value
         // TODO: get namespace from child actor context or supervisor context
-        let actor_ref = ActorActorRef::local(child_id.clone(), String::new(), mailbox, service_locator);
+        // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for supervisor-created actors)
+        let actor_ref = ActorActorRef::local(child_id.clone(), String::new(), String::new(), mailbox, service_locator);
         
         // Create core ActorRef for internal storage
         let core_actor_ref = ActorRef::new(child_id.clone())

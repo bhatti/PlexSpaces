@@ -1,51 +1,67 @@
-# Build artifacts
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Documentation (not needed in Docker image)
+*.md
+docs/
+archived_docs/
+PROJECT_TRACKER.md
+CLAUDE.md
+.cursorrules
+
+# Build artifacts (will be rebuilt in Docker)
 target/
 **/target/
-!examples/genomic-workflow-pipeline/target/release/genomic-workflow-pipeline
-*.profdata
-*.profraw
 
-# IDEs and editors
-.idea/
+# IDE files
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
-.DS_Store
 
-# Git
-.git/
-.gitignore
-
-# Documentation
-docs/
-*.md
-!README.md
-
-# Tests
-tests/
+# Test files
 **/tests/
+**/*_test.rs
+**/*_tests.rs
+
+# Example apps (not needed for node binary)
+examples/
+
+# SDKs are workspace members (needed for cargo build), but not needed at runtime
+# We copy them in Dockerfile for build, but they're not included in final image
 
 # CI/CD
 .github/
 .gitlab-ci.yml
+.circleci/
 
 # Temporary files
 *.tmp
 *.log
 *.bak
-*.old
+*.cache
 
-# Archives
-*.zip
-*.tar.gz
-*.tgz
+# OS files
+.DS_Store
+Thumbs.db
 
-# Large data files
-examples/byzantine/data/
-examples/*/data/
-cobertura.xml
-tarpaulin-report.html
+# Rust
+Cargo.lock.backup
+**/*.pdb
 
-# Node modules (if any)
-node_modules/
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Scripts (not needed in image)
+scripts/
+**/*.sh
+
+# Config files that are mounted as volumes
+config/release.yaml
+
+# Note: Makefile is NOT excluded - it's needed for proto generation

@@ -39,58 +39,64 @@ pub struct ApplicationSpec {
     /// Examples: "byzantine-generals", "genomics-coordinator"
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
-    /// Namespace for actor isolation and multi-tenancy.
+    /// Tenant ID for multi-tenancy isolation.
+    /// Extracted from JWT token during deployment.
+    /// All actors spawned by this application will be scoped to this tenant.
+    /// This is the source of truth for tenant isolation - ActorFactory enforces it.
+    #[prost(string, tag="2")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Namespace for actor isolation within a tenant.
     /// All actors spawned by this application will be registered in this namespace.
     /// If empty, defaults to application_id during deployment.
     /// Examples: "bank-test", "genomics-prod", "dev-sandbox"
-    #[prost(string, tag="13")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
     /// Application version (semantic versioning)
     /// Examples: "0.1.0", "1.2.3"
-    #[prost(string, tag="2")]
+    #[prost(string, tag="4")]
     pub version: ::prost::alloc::string::String,
     /// Human-readable description
-    #[prost(string, tag="3")]
+    #[prost(string, tag="5")]
     pub description: ::prost::alloc::string::String,
     /// Application type (library or active)
-    #[prost(enumeration="ApplicationType", tag="4")]
+    #[prost(enumeration="ApplicationType", tag="6")]
     pub r#type: i32,
     /// Dependencies (other applications that must start first)
     /// e.g., \["plexspaces-core", "plexspaces-tuplespace"\]
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag="7")]
     pub dependencies: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Application-level environment variables
-    #[prost(map="string, string", tag="6")]
+    #[prost(map="string, string", tag="8")]
     pub env: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Supervision tree (only for active applications)
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag="9")]
     pub supervisor: ::core::option::Option<SupervisorSpec>,
     // ==================== DEPLOYMENT CONFIGURATION ====================
     // (Merged from ApplicationConfig)
 
     /// Whether application is enabled (false = skip loading)
     /// Default: true
-    #[prost(bool, tag="8")]
+    #[prost(bool, tag="10")]
     pub enabled: bool,
     /// Whether to start application automatically on node boot
     /// Default: true
     /// Future: false allows manual start via ApplicationService API
-    #[prost(bool, tag="9")]
+    #[prost(bool, tag="11")]
     pub auto_start: bool,
     /// Shutdown timeout (force kill if exceeded)
     /// Default: 60 seconds
-    #[prost(message, optional, tag="10")]
+    #[prost(message, optional, tag="12")]
     pub shutdown_timeout: ::core::option::Option<::prost_types::Duration>,
     /// Shutdown strategy (graceful or immediate)
     /// Default: GRACEFUL
-    #[prost(enumeration="ShutdownStrategy", tag="11")]
+    #[prost(enumeration="ShutdownStrategy", tag="13")]
     pub shutdown_strategy: i32,
     /// Application metadata (tags, labels, annotations)
     /// Examples:
     /// - environment: "production"
     /// - team: "genomics"
     /// - criticality: "high"
-    #[prost(message, optional, tag="12")]
+    #[prost(message, optional, tag="14")]
     pub metadata: ::core::option::Option<super::super::common::v1::Metadata>,
 }
 /// Supervisor specification (Erlang/OTP supervisor)

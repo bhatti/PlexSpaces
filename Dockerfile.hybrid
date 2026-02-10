@@ -1,11 +1,16 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+# Copyright (C) 2026 Shahzad A. Bhatti <bhatti@plexobject.com>
 #
 # Dockerfile for PlexSpaces - Framework-only with hybrid backends
 # Variation 3: SQLite for journaling, Redis for channel/tuplespace
 
-# Stage 1: Builder (same as base)
-FROM rust:1.75-slim-bookworm AS builder
+# Stage 1: Builder
+# Pin Rust version: rust:1-bookworm currently provides 1.93.0 (matches rust-toolchain.toml)
+# Install exact version via rustup for reproducibility
+FROM rust:1-bookworm AS builder
+
+# Install exact Rust version to match rust-toolchain.toml (1.93.0)
+RUN rustup install 1.93.0 && rustup default 1.93.0
 
 WORKDIR /app
 
@@ -24,31 +29,23 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install buf
-RUN curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64" \
-    -o "/usr/local/bin/buf" && \
-    chmod +x /usr/local/bin/buf
-
-# Copy workspace files
+# Copy dependency files first (for better caching - cached unless Cargo.toml/Cargo.lock changes)
 COPY Cargo.toml Cargo.lock ./
-COPY crates/proto/Cargo.toml ./crates/proto/
-COPY crates/node/Cargo.toml ./crates/node/
 
-# Dummy build
-RUN mkdir -p src crates/proto/src crates/node/src && \
-    echo "fn main() {}" > src/main.rs && \
-    echo "// dummy" > crates/proto/src/lib.rs && \
-    echo "// dummy" > crates/node/src/lib.rs && \
-    cargo build --release -p plexspaces-node || true && \
-    rm -rf src crates/proto/src crates/node/src
+# Copy SDKs (workspace members required for cargo build, but not needed at runtime)
+COPY sdks/ ./sdks/
 
-# Copy the rest
-COPY . .
+# Copy all crates (includes pre-generated proto files in crates/proto/src/generated/)
+# .dockerignore excludes examples/, tests/, etc. to minimize cache invalidation
+# Proto-generated Rust files are checked into git, so no need to run buf generate
+COPY crates/ ./crates/
 
-# Generate proto files
-RUN make proto || true
+# Build plexspaces-node
+# Docker will cache this layer unless source code or dependencies changed
+# Cache-busting: Force rebuild by touching a file (increment version to bust cache)
+# Version: 2026-02-06-v1.0 (updated after fixing bindgen type resolution errors)
+RUN echo "Build cache version: 2026-02-06-v1.0" > /tmp/build_version.txt && cat /tmp/build_version.txt
 
-# Build
 RUN cargo build --release -p plexspaces-node
 
 # Stage 2: Runtime

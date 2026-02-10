@@ -325,31 +325,6 @@ message Checkpoint {
 // Configuration Messages (Proto-First)
 // ============================================================================
 
-/// Journal backend provider
-///
-/// ## Purpose
-/// Defines which storage backend to use for journal persistence.
-///
-/// ## Why This Exists
-/// - Flexibility: Choose backend based on deployment environment
-/// - Testing: Use Memory backend for unit tests (no external dependencies)
-/// - Production: Use PostgreSQL for durability and ACID guarantees
-/// - Distributed: Use Redis for multi-node journaling
-/// - Edge: Use SQLite for single-node edge deployments
-///
-/// ## Design Notes
-/// - Memory: In-process HashMap, no persistence (testing only)
-/// - PostgreSQL: ACID transactions, auto-migration via sqlx::migrate!
-/// - Redis: Distributed, eventually consistent, TTL support
-/// - SQLite: Embedded, WAL mode, single-node
-enum JournalBackend {
-  JOURNAL_BACKEND_UNSPECIFIED = 0;
-  JOURNAL_BACKEND_MEMORY = 1;      // In-memory (testing)
-  JOURNAL_BACKEND_POSTGRES = 2;    // PostgreSQL (production)
-  JOURNAL_BACKEND_REDIS = 3;       // Redis (distributed)
-  JOURNAL_BACKEND_SQLITE = 4;      // SQLite (edge)
-}
-
 /// Durability configuration (used by DurabilityFacet)
 ///
 /// ## Purpose
@@ -365,137 +340,38 @@ enum JournalBackend {
 /// - checkpoint_interval = 0 disables checkpointing (pure journal replay)
 /// - cache_side_effects = false disables caching (every replay re-executes)
 /// - replay_on_activation = false skips replay (fresh start)
-/// - backend_config is oneof for type safety (cannot mix configs)
+/// - Uses shared database from RuntimeConfig.db (no separate backend config)
 ///
 /// ## Usage
 /// ```rust
 /// let config = DurabilityConfig {
-///     backend: JournalBackend::Postgres,
 ///     checkpoint_interval: 100,  // Checkpoint every 100 messages
 ///     replay_on_activation: true,  // Replay journal on actor restart
 ///     cache_side_effects: true,  // Cache external calls during replay
 ///     compression: CompressionType::Zstd,
-///     backend_config: Some(postgres_config),
 /// };
 /// actor.attach_facet(DurabilityFacet::new(config));
 /// ```
 message DurabilityConfig {
-  // Backend type
-  JournalBackend backend = 1;
-
   // Checkpoint interval (every N messages, 0 = disabled)
-  uint64 checkpoint_interval = 2;
+  uint64 checkpoint_interval = 1;
 
   // Checkpoint timeout
-  google.protobuf.Duration checkpoint_timeout = 3;
+  google.protobuf.Duration checkpoint_timeout = 2;
 
   // Enable replay on activation
-  bool replay_on_activation = 4;
+  bool replay_on_activation = 3;
 
   // Cache side effects for replay
-  bool cache_side_effects = 5;
+  bool cache_side_effects = 4;
 
   // Compression type for checkpoints
-  CompressionType compression = 6;
+  CompressionType compression = 5;
 
   // State schema version for checkpoint compatibility checking
   // Default: 1 (initial schema version)
   // Increment when actor state format changes (breaking changes)
-  uint32 state_schema_version = 7;
-
-  // Backend-specific config (oneof for type safety)
-  oneof backend_config {
-    PostgresJournalConfig postgres = 10;
-    RedisJournalConfig redis = 11;
-    SqliteJournalConfig sqlite = 12;
-  }
-}
-
-/// PostgreSQL journal configuration
-///
-/// ## Purpose
-/// Configures PostgreSQL backend for durable journaling.
-///
-/// ## Why This Exists
-/// User requirements:
-/// - "we need to make sure db schema doesn't require much changes"
-/// - "framework is smart enough to apply migrations"
-///
-/// ## Design Notes
-/// - auto_migrate: Use sqlx::migrate! for compile-time checked migrations
-/// - batch_size: Buffer N entries before COPY bulk insert (performance)
-/// - flush_interval_ms: Max time to buffer before flush (latency vs throughput)
-/// - pool_size: Connection pool for concurrent actors
-///
-/// ## Schema Stability Strategy
-/// - JSONB columns for extensible data (add fields without ALTER TABLE)
-/// - Immutable entries (append-only, never UPDATE)
-/// - Migrations only for new tables/indexes, not field additions
-///
-/// ## Performance
-/// - Batch writes: 1000 entries/batch or 1s flush = 100K+ writes/sec
-/// - Connection pooling: Reuse connections across actors
-/// - COPY protocol: 10x faster than INSERT for bulk data
-message PostgresJournalConfig {
-  string connection_string = 1;
-  uint32 pool_size = 2;
-  uint32 batch_size = 3;          // Default: 1000
-  uint32 flush_interval_ms = 4;   // Default: 1000
-  bool auto_migrate = 5;          // Default: true
-}
-
-/// Redis journal configuration
-///
-/// ## Purpose
-/// Configures Redis backend for distributed journaling.
-///
-/// ## Why This Exists
-/// - Distributed systems: Multiple nodes share journal state
-/// - Fast reads: Redis in-memory performance
-/// - TTL support: Automatic cleanup of old journal entries
-/// - Cluster mode: Scale across multiple Redis nodes
-///
-/// ## Design Notes
-/// - cluster_mode: Use Redis Cluster for horizontal scaling
-/// - key_prefix: Namespace journal keys (e.g., "journal:actor:")
-/// - ttl: Auto-expire old entries after duration
-///
-/// ## Trade-offs
-/// - ✅ Fast: In-memory, low latency
-/// - ✅ Distributed: Multi-node shared state
-/// - ❌ Not ACID: Eventually consistent
-/// - ❌ Data loss risk: In-memory (use persistence if needed)
-message RedisJournalConfig {
-  repeated string nodes = 1;      // Redis nodes
-  bool cluster_mode = 2;
-  string key_prefix = 3;
-  google.protobuf.Duration ttl = 4;
-}
-
-/// SQLite journal configuration
-///
-/// ## Purpose
-/// Configures SQLite backend for edge deployments.
-///
-/// ## Why This Exists
-/// - Edge computing: Single-node deployments (IoT, mobile, edge servers)
-/// - Embedded: No separate database process needed
-/// - Zero config: Single file, no setup
-/// - ACID: Full transaction support despite being embedded
-///
-/// ## Design Notes
-/// - wal_mode: Write-ahead logging for concurrency (recommended: true)
-/// - synchronous: NORMAL (default), FULL (safer), OFF (faster but risky)
-/// - db_path: File path for database (":memory:" for in-memory SQLite)
-///
-/// ## Performance
-/// - WAL mode: Concurrent reads + single writer
-/// - NORMAL synchronous: Balance safety vs speed
-/// - Batch transactions: Group 100s of entries in single transaction
-message SqliteJournalConfig {
-  string db_path = 1;
-  bool wal_mode = 2;
-  string synchronous = 3;         // NORMAL, FULL, OFF
+  uint32 state_schema_version = 6;
 }
 
 /// Checkpoint configuration

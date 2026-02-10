@@ -28,6 +28,7 @@ plexspaces-actor = { workspace = true }
 plexspaces-blob = { path = "../blob" }
 plexspaces-workflow = { workspace = true }
 plexspaces-firecracker = { workspace = true, optional = true }
+plexspaces-scheduler = { path = "../scheduler" }
 sysinfo = "0.30"
 
 # Blob service dependencies
@@ -75,6 +76,7 @@ libc = "0.2"
 tokio-test = "0.4"
 plexspaces-behavior = { path = "../behavior" }
 plexspaces-grpc-middleware = { path = "../grpc-middleware" }
+plexspaces-scheduler = { path = "../scheduler" }
 jsonwebtoken = "9.0"
 reqwest = { version = "0.11", features = ["json"] }
 tempfile = "3.8"
@@ -114,3 +116,15 @@ path = "tests/actor_service/get_or_activate_actor_tests.rs"
 [[test]]
 name = "spawn_with_facets_tests"
 path = "tests/actor_service/spawn_with_facets_tests.rs"
+
+[[test]]
+name = "node_service_integration_tests"
+path = "tests/node_service_integration_tests.rs"
+
+[[test]]
+name = "shard_group_tests"
+path = "tests/actor_service/shard_group_tests.rs"
+
+[[test]]
+name = "shard_group_cohesion_tests"
+path = "tests/actor_service/shard_group_cohesion_tests.rs"

@@ -16,34 +16,33 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-
 syntax = "proto3";
 
 package plexspaces.node.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node;plexspaces_node_v1";
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
-import "google/protobuf/any.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
-import "plexspaces/v1/common.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/actors/actor_runtime.proto";
-import "plexspaces/v1/security/security.proto";
+import "plexspaces/v1/common.proto";
 import "plexspaces/v1/node/release.proto";
+import "plexspaces/v1/security/security.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
-
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node;plexspaces_node_v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpace Node API";
-    version: "1.0";
-    description: "Internal API for node management (process/kubernetes/firecracker)";
-  };
-  schemes: HTTPS;
-  consumes: "application/json";
-  produces: "application/json";
+    title: "PlexSpace Node API"
+    version: "1.0"
+    description: "Internal API for node management (process/kubernetes/firecracker)"
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
 };
 
 // Node represents a runtime host for actors
@@ -53,7 +52,10 @@ message Node {
     json_schema: {
       title: "Node"
       description: "Runtime host for actors"
-      required: ["id", "node_type"]
+      required: [
+        "id",
+        "node_type"
+      ]
     }
   };
 
@@ -64,7 +66,6 @@ message Node {
   plexspaces.common.v1.Metadata metadata = 5;
   google.protobuf.Timestamp created_at = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   google.protobuf.Timestamp last_heartbeat = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-
 
   // Current actors hosted on this node
   repeated string actor_ids = 20;
@@ -100,9 +101,9 @@ message Node {
 // Node type enumeration
 enum NodeType {
   NODE_TYPE_UNSPECIFIED = 0;
-  NODE_TYPE_PROCESS = 1;       // Simple OS process
-  NODE_TYPE_KUBERNETES = 2;    // Kubernetes pod
-  NODE_TYPE_FIRECRACKER = 3;   // Firecracker microVM
+  NODE_TYPE_PROCESS = 1; // Simple OS process
+  NODE_TYPE_KUBERNETES = 2; // Kubernetes pod
+  NODE_TYPE_FIRECRACKER = 3; // Firecracker microVM
 }
 
 // Node status
@@ -125,7 +126,6 @@ message NodeCapabilities {
   bool supports_isolation = 5;
   repeated string supported_runtimes = 6;
 }
-
 
 // Node metrics (combined resource usage and operational metrics)
 //
@@ -164,7 +164,19 @@ message NodeMetrics {
   uint32 active_actors = 9;
   // Connected nodes in cluster
   uint32 connected_nodes = 10;
-  
+
+  // Shard group metrics (data-parallel actors)
+  // Total shard groups created on this node
+  uint32 shard_groups_created = 13;
+  // Total shard messages sent (to shard actors)
+  uint64 shard_messages_sent = 14;
+  // Total shard messages received (from shard actors)
+  uint64 shard_messages_received = 15;
+  // Total shard operations (map, scatter_gather, bulk_update)
+  uint64 shard_operations_total = 16;
+  // Failed shard operations
+  uint64 shard_operations_failed = 17;
+
   // Node identity (for components that need node info without depending on Node type)
   // Node ID for this metrics instance
   string node_id = 11;
@@ -238,10 +250,10 @@ message RemoveActorRequest {
 // Distributed actor lock (Orbit-inspired)
 message ActorLock {
   string actor_id = 1;
-  string node_id = 2;  // Node that holds the lock
+  string node_id = 2; // Node that holds the lock
   google.protobuf.Timestamp acquired_at = 3;
   google.protobuf.Duration lease_duration = 4;
-  string lock_token = 5;  // Unique token for this lock
+  string lock_token = 5; // Unique token for this lock
 }
 
 message AcquireActorLockRequest {
@@ -253,7 +265,7 @@ message AcquireActorLockRequest {
 message AcquireActorLockResponse {
   bool success = 1;
   ActorLock lock = 2;
-  string conflict_node_id = 3;  // If failed, who has it
+  string conflict_node_id = 3; // If failed, who has it
 }
 
 message ReleaseActorLockRequest {
@@ -287,7 +299,7 @@ message NodeHealth {
 // Used by NodeRegistry for node lookup and health tracking
 message NodeRegistration {
   string node_id = 1;
-  string node_address = 2;  // gRPC address (e.g., "http://localhost:8000")
+  string node_address = 2; // gRPC address (e.g., "http://localhost:8000")
   map<string, string> capabilities = 3;
   NodeStatus status = 4;
   google.protobuf.Timestamp last_heartbeat = 5;
@@ -301,13 +313,13 @@ message NodeRegistration {
 message NodeCapacity {
   // Total resources available on node
   plexspaces.common.v1.ResourceSpec total = 1;
-  
+
   // Allocated resources (currently in use)
   plexspaces.common.v1.ResourceSpec allocated = 2;
-  
+
   // Available resources (total - allocated)
   plexspaces.common.v1.ResourceSpec available = 3;
-  
+
   // Node labels (for label-based matching)
   map<string, string> labels = 4;
 }
@@ -316,7 +328,7 @@ message NodeCapacity {
 message NodeMetadata {
   // Node labels (for label-based matching)
   map<string, string> labels = 1;
-  
+
   // Node annotations (for extensibility)
   map<string, string> annotations = 2;
 }
@@ -380,9 +392,7 @@ message DiscoverNodesResponse {
 service NodeService {
   // Get release specification for a node
   rpc GetReleaseSpec(GetReleaseSpecRequest) returns (GetReleaseSpecResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes/{node_id}/release-spec"
-    };
+    option (google.api.http) = {get: "/api/v1/nodes/{node_id}/release-spec"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get release specification for node"
       description: "Returns the release specification configured for the node"
@@ -403,9 +413,7 @@ service NodeService {
 
   // Unregister a node
   rpc UnregisterNode(UnregisterNodeRequest) returns (UnregisterNodeResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/nodes/{node_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/nodes/{node_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Unregister a node"
       description: "Removes a node from the cluster"
@@ -414,9 +422,7 @@ service NodeService {
 
   // List connected nodes (paginated)
   rpc ListConnectedNodes(ListConnectedNodesRequest) returns (ListConnectedNodesResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes"
-    };
+    option (google.api.http) = {get: "/api/v1/nodes"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List connected nodes"
       description: "Returns list of connected nodes with pagination"
@@ -433,9 +439,7 @@ service NodeService {
 
   // Get node metrics
   rpc GetMetrics(GetMetricsRequest) returns (NodeMetrics) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes/{node_id}/metrics"
-    };
+    option (google.api.http) = {get: "/api/v1/nodes/{node_id}/metrics"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get node metrics"
       description: "Returns CPU, memory, and operational metrics for a node"
@@ -444,9 +448,7 @@ service NodeService {
 
   // Calculate node capacity
   rpc CalculateCapacity(CalculateCapacityRequest) returns (NodeCapacity) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes/{node_id}/capacity"
-    };
+    option (google.api.http) = {get: "/api/v1/nodes/{node_id}/capacity"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Calculate node capacity"
       description: "Returns total, allocated, and available resources"
@@ -455,9 +457,7 @@ service NodeService {
 
   // List applications deployed on a node
   rpc ListNodeApplications(ListNodeApplicationsRequest) returns (ListNodeApplicationsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes/{node_id}/applications"
-    };
+    option (google.api.http) = {get: "/api/v1/nodes/{node_id}/applications"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List applications on node"
       description: "Returns list of applications deployed on the node"
@@ -466,9 +466,7 @@ service NodeService {
 
   // Get node health status
   rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/nodes/{node_id}/health"
-    };
+    option (google.api.http) = {get: "/api/v1/nodes/{node_id}/health"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get node health"
       description: "Returns health status for the node"
@@ -526,6 +524,109 @@ service NodeService {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Sync membership state"
       description: "Full membership state sync for anti-entropy"
+    };
+  }
+
+  // ============================================================================
+  // Node Connectivity RPCs - Erlang-style Connect/Disconnect
+  // ============================================================================
+  // These RPCs provide manual node connection management, similar to Erlang's
+  // net_adm:ping/1 and erlang:disconnect_node/1. Useful for:
+  // - Dynamic cluster formation without shared database
+  // - Bootstrap node discovery
+  // - Testing multi-node scenarios
+  // - Building process groups across nodes
+
+  // ConnectNodes - Connect to remote nodes (Erlang-style net_adm:ping)
+  //
+  // ## Purpose
+  // Establishes connections to remote nodes by address. For each address:
+  // 1. Attempts gRPC Ping to verify node is alive and get node_id
+  // 2. Registers node in NodeRegistry for SWIM protocol membership
+  // 3. SWIM protocol handles ongoing failure detection
+  //
+  // ## Semantics
+  // - Idempotent: connecting to already-connected node succeeds
+  // - Partial success: some connections may succeed while others fail
+  // - Returns map of successful connections (node_id -> address)
+  //
+  // ## Example
+  // ```
+  // ConnectNodesRequest { node_addresses: ["node2:8000", "node3:8000"] }
+  // ConnectNodesResponse {
+  //   connected: {"node2": "node2:8000", "node3": "node3:8000"},
+  //   failed: {}
+  // }
+  // ```
+  rpc ConnectNodes(ConnectNodesRequest) returns (ConnectNodesResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/nodes:connect"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Connect to remote nodes"
+      description: "Erlang-style node connection (net_adm:ping). Establishes connections to remote nodes by address, pings each to verify connectivity and retrieve node_id, then registers in SWIM membership for ongoing failure detection. Supports partial success - some connections may succeed while others fail."
+      tags: "Node Connectivity"
+      responses: {
+        key: "200"
+        value: {
+          description: "Connection results with success/failure details"
+          schema: {
+            json_schema: {ref: ".plexspaces.node.v1.ConnectNodesResponse"}
+          }
+        }
+      }
+      responses: {
+        key: "400"
+        value: {description: "Invalid request - no addresses provided or invalid format"}
+      }
+      responses: {
+        key: "408"
+        value: {description: "Request timeout - all connection attempts timed out"}
+      }
+    };
+  }
+
+  // DisconnectNodes - Disconnect from nodes (Erlang-style erlang:disconnect_node)
+  //
+  // ## Purpose
+  // Removes nodes from the local node's membership. The disconnected nodes:
+  // 1. Are marked as 'Left' in SWIM protocol
+  // 2. Are removed from NodeRegistry
+  // 3. Will no longer receive gossip or be probed
+  //
+  // ## Semantics
+  // - Idempotent: disconnecting from unknown node succeeds
+  // - Does NOT notify remote node (they will detect via SWIM timeout)
+  // - Partial success: some disconnections may succeed while others fail
+  //
+  // ## Example
+  // ```
+  // DisconnectNodesRequest { node_ids: ["node2", "node3"] }
+  // DisconnectNodesResponse { disconnected: ["node2", "node3"], failed: {} }
+  // ```
+  rpc DisconnectNodes(DisconnectNodesRequest) returns (DisconnectNodesResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/nodes:disconnect"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Disconnect from nodes"
+      description: "Erlang-style node disconnection (erlang:disconnect_node). Removes nodes from SWIM membership - they will no longer be probed or receive gossip. Idempotent: disconnecting from unknown node succeeds. By default, does NOT notify remote node (they detect via SWIM timeout). Set notify_remote=true for graceful disconnect."
+      tags: "Node Connectivity"
+      responses: {
+        key: "200"
+        value: {
+          description: "Disconnection results with success/failure details"
+          schema: {
+            json_schema: {ref: ".plexspaces.node.v1.DisconnectNodesResponse"}
+          }
+        }
+      }
+      responses: {
+        key: "400"
+        value: {description: "Invalid request - no node_ids provided"}
+      }
     };
   }
 }
@@ -683,6 +784,8 @@ message PingResponse {
   uint64 incarnation = 3;
   // Piggybacked membership updates
   repeated MembershipUpdate updates = 4;
+  // Cluster name (for same-cluster check on ConnectNodes; empty means no cluster)
+  string cluster_name = 5;
 }
 
 // Indirect ping request - Ask intermediary to ping target
@@ -748,3 +851,153 @@ message SyncMembershipResponse {
   int32 updates_applied = 2;
 }
 
+// ============================================================================
+// Node Connectivity Messages - ConnectNodes/DisconnectNodes
+// ============================================================================
+
+// ConnectNodes request - Erlang-style net_adm:ping
+//
+// ## Purpose
+// Connects to remote nodes by address. Each address is pinged to verify
+// connectivity and retrieve the node's ID before adding to membership.
+//
+// ## Address Format
+// Addresses should be in the format "host:port" (e.g., "node2:8000", "192.168.1.10:8000").
+// The protocol (http/https) is determined by node configuration.
+//
+// ## Example
+// ```json
+// {
+//   "node_addresses": ["node2:8000", "192.168.1.10:8000"],
+//   "cluster": "production",
+//   "timeout": "5s"
+// }
+// ```
+message ConnectNodesRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Connect Nodes Request"
+      description: "Request to connect to remote nodes (Erlang-style net_adm:ping)"
+      required: ["node_addresses"]
+    }
+    example: "{\"node_addresses\": [\"node2:8000\"], \"cluster\": \"production\"}"
+  };
+
+  // Node addresses to connect to (e.g., "node2:8000", "192.168.1.10:8000")
+  // Each address will be pinged to verify connectivity.
+  // At least one address is required, maximum 100 addresses per request.
+  repeated string node_addresses = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 100
+      items: {
+        string: {
+          min_len: 3
+          max_len: 255
+          pattern: "^[a-zA-Z0-9][a-zA-Z0-9.-]*:[0-9]{1,5}$"
+        }
+      }
+    }
+  ];
+
+  // Optional: cluster name for grouping connected nodes.
+  // If specified, nodes are tagged with this cluster for filtering.
+  // Must be alphanumeric with hyphens, max 63 characters (DNS label format).
+  string cluster = 2 [(buf.validate.field).string.max_len = 63];  // Optional: timeout for each connection attempt.
+  // Default: 5 seconds if not specified.
+  // Range: 1 second to 60 seconds.
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration = {
+    gte: {seconds: 1}
+    lte: {seconds: 60}
+  }];
+}
+
+// ConnectNodes response
+//
+// ## Partial Success
+// Some connections may succeed while others fail. Check both maps.
+// A request is considered successful if at least one node connected.
+message ConnectNodesResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Connect Nodes Response"
+      description: "Response from node connection attempt with success/failure details"
+    }
+    example: "{\"connected\": {\"node2\": \"node2:8000\"}, \"failed\": {}, \"total_time\": \"1.5s\"}"
+  };
+
+  // Successfully connected nodes: node_id -> address.
+  // The node_id is retrieved from the remote node via Ping RPC.
+  map<string, string> connected = 1;
+
+  // Failed connections: address -> error message.
+  // Contains addresses that could not be connected with error details.
+  map<string, string> failed = 2;
+
+  // Total time taken for all connection attempts (parallel execution).
+  google.protobuf.Duration total_time = 3;
+}
+
+// DisconnectNodes request - Erlang-style erlang:disconnect_node
+//
+// ## Purpose
+// Disconnects from nodes by their node_id. The nodes are removed from
+// SWIM membership and will no longer be probed or receive gossip.
+//
+// ## Example
+// ```json
+// {
+//   "node_ids": ["node2", "node3"],
+//   "notify_remote": false
+// }
+// ```
+message DisconnectNodesRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Disconnect Nodes Request"
+      description: "Request to disconnect from nodes (Erlang-style erlang:disconnect_node)"
+      required: ["node_ids"]
+    }
+    example: "{\"node_ids\": [\"node2\"], \"notify_remote\": false}"
+  };
+
+  // Node IDs to disconnect from.
+  // Use ListConnectedNodes to get current node IDs.
+  // At least one node_id is required, maximum 100 per request.
+  repeated string node_ids = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 100
+      items: {
+        string: {
+          min_len: 1
+          max_len: 255
+        }
+      }
+    }
+  ];
+
+  // Optional: graceful disconnect with notification.
+  // If true, attempts to notify remote node before disconnecting.
+  // Default: false (silent disconnect, remote detects via SWIM timeout).
+  bool notify_remote = 2;
+}
+
+// DisconnectNodes response
+message DisconnectNodesResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Disconnect Nodes Response"
+      description: "Response from node disconnection attempt with success/failure details"
+    }
+    example: "{\"disconnected\": [\"node2\"], \"failed\": {}}"
+  };
+
+  // Successfully disconnected node IDs.
+  repeated string disconnected = 1;
+
+  // Failed disconnections: node_id -> error message.
+  map<string, string> failed = 2;
+}

@@ -42,6 +42,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use plexspaces_core::{NodeRegistryTrait, ObjectRegistry, RequestContext, ServiceLocator};
+use plexspaces_proto::common::v1::Metadata as CommonMetadata;
 use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use prost_types::Timestamp;
@@ -328,7 +329,9 @@ impl NodeRegistry {
         }
     }
 
-    /// Convert NodeRegistration to ObjectRegistration
+    /// Convert NodeRegistration to ObjectRegistration.
+    /// Capabilities (e.g. "cluster") are mirrored into metadata.labels so resource-based
+    /// routing (NodeSelector, CapacityTracker) and list_nodes cluster filter stay aligned.
     fn to_object_registration(node_reg: &NodeRegistration, ctx: &RequestContext) -> ObjectRegistration {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -336,6 +339,15 @@ impl NodeRegistry {
         let timestamp = Timestamp {
             seconds: now.as_secs() as i64,
             nanos: now.subsec_nanos() as i32,
+        };
+
+        let metadata = if node_reg.capabilities.is_empty() {
+            None
+        } else {
+            Some(CommonMetadata {
+                labels: node_reg.capabilities.clone(),
+                ..Default::default()
+            })
         };
 
         ObjectRegistration {
@@ -349,6 +361,7 @@ impl NodeRegistry {
             namespace: ctx.namespace().to_string(),
             health_status: HealthStatus::HealthStatusHealthy as i32,
             capabilities: node_reg.capabilities.keys().cloned().collect(),
+            metadata,
             created_at: node_reg.registered_at.clone().or(Some(timestamp.clone())),
             updated_at: Some(timestamp.clone()),
             last_heartbeat: node_reg.last_heartbeat.clone().or(Some(timestamp)),

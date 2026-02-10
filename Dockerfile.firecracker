@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Dockerfile for PlexSpaces Node with Firecracker support
+# Shared base Dockerfile for Firecracker-enabled deployments
+# Builds plexspaces CLI binary with Firecracker feature
+
+# Build for linux/amd64 (Firecracker only supports x86_64)
+# Pin Rust version: rust:1-bookworm currently provides 1.93.0 (matches rust-toolchain.toml)
+# Install exact version via rustup for reproducibility
+FROM --platform=linux/amd64 rust:1-bookworm AS builder
+
+# Install exact Rust version to match rust-toolchain.toml (1.93.0)
+RUN rustup install 1.93.0 && rustup default 1.93.0
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    pkg-config \
+    libssl-dev \
+    cmake \
+    build-essential \
+    clang \
+    llvm \
+    libclang-dev \
+    git \
+    curl \
+    ca-certificates \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files first (for better caching - cached unless Cargo.toml/Cargo.lock changes)
+COPY Cargo.toml Cargo.lock ./
+
+# Copy SDKs (workspace members required for cargo build, but not needed at runtime)
+COPY sdks/ ./sdks/
+
+# Copy all crates (includes pre-generated proto files in crates/proto/src/generated/)
+# .dockerignore excludes examples/, tests/, etc. to minimize cache invalidation
+# Proto-generated Rust files are checked into git, so no need to run buf generate
+COPY crates/ ./crates/
+COPY wit/ ./wit/
+
+# Build CLI with Firecracker feature
+# Use BuildKit cache mounts for Cargo registry, git cache, and target directory
+# This dramatically speeds up rebuilds by caching dependencies and incremental compilation
+# Docker will cache this layer unless source code or dependencies changed
+    # Cache-busting: Force rebuild by touching a file (increment version to bust cache)
+    # Version: 2026-02-06-v1.0 (updated after fixing bindgen type resolution errors)
+    RUN echo "Build cache version: 2026-02-06-v1.0" > /tmp/build_version.txt && cat /tmp/build_version.txt
+    
+    # Cargo automatically builds workspace dependencies when building a specific package
+    # Use --all-features to ensure component-model is enabled for wasm-runtime (required for bindgen macro)
+    # Build the binary (binary name is "plexspaces" per [[bin]] name in crates/cli/Cargo.toml)
+    # Note: Cache mount for /app/target doesn't persist between stages, so we copy the binary to a non-cached location
+    RUN --mount=type=cache,target=/usr/local/cargo/registry \
+        --mount=type=cache,target=/usr/local/cargo/git \
+        --mount=type=cache,target=/app/target \
+        cargo build --release --all-features --features firecracker -p plexspaces-cli --bin plexspaces && \
+        cp /app/target/release/plexspaces /tmp/plexspaces && \
+        chmod +x /tmp/plexspaces && \
+        ls -lh /tmp/plexspaces
+
+# Runtime stage - must be linux/amd64 for Firecracker
+# Use debian:bookworm to match rust:1-bookworm builder (ensures GLIBC compatibility)
+FROM --platform=linux/amd64 debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies (including netcat for health checks)
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    wget \
+    netcat-openbsd \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install grpc_health_probe for K8s health checks
+RUN curl -sSL "https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.24/grpc_health_probe-linux-amd64" \
+    -o "/usr/local/bin/grpc_health_probe" && \
+    chmod +x /usr/local/bin/grpc_health_probe
+
+    # Install Firecracker binary (v1.4.0 - stable version)
+    RUN mkdir -p /usr/bin /var/lib/firecracker && \
+        wget --no-check-certificate -q --timeout=30 --tries=3 https://github.com/firecracker-microvm/firecracker/releases/download/v1.4.0/firecracker-v1.4.0-x86_64.tgz -O /tmp/firecracker.tgz && \
+        cd /tmp && tar -xzf firecracker.tgz && \
+        mv release-v1.4.0-x86_64/firecracker-v1.4.0-x86_64 /usr/bin/firecracker && \
+        chmod +x /usr/bin/firecracker && \
+        rm -rf /tmp/firecracker.tgz /tmp/release-v1.4.0-x86_64 && \
+        firecracker --version
+
+# Create app user (non-root)
+RUN useradd -m -u 1000 plexspaces
+
+# Copy CLI binary from builder (copied to /tmp/plexspaces because cache mount doesn't persist between stages)
+COPY --from=builder /tmp/plexspaces /usr/local/bin/plexspaces
+
+# Create config and data directories
+# Data directory for SQLite databases (file-based, not in-memory)
+# Each node will have its own database in /app/data/db/plexspaces.db
+RUN mkdir -p /app/config /app/data /app/data/db /app/data/blob /app/certs && \
+    chown -R plexspaces:plexspaces /app && \
+    chmod -R 755 /app/data
+
+# Copy default release configuration (if exists)
+# Use shell to handle optional file copy
+RUN if [ -f config/release.yaml ]; then \
+        cp config/release.yaml /app/config/release.yaml && \
+        chown plexspaces:plexspaces /app/config/release.yaml; \
+    else \
+        echo "# Default release config" > /app/config/release.yaml && \
+        chown plexspaces:plexspaces /app/config/release.yaml; \
+    fi
+
+# Switch to non-root user
+USER plexspaces
+
+# Expose the default gRPC port
+EXPOSE 8000
+
+# Default environment variables (matching docs/installation.md)
+# These can be overridden via docker-compose or Kubernetes
+ENV PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
+ENV PLEXSPACES_NODE_ID=node1
+ENV PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+ENV PLEXSPACES_BASE_DIR=/app/data
+
+# Database configuration (defaults to SQLite file-based, don't override)
+# Leave blank/default - config manager will use PLEXSPACES_BASE_DIR
+# Default: sqlite://${base_dir}/db/plexspaces.db = sqlite:///app/data/db/plexspaces.db
+
+# Backend configurations (defaults to SQLite file-based, don't override)
+# Leave blank/default - config manager will use defaults from release.yaml
+
+# Health check using gRPC health probe
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD grpc_health_probe -addr=:8000 -service=readiness || nc -z localhost 8000 || exit 1
+
+# Run the PlexSpaces node using CLI start command
+# Default command: start node (will be overridden by docker-compose)
+ENTRYPOINT ["plexspaces", "start"]
+CMD ["--node-id", "${PLEXSPACES_NODE_ID}", "--listen-addr", "${PLEXSPACES_LISTEN_ADDR}", "--release-config", "${PLEXSPACES_RELEASE_CONFIG}"]

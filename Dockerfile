@@ -1,13 +1,18 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+# Copyright (C) 2026 Shahzad A. Bhatti <bhatti@plexobject.com>
 #
 # Multi-stage Dockerfile for PlexSpaces framework
 # Framework-only container (Model 1: Dynamic WASM Deployment)
 # Ready to accept WASM modules and actors via gRPC
+# Shared base Dockerfile for all deployments
 
 # Stage 1: Builder
-# Using rust:1-bookworm to get latest Rust 1.x (supports Cargo.lock v4)
+# Pin Rust version: rust:1-bookworm currently provides 1.93.0 (matches rust-toolchain.toml)
+# Install exact version via rustup for reproducibility
 FROM rust:1-bookworm AS builder
+
+# Install exact Rust version to match rust-toolchain.toml (1.93.0)
+RUN rustup install 1.93.0 && rustup default 1.93.0
 
 WORKDIR /app
 
@@ -26,44 +31,38 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install buf for proto linting and generation
-RUN curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-Linux-x86_64" \
-    -o "/usr/local/bin/buf" && \
-    chmod +x /usr/local/bin/buf
-
-# Copy workspace files for dependency resolution
+# Copy dependency files first (for better caching - cached unless Cargo.toml/Cargo.lock changes)
 COPY Cargo.toml Cargo.lock ./
-COPY crates/proto/Cargo.toml ./crates/proto/
-COPY crates/node/Cargo.toml ./crates/node/
+
+# Copy SDKs (workspace members required for cargo build, but not needed at runtime)
+COPY sdks/ ./sdks/
+
+# Copy all crates (includes pre-generated proto files in crates/proto/src/generated/)
+# .dockerignore excludes examples/, tests/, etc. to minimize cache invalidation
+# Proto-generated Rust files are checked into git, so no need to run buf generate
+COPY crates/ ./crates/
+COPY wit/ ./wit/
 
 # Build arguments for features (dashboard is enabled by default via default features)
 # Can override with --build-arg FEATURES="firecracker" or --build-arg FEATURES="dashboard,firecracker"
 ARG FEATURES=""
 
-# Dummy build to cache dependencies
-RUN mkdir -p src crates/proto/src crates/node/src && \
-    echo "fn main() {}" > src/main.rs && \
-    echo "// dummy" > crates/proto/src/lib.rs && \
-    echo "// dummy" > crates/node/src/lib.rs && \
-    if [ -z "${FEATURES}" ]; then \
-        cargo build --release -p plexspaces-node || true; \
-    else \
-        cargo build --release -p plexspaces-node --features "${FEATURES}" || true; \
-    fi && \
-    rm -rf src crates/proto/src crates/node/src
-
-# Copy the rest of the application code
-COPY . .
-
-# Generate proto files
-RUN make proto || true
-
-# Build the plexspaces-node binary (framework runtime)
+# Build the plexspaces CLI binary (includes node start command)
+# Use BuildKit cache mounts for Cargo registry, git cache, and target directory
+# This dramatically speeds up rebuilds by caching dependencies and incremental compilation
+# Docker will cache this layer unless source code or dependencies changed
 # Dashboard is enabled by default, additional features can be specified via FEATURES
-RUN if [ -z "${FEATURES}" ]; then \
-        cargo build --release --bin plexspaces-node -p plexspaces-node; \
+# Cache-busting: Force rebuild by touching a file (increment version to bust cache)
+# Version: 2026-02-06-v1.0 (updated after fixing bindgen type resolution errors)
+RUN echo "Build cache version: 2026-02-06-v1.0" > /tmp/build_version.txt && cat /tmp/build_version.txt
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    if [ -z "${FEATURES}" ]; then \
+        cargo build --release -p plexspaces; \
     else \
-        cargo build --release --bin plexspaces-node -p plexspaces-node --features "${FEATURES}"; \
+        cargo build --release -p plexspaces --features "${FEATURES}"; \
     fi
 
 # Stage 2: Runtime
@@ -74,6 +73,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     ca-certificates \
     curl \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install grpc_health_probe for K8s health checks
@@ -87,14 +87,15 @@ RUN useradd -m -u 1000 plexspaces
 WORKDIR /app
 
 # Copy the compiled binary from builder
-COPY --from=builder /app/target/release/plexspaces-node ./plexspaces-node
+COPY --from=builder /app/target/release/plexspaces /usr/local/bin/plexspaces
 
 # Create config and data directories
 # Data directory for SQLite databases and LocalFileSystem blob storage
-RUN mkdir -p /app/config /app/data /app/data/blob && chown -R plexspaces:plexspaces /app
+RUN mkdir -p /app/config /app/data /app/data/blob /app/certs && \
+    chown -R plexspaces:plexspaces /app
 
-# Copy default release configuration
-COPY config/release.yaml /app/config/release.yaml
+# Copy default release configuration (if exists)
+COPY config/release.yaml /app/config/release.yaml 2>/dev/null || echo "# Default release config" > /app/config/release.yaml
 RUN chown plexspaces:plexspaces /app/config/release.yaml
 
 # Switch to non-root user
@@ -103,46 +104,30 @@ USER plexspaces
 # Expose the default gRPC port
 EXPOSE 8000
 
-# Default environment variables
+# Default environment variables (matching docs/installation.md)
 # These can be overridden via docker-compose or Kubernetes
 ENV PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
-ENV NODE_ID=node1
-ENV NODE_LISTEN_ADDRESS=0.0.0.0:8000
-ENV GRPC_ADDRESS=0.0.0.0:8000
+ENV PLEXSPACES_NODE_ID=node1
+ENV PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
+ENV PLEXSPACES_BASE_DIR=/app/data
 
-# Database configuration (defaults to SQLite, override in docker-compose)
-# SQLite is easier for local development and can be overridden to PostgreSQL
-ENV DATABASE_URL=sqlite:///app/data/plexspaces.db
+# Database configuration (defaults to SQLite file-based, don't override)
+# Leave blank/default - config manager will use PLEXSPACES_BASE_DIR
+# Default: sqlite://${base_dir}/db/plexspaces.db = sqlite:///app/data/db/plexspaces.db
 
-# Backend configurations (defaults, override in docker-compose)
-# All storage uses SQLite by default (can be overridden to PostgreSQL)
-# Channels use SQLite for single-node durability
-ENV LOCKS_BACKEND=sqlite
-ENV LOCKS_SQLITE_PATH=sqlite:///app/data/locks.db
-ENV CHANNEL_BACKEND=sqlite
-ENV CHANNEL_SQLITE_PATH=/app/data/channels.db
-ENV KEYVALUE_BACKEND=sqlite
-ENV PLEXSPACES_KV_SQLITE_PATH=/app/data/keyvalue.db
-ENV TUPLESPACE_BACKEND=sqlite
-ENV TUPLESPACE_SQLITE_PATH=/app/data/tuplespace.db
+# Backend configurations (defaults to SQLite file-based, don't override)
+# Leave blank/default - config manager will use defaults from release.yaml
+# Don't set :memory: - use file-based SQLite for persistence
 
 # Blob storage configuration (defaults to LocalFileSystem, override in docker-compose)
 # LocalFileSystem is easier for local development, docker-compose uses MinIO
-ENV BLOB_BACKEND=local
-ENV BLOB_BUCKET=plexspaces
-ENV BLOB_PREFIX=/app/data/blob
-# MinIO settings (used in docker-compose, not needed for local backend)
-# ENV BLOB_ENDPOINT=http://minio:9000
-# ENV BLOB_ACCESS_KEY_ID=minioadmin
-# BLOB_SECRET_ACCESS_KEY should be set via secrets in docker-compose/k8s
+# Leave blank/default - config manager will use defaults from release.yaml
 
 # Health check using gRPC health probe
-# Note: Requires grpc_health_probe binary (install separately or use HTTP via gRPC-Gateway)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD grpc_health_probe -addr=:8000 -service=readiness || exit 1
+    CMD grpc_health_probe -addr=:8000 -service=readiness || nc -z localhost 8000 || exit 1
 
-# Run the PlexSpaces framework node
-# Framework starts empty, ready to accept WASM deployments via gRPC
-ENTRYPOINT ["./plexspaces-node"]
-CMD ["--release-config", "/app/config/release.yaml"]
-
+# Run the PlexSpaces node using CLI start command
+# Framework starts empty, ready to accept deployments via gRPC
+ENTRYPOINT ["plexspaces", "start"]
+CMD ["--node-id", "${PLEXSPACES_NODE_ID}", "--listen-addr", "${PLEXSPACES_LISTEN_ADDR}", "--release-config", "${PLEXSPACES_RELEASE_CONFIG}"]

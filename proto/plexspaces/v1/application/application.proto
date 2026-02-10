@@ -93,58 +93,64 @@ message ApplicationSpec {
   // Examples: "byzantine-generals", "genomics-coordinator"
   string name = 1;
 
-  // Namespace for actor isolation and multi-tenancy.
+  // Tenant ID for multi-tenancy isolation.
+  // Extracted from JWT token during deployment.
+  // All actors spawned by this application will be scoped to this tenant.
+  // This is the source of truth for tenant isolation - ActorFactory enforces it.
+  string tenant_id = 2;
+
+  // Namespace for actor isolation within a tenant.
   // All actors spawned by this application will be registered in this namespace.
   // If empty, defaults to application_id during deployment.
   // Examples: "bank-test", "genomics-prod", "dev-sandbox"
-  string namespace = 13;
+  string namespace = 3;
 
   // Application version (semantic versioning)
   // Examples: "0.1.0", "1.2.3"
-  string version = 2;
+  string version = 4;
 
   // Human-readable description
-  string description = 3;
+  string description = 5;
 
   // Application type (library or active)
-  ApplicationType type = 4;
+  ApplicationType type = 6;
 
   // Dependencies (other applications that must start first)
   // e.g., ["plexspaces-core", "plexspaces-tuplespace"]
-  repeated string dependencies = 5;
+  repeated string dependencies = 7;
 
   // Application-level environment variables
-  map<string, string> env = 6;
+  map<string, string> env = 8;
 
   // Supervision tree (only for active applications)
-  optional SupervisorSpec supervisor = 7;
+  optional SupervisorSpec supervisor = 9;
 
   // ==================== DEPLOYMENT CONFIGURATION ====================
   // (Merged from ApplicationConfig)
 
   // Whether application is enabled (false = skip loading)
   // Default: true
-  bool enabled = 8;
+  bool enabled = 10;
 
   // Whether to start application automatically on node boot
   // Default: true
   // Future: false allows manual start via ApplicationService API
-  bool auto_start = 9;
+  bool auto_start = 11;
 
   // Shutdown timeout (force kill if exceeded)
   // Default: 60 seconds
-  google.protobuf.Duration shutdown_timeout = 10;
+  google.protobuf.Duration shutdown_timeout = 12;
 
   // Shutdown strategy (graceful or immediate)
   // Default: GRACEFUL
-  ShutdownStrategy shutdown_strategy = 11;
+  ShutdownStrategy shutdown_strategy = 13;
 
   // Application metadata (tags, labels, annotations)
   // Examples:
   // - environment: "production"
   // - team: "genomics"
   // - criticality: "high"
-  plexspaces.common.v1.Metadata metadata = 12;
+  plexspaces.common.v1.Metadata metadata = 14;
 }
 
 // Application type

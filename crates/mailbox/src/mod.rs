@@ -56,16 +56,19 @@ use std::collections::{BinaryHeap, VecDeque};
 use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use std::io::Write;
 use tokio::sync::{mpsc, Notify, RwLock};
-use ulid::Ulid;
 use plexspaces_channel::{Channel, ChannelError, create_channel};
 use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig};
 use plexspaces_proto::common::v1::Message as ProtoMessage;
-use prost_types::Timestamp;
 
 #[path = "lru_cache.rs"]
 mod lru_cache;
 use lru_cache::LruCache;
+
+#[path = "message_helpers.rs"]
+mod message_helpers;
+pub use message_helpers::*;
 
 // Re-export proto-generated types
 pub use plexspaces_proto::mailbox::v1::{
@@ -128,774 +131,38 @@ pub fn message_priority_value(priority: &MessagePriority) -> i32 {
 }
 
 fn message_priority_from_value(value: i32) -> MessagePriority {
-    // Handle legacy values (0-100 scale) first, then proto values (1-10 scale)
-    // Legacy values are more common in existing code
+    // Proto values: System=10, Highest=5, High=4, Normal=3, Low=2, Lowest=1
     match value {
-        // Legacy exact values (0-100 scale)
-        100 => MessagePriority::Highest, // Legacy Signal -> Highest
-        75 => MessagePriority::System,   // Legacy System -> System
-        50 => MessagePriority::High,     // Legacy High -> High
-        25 => MessagePriority::Normal,   // Legacy Normal -> Normal
-        0 => MessagePriority::Low,       // Legacy Low -> Low
-        // Legacy ranges (0-100 scale)
-        v if v > 100 => MessagePriority::Highest,  // Values > 100 -> Highest
-        v if v >= 75 && v < 100 => MessagePriority::System,   // Legacy 75-99 -> System
-        v if v >= 50 && v < 75 => MessagePriority::High,      // Legacy 50-74 -> High
-        v if v >= 25 && v < 50 => MessagePriority::Normal,    // Legacy 25-49 -> Normal
-        v if v > 0 && v < 25 => MessagePriority::Normal,      // Legacy 1-24 -> Normal (low maps to normal)
-        // Proto exact values (1-10 scale) - only match if not already matched
         10 => MessagePriority::System,
         5 => MessagePriority::Highest,
         4 => MessagePriority::High,
         3 => MessagePriority::Normal,
         2 => MessagePriority::Low,
         1 => MessagePriority::Lowest,
-        // Default
         _ => MessagePriority::Normal,
     }
 }
 
-/// Message for actor communication
-///
-/// ## Proto-First Design
-/// This is a wrapper around proto-generated types for backward compatibility.
-/// The priority field uses proto-generated MessagePriority enum.
-/// Note: MessagePriority doesn't implement Serialize/Deserialize, so Message
-/// cannot derive these traits. Use to_proto()/from_proto() for serialization.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Message {
-    /// Unique message ID
-    pub id: String,
-    /// Message payload
-    pub payload: Vec<u8>,
-    /// Message metadata
-    pub metadata: std::collections::HashMap<String, String>,
-    /// Priority for ordering
-    pub priority: MessagePriority,
-    /// Correlation ID for request-reply
-    pub correlation_id: Option<String>,
-    /// Reply-to address
-    pub reply_to: Option<String>,
-    /// Sender actor ID
-    pub sender: Option<String>,
-    /// Receiver actor ID
-    pub receiver: String,
-    /// Message type
-    pub message_type: String,
-    /// Time-to-live (TTL) for message expiration
-    ttl: Option<std::time::Duration>,
-    /// Timestamp when message was created (for expiration check)
-    created_at: std::time::Instant,
-    /// Optional idempotency key for message deduplication
-    /// If provided, messages with the same key are deduplicated within time window
-    pub idempotency_key: Option<String>,
-    /// URI path for HTTP-based invocations (optional)
-    /// Example: "/api/v1/actors/default/counter/metrics"
-    pub uri_path: Option<String>,
-    /// HTTP method for HTTP-based invocations (optional)
-    /// Example: "GET", "POST", "PUT", "DELETE"
-    pub uri_method: Option<String>,
-    /// Channel message ID (for ack/nack operations on channels that support it)
-    /// This is the ID assigned by the channel backend (Redis, Kafka, etc.)
-    /// and is different from the mailbox message ID
-    pub channel_message_id: Option<String>,
-}
-
-impl Message {
-    /// Check if receiver is unset (empty or "unknown")
-    /// 
-    /// ## Purpose
-    /// "unknown" is used as a sentinel value to indicate the receiver is not set.
-    /// This helper provides a consistent way to check if receiver needs to be set.
-    pub fn is_receiver_unset(&self) -> bool {
-        self.receiver.is_empty() || self.receiver == "unknown"
-    }
-    
-    /// Create a new message
-    pub fn new(payload: Vec<u8>) -> Self {
-        Message {
-            id: Ulid::new().to_string(),
-            payload,
-            metadata: Default::default(),
-            priority: MessagePriority::Normal,
-            correlation_id: None,
-            reply_to: None,
-            sender: None,
-            receiver: String::from("unknown"), // Sentinel value indicating receiver not set
-            message_type: String::new(),
-            ttl: None,
-            created_at: std::time::Instant::now(),
-            idempotency_key: None,
-            uri_path: None,
-            uri_method: None,
-            channel_message_id: None, // Only set when received from channel backend
-        }
-    }
-
-    /// Create a message from a JSON-serializable value
-    ///
-    /// ## Purpose
-    /// Convenience method that serializes a value to JSON and creates a Message.
-    /// Use `.with_message_type()` to set the message type (always explicit).
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// #[derive(Serialize)]
-    /// enum CounterMsg { Increment { amount: i64 } }
-    ///
-    /// let msg = Message::json(&CounterMsg::Increment { amount: 1 })?
-    ///     .with_message_type("increment")
-    ///     .with_sender("sender@node");
-    /// ```
-    pub fn json<T: serde::Serialize>(value: &T) -> Result<Self, serde_json::Error> {
-        let payload = serde_json::to_vec(value)?;
-        Ok(Self::new(payload))
-    }
-
-    /// Create a system message
-    pub fn system(payload: Vec<u8>) -> Self {
-        Self::new(payload).with_priority(MessagePriority::System)
-    }
-
-    /// Create a signal message (highest priority)
-    pub fn signal(payload: Vec<u8>) -> Self {
-        Self::new(payload).with_priority(MessagePriority::Highest)
-    }
-
-    /// Create a timer message (for lifecycle timer events)
-    pub fn timer(timer_name: &str) -> Self {
-        Self::new(timer_name.as_bytes().to_vec())
-            .with_metadata("type".to_string(), "timer".to_string())
-            .with_metadata("timer_name".to_string(), timer_name.to_string())
-    }
-
-    /// Create an EXIT message (from linked actor death)
-    ///
-    /// ## Purpose
-    /// Used for Erlang-style link propagation. When a linked actor dies,
-    /// this message is sent to actors that trap exits (trap_exit=true).
-    ///
-    /// ## Arguments
-    /// * `from` - ID of the actor that died
-    /// * `reason` - Exit reason from the dead actor (serialized as string)
-    ///
-    /// ## Note
-    /// This method accepts a string representation of the exit reason to avoid
-    /// dependency on plexspaces_core. The reason is stored in metadata.
-    pub fn exit(from: String, reason_str: &str) -> Self {
-        let mut msg = Self::new(b"__EXIT__".to_vec())
-            .with_metadata("type".to_string(), "__EXIT__".to_string())
-            .with_metadata("exit_from".to_string(), from.clone())
-            .with_metadata("exit_reason".to_string(), reason_str.to_string());
-        
-        msg.sender = Some(from);
-        msg
-    }
-
-    /// Check if this is an EXIT message
-    pub fn is_exit(&self) -> bool {
-        self.payload == b"__EXIT__" || 
-        self.message_type == "__EXIT__" ||
-        self.metadata.get("type").map(|s| s == "__EXIT__").unwrap_or(false)
-    }
-
-    /// Try to parse EXIT message and extract exit reason string
-    ///
-    /// ## Returns
-    /// Some((from_actor_id, exit_reason_string)) if this is an EXIT message, None otherwise
-    ///
-    /// ## Note
-    /// Returns the reason as a string to avoid dependency on plexspaces_core.
-    /// The caller should convert to ExitReason if needed.
-    pub fn try_parse_exit(&self) -> Option<(String, String)> {
-        if !self.is_exit() {
-            return None;
-        }
-
-        let from = self.sender.clone().unwrap_or_else(|| "unknown".to_string());
-        let reason_str = self.metadata.get("exit_reason")
-            .cloned()
-            .unwrap_or_else(|| "Normal".to_string());
-
-        Some((from, reason_str))
-    }
-
-    /// Get message ID
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Get payload
-    pub fn payload(&self) -> &[u8] {
-        &self.payload
-    }
-
-    /// Get message type string for routing (extracted from metadata or message_type field)
-    pub fn message_type_str(&self) -> &str {
-        // First check the message_type field
-        if !self.message_type.is_empty() {
-            return &self.message_type;
-        }
-        // Fall back to metadata "type" key
-        self.metadata
-            .get("type")
-            .map(|s| s.as_str())
-            .unwrap_or("cast")
-    }
-
-    // TODO: Restore when behavior module is migrated - returns MessageType enum
-    // /// Get message type for routing
-    // pub fn message_type(&self) -> crate::behavior::MessageType {
-    //     // Extract from metadata or default
-    //     if let Some(msg_type) = self.metadata.get("type") {
-    //         match msg_type.as_str() {
-    //             "call" => crate::behavior::MessageType::Call,
-    //             "cast" => crate::behavior::MessageType::Cast,
-    //             "info" => crate::behavior::MessageType::Info,
-    //             "workflow_run" => crate::behavior::MessageType::WorkflowRun,
-    //             msg_type if msg_type.starts_with("workflow_signal:") => {
-    //                 let name = msg_type.strip_prefix("workflow_signal:").unwrap();
-    //                 crate::behavior::MessageType::WorkflowSignal(name.to_string())
-    //             }
-    //             msg_type if msg_type.starts_with("workflow_query:") => {
-    //                 let name = msg_type.strip_prefix("workflow_query:").unwrap();
-    //                 crate::behavior::MessageType::WorkflowQuery(name.to_string())
-    //             }
-    //             _ => crate::behavior::MessageType::Cast,
-    //         }
-    //     } else {
-    //         crate::behavior::MessageType::Cast
-    //     }
-    // }
-
-    /// Set correlation ID for request-reply
-    pub fn with_correlation_id(mut self, id: impl Into<String>) -> Self {
-        self.correlation_id = Some(id.into());
-        self
-    }
-
-    /// Set idempotency key for message deduplication
-    pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
-        self.idempotency_key = Some(key.into());
-        self
-    }
-
-    /// Set reply-to address
-    pub fn with_reply_to(mut self, address: impl Into<String>) -> Self {
-        self.reply_to = Some(address.into());
-        self
-    }
-
-    /// Set priority
-    pub fn with_priority(mut self, priority: MessagePriority) -> Self {
-        self.priority = priority;
-        self
-    }
-
-    /// Add metadata
-    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.metadata.insert(key.into(), value.into());
-        self
-    }
-
-    /// Set sender ID for request-reply patterns
-    pub fn with_sender(mut self, sender_id: impl Into<String>) -> Self {
-        self.sender = Some(sender_id.into());
-        self
-    }
-
-    /// Set message type for routing
-    pub fn with_message_type(mut self, message_type: impl Into<String>) -> Self {
-        self.message_type = message_type.into();
-        self
-    }
-
-    /// Set time-to-live (TTL) for message expiration
-    ///
-    /// ## Arguments
-    /// * `ttl` - Duration after which the message expires
-    ///
-    /// ## Example
-    /// ```rust
-    /// use plexspaces_mailbox::Message;
-    /// use std::time::Duration;
-    /// let msg = Message::new(b"data".to_vec())
-    ///     .with_ttl(Duration::from_secs(30));
-    /// ```
-    pub fn with_ttl(mut self, ttl: std::time::Duration) -> Self {
-        self.ttl = Some(ttl);
-        self
-    }
-
-    /// Get the TTL (time-to-live) of this message
-    ///
-    /// ## Returns
-    /// `Some(Duration)` if TTL is set, `None` otherwise
-    pub fn ttl(&self) -> Option<std::time::Duration> {
-        self.ttl
-    }
-
-    /// Check if this message has expired
-    ///
-    /// ## Returns
-    /// `true` if message has TTL and it has expired, `false` otherwise
-    ///
-    /// ## Example
-    /// ```rust
-    /// use plexspaces_mailbox::Message;
-    /// use std::time::Duration;
-    /// let msg = Message::new(b"data".to_vec())
-    ///     .with_ttl(Duration::from_millis(10));
-    /// assert!(!msg.is_expired()); // Just created
-    /// ```
-    pub fn is_expired(&self) -> bool {
-        if let Some(ttl) = self.ttl {
-            self.created_at.elapsed() >= ttl
-        } else {
-            false // No TTL means never expires
-        }
-    }
-
-    /// Get sender ID
-    pub fn sender_id(&self) -> Option<&str> {
-        self.sender.as_deref()
-    }
-
-    /// Get priority
-    pub fn priority(&self) -> MessagePriority {
-        self.priority.clone()
-    }
-
-    /// Convert from proto Message to internal Message
-    pub fn from_proto(proto_msg: &plexspaces_proto::common::v1::Message) -> Self {
-        // Convert priority from i32 to MessagePriority
-        // Proto uses: System(10), Highest(5), High(4), Normal(3), Low(2), Lowest(1)
-        // Legacy values: Signal(100), System(75), High(50), Normal(25), Low(0)
-        let priority = message_priority_from_value(proto_msg.priority);
-
-        // Convert TTL from proto Duration if present
-        let ttl = proto_msg.ttl.as_ref().map(|d| {
-            std::time::Duration::from_secs(d.seconds as u64)
-                + std::time::Duration::from_nanos(d.nanos as u64)
-        });
-
-        Message {
-            id: proto_msg.id.clone(),
-            payload: proto_msg.payload.clone(),
-            metadata: proto_msg.headers.clone(),
-            priority,
-            // Use proto field directly, fallback to header for backward compatibility
-            correlation_id: if !proto_msg.correlation_id.is_empty() {
-                Some(proto_msg.correlation_id.clone())
-            } else {
-                proto_msg.headers.get("correlation_id").cloned()
-            },
-            reply_to: if !proto_msg.reply_to.is_empty() {
-                Some(proto_msg.reply_to.clone())
-            } else {
-                proto_msg.headers.get("reply_to").cloned()
-            },
-            sender: if proto_msg.sender_id.is_empty() {
-                None
-            } else {
-                Some(proto_msg.sender_id.clone())
-            },
-            receiver: if proto_msg.receiver_id.is_empty() {
-                "unknown".to_string()
-            } else {
-                proto_msg.receiver_id.clone()
-            },
-            message_type: proto_msg.message_type.clone(),
-            ttl,
-            created_at: std::time::Instant::now(), // Reset creation time when deserializing
-            idempotency_key: if proto_msg.idempotency_key.is_empty() {
-                None
-            } else {
-                Some(proto_msg.idempotency_key.clone())
-            },
-            uri_path: if proto_msg.uri_path.is_empty() {
-                None
-            } else {
-                Some(proto_msg.uri_path.clone())
-            },
-            uri_method: if proto_msg.uri_method.is_empty() {
-                None
-            } else {
-                Some(proto_msg.uri_method.clone())
-            },
-            channel_message_id: None, // Proto messages don't have channel message ID
-        }
-    }
-
-    /// Convert internal Message to proto Message
-    pub fn to_proto(&self) -> plexspaces_proto::common::v1::Message {
-        use chrono::Utc;
-
-        // Convert priority to i32 (proto uses: System=10, Highest=5, High=4, Normal=3, Low=2, Lowest=1)
-        // For backward compatibility with actor.proto, map to legacy values
-        let priority = match self.priority {
-            MessagePriority::System => 75,  // Legacy System value
-            MessagePriority::Highest => 100, // Legacy Signal value
-            MessagePriority::High => 50,
-            MessagePriority::Normal => 25,
-            MessagePriority::Low => 0,
-            MessagePriority::Lowest => 0,
-            MessagePriority::MessagePriorityUnspecified => 25,
-        };
-
-        // Build headers from metadata + correlation_id + reply_to
-        let mut headers = self.metadata.clone();
-        if let Some(ref correlation_id) = self.correlation_id {
-            headers.insert("correlation_id".to_string(), correlation_id.clone());
-        }
-        if let Some(ref reply_to) = self.reply_to {
-            headers.insert("reply_to".to_string(), reply_to.clone());
-        }
-
-        plexspaces_proto::common::v1::Message {
-            id: self.id.clone(),
-            sender_id: self.sender.clone().unwrap_or_default(),
-            receiver_id: self.receiver.clone(),
-            channel: String::new(), // Not used for actor messages
-            message_type: self.message_type.clone(),
-            payload: self.payload.clone(),
-            timestamp: Some(prost_types::Timestamp {
-                seconds: Utc::now().timestamp(),
-                nanos: 0,
-            }),
-            headers,
-            priority,
-            ttl: self.ttl.map(|d| prost_types::Duration {
-                seconds: d.as_secs() as i64,
-                nanos: d.subsec_nanos() as i32,
-            }),
-            delivery_count: 0, // Initial delivery
-            idempotency_key: self.idempotency_key.clone().unwrap_or_default(),
-            correlation_id: self.correlation_id.clone().unwrap_or_default(),
-            reply_to: self.reply_to.clone().unwrap_or_default(),
-            partition_key: String::new(), // Not used for actor messages
-            uri_path: self.uri_path.clone().unwrap_or_default(),
-            uri_method: self.uri_method.clone().unwrap_or_default(),
-        }
-    }
-
-    /// Convert Message to typed ActorMessage (if possible)
-    ///
-    /// ## Usage
-    /// ```rust
-    /// use plexspaces_mailbox::Message;
-    /// use plexspaces_mailbox::ActorMessage;
-    /// # let msg = Message::new(b"data".to_vec());
-    /// match msg.as_typed() {
-    ///     Ok(ActorMessage::TimerFired { timer_name, .. }) => {
-    ///         // Handle timer
-    ///     }
-    ///     Ok(_) => {}
-    ///     Err(_) => {}
-    /// }
-    /// ```
-    ///
-    /// ## Returns
-    /// Typed message or error if conversion fails
-    pub fn as_typed(&self) -> Result<crate::messages::ActorMessage, Box<dyn std::error::Error + Send + Sync>> {
-        use crate::messages::*;
-        use std::time::SystemTime;
-        
-        // Check metadata for known message types
-        if let Some(msg_type) = self.metadata.get("type") {
-            match msg_type.as_str() {
-                "TimerFired" => {
-                    let timer_name = self.metadata.get("timer_name")
-                        .cloned()
-                        .unwrap_or_else(|| "unknown".to_string());
-                    
-                    // Parse fired_at from metadata if present
-                    let fired_at = self.metadata.get("fired_at")
-                        .and_then(|s| s.parse::<i64>().ok())
-                        .map(|secs| SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64));
-                    
-                    return Ok(ActorMessage::TimerFired {
-                        timer_name,
-                        fired_at,
-                        callback_data: self.payload.clone(),
-                    });
-                }
-                "ReminderFired" => {
-                    let reminder_name = self.metadata.get("reminder_name")
-                        .cloned()
-                        .unwrap_or_else(|| "unknown".to_string());
-                    
-                    let fired_at = self.metadata.get("fired_at")
-                        .and_then(|s| s.parse::<i64>().ok())
-                        .map(|secs| SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64));
-                    
-                    return Ok(ActorMessage::ReminderFired {
-                        reminder_name,
-                        fired_at,
-                        reminder_data: self.payload.clone(),
-                    });
-                }
-                _ => {}
-            }
-        }
-        
-        // Check message_type field
-        if !self.message_type.is_empty() {
-            if self.message_type.starts_with("system:") {
-                let kind_str = self.message_type.strip_prefix("system:").unwrap();
-                let kind = match kind_str {
-                    "activated" => SystemMessageKind::Activated,
-                    "deactivated" => SystemMessageKind::Deactivated,
-                    "terminated" => SystemMessageKind::Terminated,
-                    "health_check" => SystemMessageKind::HealthCheck,
-                    _ => SystemMessageKind::Unknown(kind_str.to_string()),
-                };
-                return Ok(ActorMessage::System {
-                    kind,
-                    payload: self.payload.clone(),
-                });
-            }
-        }
-        
-        // Default to User message
-        Ok(ActorMessage::User {
-            payload: self.payload.clone(),
-            message_type: self.message_type.clone(),
-        })
-    }
-
-    /// Create Message from typed ActorMessage
-    ///
-    /// ## Usage
-    /// ```rust,no_run
-    /// use plexspaces_mailbox::Message;
-    /// use std::time::SystemTime;
-    /// // Note: ActorMessage is an internal type, this is for illustration
-    /// // In practice, use Message::timer() or other constructors
-    /// let msg = Message::timer("heartbeat");
-    /// ```
-    pub fn from_typed(typed: crate::messages::ActorMessage) -> Self {
-        use crate::messages::*;
-        use std::time::SystemTime;
-        
-        match typed {
-            ActorMessage::TimerFired { timer_name, fired_at, callback_data } => {
-                let mut msg = Message::new(callback_data);
-                msg = msg.with_metadata("type".to_string(), "TimerFired".to_string());
-                msg = msg.with_metadata("timer_name".to_string(), timer_name);
-                if let Some(time) = fired_at {
-                    if let Ok(duration) = time.duration_since(SystemTime::UNIX_EPOCH) {
-                        msg = msg.with_metadata("fired_at".to_string(), duration.as_secs().to_string());
-                    }
-                }
-                msg
-            }
-            ActorMessage::ReminderFired { reminder_name, fired_at, reminder_data } => {
-                let mut msg = Message::new(reminder_data);
-                msg = msg.with_metadata("type".to_string(), "ReminderFired".to_string());
-                msg = msg.with_metadata("reminder_name".to_string(), reminder_name);
-                if let Some(time) = fired_at {
-                    if let Ok(duration) = time.duration_since(SystemTime::UNIX_EPOCH) {
-                        msg = msg.with_metadata("fired_at".to_string(), duration.as_secs().to_string());
-                    }
-                }
-                msg
-            }
-            ActorMessage::User { payload, message_type } => {
-                Message::new(payload).with_message_type(message_type)
-            }
-            ActorMessage::System { kind, payload } => {
-                let kind_str = match kind {
-                    SystemMessageKind::Activated => "activated",
-                    SystemMessageKind::Deactivated => "deactivated",
-                    SystemMessageKind::Terminated => "terminated",
-                    SystemMessageKind::HealthCheck => "health_check",
-                    SystemMessageKind::Unknown(_) => return Message::system(payload), // Fallback
-                };
-                Message::system(payload).with_message_type(format!("system:{}", kind_str))
-            }
-        }
-    }
-
-    /// Convert Mailbox Message to ProtoMessage
-    ///
-    /// ## Purpose
-    /// Converts mailbox-specific Message to channel-agnostic ProtoMessage
-    /// for use with Channel trait backends.
-    pub fn to_channel_message(&self, channel_name: &str) -> ProtoMessage {
-        use chrono::Utc;
-        
-        let mut headers = self.metadata.clone();
-        // Add mailbox-specific fields to headers
-        headers.insert("message_type".to_string(), self.message_type.clone());
-        headers.insert("priority".to_string(), format!("{}", message_priority_value(&self.priority)));
-        if let Some(ref correlation_id) = self.correlation_id {
-            headers.insert("correlation_id".to_string(), correlation_id.clone());
-        }
-        if let Some(ref reply_to) = self.reply_to {
-            headers.insert("reply_to".to_string(), reply_to.clone());
-        }
-        if let Some(ref sender) = self.sender {
-            headers.insert("sender".to_string(), sender.clone());
-        }
-        headers.insert("receiver".to_string(), self.receiver.clone());
-        
-        let now = Utc::now();
-        let priority = message_priority_value(&self.priority);
-        
-        ProtoMessage {
-            id: self.id.clone(),
-            sender_id: self.sender.clone().unwrap_or_default(),
-            receiver_id: self.receiver.clone(),
-            channel: channel_name.to_string(),
-            message_type: self.message_type.clone(),
-            payload: self.payload.clone(),
-            timestamp: Some(Timestamp {
-                seconds: now.timestamp(),
-                nanos: now.timestamp_subsec_nanos() as i32,
-            }),
-            headers,
-            priority,
-            ttl: self.ttl.map(|d| prost_types::Duration {
-                seconds: d.as_secs() as i64,
-                nanos: d.subsec_nanos() as i32,
-            }),
-            delivery_count: 0,
-            idempotency_key: self.idempotency_key.clone().unwrap_or_default(),
-            correlation_id: self.correlation_id.clone().unwrap_or_default(),
-            reply_to: self.reply_to.clone().unwrap_or_default(),
-            partition_key: self.receiver.clone(), // Use receiver as partition key
-            uri_path: self.uri_path.clone().unwrap_or_default(),
-            uri_method: self.uri_method.clone().unwrap_or_default(),
-        }
-    }
-}
-
-/// Convert ProtoMessage to Mailbox Message
-///
-/// ## Purpose
-/// Converts channel-agnostic ProtoMessage back to mailbox-specific Message
-/// for actor consumption.
-impl From<ProtoMessage> for Message {
-    fn from(channel_msg: ProtoMessage) -> Self {
-        // Extract priority from headers or default to Normal
-        // Priority is stored as the numeric value (e.g., "4" for High)
-        let priority = channel_msg.headers
-            .get("priority")
-            .and_then(|p| p.parse::<i32>().ok())
-            .map(|v| {
-                // Map numeric value to MessagePriority enum
-                // Proto values: System=10, Highest=5, High=4, Normal=3, Low=2, Lowest=1
-                match v {
-                    10 => MessagePriority::System,
-                    5 => MessagePriority::Highest,
-                    4 => MessagePriority::High,
-                    3 => MessagePriority::Normal,
-                    2 => MessagePriority::Low,
-                    1 => MessagePriority::Lowest,
-                    _ => message_priority_from_value(v), // Fallback to legacy conversion
-                }
-            })
-            .unwrap_or(MessagePriority::Normal);
-        
-        // Extract message_type from headers
-        let message_type = channel_msg.headers
-            .get("message_type")
-            .cloned()
-            .unwrap_or_default();
-        
-        // Extract correlation_id and reply_to from headers or fields
-        let correlation_id = channel_msg.headers
-            .get("correlation_id")
-            .or_else(|| if channel_msg.correlation_id.is_empty() { None } else { Some(&channel_msg.correlation_id) })
-            .cloned();
-        
-        let reply_to = channel_msg.headers
-            .get("reply_to")
-            .or_else(|| if channel_msg.reply_to.is_empty() { None } else { Some(&channel_msg.reply_to) })
-            .cloned();
-        
-        // Extract sender from headers or sender_id field
-        let sender = channel_msg.headers
-            .get("sender")
-            .or_else(|| if channel_msg.sender_id.is_empty() { None } else { Some(&channel_msg.sender_id) })
-            .cloned();
-        
-        // Extract receiver from headers
-        let receiver = channel_msg.headers
-            .get("receiver")
-            .cloned()
-            .unwrap_or_else(|| channel_msg.channel.clone());
-        
-        Message {
-            id: channel_msg.id.clone(),
-            payload: channel_msg.payload,
-            metadata: channel_msg.headers,
-            priority,
-            correlation_id,
-            reply_to,
-            sender,
-            receiver,
-            message_type,
-            ttl: None, // TTL not in ProtoMessage, would need to be added if needed
-            created_at: std::time::Instant::now(), // Reset creation time when deserializing
-            idempotency_key: None, // Idempotency key not in ProtoMessage
-            uri_path: None, // URI path not in ProtoMessage
-            uri_method: None, // URI method not in ProtoMessage
-            // Store channel message ID for ack/nack operations
-            // For Redis: this is the stream ID (e.g., "1234567890-0")
-            // For Kafka: this would be the offset
-            // For InMemory: this is None (no ack/nack needed)
-            channel_message_id: Some(channel_msg.id),
-        }
-    }
-}
-
-/// Convert mailbox Message to proto Message
-///
-/// ## Purpose
-/// Allows ActorRef::tell() to accept mailbox Message directly via Into<ProtoMessage>.
-/// This eliminates the need to call .to_proto() manually.
-impl From<Message> for ProtoMessage {
-    fn from(msg: Message) -> Self {
-        msg.to_proto()
-    }
-}
+// Message struct removed - use plexspaces_proto::common::v1::Message directly
+// Helper functions available in message_helpers module
+// All Message functionality moved to proto Message + helper functions
 
 // Helper functions for MailboxConfig (cannot add methods to proto-generated types)
 pub fn mailbox_config_default() -> MailboxConfig {
-    let mut config = MailboxConfig::default();
-    config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-    config.backpressure_strategy = BackpressureStrategy::Block as i32;
-    config.capacity = 10000;
-    config
-}
-
-fn mailbox_config_ordering(config: &MailboxConfig) -> OrderingStrategy {
-    OrderingStrategy::try_from(config.ordering_strategy).unwrap_or(OrderingStrategy::OrderingStrategyUnspecified)
-}
-
-fn mailbox_config_backpressure(config: &MailboxConfig) -> BackpressureStrategy {
-    BackpressureStrategy::try_from(config.backpressure_strategy).unwrap_or(BackpressureStrategy::BackpressureStrategyUnspecified)
-}
-
-fn mailbox_config_max_size(config: &MailboxConfig) -> usize {
-    config.capacity as usize
-}
-
-fn mailbox_config_message_id_cache_size(config: &MailboxConfig) -> usize {
-    if config.message_id_cache_size > 0 {
-        config.message_id_cache_size as usize
-    } else {
-        10000 // Default: 10000 entries
-    }
-}
-
-fn mailbox_config_idempotency_cache_size(config: &MailboxConfig) -> usize {
-    if config.idempotency_cache_size > 0 {
-        config.idempotency_cache_size as usize
-    } else {
-        10000 // Default: 10000 entries
+    MailboxConfig {
+        mailbox_type: 0, // MailboxTypeUnspecified (defaults to Unbounded)
+        capacity: 10000,
+        backpressure_strategy: BackpressureStrategy::Block as i32,
+        message_timeout: None,
+        enable_priority: false,
+        enable_deduplication: false,
+        deduplication_window: None,
+        message_id_cache_size: 10000,
+        idempotency_cache_size: 10000,
+        ordering_strategy: OrderingStrategy::OrderingFifo as i32,
+        channel_provider: 0, // Unspecified (defaults to InMemory)
+        channel_config: None,
+        metadata: std::collections::HashMap::new(),
     }
 }
 
@@ -904,6 +171,40 @@ fn mailbox_config_deduplication_window(config: &MailboxConfig) -> Duration {
         Duration::from_secs(window.seconds as u64) + Duration::from_nanos(window.nanos as u64)
     } else {
         Duration::from_secs(24 * 60 * 60) // Default: 24 hours
+    }
+}
+
+fn mailbox_config_ordering(config: &MailboxConfig) -> OrderingStrategy {
+    OrderingStrategy::try_from(config.ordering_strategy)
+        .unwrap_or(OrderingStrategy::OrderingFifo)
+}
+
+fn mailbox_config_max_size(config: &MailboxConfig) -> usize {
+    if config.capacity == 0 {
+        usize::MAX // Unlimited
+    } else {
+        config.capacity as usize
+    }
+}
+
+fn mailbox_config_backpressure(config: &MailboxConfig) -> BackpressureStrategy {
+    BackpressureStrategy::try_from(config.backpressure_strategy)
+        .unwrap_or(BackpressureStrategy::Block)
+}
+
+fn mailbox_config_message_id_cache_size(config: &MailboxConfig) -> usize {
+    if config.message_id_cache_size == 0 {
+        10000 // Default
+    } else {
+        config.message_id_cache_size as usize
+    }
+}
+
+fn mailbox_config_idempotency_cache_size(config: &MailboxConfig) -> usize {
+    if config.idempotency_cache_size == 0 {
+        10000 // Default
+    } else {
+        config.idempotency_cache_size as usize
     }
 }
 
@@ -937,14 +238,14 @@ pub struct Mailbox {
     notify: Arc<Notify>,
     /// Local receiver buffer for in-memory fast path (when using InMemoryChannel)
     /// This allows us to maintain the existing dequeue API while using Channel trait
-    local_receiver: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<Message>>>>,
+    local_receiver: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<ProtoMessage>>>>,
     /// LRU cache for message ID deduplication (message_id -> timestamp)
     /// Fixed size cache (default: 10000 entries) with TTL expiration
     message_id_cache: Arc<RwLock<LruCache<String, SystemTime>>>,
     /// LRU cache for idempotency key deduplication (idempotency_key -> (timestamp, cached_response))
     /// Fixed size cache (default: 10000 entries) with TTL expiration
     /// Idempotency keys seen within deduplication_window return cached response
-    idempotency_cache: Arc<RwLock<LruCache<String, (SystemTime, Option<Message>)>>>,
+    idempotency_cache: Arc<RwLock<LruCache<String, (SystemTime, Option<ProtoMessage>)>>>,
     /// Deduplication time window (default: 24 hours)
     deduplication_window: Duration,
     /// Maximum cache size for message ID deduplication (default: 10000)
@@ -962,7 +263,7 @@ pub struct Mailbox {
 #[derive(Debug)]
 enum MessageStorage {
     /// FIFO/LIFO queue
-    Queue(VecDeque<Message>),
+    Queue(VecDeque<ProtoMessage>),
     /// Priority queue (BinaryHeap with reverse ordering for max-heap)
     Priority(BinaryHeap<PriorityMessage>),
 }
@@ -970,12 +271,12 @@ enum MessageStorage {
 /// Wrapper for Message in priority queue (BinaryHeap is max-heap, we want highest priority first)
 #[derive(Debug, Clone)]
 struct PriorityMessage {
-    message: Message,
+    message: ProtoMessage,
 }
 
 impl PartialEq for PriorityMessage {
     fn eq(&self, other: &Self) -> bool {
-        message_priority_value(&self.message.priority) == message_priority_value(&other.message.priority)
+        self.message.priority == other.message.priority
     }
 }
 
@@ -990,9 +291,8 @@ impl PartialOrd for PriorityMessage {
 impl Ord for PriorityMessage {
     fn cmp(&self, other: &Self) -> Ordering {
         // BinaryHeap is a max-heap, so we want higher priority (larger value) to be "greater"
-        // self.cmp(other) should return Greater when self has higher priority
-        // So we compare self.priority to other.priority (not reversed)
-        message_priority_value(&self.message.priority).cmp(&message_priority_value(&other.message.priority))
+        // Proto priority is already an i32, so compare directly
+        self.message.priority.cmp(&other.message.priority)
     }
 }
 
@@ -1057,9 +357,8 @@ impl Mailbox {
             .map_err(|e| MailboxError::StorageError(format!("Failed to create channel backend: {}", e)))?;
         
         // For InMemory backend, create a local mpsc channel for fast-path dequeue
-        // This maintains backward compatibility with existing dequeue API
         let (local_sender, local_receiver) = if is_in_memory {
-            let (s, r) = mpsc::unbounded_channel();
+            let (s, r): (mpsc::UnboundedSender<ProtoMessage>, mpsc::UnboundedReceiver<ProtoMessage>) = mpsc::unbounded_channel();
             (Some(s), Some(r))
         } else {
             (None, None)
@@ -1162,7 +461,9 @@ impl Mailbox {
                 // Send messages to channel backend
                 let mut num_sent = 0;
                 for msg in messages_to_send {
-                    let channel_msg = msg.to_channel_message(&channel_name);
+                    // ProtoMessage is already in the correct format, just set channel name
+                    let mut channel_msg = msg.clone();
+                    channel_msg.channel = channel_name.clone();
                     match channel.send(channel_msg).await {
                         Ok(_) => {
                             num_sent += 1;
@@ -1200,7 +501,7 @@ impl Mailbox {
     }
 
     /// Start background task with local sender for InMemory fast-path
-    fn start_processor_with_local_sender(&self, local_sender: mpsc::UnboundedSender<Message>) {
+    fn start_processor_with_local_sender(&self, local_sender: mpsc::UnboundedSender<ProtoMessage>) {
         let internal_queue = self.internal_queue.clone();
         let channel = self.channel.clone();
         let channel_name = self.channel_name.clone();
@@ -1249,7 +550,9 @@ impl Mailbox {
                 for msg in messages_to_send {
                     let msg_id = msg.id.clone();
                     // Send to channel backend
-                    let channel_msg = msg.to_channel_message(&channel_name);
+                    // ProtoMessage is already in the correct format, just set channel name
+                    let mut channel_msg = msg.clone();
+                    channel_msg.channel = channel_name.clone();
                     let channel_send_result = channel.send(channel_msg).await;
                     
                     // Also send to local receiver for fast-path (InMemory backend)
@@ -1323,7 +626,7 @@ impl Mailbox {
     /// ## Deduplication
     /// - Message IDs: Duplicate message IDs within deduplication_window are skipped (LRU cache with fixed size)
     /// - Idempotency keys: Duplicate idempotency keys return cached response (if available) (LRU cache with fixed size)
-    pub async fn enqueue(&self, message: Message) -> Result<(), MailboxError> {
+    pub async fn enqueue(&self, message: ProtoMessage) -> Result<(), MailboxError> {
         // For non-memory channels, check shutdown flag to stop accepting new messages
         if !self.is_in_memory() {
             let shutdown = *self.shutdown_flag.read().await;
@@ -1354,7 +657,8 @@ impl Mailbox {
         }
         
         // Check for duplicate idempotency key (LRU cache with fixed size)
-        if let Some(ref idempotency_key) = message.idempotency_key {
+        if !message.idempotency_key.is_empty() {
+            let idempotency_key = &message.idempotency_key;
             let mut cache = self.idempotency_cache.write().await;
             // Cleanup expired entries
             cache.cleanup_expired();
@@ -1414,6 +718,12 @@ impl Mailbox {
 
         let message_id = message.id.clone();
         
+        // Clone values before moving message
+        let sender_id = message.sender_id.clone();
+        let receiver_id = message.receiver_id.clone();
+        let message_type = message.message_type.clone();
+        let correlation_id = message.correlation_id.clone();
+        
         // Add message based on ordering (always use internal queue, processor moves to channel)
         match mailbox_config_ordering(&self.config) {
             OrderingStrategy::OrderingFifo => {
@@ -1448,10 +758,14 @@ impl Mailbox {
 
         stats.total_enqueued += 1;
         stats.current_size += 1;
-
+        
         if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!(
             message_id = %message_id,
+            sender_id = %sender_id,
+            receiver_id = %receiver_id,
+            message_type = %message_type,
+            correlation_id = %correlation_id,
             queue_size = stats.current_size,
             "Mailbox::enqueue: ✅ Message enqueued successfully"
         );
@@ -1471,7 +785,7 @@ impl Mailbox {
     }
 
     /// Send a message (alias for enqueue)
-    pub async fn send(&self, message: Message) -> Result<(), MailboxError> {
+    pub async fn send(&self, message: ProtoMessage) -> Result<(), MailboxError> {
         self.enqueue(message).await
     }
 
@@ -1504,7 +818,7 @@ impl Mailbox {
     pub fn dequeue_with_timeout(
         &self,
         timeout: Option<std::time::Duration>,
-    ) -> impl std::future::Future<Output = Option<Message>> + 'static {
+    ) -> impl std::future::Future<Output = Option<ProtoMessage>> + 'static {
         let channel = self.channel.clone();
         let local_receiver = self.local_receiver.clone();
         let mailbox_id = self.mailbox_id.clone();
@@ -1556,14 +870,15 @@ impl Mailbox {
                     tracing::debug!(
                         mailbox_id = %mailbox_id,
                         message_id = %msg.id,
-                        message_type = %msg.message_type_str(),
-                        sender = ?msg.sender,
-                        receiver = %msg.receiver,
-                        correlation_id = ?msg.correlation_id,
+                        message_type = %message_type_str(&msg),
+                        sender_id = %msg.sender_id,
+                        receiver_id = %msg.receiver_id,
+                        correlation_id = %msg.correlation_id,
                         attempts = attempts,
                         "📬 Mailbox::dequeue: ✅ Received message from local_receiver (try_recv)"
                     );
                     }
+                    
                     return Some(msg);
                 }
                 
@@ -1618,19 +933,18 @@ impl Mailbox {
                         match channel.receive(1).await {
                             Ok(messages) => {
                                 if let Some(channel_msg) = messages.first() {
-                                    let msg = Message::from(channel_msg.clone());
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                     tracing::debug!(
                                         mailbox_id = %mailbox_id,
-                                        message_id = %msg.id,
-                                        message_type = %msg.message_type_str(),
-                                        sender = ?msg.sender,
-                                        receiver = %msg.receiver,
-                                        correlation_id = ?msg.correlation_id,
+                                        message_id = %channel_msg.id,
+                                        message_type = %message_type_str(channel_msg),
+                                        sender = ?channel_msg.sender_id,
+                                        receiver = %channel_msg.receiver_id,
+                                        correlation_id = ?channel_msg.correlation_id,
                                         "📬 Mailbox::dequeue: ✅ Received message from channel (receive)"
                                     );
                                     }
-                                    return Some(msg);
+                                    return Some(channel_msg.clone());
                                 }
                             }
                             Err(ChannelError::ChannelClosed(_)) => {
@@ -1671,19 +985,18 @@ impl Mailbox {
                         match channel.try_receive(1).await {
                             Ok(messages) => {
                                 if let Some(channel_msg) = messages.first() {
-                                    let msg = Message::from(channel_msg.clone());
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                     tracing::debug!(
                                         mailbox_id = %mailbox_id,
-                                        message_id = %msg.id,
-                                        message_type = %msg.message_type_str(),
-                                        sender = ?msg.sender,
-                                        receiver = %msg.receiver,
-                                        correlation_id = ?msg.correlation_id,
+                                        message_id = %channel_msg.id,
+                                        message_type = %message_type_str(channel_msg),
+                                        sender = ?channel_msg.sender_id,
+                                        receiver = %channel_msg.receiver_id,
+                                        correlation_id = ?channel_msg.correlation_id,
                                         "📬 Mailbox::dequeue: ✅ Received message from channel (try_receive)"
                                     );
                                     }
-                                    return Some(msg);
+                                    return Some(channel_msg.clone());
                                 }
                             }
                             Err(ChannelError::ChannelClosed(_)) => {
@@ -1718,7 +1031,7 @@ impl Mailbox {
     ///     }
     /// }
     /// ```
-    pub fn dequeue(&self) -> impl std::future::Future<Output = Option<Message>> {
+    pub fn dequeue(&self) -> impl std::future::Future<Output = Option<ProtoMessage>> {
         self.dequeue_with_timeout(None)
     }
 
@@ -1734,10 +1047,9 @@ impl Mailbox {
     /// ## Notes
     /// - Channel implementations handle ack appropriately (InMemory = no-op, Redis/Kafka = actual ack)
     /// - No backend-specific checks needed - channel trait handles it
-    pub async fn ack_message(&self, message: &Message) -> Result<(), MailboxError> {
-        // Get channel message ID (use channel_message_id if available, otherwise fall back to message.id)
-        let channel_msg_id = message.channel_message_id.as_ref()
-            .unwrap_or(&message.id);
+    pub async fn ack_message(&self, message: &ProtoMessage) -> Result<(), MailboxError> {
+        // Get channel message ID (use message.id directly for proto Message)
+        let channel_msg_id = &message.id;
 
         // Call channel.ack() - channel implementation handles backend-specific behavior
         self.channel.ack(channel_msg_id).await
@@ -1784,10 +1096,9 @@ impl Mailbox {
     ///   - Redis/Kafka = tracks retry count, requeues or sends to DLQ based on channel config
     /// - No backend-specific checks needed - channel trait handles it
     /// - Retry/DLQ logic is in channel implementation, not mailbox
-    pub async fn nack_message(&self, message: &Message, error: Option<&str>) -> Result<(), MailboxError> {
-        // Get channel message ID (use channel_message_id if available, otherwise fall back to message.id)
-        let channel_msg_id = message.channel_message_id.as_ref()
-            .unwrap_or(&message.id);
+    pub async fn nack_message(&self, message: &ProtoMessage, error: Option<&str>) -> Result<(), MailboxError> {
+        // Get channel message ID (use message.id directly for proto Message)
+        let channel_msg_id = &message.id;
 
         // Call channel.nack() with requeue=true
         // Channel implementation will handle retry counting and DLQ logic based on its config
@@ -1818,9 +1129,9 @@ impl Mailbox {
     ///
     /// Note: This is less efficient with channel-based architecture as it requires
     /// checking messages. For better performance, use pattern matching in the actor loop.
-    pub async fn dequeue_matching<F>(&self, predicate: F) -> Option<Message>
-    where
-        F: Fn(&Message) -> bool,
+    pub async fn dequeue_matching<F>(&self, predicate: F) -> Option<ProtoMessage>
+        where
+        F: Fn(&ProtoMessage) -> bool,
     {
         // For selective receive, we need to check the internal queue
         // This is a limitation of channel-based architecture
@@ -1847,7 +1158,7 @@ impl Mailbox {
     }
 
     /// Peek at messages without removing
-    pub async fn peek(&self, count: usize) -> Vec<Message> {
+    pub async fn peek(&self, count: usize) -> Vec<ProtoMessage> {
         let queue_guard = self.internal_queue.read().await;
         match &*queue_guard {
             MessageStorage::Queue(queue) => queue.iter().take(count).cloned().collect(),
@@ -1855,7 +1166,7 @@ impl Mailbox {
                 // Convert heap to sorted vec for peeking
                 let mut sorted: Vec<_> = heap.iter().map(|pm| pm.message.clone()).collect();
                 sorted.sort_by(|a, b| {
-                    message_priority_value(&b.priority).cmp(&message_priority_value(&a.priority))
+                    b.priority.cmp(&a.priority) // Proto priority is already i32
                 });
                 sorted.into_iter().take(count).collect()
             }
@@ -2596,7 +1907,7 @@ mod tests {
             .with_metadata("custom".to_string(), "value".to_string());
 
         let proto1 = msg1.to_proto();
-        assert_eq!(proto1.priority, 100); // Highest = 100 (legacy Signal value)
+        assert_eq!(proto1.priority, 100); // Highest = 100
         assert_eq!(proto1.sender_id, "sender-1");
         assert_eq!(
             proto1.headers.get("correlation_id"),
@@ -2938,7 +2249,9 @@ mod tests {
             .with_message_type("test_type".to_string())
             .with_metadata("key1".to_string(), "value1".to_string());
         
-        let channel_msg = msg.to_channel_message("test-channel");
+        // ProtoMessage is already in the correct format, just set channel name
+        let mut channel_msg = msg.clone();
+        channel_msg.channel = "test-channel".to_string();
         
         assert_eq!(channel_msg.id, msg.id);
         assert_eq!(channel_msg.payload, b"test payload");

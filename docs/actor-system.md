@@ -117,15 +117,23 @@ pub struct Actor {
 - **Automatic Routing**: Handles local vs remote communication automatically
 
 ```rust
-// Get actor reference
-let actor_ref = actor_factory.spawn_actor(...).await?;
+use plexspaces_sdk::{spawn, call_message, cast_message, json, RequestContext};
+use std::time::Duration;
 
-// Fire-and-forget (tell)
-actor_ref.tell(message).await?;
+// Spawn actor using SDK (recommended for examples)
+let ctx = RequestContext::new_without_auth("tenant".to_string(), "namespace".to_string());
+let actor_ref = spawn(&ctx, service_locator, actor_id, "namespace", MyActor::new()).await?;
 
-// Request-reply (ask)
+// Fire-and-forget (tell) - use cast_message()
+let event = cast_message(json!({ "event": "user_login" }));
+actor_ref.tell(event).await?;
+
+// Request-reply (ask) - use call_message()
+let request = call_message(json!({ "action": "get_balance" }));
 let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 ```
+
+**Note**: For examples and user code, use SDK patterns (`spawn`, `call_message`, `cast_message`). `ActorFactory` is for framework code only.
 
 ### ActorContext
 
@@ -191,23 +199,37 @@ stateDiagram-v2
 
 Actors can be started in several ways:
 
-#### 1. Direct Spawning (Programmatic)
+#### 1. Direct Spawning (SDK - Recommended)
 
 ```rust
-use plexspaces_actor::{ActorFactory, get_actor_factory};
-use plexspaces_core::RequestContext;
+use plexspaces_sdk::{
+    gen_server_actor, plexspaces_handlers, handler,
+    spawn_with_facets, RequestContext, ActorId, json,
+};
 
-let ctx = RequestContext::internal();
-let actor_factory = get_actor_factory(service_locator.as_ref()).await?;
+// Define actor with SDK annotations
+#[gen_server_actor]
+struct Counter { count: i32 }
 
-let actor_ref = actor_factory.spawn_actor(
+#[plexspaces_handlers]
+impl Counter {
+    #[handler("increment")]
+    async fn increment(&mut self, _ctx: &plexspaces_sdk::ActorContext, msg: &plexspaces_sdk::Message) 
+        -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
+        self.count += 1;
+        Ok(json!({ "count": self.count }))
+    }
+}
+
+// Spawn using SDK helper (NEVER use RequestContext::internal())
+let ctx = RequestContext::new_without_auth("my-tenant".into(), "default".into());
+let actor_ref = spawn_with_facets(
     &ctx,
-    &"counter@node1".to_string(),
-    "Counter",                    // actor_type
-    b"initial_state".to_vec(),   // initial_state
-    None,                         // config
-    HashMap::new(),               // labels
-    vec![],                       // facets
+    service_locator.clone(),
+    ActorId::from("counter@node1"),
+    "default",
+    Counter { count: 0 },
+    vec![],  // facets
 ).await?;
 ```
 
@@ -215,15 +237,32 @@ let actor_ref = actor_factory.spawn_actor(
 
 Actors are defined in `ApplicationSpec` and spawned automatically. Applications can be:
 
-**Native Rust Applications:**
+**Native Rust Applications (Embedded):**
 - Actor type is derived from `child.id` in `ChildSpec`
-- Requires `BehaviorFactory` to create behaviors (future enhancement)
+- Behaviors must be **explicitly registered** in `BehaviorRegistry` before spawning
+- Registration pattern:
+  ```rust
+  use plexspaces_core::BehaviorRegistry;
+  use std::sync::Arc;
+  
+  let behavior_registry = BehaviorRegistry::new();
+  behavior_registry.register_simple("worker", || {
+      WorkerActor::new()
+  }).await;
+  
+  node.service_locator().register_behavior_registry(Arc::new(behavior_registry)).await;
+  ```
+- `ActorFactory` uses `BehaviorRegistry` to create behaviors when spawning actors
+- If behavior is not registered, `spawn_actor` will fail with a clear error message
 
 **WASM Applications:**
 - WASM module is deployed at the **application level** via `DeployApplicationRequest.wasm_module`
 - All actors in the supervision tree use the same deployed WASM module
 - Actor type is derived from `child.id` in `ChildSpec`
 - Actors are instantiated from the deployed WASM module using `module_hash`
+- Behaviors are **automatically registered** from supervisor tree during `start()`
+- Each `ChildSpec.id` becomes a registered behavior name
+- Enables `ShardGroups` to spawn WASM actors using `actor_type="worker"` (or any `ChildSpec.id`)
 
 ```protobuf
 // Deploy WASM application
@@ -268,19 +307,24 @@ let virtual_facet = Box::new(VirtualActorFacet::new(
     100, // priority
 ));
 
-let actor_ref = actor_factory.spawn_actor(
+// Spawn actor using SDK (recommended)
+use plexspaces_sdk::{spawn_with_facets, VirtualActorFacet};
+#[gen_server_actor(facets = ["virtual_actor"])]
+struct UserSession { /* ... */ }
+
+let actor_ref = spawn_with_facets(
     &ctx,
-    &"user-123@node1".to_string(),
-    "UserSession",
-    vec![],
-    None,
-    HashMap::new(),
-    vec![virtual_facet],  // Virtual actor facet
+    service_locator,
+    "user-123@node1",
+    "namespace",
+    UserSession::new(),
+    vec![Box::new(virtual_facet)],
 ).await?;
 
 // Actor is addressable but not yet active
 // First message triggers activation
-actor_ref.tell(message).await?;  // Activates actor automatically
+let event = cast_message(json!({ "event": "activate" }));
+actor_ref.tell(event).await?;  // Activates actor automatically
 ```
 
 ### Graceful Shutdown
@@ -551,10 +595,10 @@ impl GenServer for Counter {
         match msg.payload() {
             b"increment" => {
                 self.count += 1;
-                ctx.reply(Message::new(b"ok".to_vec())).await?;
+                ctx.reply(call_message(json!({ "status": "ok" }))).await?;
             }
             b"get" => {
-                ctx.reply(Message::new(self.count.to_string().into_bytes())).await?;
+                ctx.reply(call_message(json!({ "count": self.count }))).await?;
             }
             _ => {}
         }
@@ -598,6 +642,86 @@ impl GenFSM for Processor {
     }
 }
 ```
+
+### Behavior Registration
+
+Behaviors must be registered in `BehaviorRegistry` before actors can be spawned using `actor_type` strings. This enables `ActorFactory` to create behaviors dynamically.
+
+#### Embedded Applications (Explicit Registration)
+
+Native Rust applications must explicitly register behaviors:
+
+```rust
+use plexspaces_core::BehaviorRegistry;
+use std::sync::Arc;
+
+// Create registry and register behaviors
+let behavior_registry = BehaviorRegistry::new();
+behavior_registry.register_simple("worker", || {
+    WorkerActor::new()
+}).await;
+
+// Register with ServiceLocator (required for ActorFactory)
+node.service_locator().register_behavior_registry(Arc::new(behavior_registry)).await;
+
+// Now ActorFactory can spawn actors with actor_type="worker"
+let actor_ref = actor_factory.spawn_actor(
+    &ctx,
+    &actor_id,
+    "worker",  // Uses registered behavior
+    vec![],
+    None,
+    HashMap::new(),
+    vec![],
+).await?;
+```
+
+#### WASM Applications (Automatic Registration)
+
+WASM applications automatically register behaviors from their supervisor tree during `start()`:
+
+1. Application extracts all `ChildSpec.id` values from supervisor tree
+2. Each `id` becomes a registered behavior name
+3. Behavior constructor creates `WasmActorBehavior` wrapping WASM instance
+4. Enables `ShardGroups` to spawn WASM actors using `actor_type="worker"`
+
+```protobuf
+// ApplicationSpec with supervisor tree
+supervisor: {
+  children: [
+    { id: "worker"; type: CHILD_TYPE_WORKER; },
+    { id: "processor"; type: CHILD_TYPE_WORKER; }
+  ]
+}
+```
+
+After deployment, both `"worker"` and `"processor"` behaviors are automatically registered.
+
+#### BehaviorRegistry API
+
+```rust
+// Register simple behavior (no arguments)
+registry.register_simple("my_actor", || MyActor::new()).await;
+
+// Register behavior with arguments
+registry.register("my_actor", |args: &[u8]| {
+    let config: MyConfig = deserialize(args)?;
+    Ok(Box::new(MyActor::new(config)))
+}).await;
+
+// Check if behavior is registered
+if registry.is_registered("my_actor").await {
+    // Behavior exists
+}
+
+// Create behavior instance
+let behavior = registry.create("my_actor", &[]).await?;
+
+// List all registered behaviors
+let modules = registry.registered_modules().await;
+```
+
+**Note**: `BehaviorRegistry` uses interior mutability (`Arc<RwLock<HashMap>>`), so methods take `&self` (not `&mut self`), enabling sharing via `Arc`.
 
 ### GenEvent Behavior
 
@@ -680,19 +804,20 @@ let virtual_facet = Box::new(VirtualActorFacet::new(
     100, // priority
 ));
 
-let actor_ref = actor_factory.spawn_actor(
+// Spawn actor using SDK (recommended)
+let actor_ref = spawn_with_facets(
     &ctx,
-    &"user-123@node1".to_string(),
-    "UserSession",
-    vec![],
-    None,
-    HashMap::new(),
-    vec![virtual_facet],
+    service_locator,
+    "user-123@node1",
+    "namespace",
+    UserSession::new(),
+    vec![Box::new(virtual_facet)],
 ).await?;
 
 // Actor is addressable but not yet active
 // First message triggers activation
-actor_ref.tell(message).await?;  // Activates automatically
+let event = cast_message(json!({ "event": "activate" }));
+actor_ref.tell(event).await?;  // Activates automatically
 ```
 
 ### Durability Facet
@@ -729,14 +854,18 @@ let durability_facet = Box::new(DurabilityFacet::new(
     50, // priority (runs after business logic)
 ));
 
-let actor_ref = actor_factory.spawn_actor(
+// Spawn actor using SDK (recommended)
+use plexspaces_sdk::{spawn_with_facets, DurabilityFacet};
+#[workflow_actor(facets = ["durability"])]
+struct WorkflowActor { /* ... */ }
+
+let actor_ref = spawn_with_facets(
     &ctx,
-    &"workflow-1@node1".to_string(),
-    "WorkflowActor",
-    vec![],
-    None,
-    HashMap::new(),
-    vec![durability_facet],
+    service_locator,
+    "workflow-1@node1",
+    "namespace",
+    WorkflowActor::new(),
+    vec![Box::new(durability_facet)],
 ).await?;
 ```
 
@@ -1051,8 +1180,11 @@ actor_registry.link(&ctx, &"actor1@node1".to_string(), &"actor2@node1".to_string
 Async, non-blocking message sending:
 
 ```rust
-let actor_ref = actor_factory.spawn_actor(...).await?;
-actor_ref.tell(Message::new(b"increment".to_vec())).await?;
+use plexspaces_sdk::{spawn, cast_message, json};
+
+let actor_ref = spawn(&ctx, service_locator, actor_id, "namespace", Counter::new()).await?;
+let event = cast_message(json!({ "action": "increment" }));
+actor_ref.tell(event).await?;
 ```
 
 **Characteristics**:
@@ -1065,10 +1197,10 @@ actor_ref.tell(Message::new(b"increment".to_vec())).await?;
 Async, but waits for response:
 
 ```rust
-let reply = actor_ref.ask(
-    Message::new(b"get_count".to_vec()),
-    Duration::from_secs(5)
-).await?;
+use plexspaces_sdk::{call_message, json};
+
+let request = call_message(json!({ "action": "get_count" }));
+let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 ```
 
 **Characteristics**:
@@ -1171,9 +1303,25 @@ debug!(actor_id = %actor_id, message_count = count, "Processing messages");
 
 ### Health Checks
 
-- `GET /health/live` - Liveness probe
-- `GET /health/ready` - Readiness probe
+**HTTP Endpoints**:
+- `GET /health/live` - Liveness probe (Kubernetes liveness probe)
+- `GET /health/ready` - Readiness probe (Kubernetes readiness probe)
+- `GET /health/startup` - Startup probe (Kubernetes startup probe)
 - `GET /v1/system/health` - Detailed health with dependency checks
+
+**gRPC Endpoints** (via `SystemService`):
+- `SystemService.liveness_probe()` - Liveness check (is node alive?)
+- `SystemService.readiness_probe()` - Readiness check (is node ready?)
+- `SystemService.startup_probe()` - Startup check (is initialization complete?)
+
+**SDK Health-Aware Connection**:
+The SDK's `NodeClient` uses these health checks for production-grade connection:
+- Pre-checks liveness before connecting (avoids unnecessary attempts)
+- Waits for readiness after connecting (ensures node is ready)
+- Exponential backoff with jitter for retries
+- Parallel health checks for multi-node connections
+
+See [SDK Documentation](../docs/sdk.md#node-connectivity-health-aware-connection) for usage examples.
 
 ### Dashboard
 
@@ -1229,7 +1377,7 @@ impl Actor for Counter {
                 info!(count = self.count, "Counter incremented");
             }
             b"get" => {
-                ctx.reply(Message::new(self.count.to_string().into_bytes())).await?;
+                ctx.reply(call_message(json!({ "count": self.count }))).await?;
             }
             _ => {}
         }
@@ -1241,20 +1389,14 @@ impl Actor for Counter {
     }
 }
 
-// Spawn actor
-let actor_ref = actor_factory.spawn_actor(
-    &ctx,
-    &"counter@node1".to_string(),
-    "Counter",
-    vec![],
-    None,
-    HashMap::new(),
-    vec![],
-).await?;
+// Spawn actor using SDK (recommended)
+let actor_ref = spawn(&ctx, service_locator, "counter@node1", "namespace", Counter::new()).await?;
 
-// Send messages
-actor_ref.tell(Message::new(b"increment".to_vec())).await?;
-let count = actor_ref.ask(Message::new(b"get".to_vec()), Duration::from_secs(5)).await?;
+// Send messages using SDK helpers
+let event = cast_message(json!({ "action": "increment" }));
+actor_ref.tell(event).await?;
+let request = call_message(json!({ "action": "get" }));
+let count = actor_ref.ask(request, Duration::from_secs(5)).await?;
 ```
 
 ### Example 2: Virtual Actor with Timer
@@ -1281,14 +1423,18 @@ let timer_facet = Box::new(TimerFacet::new(
     200,
 ));
 
-let actor_ref = actor_factory.spawn_actor(
+// Spawn actor using SDK (recommended)
+use plexspaces_sdk::{spawn_with_facets, VirtualActorFacet, TimerFacet};
+#[actor(facets = ["virtual_actor", "timer"])]
+struct UserSession { /* ... */ }
+
+let actor_ref = spawn_with_facets(
     &ctx,
-    &"session-123@node1".to_string(),
-    "UserSession",
-    vec![],
-    None,
-    HashMap::new(),
-    vec![virtual_facet, timer_facet],
+    service_locator,
+    "session-123@node1",
+    "namespace",
+    UserSession::new(),
+    vec![Box::new(virtual_facet), Box::new(timer_facet)],
 ).await?;
 
 // Actor is virtual - activated on first message
@@ -1316,14 +1462,18 @@ let workflow_facet = Box::new(WorkflowFacet::new(
     100,
 ));
 
-let actor_ref = actor_factory.spawn_actor(
+// Spawn actor using SDK (recommended)
+use plexspaces_sdk::{spawn_with_facets, DurabilityFacet};
+#[workflow_actor(facets = ["durability"])]
+struct OrderWorkflow { /* ... */ }
+
+let actor_ref = spawn_with_facets(
     &ctx,
-    &"workflow-1@node1".to_string(),
-    "OrderWorkflow",
-    vec![],
-    None,
-    HashMap::new(),
-    vec![durability_facet, workflow_facet],
+    service_locator,
+    "workflow-1@node1",
+    "namespace",
+    OrderWorkflow::new(),
+    vec![Box::new(durability_facet)],
 ).await?;
 
 // Workflow is durable - survives crashes and restarts

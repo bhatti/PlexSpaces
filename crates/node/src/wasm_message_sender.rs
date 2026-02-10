@@ -171,19 +171,33 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn stop_actor(
         &self,
-        _from: &str,
+        from: &str,
         actor_id: &str,
         _timeout_ms: u64,
     ) -> Result<(), String> {
-        // Use ActorFactory to stop actor
-        use plexspaces_core::ActorId;
-        use plexspaces_core::ActorFactory;
+        // Use ActorFactory to stop actor with tenant isolation
+        use plexspaces_core::{ActorId, ActorFactory, RequestContext};
+        
         let actor_factory: Arc<dyn ActorFactory> = self.service_locator.get_actor_factory().await
             .ok_or_else(|| "ActorFactory not found in ServiceLocator".to_string())?;
         
+        // Get caller's tenant/namespace from ActorRegistry metadata
+        // This ensures tenant isolation - WASM actors can only stop actors in their own tenant/namespace
+        let ctx = if let Some(registry) = self.service_locator.actor_registry().await {
+            if let Some((tenant_id, namespace)) = registry.get_actor_metadata(&from.to_string()).await {
+                RequestContext::new_without_auth(tenant_id, namespace)
+            } else {
+                // Caller not found - use empty context (will fail validation if target has tenant)
+                RequestContext::new_without_auth(String::new(), String::new())
+            }
+        } else {
+            // No registry - use empty context
+            RequestContext::new_without_auth(String::new(), String::new())
+        };
+        
         let actor_id_typed = ActorId::from(actor_id.to_string());
         actor_factory
-            .stop_actor(&actor_id_typed)
+            .stop_actor(&ctx, &actor_id_typed)
             .await
             .map_err(|e| format!("Failed to stop actor: {}", e))?;
         

@@ -82,7 +82,7 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         use plexspaces_node::create_default_service_locator;
         let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-        let _actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), mailbox, service_locator);
+        let _actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), "test".to_string(), mailbox, service_locator);
         
         let ttl = Duration::from_secs(30);
         let message = create_test_message_with_ttl(b"test".to_vec(), ttl);
@@ -99,7 +99,7 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         use plexspaces_node::create_default_service_locator;
         let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-        let _actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), mailbox, service_locator);
+        let _actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), "test".to_string(), mailbox, service_locator);
         
         let message = create_test_message(b"test".to_vec());
         
@@ -113,7 +113,7 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         use plexspaces_node::create_default_service_locator;
         let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-        let actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), Arc::clone(&mailbox), service_locator.clone());
+        let actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), "test".to_string(), Arc::clone(&mailbox), service_locator.clone());
         
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};

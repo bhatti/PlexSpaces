@@ -26,6 +26,9 @@ use plexspaces_core::{ActorId, RequestContext, TupleSpaceProvider};
 use std::sync::Arc;
 use wasmtime::Result as WasmtimeResult;
 
+// Note: bindgen! macro generates types under plexspaces::actor::registry
+// These are used in conversion functions below
+
 /// Helper function to convert WIT context to RequestContext
 /// Uses tenant_id/namespace from WIT context (from gRPC request), or empty strings if not provided
 fn context_to_request_context(ctx: &plexspaces::actor::types::Context) -> RequestContext {
@@ -89,12 +92,20 @@ impl PlexspacesHost {
 
 // Generate bindings from WIT files using bindgen! macro
 // Path is relative to Cargo.toml (crates/wasm-runtime/)
+// This generates the plexspaces::actor::* module with all WIT types
+// The bindgen macro generates types like PlexspacesActor, plexspaces::actor::registry::ObjectType, etc.
 #[cfg(feature = "component-model")]
 wasmtime::component::bindgen!({
     world: "plexspaces-actor",
     path: "../../wit/plexspaces-actor",
     async: true,
 });
+
+// Note: The bindgen macro generates types directly in this module:
+// - PlexspacesActor: Main instantiation type (available as PlexspacesActor in this module)
+// - plexspaces::actor::*: Interface types (registry::ObjectType, registry::HealthStatus, etc.)
+// These types are available after macro expansion. PlexspacesActor is used via crate::component_host::PlexspacesActor
+// The registry types must use full paths: plexspaces::actor::registry::ObjectType
 
 /// Add plexspaces host function bindings to component linker
 ///
@@ -4538,34 +4549,34 @@ pub struct RegistryImpl {
 impl RegistryImpl {
     /// Convert proto ObjectType to WIT ObjectType
     fn proto_to_wit_object_type(proto_type: i32) -> plexspaces::actor::registry::ObjectType {
-        use plexspaces_proto::object_registry::v1::ObjectType;
+        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
         use prost::Enumeration;
         // prost::Enumeration provides from_i32
-        match ObjectType::from_i32(proto_type).unwrap_or(ObjectType::ObjectTypeUnspecified) {
-            ObjectType::ObjectTypeUnspecified => plexspaces::actor::registry::ObjectType::Unspecified,
-            ObjectType::ObjectTypeActor => plexspaces::actor::registry::ObjectType::Actor,
-            ObjectType::ObjectTypeTuplespace => plexspaces::actor::registry::ObjectType::Tuplespace,
-            ObjectType::ObjectTypeService => plexspaces::actor::registry::ObjectType::Service,
-            ObjectType::ObjectTypeVm => plexspaces::actor::registry::ObjectType::Vm,
-            ObjectType::ObjectTypeApplication => plexspaces::actor::registry::ObjectType::Application,
-            ObjectType::ObjectTypeWorkflow => plexspaces::actor::registry::ObjectType::Workflow,
-            ObjectType::ObjectTypeNode => plexspaces::actor::registry::ObjectType::Node,
-            ObjectType::ObjectTypeProcessGroup => plexspaces::actor::registry::ObjectType::ProcessGroup,
+        match ProtoObjectType::from_i32(proto_type).unwrap_or(ProtoObjectType::ObjectTypeUnspecified) {
+            ProtoObjectType::ObjectTypeUnspecified => plexspaces::actor::registry::ObjectType::Unspecified,
+            ProtoObjectType::ObjectTypeActor => plexspaces::actor::registry::ObjectType::Actor,
+            ProtoObjectType::ObjectTypeTuplespace => plexspaces::actor::registry::ObjectType::Tuplespace,
+            ProtoObjectType::ObjectTypeService => plexspaces::actor::registry::ObjectType::Service,
+            ProtoObjectType::ObjectTypeVm => plexspaces::actor::registry::ObjectType::Vm,
+            ProtoObjectType::ObjectTypeApplication => plexspaces::actor::registry::ObjectType::Application,
+            ProtoObjectType::ObjectTypeWorkflow => plexspaces::actor::registry::ObjectType::Workflow,
+            ProtoObjectType::ObjectTypeNode => plexspaces::actor::registry::ObjectType::Node,
+            ProtoObjectType::ObjectTypeProcessGroup => plexspaces::actor::registry::ObjectType::ProcessGroup,
         }
     }
 
     /// Convert proto HealthStatus to WIT HealthStatus
     fn proto_to_wit_health_status(proto_status: i32) -> plexspaces::actor::registry::HealthStatus {
-        use plexspaces_proto::object_registry::v1::HealthStatus;
+        use plexspaces_proto::object_registry::v1::HealthStatus as ProtoHealthStatus;
         use prost::Enumeration;
         // prost::Enumeration provides from_i32
-        match HealthStatus::from_i32(proto_status).unwrap_or(HealthStatus::HealthStatusUnknown) {
-            HealthStatus::HealthStatusUnknown => plexspaces::actor::registry::HealthStatus::Unknown,
-            HealthStatus::HealthStatusHealthy => plexspaces::actor::registry::HealthStatus::Healthy,
-            HealthStatus::HealthStatusDegraded => plexspaces::actor::registry::HealthStatus::Degraded,
-            HealthStatus::HealthStatusUnhealthy => plexspaces::actor::registry::HealthStatus::Unhealthy,
-            HealthStatus::HealthStatusStarting => plexspaces::actor::registry::HealthStatus::Starting,
-            HealthStatus::HealthStatusStopping => plexspaces::actor::registry::HealthStatus::Stopping,
+        match ProtoHealthStatus::from_i32(proto_status).unwrap_or(ProtoHealthStatus::HealthStatusUnknown) {
+            ProtoHealthStatus::HealthStatusUnknown => plexspaces::actor::registry::HealthStatus::Unknown,
+            ProtoHealthStatus::HealthStatusHealthy => plexspaces::actor::registry::HealthStatus::Healthy,
+            ProtoHealthStatus::HealthStatusDegraded => plexspaces::actor::registry::HealthStatus::Degraded,
+            ProtoHealthStatus::HealthStatusUnhealthy => plexspaces::actor::registry::HealthStatus::Unhealthy,
+            ProtoHealthStatus::HealthStatusStarting => plexspaces::actor::registry::HealthStatus::Starting,
+            ProtoHealthStatus::HealthStatusStopping => plexspaces::actor::registry::HealthStatus::Stopping,
         }
     }
 
@@ -4646,16 +4657,17 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         let request_ctx = context_to_request_context(&ctx);
 
         // Convert WIT ObjectType to proto ObjectType
+        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
         let proto_object_type = match object_type {
-            plexspaces::actor::registry::ObjectType::Unspecified => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified,
-            plexspaces::actor::registry::ObjectType::Actor => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor,
-            plexspaces::actor::registry::ObjectType::Tuplespace => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeTuplespace,
-            plexspaces::actor::registry::ObjectType::Service => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeService,
-            plexspaces::actor::registry::ObjectType::Vm => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeVm,
-            plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
-            plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
-            plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
-            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
+            plexspaces::actor::registry::ObjectType::Unspecified => ProtoObjectType::ObjectTypeUnspecified,
+            plexspaces::actor::registry::ObjectType::Actor => ProtoObjectType::ObjectTypeActor,
+            plexspaces::actor::registry::ObjectType::Tuplespace => ProtoObjectType::ObjectTypeTuplespace,
+            plexspaces::actor::registry::ObjectType::Service => ProtoObjectType::ObjectTypeService,
+            plexspaces::actor::registry::ObjectType::Vm => ProtoObjectType::ObjectTypeVm,
+            plexspaces::actor::registry::ObjectType::Application => ProtoObjectType::ObjectTypeApplication,
+            plexspaces::actor::registry::ObjectType::Workflow => ProtoObjectType::ObjectTypeWorkflow,
+            plexspaces::actor::registry::ObjectType::Node => ProtoObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => ProtoObjectType::ObjectTypeProcessGroup,
         };
 
         // Convert WIT labels to proto labels (Vec<String>)
@@ -4725,16 +4737,17 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         let request_ctx = context_to_request_context(&ctx);
 
         // Convert WIT ObjectType to proto ObjectType
+        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
         let proto_object_type = match object_type {
-            plexspaces::actor::registry::ObjectType::Unspecified => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified,
-            plexspaces::actor::registry::ObjectType::Actor => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor,
-            plexspaces::actor::registry::ObjectType::Tuplespace => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeTuplespace,
-            plexspaces::actor::registry::ObjectType::Service => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeService,
-            plexspaces::actor::registry::ObjectType::Vm => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeVm,
-            plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
-            plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
-            plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
-            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
+            plexspaces::actor::registry::ObjectType::Unspecified => ProtoObjectType::ObjectTypeUnspecified,
+            plexspaces::actor::registry::ObjectType::Actor => ProtoObjectType::ObjectTypeActor,
+            plexspaces::actor::registry::ObjectType::Tuplespace => ProtoObjectType::ObjectTypeTuplespace,
+            plexspaces::actor::registry::ObjectType::Service => ProtoObjectType::ObjectTypeService,
+            plexspaces::actor::registry::ObjectType::Vm => ProtoObjectType::ObjectTypeVm,
+            plexspaces::actor::registry::ObjectType::Application => ProtoObjectType::ObjectTypeApplication,
+            plexspaces::actor::registry::ObjectType::Workflow => ProtoObjectType::ObjectTypeWorkflow,
+            plexspaces::actor::registry::ObjectType::Node => ProtoObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => ProtoObjectType::ObjectTypeProcessGroup,
         };
 
         // Drop span before await to ensure Send
@@ -4781,16 +4794,17 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         let request_ctx = context_to_request_context(&ctx);
 
         // Convert WIT ObjectType to proto ObjectType
+        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
         let proto_object_type = match object_type {
-            plexspaces::actor::registry::ObjectType::Unspecified => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified,
-            plexspaces::actor::registry::ObjectType::Actor => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor,
-            plexspaces::actor::registry::ObjectType::Tuplespace => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeTuplespace,
-            plexspaces::actor::registry::ObjectType::Service => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeService,
-            plexspaces::actor::registry::ObjectType::Vm => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeVm,
-            plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
-            plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
-            plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
-            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
+            plexspaces::actor::registry::ObjectType::Unspecified => ProtoObjectType::ObjectTypeUnspecified,
+            plexspaces::actor::registry::ObjectType::Actor => ProtoObjectType::ObjectTypeActor,
+            plexspaces::actor::registry::ObjectType::Tuplespace => ProtoObjectType::ObjectTypeTuplespace,
+            plexspaces::actor::registry::ObjectType::Service => ProtoObjectType::ObjectTypeService,
+            plexspaces::actor::registry::ObjectType::Vm => ProtoObjectType::ObjectTypeVm,
+            plexspaces::actor::registry::ObjectType::Application => ProtoObjectType::ObjectTypeApplication,
+            plexspaces::actor::registry::ObjectType::Workflow => ProtoObjectType::ObjectTypeWorkflow,
+            plexspaces::actor::registry::ObjectType::Node => ProtoObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => ProtoObjectType::ObjectTypeProcessGroup,
         };
 
         // Drop span before await to ensure Send
@@ -4923,16 +4937,17 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         let request_ctx = context_to_request_context(&ctx);
 
         // Convert WIT ObjectType to proto ObjectType
+        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
         let proto_object_type = match object_type {
-            plexspaces::actor::registry::ObjectType::Unspecified => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified,
-            plexspaces::actor::registry::ObjectType::Actor => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor,
-            plexspaces::actor::registry::ObjectType::Tuplespace => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeTuplespace,
-            plexspaces::actor::registry::ObjectType::Service => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeService,
-            plexspaces::actor::registry::ObjectType::Vm => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeVm,
-            plexspaces::actor::registry::ObjectType::Application => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication,
-            plexspaces::actor::registry::ObjectType::Workflow => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow,
-            plexspaces::actor::registry::ObjectType::Node => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode,
-            plexspaces::actor::registry::ObjectType::ProcessGroup => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup,
+            plexspaces::actor::registry::ObjectType::Unspecified => ProtoObjectType::ObjectTypeUnspecified,
+            plexspaces::actor::registry::ObjectType::Actor => ProtoObjectType::ObjectTypeActor,
+            plexspaces::actor::registry::ObjectType::Tuplespace => ProtoObjectType::ObjectTypeTuplespace,
+            plexspaces::actor::registry::ObjectType::Service => ProtoObjectType::ObjectTypeService,
+            plexspaces::actor::registry::ObjectType::Vm => ProtoObjectType::ObjectTypeVm,
+            plexspaces::actor::registry::ObjectType::Application => ProtoObjectType::ObjectTypeApplication,
+            plexspaces::actor::registry::ObjectType::Workflow => ProtoObjectType::ObjectTypeWorkflow,
+            plexspaces::actor::registry::ObjectType::Node => ProtoObjectType::ObjectTypeNode,
+            plexspaces::actor::registry::ObjectType::ProcessGroup => ProtoObjectType::ObjectTypeProcessGroup,
         };
 
         // Drop span before await to ensure Send

@@ -118,7 +118,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     let mailbox = Arc::new(Mailbox::new(mailbox_config, "test@node1".to_string()).await.unwrap());
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), Arc::clone(&mailbox), service_locator.clone());
+    let actor_ref = ActorRef::local("test@node1".to_string(), "test".to_string(), "test".to_string(), Arc::clone(&mailbox), service_locator.clone());
     
     // Register actor before calling tell()
     use plexspaces_core::{ActorRegistry, RequestContext};
@@ -142,8 +142,8 @@ async fn test_actor_ref_tell_with_ttl_message() {
     let received_msg = received.unwrap();
     assert_eq!(received_msg.id, message_id);
     
-    // TTL should be preserved (using getter method since ttl field is private)
-    assert!(received_msg.ttl().is_some());
+    // TTL should be preserved (ttl is an Option field in proto Message)
+    assert!(received_msg.ttl.is_some());
 }
 
 #[tokio::test]

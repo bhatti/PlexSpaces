@@ -48,8 +48,11 @@ pub enum ConfigLoaderError {
         source: std::io::Error,
     },
     /// YAML parsing error
-    #[error("Failed to parse YAML: {0}")]
-    YamlError(#[from] serde_yaml::Error),
+    #[error("Failed to parse YAML at '{path}': {error}")]
+    YamlError {
+        path: String,
+        error: serde_yaml::Error,
+    },
     /// Security validation error
     #[error("Security validation failed: {0}")]
     SecurityError(String),
@@ -110,7 +113,11 @@ impl ConfigLoader {
         let substituted = self.substitute_env_vars(&content)?;
 
         // Parse YAML into intermediate representation
-        let yaml_release: ReleaseYaml = serde_yaml::from_str(&substituted)?;
+        let yaml_release: ReleaseYaml = serde_yaml::from_str(&substituted)
+            .map_err(|e| ConfigLoaderError::YamlError {
+                path: path.to_string(),
+                error: e,
+            })?;
 
         // Convert to proto ReleaseSpec
         let spec = convert_yaml_to_proto(yaml_release)

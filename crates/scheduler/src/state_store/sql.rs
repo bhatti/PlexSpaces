@@ -41,15 +41,80 @@ impl SqliteSchedulingStateStore {
     /// - `path`: Database file path (use ":memory:" for in-memory database)
     pub async fn new(path: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let connection_string = format!("sqlite:{}", path);
+        
+        tracing::debug!(
+            db_path = %path,
+            connection_string = %connection_string,
+            "Creating SQLite scheduler state store"
+        );
+        
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(5)
             .connect(&connection_string)
             .await?;
 
-        // Run migrations
-        sqlx::migrate!("./migrations/sqlite")
-            .run(&pool)
-            .await?;
+        // For SQLite, use manual CREATE TABLE to avoid migration conflicts when sharing database
+        // with other crates (keyvalue, blob, etc.). PostgreSQL uses sqlx::migrate!().
+        let mut conn = pool.acquire().await.map_err(|e| {
+            format!("Failed to acquire connection for scheduler migration: {}", e)
+        })?;
+
+        tracing::debug!(
+            db_path = %path,
+            "Creating scheduler tables and indexes"
+        );
+
+        // Create table (SQLite uses INTEGER for Unix timestamps, not TIMESTAMP)
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS scheduling_requests (
+                request_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                requirements_json TEXT NOT NULL,
+                namespace TEXT,
+                tenant_id TEXT,
+                selected_node_id TEXT,
+                actor_id TEXT,
+                error_message TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                scheduled_at INTEGER,
+                completed_at INTEGER,
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                metadata_json TEXT
+            )
+            "#,
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("Scheduler migration CREATE TABLE failed: {}", e))?;
+
+        tracing::debug!("Created scheduling_requests table");
+
+        // Create indexes
+        for (idx_name, idx_sql) in [
+            (
+                "idx_scheduling_requests_status",
+                "CREATE INDEX IF NOT EXISTS idx_scheduling_requests_status ON scheduling_requests(status)",
+            ),
+            (
+                "idx_scheduling_requests_created",
+                "CREATE INDEX IF NOT EXISTS idx_scheduling_requests_created ON scheduling_requests(created_at DESC)",
+            ),
+            (
+                "idx_scheduling_requests_node",
+                "CREATE INDEX IF NOT EXISTS idx_scheduling_requests_node ON scheduling_requests(selected_node_id) WHERE selected_node_id IS NOT NULL",
+            ),
+            (
+                "idx_scheduling_requests_actor",
+                "CREATE INDEX IF NOT EXISTS idx_scheduling_requests_actor ON scheduling_requests(actor_id) WHERE actor_id IS NOT NULL",
+            ),
+        ] {
+            sqlx::query(idx_sql)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| format!("Scheduler migration failed to create index {}: {}", idx_name, e))?;
+            tracing::debug!(index = %idx_name, "Created scheduler index");
+        }
 
         tracing::info!(
             db_path = %path,

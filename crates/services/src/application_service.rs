@@ -90,6 +90,7 @@ pub fn create_default_application_spec(
     
     ApplicationSpec {
         name: name.to_string(),
+        tenant_id: String::new(), // Set by deployment code from JWT
         namespace: String::new(), // Set by deployment code
         version: version.to_string(),
         description: format!("WASM application: {}", name),
@@ -248,8 +249,10 @@ impl ApplicationService for ApplicationServiceImpl {
                 merged_config.supervisor = default_spec.supervisor;
             }
             
-            // Tenant comes from auth, not config
+            // Set tenant_id in ApplicationSpec from JWT (via RequestContext)
+            // This is the source of truth for tenant isolation
             let final_tenant_id = tenant_id.clone();
+            merged_config.tenant_id = final_tenant_id.clone();
             
             // Set namespace in ApplicationSpec for actor registration
             // Priority: 1) spec.namespace from config, 2) namespace from request, 3) application_id

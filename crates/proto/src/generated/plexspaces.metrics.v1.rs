@@ -307,6 +307,25 @@ pub struct ActorMetrics {
     /// Total parent-child relationships unregistered
     #[prost(uint64, tag="16")]
     pub parent_child_unregistered_total: u64,
+    // ============================================================================
+    // SHARD GROUP METRICS (Data-Parallel Actors)
+    // ============================================================================
+
+    /// Total shard groups created
+    #[prost(uint64, tag="17")]
+    pub shard_groups_created_total: u64,
+    /// Total shard messages sent (to shard actors)
+    #[prost(uint64, tag="18")]
+    pub shard_messages_sent_total: u64,
+    /// Total shard messages received (from shard actors)
+    #[prost(uint64, tag="19")]
+    pub shard_messages_received_total: u64,
+    /// Total shard operations (map, scatter_gather, bulk_update)
+    #[prost(uint64, tag="20")]
+    pub shard_operations_total: u64,
+    /// Failed shard operations
+    #[prost(uint64, tag="21")]
+    pub shard_operations_failed_total: u64,
 }
 // ============================================================================
 // SYSTEM METRICS (Detailed)

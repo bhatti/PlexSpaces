@@ -277,7 +277,8 @@ impl ReplyWaiterRegistry {
     /// - true if waiter was found and notified
     /// - false if no waiter found for this correlation_id
     pub async fn notify(&self, correlation_id: &str, reply: Message) -> bool {
-        let waiters_count = self.waiters.read().await.len();
+        let mut waiters = self.waiters.write().await;
+        let waiters_count = waiters.len();
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
                 "[REPLY_WAITER_REGISTRY] notify called: correlation_id={}, waiters_count={}",
@@ -285,8 +286,6 @@ impl ReplyWaiterRegistry {
                 waiters_count
             );
         }
-        
-        let mut waiters = self.waiters.write().await;
         if let Some(waiter) = waiters.remove(correlation_id) {
             drop(waiters); // Release lock before notifying
             if tracing::enabled!(tracing::Level::TRACE) {
@@ -307,11 +306,14 @@ impl ReplyWaiterRegistry {
                 }
             }
         } else {
-            tracing::warn!(
-                "[REPLY_WAITER_REGISTRY] No waiter found for correlation_id={}, available_ids={:?}",
-                correlation_id,
-                waiters.keys().collect::<Vec<_>>()
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                let available_ids: Vec<String> = waiters.keys().cloned().collect();
+                tracing::trace!(
+                    "[REPLY_WAITER_REGISTRY] No waiter found for correlation_id={}, available_ids={:?}",
+                    correlation_id,
+                    available_ids
+                );
+            }
         }
         false
     }

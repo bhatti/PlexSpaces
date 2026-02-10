@@ -28,7 +28,7 @@ plexspaces-services = { path = "../services" }
 plexspaces-scheduler = { workspace = true, features = ["sqlite-backend"] }
 plexspaces-locks = { workspace = true }
 plexspaces-common = { path = "../common" }
-plexspaces-wasm-runtime = { workspace = true }
+plexspaces-wasm-runtime = { workspace = true, features = ["component-model"] }
 plexspaces-blob = { path = "../blob", features = ["sql-backend", "server", "presigned-urls", "s3-backend"] }
 plexspaces-firecracker = { workspace = true, optional = true }
 plexspaces-dashboard = { path = "../dashboard", optional = true }

@@ -194,13 +194,14 @@
 //! - **Memory per actor**: < 1KB (idle), < 10KB (active with state)
 //!
 //! ## Known Limitations
-//! - **Actor groups**: Planned for Week 6-7 (data-parallel actors from NSDI'22 paper)
+//! - **Shard groups**: Planned for Week 6-7 (data-parallel actors from NSDI'22 paper)
 //! - **Hot code swapping**: Planned via WASM module replacement
 //! - **Distributed placement**: Currently random, planned intelligent placement
 
 // Submodules are declared in lib.rs, not here
 
 use std::sync::Arc;
+use std::io::Write;
 use tokio::sync::{mpsc, RwLock};
 // For catch_unwind()
 use crate::resource::{ActorHealth, ResourceContract, ResourceProfile, ResourceUsage};
@@ -416,7 +417,7 @@ async fn set_replay_handler_for_facet(
         return;
     }
     
-    // If we get here, we couldn't downcast - that's okay, replay will use legacy mode
+    // If we get here, we couldn't downcast - that's okay, replay will use default mode
     if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Could not set ReplayHandler - facet is not a DurabilityFacet");
     }
@@ -785,7 +786,7 @@ impl Actor {
         // Critical for supervisor tree: supervisor waits for init() before starting next child
         self.register_in_registry().await?;
 
-        // Step 6: Call STATIC lifecycle hook (ALWAYS runs) - for backward compatibility
+        // Step 6: Call STATIC lifecycle hook (ALWAYS runs)
         self.on_activate().await?;
 
         // Start message processing
@@ -840,9 +841,7 @@ impl Actor {
                         }
                         tracing::error!("[ACTOR::SHUTDOWN] ERROR: Should not reach here after break! actor_id={}", actor_id_for_logging);
                     }
-                    Some(mailbox_message) = mailbox.dequeue() => {
-                        // Convert mailbox Message to proto Message at boundary
-                        let message = mailbox_message.to_proto();
+                    Some(message) = mailbox.dequeue() => {
                         if tracing::enabled!(tracing::Level::TRACE) {
                             tracing::trace!(
                                 actor_id = %actor_id_for_logging,
@@ -852,11 +851,13 @@ impl Actor {
                         }
                         
                         // Check if this is an EXIT message (from linked actor death)
-                        // Use mailbox_message for EXIT handling (has is_exit() and try_parse_exit() methods)
-                        if mailbox_message.is_exit() {
-                            if let Some((from_actor_id, reason_str)) = mailbox_message.try_parse_exit() {
+                        // Use helper functions for EXIT handling
+                        use plexspaces_mailbox::{is_exit, try_parse_exit};
+                        let is_exit_msg = is_exit(&message);
+                        if is_exit_msg {
+                            if let Some((from_actor_id, reason_str)) = try_parse_exit(&message) {
                                 // Parse exit reason from string
-                                let exit_reason = parse_exit_reason_from_str(&reason_str, &mailbox_message.metadata);
+                                let exit_reason = parse_exit_reason_from_str(&reason_str, &message.headers);
                                 // Check if actor traps exits
                                 if context.trap_exit {
                                     // Phase 4: Monitoring/Linking Integration - Call facet.on_exit() for ALL facets
@@ -1059,6 +1060,12 @@ impl Actor {
                         }
                         
                         // Process normal message with facets
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            tracing::debug!(
+                                "[ACTOR LOOP] Calling process_message: actor_id={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}",
+                                actor_id_for_logging, message.id, message.message_type, message.sender_id, message.receiver_id, message.correlation_id
+                            );
+                        }
                         let result = Self::process_message(
                             message.clone(),
                             &actor_id_for_logging,
@@ -1072,7 +1079,7 @@ impl Actor {
                         // Only for channels that support ack/nack (Redis, Kafka, etc.)
                         if result.is_ok() {
                             // Successful processing - ACK the message
-                            if let Err(e) = mailbox.ack_message(&mailbox_message).await {
+                            if let Err(e) = mailbox.ack_message(&message).await {
                                 let error_str = e.to_string();
                                 // MessageNotFound is expected for in-memory channels (fire-and-forget)
                                 // Only log as warning for unexpected errors
@@ -1096,7 +1103,7 @@ impl Actor {
                         } else {
                             // Failed processing - NACK the message (will retry or DLQ)
                             let error_msg = result.as_ref().err().map(|e| e.to_string());
-                            if let Err(e) = mailbox.nack_message(&mailbox_message, error_msg.as_deref()).await {
+                            if let Err(e) = mailbox.nack_message(&message, error_msg.as_deref()).await {
                                 let error_str = e.to_string();
                                 // MessageNotFound is expected for in-memory channels (fire-and-forget)
                                 // Only log as warning for unexpected errors
@@ -1576,10 +1583,10 @@ impl Actor {
 
     /// Send a message to this actor
     pub async fn send(&self, message: Message) -> Result<(), ActorError> {
-        // Convert proto Message to mailbox Message for mailbox storage
-        let mailbox_msg = plexspaces_mailbox::Message::from_proto(&message);
+        // Convert proto Message to mailbox Message
+        // Use proto Message directly - no conversion needed
         self.mailbox
-            .enqueue(mailbox_msg)
+            .enqueue(message)
             .await
             .map_err(|e| ActorError::MailboxError(e.to_string()))
     }
@@ -1910,8 +1917,10 @@ impl Actor {
             );
 
             // Create ActorRef for registration
+            // CRITICAL: Pass tenant_id from ActorContext to ActorRef
             let actor_ref = ActorRef::local(
                 self.id.clone(),
+                self.context.tenant_id.clone(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
                 self.context.namespace.clone(),
                 self.mailbox.clone(),
                 self.context.service_locator.clone(),
@@ -1994,11 +2003,6 @@ impl Actor {
         last_message_time: &Arc<RwLock<std::time::Instant>>,
         facets: &Arc<RwLock<FacetContainer>>,
     ) -> Result<(), ActorError> {
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!("[ACTOR::PROCESS_MESSAGE] START: actor_id={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
-                actor_id, message.id, message.sender_id, message.receiver_id, message.correlation_id, message.message_type);
-        }
-        
         // RECURSION DETECTION: Track call depth to detect infinite loops
         use std::thread_local;
         thread_local! {
@@ -2043,6 +2047,24 @@ impl Actor {
                 plexspaces_core::BehaviorType::Custom(ref s) => s.clone(),
             }
         };
+        
+        // Verify actor_id matches message.receiver_id
+        if actor_id != message.receiver_id {
+            tracing::warn!(
+                "[ACTOR::PROCESS_MESSAGE] Actor ID mismatch: actor_id={}, behavior={}, message.receiver_id={}, message_id={}, message_type={}, sender_id={}",
+                actor_id, behavior_owned, message.receiver_id, message.id, message.message_type, message.sender_id
+            );
+        }
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[ACTOR::PROCESS_MESSAGE] START: actor_id={}, behavior={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}",
+                actor_id, behavior_owned, message.id, message.message_type, message.sender_id, message.receiver_id, message.correlation_id
+            );
+        }
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("[ACTOR::PROCESS_MESSAGE] START: actor_id={}, behavior={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
+                actor_id, behavior_owned, message.id, message.sender_id, message.receiver_id, message.correlation_id, message.message_type);
+        }
         
         // OBSERVABILITY: Tracing span for message processing (TRACE to reduce log noise; use RUST_LOG=plexspaces_actor=trace to enable)
         let span = tracing::span!(
@@ -2103,7 +2125,8 @@ impl Actor {
                 // Only send reply if there's a correlation_id (ask pattern) and sender_id
                 if !message.correlation_id.is_empty() && !message.sender_id.is_empty() {
                     let mut reply_msg = Message::default();
-                    reply_msg.id = ulid::Ulid::new().to_string();
+                    // Ensure reply message ID has "res-" prefix
+                    reply_msg.id = format!("res-{}", ulid::Ulid::new().to_string());
                     reply_msg.payload = result;
                     reply_msg.message_type = format!("{}_reply", method_name);
                     reply_msg.sender_id = actor_id_owned.clone();
@@ -2116,9 +2139,26 @@ impl Actor {
                         actor_id_owned.clone(),
                         reply_msg,
                     ).await {
-                        tracing::error!(error = %e, "Failed to send facet reply");
+                        tracing::error!(
+                            actor_id = %actor_id_owned,
+                            method = %method_name,
+                            message_id = %message.id,
+                            message_type = %message.message_type,
+                            correlation_id = %message.correlation_id,
+                            sender_id = %message.sender_id,
+                            error = %e,
+                            "Failed to send facet reply"
+                        );
                     } else {
-                        info!(actor_id = %actor_id_owned, method = %method_name, "📤 Actor: Sent facet reply");
+                        tracing::info!(
+                            actor_id = %actor_id_owned,
+                            method = %method_name,
+                            message_id = %message.id,
+                            message_type = %message.message_type,
+                            correlation_id = %message.correlation_id,
+                            sender_id = %message.sender_id,
+                            "📤 Actor: Sent facet reply"
+                        );
                     }
                 }
                 return Ok(());
@@ -2131,17 +2171,19 @@ impl Actor {
                 // Process with behavior (Go-style: context first, then message)
                 // Note: ActorContext is now static - sender_id and correlation_id are in Message, not context
                 let mut behavior = behavior.write().await;
-                if tracing::enabled!(tracing::Level::TRACE) {
-                    tracing::trace!(
-                        "CALLING handle_message: depth={}, actor_id={}, message_id={}",
-                        depth, actor_id_owned, message_id
+                
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[PROCESS_MESSAGE] CALLING handle_message: actor_id={}, behavior={}, method={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}, depth={}",
+                        actor_id_owned, behavior_owned, method_name, message_id, message.message_type, message.sender_id, message.receiver_id, message.correlation_id, depth
                     );
                 }
                 let result = behavior.handle_message(context, message.clone()).await;
-                if tracing::enabled!(tracing::Level::TRACE) {
-                    tracing::trace!(
-                        "handle_message COMPLETED: depth={}, actor_id={}, result={}",
-                        depth, actor_id_owned, result.is_ok()
+                
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        "[PROCESS_MESSAGE] handle_message COMPLETED: actor_id={}, behavior={}, method={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}, result={:?}, depth={}",
+                        actor_id_owned, behavior_owned, method_name, message_id, message.message_type, message.sender_id, message.receiver_id, message.correlation_id, result.is_ok(), depth
                     );
                 }
 

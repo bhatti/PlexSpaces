@@ -1,0 +1,18 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'lineColor': '#94a3b8'}}}%%
+graph LR
+    M["📨 Message"] --> S["🔒 Security<br/>Priority 1000+"]
+    S --> L["📋 Logging<br/>Priority 900"]
+    L --> Me["📊 Metrics<br/>Priority 800"]
+    Me --> D["🧩 Domain<br/>Priority 100-500"]
+    D --> A["🎯 Actor Logic"]
+    A --> P["💾 Persistence<br/>Priority 1-99"]
+    P --> R["📤 Response"]
+
+    style M fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+    style S fill:#ef4444,stroke:#f87171,stroke-width:2px,color:#fff
+    style L fill:#6b7280,stroke:#9ca3af,stroke-width:2px,color:#fff
+    style Me fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+    style D fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style A fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style P fill:#0891b2,stroke:#22d3ee,stroke-width:2px,color:#000
+    style R fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff

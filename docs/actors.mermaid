@@ -1,0 +1,24 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'primaryTextColor': '#ffffff', 'lineColor': '#94a3b8', 'fontSize': '14px'}}}%%
+graph TB
+    subgraph Pillars["Five Foundational Pillars"]
+        P1["🔷 TupleSpace<br/>Linda Coordination"]
+        P2["🟢 Erlang/OTP<br/>Supervision & Behaviors"]
+        P3["🟣 Durable Execution<br/>Journaling & Replay"]
+        P4["🔵 WASM Runtime<br/>Polyglot & Portable"]
+        P5["🔴 Firecracker<br/>Isolation & Security"]
+    end
+
+    Actor["🏗️ Unified Actor Model"]
+
+    P1 --> Actor
+    P2 --> Actor
+    P3 --> Actor
+    P4 --> Actor
+    P5 --> Actor
+
+    style P1 fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+    style P2 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style P3 fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style P4 fill:#0891b2,stroke:#22d3ee,stroke-width:2px,color:#000
+    style P5 fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
+    style Actor fill:#1e3a8a,stroke:#3b82f6,stroke-width:3px,color:#fff

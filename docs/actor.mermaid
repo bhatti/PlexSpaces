@@ -1,0 +1,12 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'primaryTextColor': '#ffffff', 'lineColor': '#94a3b8'}}}%%
+graph LR
+    Msg["📨 Message"] --> Mailbox["📬 Mailbox"]
+    Mailbox --> Actor["🎯 Actor<br/>State + Behavior"]
+    Actor --> Facets["🧩 Facets<br/>Capabilities"]
+    Facets --> Reply["📤 Response"]
+
+    style Msg fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+    style Mailbox fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+    style Actor fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style Facets fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style Reply fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000

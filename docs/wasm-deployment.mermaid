@@ -1,0 +1,28 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'lineColor': '#94a3b8'}}}%%
+graph TB
+    subgraph Node["PlexSpaces Node"]
+        subgraph Apps["Deployed Applications"]
+            A1["🐍 Python App<br/>ML Models"]
+            A2["📜 TypeScript App<br/>Webhooks"]
+            A3["🦀 Rust App<br/>Performance-Critical"]
+        end
+
+        WASM["⚙️ WASM Runtime<br/>wasmtime"]
+
+        subgraph Svc["Framework Services"]
+            S1["ActorService"]
+            S2["TupleSpace"]
+            S3["KeyValue"]
+            S4["BlobStorage"]
+        end
+    end
+
+    A1 -->|"Compile to WASM"| WASM
+    A2 -->|"Compile to WASM"| WASM
+    A3 -->|"Native Rust"| S1
+    WASM --> Svc
+
+    style Node fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style Apps fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
+    style WASM fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style Svc fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff

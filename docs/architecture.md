@@ -31,31 +31,135 @@ PlexSpaces modernizes these concepts with:
 ### Pillar Architecture Diagram
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'primaryTextColor': '#fff', 'lineColor': '#64748b', 'fontSize': '13px'}}}%%
 graph TB
-    subgraph Pillars["Five Foundational Pillars"]
-        P1["Pillar 1: TupleSpace<br/>(Linda Coordination)"]
-        P2["Pillar 2: Erlang/OTP<br/>(Supervision & Behaviors)"]
-        P3["Pillar 3: Durable Execution<br/>(Journaling & Replay)"]
-        P4["Pillar 4: WASM Runtime<br/>(Polyglot & Portable)"]
-        P5["Pillar 5: Firecracker<br/>(Isolation & Security)"]
+    subgraph SDKs["📦 Polyglot SDKs"]
+        SDK1["🐍 Python"] ~~~ SDK2["📜 TypeScript"] ~~~ SDK3["🦀 Rust"]
     end
-    
-    subgraph Unified["Unified Actor Model"]
-        Actor["Actor<br/>(One Powerful Abstraction)"]
+
+    subgraph UseCases["🎯 Use Cases"]
+        UC1["Microservices"] ~~~ UC2["Serverless<br/>FaaS"] ~~~ UC3["AI Agents /<br/>ML Workloads"] ~~~ UC4["HPC"] ~~~ UC5["Durable<br/>Workflows"]
     end
-    
-    P1 --> Actor
-    P2 --> Actor
-    P3 --> Actor
-    P4 --> Actor
-    P5 --> Actor
-    
-    style P1 fill:#ea580c,stroke:#fb923c,stroke-width:3px,color:#fff
-    style P2 fill:#10b981,stroke:#34d399,stroke-width:3px,color:#000
-    style P3 fill:#7c3aed,stroke:#a78bfa,stroke-width:3px,color:#fff
-    style P4 fill:#0891b2,stroke:#22d3ee,stroke-width:3px,color:#000
-    style P5 fill:#dc2626,stroke:#ef4444,stroke-width:3px,color:#fff
-    style Actor fill:#1e3a8a,stroke:#3b82f6,stroke-width:4px,color:#fff
+
+    subgraph Patterns["📐 Patterns"]
+        PA1["Worker Pool<br/>ShardGroup"] ~~~ PA2["Scatter-Gather<br/>Map-Reduce"] ~~~ PA3["SEDA<br/>Pipelines"] ~~~ PA4["Leader<br/>Election"] ~~~ PA5["Event<br/>Sourcing"] ~~~ PA6["Cellular<br/>Architecture"]
+    end
+
+    subgraph Core["🏗️ Unified Actor Model"]
+        direction TB
+        ActorCore["Actor Core — State · Mailbox · Tell/Ask · Supervision · Location Transparency"]
+        subgraph BehaviorRow["Behaviors (Compile-Time)"]
+            B1["GenServer"] ~~~ B2["GenEvent"] ~~~ B3["GenFSM"] ~~~ B4["Workflow"]
+        end
+        subgraph FacetRow["Facets (Runtime)"]
+            F1["Virtual<br/>Actor"] ~~~ F2["Durability"] ~~~ F3["Mobility"] ~~~ F4["Timer /<br/>Reminder"] ~~~ F5["Metrics /<br/>Tracing"] ~~~ F6["AuthN /<br/>AuthZ"] ~~~ F7["Event<br/>Emitter"]
+        end
+        ActorCore --- BehaviorRow
+        ActorCore --- FacetRow
+    end
+
+    subgraph CoordLayer["🔗 Coordination & Communication"]
+        CO1["TupleSpace<br/>Linda Memory"] ~~~ CO2["Channels<br/>Kafka · NATS · SQS<br/>Redis · UDP"] ~~~ CO3["Process Groups<br/>pg2 Pub/Sub"] ~~~ CO4["Distributed<br/>Locks"]
+    end
+
+    subgraph Services["🔧 Batteries Included"]
+        IS1["Key-Value Store<br/>SQLite·PG·Redis·DDB"] ~~~ IS2["Blob Storage<br/>S3·GCS·Azure"] ~~~ IS3["Object Registry<br/>Discovery + Gossip"] ~~~ IS4["Journal Storage<br/>Checkpoints"] ~~~ IS5["Node Registry<br/>Health + Capacity"]
+    end
+
+    subgraph Pillars["🏛️ Five Foundational Pillars"]
+        P1["🔷 TupleSpace<br/>Linda Coordination"]
+        P2["🟢 Erlang/OTP<br/>Supervision"]
+        P3["🟣 Durable Execution<br/>Journaling + Replay"]
+        P4["🔵 WASM Runtime<br/>wasmtime + WIT"]
+        P5["🔴 Firecracker<br/>MicroVM Isolation"]
+    end
+
+    subgraph Deploy["☁️ Deploy Anywhere"]
+        D1["Docker / K8s"] ~~~ D2["On-Premises"] ~~~ D3["AWS / GCP / Azure"] ~~~ D4["Edge"]
+    end
+
+    subgraph Comms["📡 Communication"]
+        CM1["gRPC / Protobuf<br/>Proto-First"] ~~~ CM2["HTTP Gateway<br/>REST · Lambda URLs"] ~~~ CM3["Multi-Tenancy<br/>JWT · mTLS"]
+    end
+
+    SDKs --> UseCases
+    UseCases --> Patterns
+    Patterns --> Core
+    Core --> CoordLayer
+    CoordLayer --> Services
+    Services --> Pillars
+    Pillars --> Comms
+    Comms --> Deploy
+
+    style SDKs fill:#422006,stroke:#f59e0b,stroke-width:2px,color:#fefce8
+    style UseCases fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#e2e8f0
+    style Patterns fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff
+    style Core fill:#1e3a8a,stroke:#60a5fa,stroke-width:3px,color:#fff
+    style CoordLayer fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#fff7ed
+    style Services fill:#164e63,stroke:#22d3ee,stroke-width:2px,color:#ecfeff
+    style Pillars fill:#1a1a2e,stroke:#a78bfa,stroke-width:2px,color:#f3e8ff
+    style Deploy fill:#1c1917,stroke:#a8a29e,stroke-width:2px,color:#f5f5f4
+    style Comms fill:#4a044e,stroke:#e879f9,stroke-width:2px,color:#fdf4ff
+
+    style SDK1 fill:#d97706,stroke:#f59e0b,color:#fff
+    style SDK2 fill:#d97706,stroke:#f59e0b,color:#fff
+    style SDK3 fill:#d97706,stroke:#f59e0b,color:#fff
+
+    style UC1 fill:#3b82f6,stroke:#60a5fa,color:#fff
+    style UC2 fill:#3b82f6,stroke:#60a5fa,color:#fff
+    style UC3 fill:#3b82f6,stroke:#60a5fa,color:#fff
+    style UC4 fill:#3b82f6,stroke:#60a5fa,color:#fff
+    style UC5 fill:#3b82f6,stroke:#60a5fa,color:#fff
+
+    style PA1 fill:#6366f1,stroke:#818cf8,color:#fff
+    style PA2 fill:#6366f1,stroke:#818cf8,color:#fff
+    style PA3 fill:#6366f1,stroke:#818cf8,color:#fff
+    style PA4 fill:#6366f1,stroke:#818cf8,color:#fff
+    style PA5 fill:#6366f1,stroke:#818cf8,color:#fff
+    style PA6 fill:#6366f1,stroke:#818cf8,color:#fff
+
+    style ActorCore fill:#2563eb,stroke:#93c5fd,stroke-width:3px,color:#fff
+    style BehaviorRow fill:#15803d,stroke:#4ade80,stroke-width:2px,color:#dcfce7
+    style FacetRow fill:#581c87,stroke:#9333ea,stroke-width:2px,color:#e9d5ff
+
+    style B1 fill:#22c55e,stroke:#4ade80,color:#000
+    style B2 fill:#22c55e,stroke:#4ade80,color:#000
+    style B3 fill:#22c55e,stroke:#4ade80,color:#000
+    style B4 fill:#22c55e,stroke:#4ade80,color:#000
+
+    style F1 fill:#a855f7,stroke:#c084fc,color:#fff
+    style F2 fill:#a855f7,stroke:#c084fc,color:#fff
+    style F3 fill:#a855f7,stroke:#c084fc,color:#fff
+    style F4 fill:#a855f7,stroke:#c084fc,color:#fff
+    style F5 fill:#a855f7,stroke:#c084fc,color:#fff
+    style F6 fill:#a855f7,stroke:#c084fc,color:#fff
+    style F7 fill:#a855f7,stroke:#c084fc,color:#fff
+
+    style CO1 fill:#ea580c,stroke:#fb923c,color:#fff
+    style CO2 fill:#ea580c,stroke:#fb923c,color:#fff
+    style CO3 fill:#ea580c,stroke:#fb923c,color:#fff
+    style CO4 fill:#ea580c,stroke:#fb923c,color:#fff
+
+    style IS1 fill:#0891b2,stroke:#22d3ee,color:#fff
+    style IS2 fill:#0891b2,stroke:#22d3ee,color:#fff
+    style IS3 fill:#0891b2,stroke:#22d3ee,color:#fff
+    style IS4 fill:#0891b2,stroke:#22d3ee,color:#fff
+    style IS5 fill:#0891b2,stroke:#22d3ee,color:#fff
+
+    style P1 fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
+    style P2 fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
+    style P3 fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style P4 fill:#0891b2,stroke:#22d3ee,stroke-width:2px,color:#000
+    style P5 fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
+
+    style CM1 fill:#c026d3,stroke:#e879f9,color:#fff
+    style CM2 fill:#c026d3,stroke:#e879f9,color:#fff
+    style CM3 fill:#c026d3,stroke:#e879f9,color:#fff
+
+    style D1 fill:#57534e,stroke:#a8a29e,color:#fff
+    style D2 fill:#57534e,stroke:#a8a29e,color:#fff
+    style D3 fill:#57534e,stroke:#a8a29e,color:#fff
+    style D4 fill:#57534e,stroke:#a8a29e,color:#fff
 ```
 
 ### 1. TupleSpace Coordination (Linda Model)

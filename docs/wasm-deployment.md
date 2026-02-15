@@ -100,6 +100,16 @@ pub extern "C" fn handle_request(
 
 **Fields**:
 - `application_id` (required): Unique application identifier (for tracking/debugging)
+- `wasm_file` (required): WASM module file (multipart file upload)
+- `config` (optional): ApplicationSpec TOML configuration file
+- `name` (required): Application name
+- `version` (required): Application version (e.g., "1.0.0")
+
+**Resource Limits**:
+- Fuel limits are configured via `WasmConfig.limits.max_fuel` (default: 10 billion units)
+- For operations requiring heavy JSON serialization or complex computations, increase fuel limits
+- Fuel is consumed during execution (ops, memory access, calls)
+- Zero = unlimited (not recommended for untrusted code)
 - `name` (required): **Application name - used by ApplicationManager for storage and lookup** (use this for undeployment, not application_id)
 - `version` (required): Application version (e.g., "1.0.0")
 - `behavior_kind` (optional): OTP-style behavior for logging (e.g. `GenEvent` for event-handler actors; logs show `EventHandler`)
@@ -354,6 +364,11 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 Uses the [TypeScript SDK](sdk.md#typescript-sdk) and the same `plexspaces-simple-actor` WIT as Python. Build with jco (not Javy) so the component imports only `plexspaces:simple-actor/host`.
 
+**Key Features**:
+- **SDK Handles WIT Types**: WIT TypeScript types are generated automatically by the SDK - clients don't need to generate or import them
+- **Iterative Serializer**: SDK uses iterative JSON serialization to avoid WASM recursion issues
+- **String Returns**: Actors return JSON strings (serialized by SDK) - host parses them
+
 **Build**:
 ```bash
 cd examples/typescript/apps/bank_account
@@ -575,6 +590,7 @@ The runtime replaces component state after each successful `handle()` for compon
 
 8. **Resource limits**  
    - Set `limits` in `WasmConfig` (e.g. `max_memory_bytes`, `max_fuel`) to avoid runaway usage; tighter limits can also improve predictability.
+   - **Fuel limits**: Default is 10 billion units (~1 second CPU time). For operations requiring heavy JSON serialization or complex computations, increase `max_fuel` (e.g., `u64::MAX / 2` for very large operations). Fuel is consumed during execution (ops, memory access, calls). Zero = unlimited (not recommended for untrusted code).
 
 ### Summary
 
@@ -690,6 +706,65 @@ cargo run --release --bin plexspaces -- application deploy \
 
 **Testing WASM Deployment**:
 - The integration test (`cargo test --package plexspaces-node --test http_wasm_deployment`) creates a working traditional WASM module and successfully deploys it
+
+## Auto-Deploy and Persistence
+
+### Auto-Deploy on Startup
+
+PlexSpaces automatically deploys WASM applications from the `wasm_apps_directory` on node startup. This enables Tomcat-style auto-deployment where applications persist across restarts.
+
+**File Structure**:
+```
+{wasm_apps_directory}/
+  payment-handler/
+    app.wasm                     # Required: WASM module
+    application-spec.toml        # Optional: ApplicationSpec config
+  calculator/
+    app.wasm
+    application-spec.toml
+```
+
+**Configuration**:
+- Environment variable: `PLEXSPACES_WASM_APPS_DIR` (default: `${base_dir}/apps`)
+- Config file: `runtime.wasm_apps_directory` in `release.yaml`
+
+**How It Works**:
+1. Node scans `wasm_apps_directory` on startup
+2. Finds all subdirectories containing `app.wasm` files
+3. Automatically deploys each valid WASM application
+4. Errors are logged but don't prevent node startup
+
+### Saving WASM Files on API Deployment
+
+When deploying via HTTP/gRPC API, you can optionally save WASM files to disk for persistence.
+
+**Configuration**:
+- Environment variable: `PLEXSPACES_SAVE_WASM_APPS=1` (default: disabled)
+- Config file: `runtime.save_wasm_apps: true` in `release.yaml`
+
+**Important**:
+- ⚠️ **Only saves during API deployments** (HTTP/gRPC) - NOT during auto-deploy
+- ⚠️ **Disabled by default** - only enable for testing/development
+- ⚠️ **Production**: Use proper deployment pipelines
+- Files are saved atomically to prevent corruption
+- Format: `{wasm_apps_directory}/{app-name}/app.wasm` and `{wasm_apps_directory}/{app-name}/application-spec.toml`
+
+**Example Workflow**:
+```bash
+# 1. Enable saving (testing only)
+export PLEXSPACES_SAVE_WASM_APPS=1
+
+# 2. Deploy via API - files are saved to apps/payment-handler/app.wasm and application-spec.toml
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
+  -F "application_id=payment-handler" \
+  -F "name=payment-handler" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@payment-handler.wasm"
+
+# 3. On next restart, payment-handler is auto-deployed automatically from the subdirectory
+```
+
+See [Installation Guide](installation.md#wasm-applications-auto-deploy-and-persistence) for complete details.
 - Use the test script (`./scripts/test-empty-node-deployment.sh`) which automatically creates a working WASM module
 - For manual testing, use Rust/Go WASM modules or TypeScript/Python components (simple-actor WIT)
 
@@ -1030,12 +1105,20 @@ See `examples/python/README.md` for complete documentation.
 
 TypeScript actors use the same **simple-actor** WIT world as Python. Use the [TypeScript SDK](sdk.md#typescript-sdk): extend `PlexSpacesActor<TState>`, implement `getDefaultState()` and `on<Op>(payload)` handlers, then build with **jco componentize** (not Javy).
 
+**SDK Simplification**: The SDK automatically generates WIT TypeScript types during build - client code doesn't need to run `jco types` or import generated files. The SDK abstracts all WIT details away, keeping client code simple.
+
 **Build** (from `examples/typescript/apps/bank_account`):
 
 1. Install deps: `npm install` (includes `@plexspaces/sdk`, `esbuild`, `jco`)
 2. Build: `./scripts/build.sh` — runs tsc, esbuild bundle (actor + SDK → single ESM), then `jco componentize account_actor_bundle.mjs --wit wit/plexspaces-simple-actor -o account_actor.wasm --disable all`
 
 **Important**: Use `--disable all` so the component only imports `plexspaces:simple-actor/host`; the PlexSpaces runtime does not provide WASI 0.2.3 that jco would otherwise add.
+
+**SDK Simplification**: 
+- WIT TypeScript types are automatically generated by the SDK during build (`npm run build` in SDK)
+- Client code doesn't need to run `jco types` or import generated files
+- SDK uses iterative JSON serialization to avoid WASM recursion issues
+- Just extend `PlexSpacesActor` and implement handlers - SDK handles all WIT details
 
 See [examples/typescript/apps/bank_account/README.md](../examples/typescript/apps/bank_account/README.md) and [sdks/typescript/README.md](../sdks/typescript/README.md) for full docs.
 

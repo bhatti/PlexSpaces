@@ -1,106 +1,116 @@
-# Heat Diffusion Example (TupleSpace Coordination)
+# Heat Diffusion - Thermal Simulation with TupleSpace Coordination
 
-**Purpose**: Demonstrate TupleSpace for neighbor communication in stencil computation.
+**Real-world use case**: Thermal simulation, image processing, weather modeling - parallel stencil computation with ghost cell exchange between distributed regions.
 
-**PlexSpaces APIs**: `TupleSpace::write()`, `TupleSpace::read()`, barrier synchronization
+**Pattern**: TupleSpace coordination for neighbor communication, barrier synchronization for iteration control.
+
+## Overview
+
+This example demonstrates parallel stencil computation (5-point stencil for heat diffusion) using PlexSpaces actors and TupleSpace coordination. Each actor manages a horizontal strip of a 2D grid and exchanges boundary values (ghost cells) with neighbors via TupleSpace.
+
+## Architecture
+
+### GridRegionActor
+
+Each actor manages a horizontal strip of the grid:
+- **State**: Current temperature values (1D array)
+- **Computation**: 5-point stencil (average of north, south, east, west neighbors)
+- **Coordination**: Writes boundary values to TupleSpace, reads neighbor boundaries
+
+### TupleSpace Coordination Pattern
+
+1. **Write Phase**: Each region publishes its north and south boundaries to TupleSpace
+2. **Read Phase**: Each region reads neighbor boundaries from TupleSpace
+3. **Compute Phase**: Update values using stencil with ghost cells
+4. **Barrier Phase**: Synchronize all regions before next iteration
+
+### Coordination vs. Computation Metrics
+
+- **Coordination**: TupleSpace operations (write, read, barrier)
+- **Computation**: Stencil computation (actual work)
+- **Granularity Ratio**: compute_time / coordinate_time (target: >10x)
+
+## SDK Features Demonstrated
+
+- `#[gen_server_actor]` - Declares GenServer behavior
+- `#[plexspaces_handlers(gen_server)]` - Auto-generated message dispatch
+- `#[handler("compute")]` - Iteration handler
+- `spawn()` - SDK helper for spawning actors
+- `GenServerRef.call()` - Request-reply messaging
+- `ActorContext::get_tuplespace()` - Access TupleSpace from actor
+
+## TupleSpace Operations
+
+- **Write**: `tuplespace.write(tuple)` - Publish boundary values
+- **Read**: `tuplespace.read(pattern)` - Get neighbor boundaries
+- **Barrier**: `tuplespace.barrier(name, pattern, count)` - Synchronize iterations
 
 ## Quick Start
 
 ```bash
 cd examples/rust/embedded/heat_diffusion
-
-# Build
-cargo build
-
-# Run
-cargo run
-```
-
-## What It Demonstrates
-
-1. **TupleSpace for Ghost Cells**: Regions write boundaries, neighbors read them
-2. **Barrier Synchronization**: All regions sync before next iteration
-3. **Decoupled Communication**: No direct actor-to-actor references needed
-
-## PlexSpaces API Usage
-
-### Ghost Cell Exchange via TupleSpace
-
-```rust
-use plexspaces_tuplespace::TupleSpace;
-use plexspaces_core::RequestContext;
-
-let tuplespace = TupleSpace::with_tenant_namespace("heat-sim", "diffusion");
-let ctx = RequestContext::new_without_auth("heat-sim".into(), "diffusion".into());
-
-// WRITE: Region publishes its boundary
-tuplespace.write(&ctx, tuple!["boundary", iteration, region_id, "south", boundary_data]).await?;
-
-// READ: Region receives neighbor's boundary  
-let tuple = tuplespace.read(&ctx, pattern!["boundary", iteration, neighbor_id, "north", _]).await?;
-let ghost_cells = extract_data(tuple);
-```
-
-### Barrier Synchronization
-
-```rust
-// All regions must reach barrier before next iteration
-tuplespace.barrier(&ctx, format!("iteration_{}", iter), num_regions).await?;
-```
-
-## Architecture
-
-```
-┌──────────────┐          ┌──────────────┐
-│  Region 0    │          │  Region 1    │
-│  (Actor)     │          │  (Actor)     │
-└──────┬───────┘          └──────┬───────┘
-       │ write south              │ write north
-       ▼                          ▼
-┌─────────────────────────────────────────┐
-│            TupleSpace                   │
-│  ["boundary", iter, region, edge, data] │
-└─────────────────────────────────────────┘
-       │ read north               │ read south
-       ▼                          ▼
-┌──────────────┐          ┌──────────────┐
-│  compute()   │          │  compute()   │
-└──────────────┘          └──────────────┘
+cargo run --bin heat_diffusion
 ```
 
 ## Expected Output
 
 ```
-Step 2: Run diffusion with TupleSpace ghost cell exchange
-  Iteration 1: WRITE phase
-    Region 0 writes south boundary to TupleSpace: ["0.0", "0.0", ...]
-    Region 1 writes north boundary to TupleSpace: ["100.0", "100.0", ...]
-    Region 0 reads from TupleSpace (south neighbor): ["100.0", ...]
-    Region 1 reads from TupleSpace (north neighbor): ["0.0", ...]
-    Region 0 after compute: ["0.0", "25.0", "25.0", ...]
-    Region 1 after compute: ["100.0", "75.0", "75.0", ...]
-    Max diff: 25.00
+╔════════════════════════════════════════════════════════════════╗
+║       Heat Diffusion with TupleSpace Coordination              ║
+╚════════════════════════════════════════════════════════════════╝
 
-  Converged at iteration 4 (diff 0.39 < 0.50)
+Configuration:
+  Grid width: 1000 columns
+  Regions: 8 horizontal strips
+  Max iterations: 100
+  Tolerance: 0.5
+
+Step 1: Spawn 8 region actors
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Spawned region-0 (initial temp: 0.0°C)
+  Spawned region-1 (initial temp: 33.3°C)
+  Spawned region-2 (initial temp: 66.7°C)
+  Spawned region-3 (initial temp: 100.0°C)
+
+Step 2: Run diffusion with TupleSpace ghost cell exchange
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Iteration 1: max_diff=25.0000, time=12.34ms
+  Iteration 10: max_diff=2.5000, time=11.23ms
+  Iteration 20: max_diff=0.2500, time=10.12ms
+  Converged at iteration 25 (diff 0.4500 < 0.50)
+
+Step 3: Performance Metrics
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total execution time: 250.00ms
+Iterations completed: 25
+
+Coordination Metrics:
+  Coordination time: 50.00ms (20.0%)
+  Computation time: 200.00ms (80.0%)
+  Messages sent: 100
+  Barriers: 25
+
+Granularity ratio (compute/coordinate): 4.00
+  ⚠️  Moderate granularity (coordination overhead is noticeable)
 ```
 
-## Key APIs
+## Real-World Use Cases
 
-| Operation | PlexSpaces API |
-|-----------|----------------|
-| Publish boundary | `tuplespace.write(&ctx, tuple![...])` |
-| Receive boundary | `tuplespace.read(&ctx, pattern![...])` |
-| Sync iterations | `tuplespace.barrier(&ctx, name, count)` |
+- **Thermal Simulation**: Heat transfer in materials, engines, buildings
+- **Image Processing**: Gaussian blur, edge detection (stencil operations)
+- **Weather Modeling**: Temperature, pressure, humidity diffusion
+- **Fluid Dynamics**: Navier-Stokes solvers (stencil-based)
 
-## Use Cases
+## Design Principles
 
-- **Thermal simulation**: Heat flow in materials
-- **Image processing**: Blur, edge detection (stencil operations)
-- **Weather modeling**: Temperature/pressure diffusion
-- **Finite element analysis**: Neighbor-dependent computations
+- **SDK Patterns**: Use annotations and helpers, not low-level APIs
+- **Tenant Isolation**: Explicit RequestContext with tenant/namespace
+- **Observability**: CoordinationComputeTracker for metrics
+- **Non-trivial Data**: 200 columns × 4 regions = 800 cells (runs 2+ seconds)
+- **Shared Target**: Uses workspace shared target directory
 
-## See Also
+## References
 
-- [Matrix Multiply](../matrix_multiply/) - Actor-based parallel computation
-- [MPI Collectives](../mpi_collectives/) - Collective operations
-- [Architecture Docs](../../../../docs/architecture.md)
+- [Architecture](../../../../docs/architecture.md)
+- [TupleSpace Coordination](../../../../docs/detailed-design.md#tuplespace)
+- [Getting Started](../../../../docs/getting-started.md)

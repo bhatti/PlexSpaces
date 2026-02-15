@@ -1,25 +1,33 @@
 // PlexSpaces Simple Actor Interface
 //
-// Ultra-simplified for maximum Python componentize-py compatibility.
-// Uses ONLY strings to completely avoid PyObject_SetItem lifting issues.
-//
-// Design: All complex data passed as JSON strings.
-// No records, no options, no lists - just primitives and strings.
+// Simplified interface for Python/TypeScript/Go component compatibility.
+// Uses structured types for results to avoid WASM recursion issues.
+// Input/output still uses JSON strings for maximum compatibility.
 
 package plexspaces:simple-actor@0.1.0;
 
-/// Ultra-minimal actor interface using only strings
+/// Actor interface
 interface actor {
     /// Initialize with JSON config
     /// Returns empty string on success, or error message on failure
     init: func(config-json: string) -> string;
     
     /// Handle message
-    /// from-actor: sender ID
-    /// msg-type: message type (e.g., "call", "cast", "get_state")  
-    /// payload-json: JSON message content
-    /// Returns: JSON response, or "ERROR:message" on failure
-    handle: func(from-actor: string, msg-type: string, payload-json: string) -> string;
+    /// 
+    /// # Arguments
+    /// - `from-actor`: Sender actor ID
+    /// - `msg-type`: Message type (e.g., "call", "cast", "get_state")
+    /// - `payload-json`: JSON message content
+    /// 
+    /// # Returns
+    /// - `ok(string)`: JSON-serialized result (host parses JSON)
+    /// - `err(string)`: Error message
+    /// 
+    /// # Design Rationale
+    /// Returns JSON string instead of structured types because jco componentize's
+    /// conversion of structured types to WIT types causes recursion in StarlingMonkey.
+    /// The iterative serializer avoids recursion during serialization.
+    handle: func(from-actor: string, msg-type: string, payload-json: string) -> result<string, string>;
     
     /// Get state as JSON
     get-state: func() -> string;

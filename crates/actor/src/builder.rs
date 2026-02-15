@@ -35,7 +35,7 @@
 //! use plexspaces_core::Actor;
 //!
 //! struct MyBehavior;
-//! impl ActorBehavior for MyBehavior { /* ... */ }
+//! impl Actor for MyBehavior { /* ... */ }
 //!
 //! let actor = ActorBuilder::new(MyBehavior::new())
 //!     .with_name("my-actor")
@@ -53,9 +53,9 @@
 //!     .await?;
 //! ```
 
-use crate::Actor;
+use crate::Actor as ActorStruct;
 use crate::resource::ResourceProfile;
-use plexspaces_core::{Actor as ActorTrait, ActorId};
+use plexspaces_core::{Actor, ActorId};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::v1::actor::ActorConfig;
 use std::sync::Arc;
@@ -73,7 +73,7 @@ use std::sync::Arc;
 /// - Supports facet-based extensibility
 /// - Single entry point for all actor types
 pub struct ActorBuilder {
-    behavior: Box<dyn ActorTrait>,
+    behavior: Box<dyn Actor>,
     actor_id: Option<ActorId>,
     tenant_id: String,
     namespace: String,
@@ -94,7 +94,7 @@ impl ActorBuilder {
     /// ```rust,ignore
     /// let builder = ActorBuilder::new(MyBehavior::new());
     /// ```
-    pub fn new(behavior: Box<dyn ActorTrait>) -> Self {
+    pub fn new(behavior: Box<dyn Actor>) -> Self {
         Self {
             behavior,
             actor_id: None,
@@ -589,7 +589,7 @@ impl ActorBuilder {
     ///     .build()
     ///     .await?;
     /// ```
-    pub async fn build(self) -> Result<Actor, std::io::Error> {
+    pub async fn build(self) -> Result<ActorStruct, std::io::Error> {
         // Generate actor ID if not provided
         let mut actor_id = self.actor_id.unwrap_or_else(|| {
             use std::time::{SystemTime, UNIX_EPOCH};
@@ -664,11 +664,11 @@ impl ActorBuilder {
                 service_locator,
                 Some(config),
             ));
-            let mut actor = Actor::new(actor_id, self.behavior, mailbox, tenant_id.clone(), namespace.clone(), node_id.clone());
+            let mut actor = ActorStruct::new(actor_id, self.behavior, mailbox, tenant_id.clone(), namespace.clone(), node_id.clone());
             actor = actor.set_context(context);
             actor
         } else {
-            Actor::new(actor_id, self.behavior, mailbox, tenant_id.clone(), namespace.clone(), node_id)
+            ActorStruct::new(actor_id, self.behavior, mailbox, tenant_id.clone(), namespace.clone(), node_id)
         };
 
         // Apply resource profile if provided
@@ -782,13 +782,14 @@ impl ActorBuilder {
         // Create ActorRef (implements MessageSender)
         // CRITICAL: Pass tenant_id from ActorBuilder to ActorRef
         use crate::ActorRef;
-        let actor_ref: std::sync::Arc<dyn plexspaces_core::MessageSender> = std::sync::Arc::new(ActorRef::local(
+        let actor_ref_impl = ActorRef::local(
             actor_id.clone(),
             tenant_id_for_ref.clone(), // CRITICAL: tenant_id from ActorBuilder (from API)
             namespace_for_ref.clone(),
             mailbox.clone(),
             service_locator.clone(),
-        ));
+        );
+        let actor_ref: std::sync::Arc<dyn plexspaces_core::MessageSender> = std::sync::Arc::new(actor_ref_impl.clone());
         
         // Start actor (calls init() internally, then registers in ActorRegistry)
         let _join_handle = actor.start().await
@@ -815,12 +816,12 @@ impl ActorBuilder {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use plexspaces_core::{BehaviorType, Actor as ActorTrait};
+    use plexspaces_core::{BehaviorType, Actor};
 
     struct TestBehavior;
 
     #[async_trait]
-    impl ActorTrait for TestBehavior {
+    impl Actor for TestBehavior {
         async fn handle_message(
             &mut self,
             _ctx: &plexspaces_core::ActorContext,

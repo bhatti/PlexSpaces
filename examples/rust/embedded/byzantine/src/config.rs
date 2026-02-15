@@ -18,10 +18,15 @@ pub struct ByzantineConfig {
     /// Number of Byzantine (faulty) generals (must be < general_count/3)
     #[serde(default = "default_fault_count")]
     pub fault_count: usize,
+    
+    /// Number of consensus rounds to run
+    #[serde(default = "default_num_rounds")]
+    pub num_rounds: usize,
 }
 
-fn default_general_count() -> usize { 4 }
-fn default_fault_count() -> usize { 1 }
+fn default_general_count() -> usize { 20 }
+fn default_fault_count() -> usize { 5 }
+fn default_num_rounds() -> usize { 5 }
 
 impl ByzantineConfig {
     /// Load configuration using ConfigBootstrap

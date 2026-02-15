@@ -262,7 +262,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
-
+    
     /// Key-value get (string-only). Returns value or empty if not found.
     /// WIT: plexspaces-simple-actor host.kv-get(key) -> string. Context uses tenant_id="", namespace=actor_id for key scoping.
     async fn kv_get(&mut self, key: String) -> String {

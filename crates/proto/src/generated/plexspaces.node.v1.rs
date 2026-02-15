@@ -351,6 +351,20 @@ pub struct RuntimeConfig {
     /// Environment variable: PLEXSPACES_WASM_APPS_DIR
     #[prost(string, tag="11")]
     pub wasm_apps_directory: ::prost::alloc::string::String,
+    /// Save deployed WASM applications to wasm_apps_directory (default: false)
+    ///
+    /// When enabled, WASM modules deployed via API are atomically saved to
+    /// wasm_apps_directory/<app-name>/app.wasm for persistence and auto-deploy
+    /// on next node restart. Uses atomic file operations (temp file then move)
+    /// to prevent half-completed files.
+    ///
+    /// Security: Only enable for testing/development. Production should use
+    /// proper deployment pipelines and not save arbitrary WASM files to disk.
+    ///
+    /// Default: false (disabled)
+    /// Environment variable: PLEXSPACES_SAVE_WASM_APPS
+    #[prost(bool, tag="12")]
+    pub save_wasm_apps: bool,
 }
 /// gRPC server configuration
 #[allow(clippy::derive_partial_eq_without_eq)]

@@ -1177,6 +1177,19 @@ impl Node {
             }
         }
 
+        // Register RuntimeConfig and SecurityConfig in ServiceLocator
+        {
+            let release_spec = self.release_spec.read().await;
+            if let Some(ref spec) = *release_spec {
+                if let Some(ref runtime) = spec.runtime {
+                    self.service_locator.register_runtime_config(runtime.clone()).await;
+                }
+                if let Some(ref security) = spec.runtime.as_ref().and_then(|r| r.security.as_ref()) {
+                    self.service_locator.register_security_config((*security).clone()).await;
+                }
+            }
+        }
+
         // Get NodeConfig for node registration
         let _proto_node_config = self.service_locator.get_node_config().await
             .ok_or_else(|| NodeError::ConfigError("NodeConfig not found in ServiceLocator".to_string()))?;

@@ -6,23 +6,33 @@ publish = false
 
 [workspace]
 
+[lib]
+name = "matrix_multiply"
+path = "src/lib.rs"
+
 [[bin]]
 name = "matrix_multiply"
 path = "src/main.rs"
 
 [dependencies]
-# PlexSpaces crates
-plexspaces = { path = "../../../.." }
-plexspaces-node = { path = "../../../../crates/node" }
-plexspaces-actor = { path = "../../../../crates/actor" }
+# PlexSpaces SDK
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
 plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-behavior = { path = "../../../../crates/behavior" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
-plexspaces-proto = { path = "../../../../crates/proto" }
+plexspaces-node = { path = "../../../../crates/node" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Utilities
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -44,9 +44,9 @@ dependencies = []
 LOG_LEVEL = "info"
 
 [matrix_vector_mpi]
-num_rows = 8
-num_cols = 4
-num_workers = 2
+num_rows = 2000
+num_cols = 2000
+num_workers = 4
 
 [shutdown]
 global_timeout_seconds = 60

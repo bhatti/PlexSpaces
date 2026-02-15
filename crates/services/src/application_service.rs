@@ -153,8 +153,9 @@ impl ApplicationService for ApplicationServiceImpl {
     ) -> Result<Response<DeployApplicationResponse>, Status> {
         // Extract RequestContext from gRPC request - tenant_id/namespace come from API request
         let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let metadata = request.metadata().clone();
         let ctx = crate::request_context_from_grpc_request(
-            request.metadata(),
+            &metadata,
             &std::collections::HashMap::new(),
             &service_locator_trait,
         ).await
@@ -165,6 +166,13 @@ impl ApplicationService for ApplicationServiceImpl {
         // Extract tenant_id and namespace from RequestContext (from API request)
         let tenant_id = ctx.tenant_id().to_string();
         let namespace = ctx.namespace().to_string();
+        
+        // Check if this is an API deployment (has proper metadata) vs internal auto-deploy
+        // API deployments will have metadata headers (authorization, x-tenant-id, etc.)
+        // Internal auto-deploy calls won't have these headers
+        let is_api_deployment = metadata.contains_key("authorization") 
+            || metadata.contains_key("x-tenant-id")
+            || metadata.contains_key("x-namespace");
         
         let req = request.into_inner();
         
@@ -196,6 +204,9 @@ impl ApplicationService for ApplicationServiceImpl {
 
         // Handle WASM module deployment if provided
         if let Some(wasm_module) = req.wasm_module {
+            // Clone WASM bytes for potential file saving (before deployment)
+            let wasm_bytes_for_save = wasm_module.module_bytes.clone();
+            
             // Get WASM runtime from ServiceLocator
             let wasm_runtime = self.get_wasm_runtime().await?;
             
@@ -270,6 +281,9 @@ impl ApplicationService for ApplicationServiceImpl {
             let namespace_for_log = final_namespace.clone();
             let tenant_id_for_log = final_tenant_id.clone();
             
+            // Clone merged_config for file saving (before it's moved into WasmApplication)
+            let merged_config_for_save = merged_config.clone();
+            
             // Create WasmApplication from application crate
             use plexspaces_application::wasm_application::WasmApplication;
             // Get WASM runtime again for WasmApplication
@@ -312,6 +326,38 @@ impl ApplicationService for ApplicationServiceImpl {
                     Status::internal(format!("Failed to register application: {}", e))
                 })?;
             
+            // Save WASM file to disk atomically ONLY if:
+            // 1. save_wasm_apps is enabled
+            // 2. This is an API deployment (HTTP/gRPC) - NOT auto-deploy on startup
+            // Auto-deploy should NOT save files (they're already on disk from previous API deployments)
+            // We check is_api_deployment flag to distinguish API calls from internal auto-deploy calls
+            if is_api_deployment {
+                if let Some(runtime_config) = self.service_locator.get_runtime_config().await {
+                    if runtime_config.save_wasm_apps && !runtime_config.wasm_apps_directory.is_empty() {
+                        use crate::wasm_file_saver::save_wasm_app_atomically;
+                        if let Err(e) = save_wasm_app_atomically(
+                            &runtime_config.wasm_apps_directory,
+                            &app_name,
+                            &wasm_bytes_for_save,
+                            &merged_config_for_save,
+                            runtime_config.save_wasm_apps,
+                        ) {
+                            // Log error but don't fail deployment (non-fatal)
+                            tracing::warn!(
+                                app_name = %app_name,
+                                error = %e,
+                                "Failed to save WASM file and config to disk (deployment continues)"
+                            );
+                        }
+                    }
+                }
+            } else {
+                tracing::debug!(
+                    app_name = %app_name,
+                    "Skipping WASM file save - this is an auto-deploy (file already on disk)"
+                );
+            }
+
             // Register application with object-registry using proper tenant/namespace
             if let Some(object_registry) = self.service_locator.get_object_registry().await {
                 use plexspaces_core::RequestContext;

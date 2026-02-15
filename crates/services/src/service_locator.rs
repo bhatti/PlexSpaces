@@ -421,6 +421,10 @@ pub struct ServiceLocatorImpl {
     /// Read-only after initialization, uses Mutex for one-time initialization
     security_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::SecurityConfig>>>,
     
+    /// Runtime configuration (for accessing wasm_apps_directory, save_wasm_apps, etc.)
+    /// Read-only after initialization, uses Mutex for one-time initialization
+    runtime_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::RuntimeConfig>>>,
+    
     /// Shutdown flag: when true, node is shutting down gracefully
     /// Components should stop accepting new requests but complete in-progress ones
     shutdown_flag: Arc<RwLock<bool>>,
@@ -454,6 +458,7 @@ impl ServiceLocatorImpl {
             task_router: Arc::new(RwLock::new(None)),
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
             security_config: Arc::new(tokio::sync::Mutex::new(None)),
+            runtime_config: Arc::new(tokio::sync::Mutex::new(None)),
             shutdown_flag: Arc::new(RwLock::new(false)),
         }
     }
@@ -540,6 +545,24 @@ impl ServiceLocatorImpl {
             Some(config) => config.disable_auth,
             None => false, // Auth enabled by default if no config
         }
+    }
+
+    /// Get RuntimeConfig (for accessing wasm_apps_directory, save_wasm_apps, etc.)
+    pub async fn get_runtime_config(&self) -> Option<plexspaces_proto::node::v1::RuntimeConfig> {
+        let runtime_config = self.runtime_config.lock().await;
+        runtime_config.clone()
+    }
+
+    /// Register RuntimeConfig
+    ///
+    /// ## Purpose
+    /// Registers runtime configuration for accessing wasm_apps_directory, save_wasm_apps, etc.
+    ///
+    /// ## Arguments
+    /// * `config` - RuntimeConfig to register
+    pub async fn register_runtime_config(&self, config: plexspaces_proto::node::v1::RuntimeConfig) {
+        let mut runtime_config = self.runtime_config.lock().await;
+        *runtime_config = Some(config);
     }
 
     /// Register SecurityConfig
@@ -1448,6 +1471,14 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     
     async fn register_security_config(&self, config: plexspaces_proto::node::v1::SecurityConfig) {
         self.register_security_config(config).await
+    }
+
+    async fn get_runtime_config(&self) -> Option<plexspaces_proto::node::v1::RuntimeConfig> {
+        self.get_runtime_config().await
+    }
+
+    async fn register_runtime_config(&self, config: plexspaces_proto::node::v1::RuntimeConfig) {
+        self.register_runtime_config(config).await
     }
     
     async fn is_auth_disabled(&self) -> bool {

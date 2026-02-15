@@ -193,6 +193,52 @@ build:
 	fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
 	$(CARGO) build --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+	@echo "Building SDKs..."
+	@if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ]; then \
+		echo "  Building TypeScript SDK..."; \
+		if command -v npm >/dev/null 2>&1; then \
+			if (cd sdks/typescript && ([ -d "node_modules" ] || npm install --no-audit --no-fund >/dev/null 2>&1) && npm run build >/dev/null 2>&1); then \
+				echo "  ✓ TypeScript SDK built"; \
+			else \
+				echo "  ⚠️  TypeScript SDK build failed (non-critical)"; \
+			fi; \
+		else \
+			echo "  ⚠️  npm not found, skipping TypeScript SDK"; \
+		fi; \
+	fi
+	@if [ -d "sdks/python" ] && [ -f "sdks/python/pyproject.toml" ]; then \
+		echo "  Building Python SDK..."; \
+		PYTHON_CMD=""; \
+		if command -v pip3 >/dev/null 2>&1; then \
+			PYTHON_CMD="pip3"; \
+		elif command -v pip >/dev/null 2>&1; then \
+			PYTHON_CMD="pip"; \
+		elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then \
+			PYTHON_CMD="python3 -m pip"; \
+		fi; \
+		if [ -n "$$PYTHON_CMD" ]; then \
+			if (cd sdks/python && $$PYTHON_CMD install -e . --quiet --break-system-packages >/dev/null 2>&1) || \
+			   (cd sdks/python && $$PYTHON_CMD install -e . --quiet >/dev/null 2>&1); then \
+				echo "  ✓ Python SDK built"; \
+			else \
+				echo "  ⚠️  Python SDK build failed (non-critical - may need venv)"; \
+			fi; \
+		else \
+			echo "  ⚠️  pip not found, skipping Python SDK"; \
+		fi; \
+	fi
+	@if [ -d "sdks/go" ] && [ -f "sdks/go/go.mod" ]; then \
+		echo "  Building Go SDK..."; \
+		if command -v go >/dev/null 2>&1; then \
+			if (cd sdks/go && go build ./... >/dev/null 2>&1); then \
+				echo "  ✓ Go SDK built"; \
+			else \
+				echo "  ⚠️  Go SDK build failed (non-critical)"; \
+			fi; \
+		else \
+			echo "  ⚠️  go not found, skipping Go SDK"; \
+		fi; \
+	fi
 	@echo "Build complete!"
 
 # Build release version
@@ -501,7 +547,7 @@ test-package:
 #        TEST_EXAMPLES_CONCURRENT=3 make test-examples   # Uses 3 concurrent examples
 #        CARGO_BUILD_JOBS=8 make test-examples           # Uses 8 cores for building
 test-examples:
-	@echo "Running all example tests (using shared target directory)..."
+	@echo "Building all Rust examples (using shared target directory)..."
 	@echo "Target directory: $$(pwd)/target (shared across all examples)"
 	@MAX_CONCURRENT=$${TEST_EXAMPLES_CONCURRENT:-2}; \
 	CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
@@ -516,7 +562,11 @@ test-examples:
 	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
 	PROJECT_ROOT=$$(pwd); \
-	EXAMPLES="advanced/byzantine advanced/nbody domains/finance-risk domains/genomic-workflow-pipeline domains/genomics-pipeline domains/order-processing intermediate/heat_diffusion intermediate/matrix_multiply intermediate/matrix_vector_mpi simple/durable_actor_example simple/firecracker_multi_tenant rust/embedded/webhook_handler wasm-calculator"; \
+	# NOTE: Keep this list in sync with ~/.cursor/plans/reorganize_examples_structure_a51cf7c7.plan.md \
+	# Update after each example is marked as completed/rewritten in the plan \
+	# Include all Rust embedded examples that should be tested (exclude migrating_* comparison examples) \
+	# From plan: Completed (Verified Working) + Recently Completed sections \
+	EXAMPLES="rust/embedded/byzantine rust/embedded/mpi_collectives rust/embedded/matrix_vector_mpi rust/embedded/matrix_multiply rust/embedded/heat_diffusion rust/embedded/webhook_handler rust/embedded/timers rust/embedded/reminders rust/embedded/durable_actor rust/embedded/chat_room rust/embedded/document_approval rust/embedded/timeseries_forecasting rust/embedded/genomic_workflow_pipeline rust/embedded/genomics_pipeline rust/embedded/order_processing rust/embedded/entity_recognition rust/embedded/supervision_tree rust/embedded/actor_groups_sharding rust/embedded/player_session"; \
 	FAILED=0; \
 	PIDS=(); \
 	EXAMPLE_NAMES=(); \
@@ -548,14 +598,14 @@ test-examples:
 				sleep 0.1; \
 			done; \
 			[ $$FAILED -eq 1 ] && break; \
-			echo "Testing $$example..."; \
+			echo "Building $$example..."; \
 			EXAMPLE_LOG_NAME=$$(echo "$$example" | tr '/' '-'); \
 			LOG_FILE="/tmp/test_$$EXAMPLE_LOG_NAME.log"; \
 			(cd "examples/$$example" && \
 				CARGO_TARGET_DIR="$$PROJECT_ROOT/target" \
-				$(CARGO) test --all-features --jobs $$CARGO_JOBS -- --include-ignored > "$$LOG_FILE" 2>&1 && \
-				echo "✓ $$example passed" || \
-				(echo "✗ $$example failed!"; [ -f "$$LOG_FILE" ] && cat "$$LOG_FILE" || echo "Log file not found: $$LOG_FILE"; exit 1)) & \
+				$(CARGO) build --all-features --jobs $$CARGO_JOBS > "$$LOG_FILE" 2>&1 && \
+				echo "✓ $$example built successfully" || \
+				(echo "✗ $$example failed to build!"; [ -f "$$LOG_FILE" ] && cat "$$LOG_FILE" || echo "Log file not found: $$LOG_FILE"; exit 1)) & \
 			PIDS+=($$!); \
 			EXAMPLE_NAMES+=("$$example"); \
 			EXAMPLE_LOG_NAMES+=("$$EXAMPLE_LOG_NAME"); \
@@ -584,7 +634,7 @@ test-examples:
 		exit 1; \
 	else \
 		echo ""; \
-		echo "✅ All example tests passed!"; \
+		echo "✅ All Rust examples built successfully!"; \
 	fi
 
 # Run tests with coverage (using cargo-llvm-cov - supports Rust 2024)

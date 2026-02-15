@@ -16,6 +16,7 @@
  */
 export declare abstract class PlexSpacesActor<TState extends object = Record<string, unknown>> {
     protected state: TState;
+    private cachedStateJson;
     constructor();
     /** Return initial state. Override in subclass. */
     abstract getDefaultState(): TState;
@@ -24,8 +25,9 @@ export declare abstract class PlexSpacesActor<TState extends object = Record<str
     /** WIT init(config-json) -> string. Empty string = success, "ERROR:..." = failure. */
     init(configJson: string): string;
     /**
-     * WIT handle(from-actor, msg-type, payload-json) -> string.
-     * Dispatches by payload.op (or payload) to on<Op>(payload). Returns JSON or "ERROR:...".
+     * WIT handle(from-actor, msg-type, payload-json) -> result<string, string>.
+     * Dispatches by payload.op (or payload) to on<Op>(payload). Returns JSON string.
+     * Uses iterative serializer to avoid WASM recursion.
      */
     handle(_fromActor: string, _msgType: string, payloadJson: string): string;
     /** WIT get-state() -> string. Returns JSON-serialized state. */
@@ -33,6 +35,14 @@ export declare abstract class PlexSpacesActor<TState extends object = Record<str
     /** WIT set-state(state-json) -> string. Empty = success, "ERROR:..." = failure. */
     setState(stateJson: string): string;
     protected capitalize(s: string): string;
+    /**
+     * Serialize object to JSON string using fully iterative approach (zero recursion).
+     *
+     * jco componentize compiles JS to WASM (StarlingMonkey) with a tiny call stack.
+     * Native JSON.stringify recurses per-element and per-nesting-level, hitting
+     * stack limits with arrays of 2+ items. This iterative serializer uses a work
+     * stack instead of recursive function calls.
+     */
     protected json(obj: unknown): string;
     protected error(message: string): string;
 }

@@ -6,83 +6,261 @@ This guide covers installing and deploying PlexSpaces in various environments.
 
 ### Docker (Recommended)
 
+The official PlexSpaces Docker image is available at `plexobject/plexspaces`:
+
 ```bash
 # Pull the latest image
-docker pull plexspaces/node:latest
+docker pull plexobject/plexspaces:latest
 
-# Run a single node
+# Run a single node (empty, ready for WASM deployments)
 docker run -d \
   --name plexspaces-node \
-  -p 8080:8080 \
   -p 8000:8000 \
   -p 8001:8001 \
-  plexspaces/node:latest
+  -e PLEXSPACES_NODE_ID=node1 \
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  plexobject/plexspaces:latest
 ```
 
-### Docker Compose (Multi-Node)
+**Note**: The default Docker image starts an **empty node** with no pre-deployed applications. You can deploy WASM applications after the node starts. See [Deploying WASM Applications](#deploying-wasm-applications) below.
+
+### Docker Compose (Production Setup)
 
 ```bash
-# Start a 3-node cluster
+# Start node with PostgreSQL and MinIO
 docker-compose up -d
 
 # Check status
 docker-compose ps
 
 # View logs
-docker-compose logs -f
+docker-compose logs -f plexspaces-node
 ```
 
 ## Installation Methods
 
 ### 1. Docker
 
-#### Single Node
+#### Official Docker Image
+
+The official PlexSpaces Docker image is published to Docker Hub as `plexobject/plexspaces`:
 
 ```bash
+# Pull latest version
+docker pull plexobject/plexspaces:latest
+
+# Or pull a specific version
+docker pull plexobject/plexspaces:v0.1.0
+```
+
+#### Single Node (Empty, Ready for Deployments)
+
+```bash
+# Run empty node (auth disabled for testing)
 docker run -d \
   --name plexspaces-node \
-  -p 8080:8080 \
   -p 8000:8000 \
   -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=node1 \
   -e PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000 \
-  plexspaces/node:latest
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  plexobject/plexspaces:latest
+
+# Check if node is ready
+curl http://localhost:8001/api/v1/health
+
+# View logs
+docker logs -f plexspaces-node
 ```
 
-#### Multi-Node Cluster
+**Production Configuration** (with authentication):
 
-```yaml
-# docker-compose.yml
-version: '3.8'
+```bash
+# Run with JWT authentication enabled
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_NODE_ID=node1 \
+  -e PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000 \
+  -e PLEXSPACES_JWT_SECRET=your-secret-key-here \
+  -v /path/to/certs:/app/certs:ro \
+  -e PLEXSPACES_MTLS_CA_CERT=/app/certs/ca.crt \
+  -e PLEXSPACES_MTLS_SERVER_CERT=/app/certs/server.crt \
+  -e PLEXSPACES_MTLS_SERVER_KEY=/app/certs/server.key \
+  plexobject/plexspaces:latest
+```
 
-services:
-  node1:
-    image: plexspaces/node:latest
-    environment:
-      - PLEXSPACES_NODE_ID=node1
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node2:8000,node3:8000
-    ports:
-      - "8000:8000"
-      - "8001:8001"
+#### Docker Compose (Multi-Node with Dependencies)
+
+The `docker-compose.yml` file provides a production-ready setup with PostgreSQL and MinIO:
+
+```bash
+# Start all services (auth enabled by default)
+docker-compose up -d
+
+# Check status
+docker-compose ps
+
+# View logs
+docker-compose logs -f plexspaces-node
+
+# Stop all services
+docker-compose down
+```
+
+The compose file includes:
+- **PlexSpaces Node**: Empty node ready for WASM deployments
+- **PostgreSQL**: Shared database for scheduler, workflow, journaling, etc.
+- **MinIO**: S3-compatible blob storage
+
+**Configuration**:
+- Auth is **enabled by default** in `docker-compose.yml` (production-ready)
+- To disable auth for testing, override at runtime:
+  ```bash
+  # Option 1: Override via environment variable
+  PLEXSPACES_DISABLE_AUTH=1 docker-compose up
   
-  node2:
-    image: plexspaces/node:latest
-    environment:
-      - PLEXSPACES_NODE_ID=node2
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node2:8000,node3:8000
-    ports:
-      - "8001:8000"
+  # Option 2: Run one-off container with override
+  docker-compose run -e PLEXSPACES_DISABLE_AUTH=1 plexspaces-node
   
-  node3:
-    image: plexspaces/node:latest
-    environment:
-      - PLEXSPACES_NODE_ID=node3
-      - PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
-      - PLEXSPACES_CLUSTER_SEED_NODES=node1:8000,node2:8000,node3:8000
-    ports:
-      - "8002:8000"
+  # Option 3: Modify docker-compose.yml to uncomment PLEXSPACES_DISABLE_AUTH=1
+  ```
+- To enable debug logs (similar to `scripts/server.sh`):
+  ```bash
+  RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+  docker-compose up
+  ```
+- See [Security Configuration](#security-configuration) for production setup
+
+#### Building Docker Image Locally
+
+```bash
+# Build from source
+docker build -t plexobject/plexspaces:latest .
+
+# Build with specific features (e.g., dashboard, firecracker)
+docker build --build-arg FEATURES="dashboard,firecracker" -t plexobject/plexspaces:latest .
+
+# Build with version tag
+docker build -t plexobject/plexspaces:v0.1.0 .
+
+# Build multiple tags at once
+docker build -t plexobject/plexspaces:latest \
+             -t plexobject/plexspaces:v0.1.0 \
+             .
+
+# Run locally built image
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  plexobject/plexspaces:latest
+
+# Or use the build script
+./scripts/build-docker.sh latest
+```
+
+#### Publishing Docker Image
+
+To publish the Docker image to Docker Hub:
+
+```bash
+# Login to Docker Hub
+docker login
+
+# Tag image (replace VERSION with actual version)
+docker tag plexobject/plexspaces:latest plexobject/plexspaces:VERSION
+
+# Push latest
+docker push plexobject/plexspaces:latest
+
+# Push versioned tag
+docker push plexobject/plexspaces:VERSION
+```
+
+**Note**: Ensure you have push access to the `plexobject` Docker Hub organization.
+
+#### Starting Server with Debug Logs (Similar to scripts/server.sh)
+
+To start a server similar to `scripts/server.sh` with debug logs and auth disabled:
+
+```bash
+# Start with debug logs and auth disabled (for testing)
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_NODE_ID=test-node \
+  -e PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000 \
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  -e PLEXSPACES_JWT_SECRET=test-secret \
+  -e WASMTIME_BACKTRACE_DETAILS=1 \
+  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+  -v $(pwd)/release.yaml:/app/config/release.yaml:ro \
+  plexobject/plexspaces:latest
+
+# View logs
+docker logs -f plexspaces-node
+
+# Check if server is ready
+curl http://localhost:8001/api/v1/health
+```
+
+**With Docker Compose** (override auth and logging at runtime):
+
+```bash
+# Start with auth disabled and debug logs
+PLEXSPACES_DISABLE_AUTH=1 \
+RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+docker-compose up
+
+# Or run a one-off container with overrides
+docker-compose run -e PLEXSPACES_DISABLE_AUTH=1 \
+  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+  plexspaces-node
+```
+
+**Key differences from `scripts/server.sh`**:
+- Uses Docker image instead of local build
+- Ports are 8000/8001 instead of 8091/8092 (configurable)
+- Release config path is `/app/config/release.yaml` (mounted or default)
+- mTLS certs can be mounted as volume if needed
+
+#### Testing WASM Deployment with Docker
+
+1. **Start empty node** (with auth disabled for testing):
+```bash
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_NODE_ID=node1 \
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  plexobject/plexspaces:latest
+```
+
+2. **Wait for node to be ready**:
+```bash
+# Check health endpoint
+curl http://localhost:8001/api/v1/health
+```
+
+3. **Deploy WASM application** (see [Deploying WASM Applications](#deploying-wasm-applications)):
+```bash
+# Example: Deploy calculator WASM app
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
+  -F "application_id=calculator-app" \
+  -F "name=calculator" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm"
+```
+
+4. **Verify deployment**:
+```bash
+# List deployed applications
+curl http://localhost:8001/api/v1/dashboard/applications | jq
 ```
 
 ### 2. Kubernetes
@@ -279,6 +457,22 @@ PlexSpaces provides comprehensive security features including:
 
 ### Security Configuration
 
+#### Authentication Default Behavior
+
+**Important**: Authentication is **enabled by default** in PlexSpaces for production security. The framework validates that required secrets are configured when auth is enabled.
+
+**For Testing**: You can disable authentication via environment variable:
+```bash
+# Disable auth for testing (Docker)
+docker run -e PLEXSPACES_DISABLE_AUTH=1 plexobject/plexspaces:latest
+
+# Disable auth for testing (local)
+export PLEXSPACES_DISABLE_AUTH=1
+./target/release/plexspaces start
+```
+
+**For Production**: Always use proper JWT and/or mTLS configuration. Never disable authentication in production.
+
 #### Environment Variables for Secrets
 
 **CRITICAL**: All secrets must be provided via environment variables, never hardcoded in config files.
@@ -291,6 +485,39 @@ PlexSpaces provides comprehensive security features including:
 | `PLEXSPACES_MTLS_SERVER_KEY` | Path to server private key file | mTLS enabled (unless auto-generating) |
 | `PLEXSPACES_MTLS_CERT_DIR` | Directory for auto-generated certificates | mTLS auto-generation (default: `/app/certs`) |
 | `PLEXSPACES_DISABLE_AUTH` | Disable auth validation (testing only) | Never in production |
+
+#### Docker Security Configuration
+
+**Default Behavior**: Auth is **enabled by default** in both Docker image and `docker-compose.yml` for production security.
+
+**Testing (Disable Auth at Runtime)**:
+```bash
+# Single container
+docker run -e PLEXSPACES_DISABLE_AUTH=1 plexobject/plexspaces:latest
+
+# Docker Compose - override at runtime
+PLEXSPACES_DISABLE_AUTH=1 docker-compose up
+
+# Or run one-off container
+docker-compose run -e PLEXSPACES_DISABLE_AUTH=1 plexspaces-node
+```
+
+**Production (JWT Enabled)**:
+```bash
+docker run \
+  -e PLEXSPACES_JWT_SECRET=your-secret-key-here \
+  -v /path/to/certs:/app/certs:ro \
+  -e PLEXSPACES_MTLS_CA_CERT=/app/certs/ca.crt \
+  -e PLEXSPACES_MTLS_SERVER_CERT=/app/certs/server.crt \
+  -e PLEXSPACES_MTLS_SERVER_KEY=/app/certs/server.key \
+  plexobject/plexspaces:latest
+```
+
+**Docker Compose** (see `docker-compose.yml`):
+- Auth is **enabled by default** (production-ready)
+- To disable auth for testing, override at runtime: `PLEXSPACES_DISABLE_AUTH=1 docker-compose up`
+- Or uncomment `PLEXSPACES_DISABLE_AUTH=1` in `docker-compose.yml` for local testing
+- Configure JWT/mTLS via environment variables for production
 
 #### JWT Configuration
 
@@ -361,7 +588,8 @@ PlexSpaces uses a centralized configuration manager (`config_manager::initialize
 | `PLEXSPACES_LISTEN_ADDR` | gRPC listen address | `0.0.0.0:8090` |
 | `PLEXSPACES_DATABASE_URL` | Database connection string | `sqlite://${base_dir}/db/plexspaces.db` |
 | `PLEXSPACES_BASE_DIR` | Base directory for all data | `~/plexspaces` |
-| `PLEXSPACES_WASM_APPS_DIR` | Directory for WASM applications | `${base_dir}/apps` |
+| `PLEXSPACES_WASM_APPS_DIR` | Directory for WASM applications (auto-deploy on startup) | `${base_dir}/apps` |
+| `PLEXSPACES_SAVE_WASM_APPS` | Save deployed WASM files to disk (testing only, default: disabled) | `0` or `1` |
 | `PLEXSPACES_CLUSTER_SEED_NODES` | Cluster seed nodes | - |
 | `PLEXSPACES_JOURNALING_BACKEND` | Journaling backend | `sqlite` (or `ddb` if `AWS_REGION` set) |
 | `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` (or `ddb` if `AWS_REGION` set) |
@@ -450,6 +678,9 @@ runtime:
   
   # WASM applications directory (overridable via PLEXSPACES_WASM_APPS_DIR)
   wasm_apps_directory: ""  # Defaults to ${base_dir}/apps
+  # Save deployed WASM files to disk (testing only, default: false)
+  # Only saves when deploying via API (HTTP/gRPC), not during auto-deploy
+  save_wasm_apps: false  # Overridable via PLEXSPACES_SAVE_WASM_APPS=1
   
   # Shared database configuration (overridable via PLEXSPACES_DATABASE_URL)
   db:
@@ -496,6 +727,7 @@ The following field names were updated for clarity:
 | `channel_backend` | `channel_provider` | `runtime.channel_provider` |
 | `mailbox_backend` | `mailbox_provider` | `runtime.mailbox_provider` |
 | `wasm_apps_directory` | `wasm_apps_directory` | `runtime.wasm_apps_directory` (moved from `node`) |
+| `save_wasm_apps` | `save_wasm_apps` | `runtime.save_wasm_apps` (default: false, testing only) |
 | `ChannelBackend` enum | `ChannelProvider` enum | Proto files |
 
 ### AWS Configuration (Optional)
@@ -1051,6 +1283,89 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/tuplespace_calculator_actor.wasm"
 ```
 
+## WASM Applications Auto-Deploy and Persistence
+
+PlexSpaces supports automatic deployment of WASM applications on node startup and optional persistence of deployed applications to disk.
+
+### Auto-Deploy on Startup
+
+When a node starts, it automatically scans the `wasm_apps_directory` and deploys all valid WASM applications found. This enables Tomcat-style auto-deployment where applications persist across node restarts.
+
+**File Structure**:
+```
+{wasm_apps_directory}/
+  payment-handler/
+    app.wasm                     # Required: WASM module
+    application-spec.toml        # Optional: ApplicationSpec config
+  calculator/
+    app.wasm
+    application-spec.toml        # Optional: ApplicationSpec config
+```
+
+**Supported Format**:
+- **Subdirectories**: `apps/app-name/app.wasm` + `apps/app-name/application-spec.toml`
+
+**Configuration**:
+- **Environment Variable**: `PLEXSPACES_WASM_APPS_DIR` (default: `${base_dir}/apps`)
+- **Config File**: `runtime.wasm_apps_directory` in `release.yaml`
+
+**Example**:
+```bash
+# Set custom apps directory
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_NODE_ID=node1 \
+  -e PLEXSPACES_WASM_APPS_DIR=/app/data/apps \
+  -v /host/path/apps:/app/data/apps:ro \
+  plexobject/plexspaces:latest
+```
+
+### Saving WASM Files on API Deployment
+
+When deploying WASM applications via HTTP/gRPC API, you can optionally save the WASM files to disk for persistence and auto-deploy on next restart.
+
+**Configuration**:
+- **Environment Variable**: `PLEXSPACES_SAVE_WASM_APPS=1` (default: disabled)
+- **Config File**: `runtime.save_wasm_apps: true` in `release.yaml`
+
+**Important Notes**:
+- ⚠️ **Only saves during API deployments** (HTTP/gRPC) - NOT during auto-deploy
+- ⚠️ **Disabled by default** - only enable for testing/development
+- ⚠️ **Production**: Use proper deployment pipelines, don't save arbitrary WASM files
+- Files are saved atomically (temp file → atomic move) to prevent corruption
+- Saved files use subdirectory format: `{wasm_apps_directory}/{app-name}/app.wasm` and `{wasm_apps_directory}/{app-name}/application-spec.toml`
+
+**Example**:
+```bash
+# Enable saving WASM files on API deployment
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_NODE_ID=node1 \
+  -e PLEXSPACES_WASM_APPS_DIR=/app/data/apps \
+  -e PLEXSPACES_SAVE_WASM_APPS=1 \
+  -v /host/path/apps:/app/data/apps \
+  plexobject/plexspaces:latest
+
+# Deploy via API - files will be saved to /app/data/apps/payment-handler/app.wasm and application-spec.toml
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
+  -F "application_id=payment-handler" \
+  -F "name=payment-handler" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@payment-handler.wasm"
+
+# On next restart, payment-handler will be auto-deployed automatically from the subdirectory
+```
+
+**Workflow**:
+1. Deploy WASM app via API with `PLEXSPACES_SAVE_WASM_APPS=1`
+2. Files are atomically saved to `{wasm_apps_directory}/{app-name}/app.wasm` and `{wasm_apps_directory}/{app-name}/application-spec.toml`
+3. On next node restart, the application is automatically detected and deployed from the subdirectory
+4. Redeploying via API overwrites the old files with the new version
+
 ## Verifying Deployment
 
 ### Check Applications
@@ -1127,6 +1442,353 @@ ls -lh examples/simple/wasm_calculator/wasm-modules/*.wasm
 # Python WASM files are typically ~39MB (includes Python runtime)
 # This is normal for componentize-py builds
 ```
+
+## Docker Quick Reference
+
+### Official Docker Image
+
+- **Image**: `plexobject/plexspaces:latest`
+- **Registry**: Docker Hub (https://hub.docker.com/r/plexobject/plexspaces)
+- **Default Behavior**: Starts empty node, ready for WASM deployments
+- **Authentication**: Enabled by default (override with `PLEXSPACES_DISABLE_AUTH=1` for testing)
+
+### Common Docker Commands
+
+```bash
+# Pull latest image
+docker pull plexobject/plexspaces:latest
+
+# Run empty node (production, auth enabled)
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_JWT_SECRET=your-secret-key \
+  plexobject/plexspaces:latest
+
+# Run empty node (testing, auth disabled)
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  plexobject/plexspaces:latest
+
+# Run with debug logs (similar to scripts/server.sh)
+docker run -d \
+  --name plexspaces-node \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+  plexobject/plexspaces:latest
+
+# Run with docker-compose (auth enabled by default)
+docker-compose up -d
+
+# Run docker-compose with auth disabled (testing)
+PLEXSPACES_DISABLE_AUTH=1 docker-compose up
+
+# View logs
+docker logs -f plexspaces-node
+
+# Stop node
+docker stop plexspaces-node
+
+# Remove container
+docker rm plexspaces-node
+```
+
+### Docker Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PLEXSPACES_NODE_ID` | Node identifier | `node1` |
+| `PLEXSPACES_LISTEN_ADDR` | gRPC listen address | `0.0.0.0:8000` |
+| `PLEXSPACES_RELEASE_CONFIG` | Path to release config | `/app/config/release.yaml` |
+| `PLEXSPACES_BASE_DIR` | Base directory for data | `/app/data` |
+| `PLEXSPACES_DISABLE_AUTH` | Disable auth (testing only) | Not set (auth enabled) |
+| `PLEXSPACES_JWT_SECRET` | JWT secret for authentication | Not set |
+| `PLEXSPACES_MTLS_CA_CERT` | Path to mTLS CA certificate | Not set |
+| `PLEXSPACES_MTLS_SERVER_CERT` | Path to mTLS server certificate | Not set |
+| `PLEXSPACES_MTLS_SERVER_KEY` | Path to mTLS server private key | Not set |
+
+### Building Docker Image
+
+#### Build Locally
+
+```bash
+# Build latest image
+docker build -t plexobject/plexspaces:latest .
+
+# Build with specific features (e.g., dashboard, firecracker)
+docker build --build-arg FEATURES="dashboard,firecracker" -t plexobject/plexspaces:latest .
+
+# Build with version tag
+docker build -t plexobject/plexspaces:v0.1.0 .
+
+# Build and tag multiple versions
+docker build -t plexobject/plexspaces:latest \
+             -t plexobject/plexspaces:v0.1.0 \
+             -t plexobject/plexspaces:v0.1 .
+```
+
+#### Build Options
+
+```bash
+# Build with all features (default: dashboard,firecracker)
+docker build -t plexobject/plexspaces:latest .
+
+# Build with specific features only
+docker build \
+  --build-arg FEATURES="dashboard" \
+  -t plexobject/plexspaces:latest .
+
+# Build with no features (default features only)
+docker build \
+  --build-arg FEATURES="" \
+  -t plexobject/plexspaces:latest .
+
+# Build without cache (force rebuild)
+docker build --no-cache -t plexobject/plexspaces:latest .
+
+# Build and see build output
+docker build --progress=plain -t plexobject/plexspaces:latest .
+```
+
+**Note**: By default, the Dockerfile builds with **ALL features** (`dashboard,firecracker`) for a production-ready image. To build with only default features, set `FEATURES=""`.
+
+#### Verify Build
+
+```bash
+# Check image was created
+docker images | grep plexspaces
+
+# Test the image locally
+docker run --rm \
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  plexobject/plexspaces:latest
+
+# Check image size
+docker images plexobject/plexspaces:latest
+```
+
+### Publishing Docker Images to Docker Hub
+
+#### Prerequisites
+
+1. **Docker Hub Account**: Ensure you have an account at https://hub.docker.com
+2. **Organization Access**: You must have push access to the `plexobject` organization
+3. **Docker CLI**: Docker must be installed and configured
+
+#### Step-by-Step Publishing Process
+
+**Step 1: Login to Docker Hub**
+
+```bash
+# Login to Docker Hub
+docker login
+
+# Or login with username explicitly
+docker login -u plexobject
+
+# Login with password from stdin (for CI/CD)
+echo $DOCKER_PASSWORD | docker login -u plexobject --password-stdin
+```
+
+**Step 2: Build the Image**
+
+```bash
+# Build the image with proper tags
+docker build -t plexobject/plexspaces:latest \
+             -t plexobject/plexspaces:v0.1.0 \
+             .
+```
+
+**Step 3: Tag the Image (if needed)**
+
+```bash
+# Tag existing image
+docker tag plexobject/plexspaces:latest plexobject/plexspaces:v0.1.0
+
+# Tag with commit hash (for traceability)
+docker tag plexobject/plexspaces:latest plexobject/plexspaces:$(git rev-parse --short HEAD)
+
+# Tag with date
+docker tag plexobject/plexspaces:latest plexobject/plexspaces:$(date +%Y%m%d)
+```
+
+**Step 4: Push to Docker Hub**
+
+```bash
+# Push latest tag
+docker push plexobject/plexspaces:latest
+
+# Push version tag
+docker push plexobject/plexspaces:v0.1.0
+
+# Push all tags at once
+docker push plexobject/plexspaces:latest
+docker push plexobject/plexspaces:v0.1.0
+```
+
+#### Using the Publishing Script
+
+A complete publishing script is available at `scripts/publish-docker.sh`:
+
+```bash
+# Make executable (if not already)
+chmod +x scripts/publish-docker.sh
+
+# Publish with version (also tags as latest)
+./scripts/publish-docker.sh v0.1.0
+
+# Publish latest only
+./scripts/publish-docker.sh latest
+
+# Publish with all features (default: dashboard,firecracker)
+./scripts/publish-docker.sh v0.1.0
+
+# Publish with specific features only
+./scripts/publish-docker.sh v0.1.0 "dashboard"
+```
+
+The script will:
+1. Build the Docker image
+2. Verify the image was created
+3. Prompt for Docker Hub login (if not already logged in)
+4. Push the version tag
+5. Push the latest tag (if version provided)
+6. Display success message with Docker Hub URL
+
+**Manual Publishing** (if you prefer to run commands manually):
+
+```bash
+# Build image
+docker build -t plexobject/plexspaces:v0.1.0 -t plexobject/plexspaces:latest .
+
+# Login to Docker Hub
+docker login
+
+# Push version tag
+docker push plexobject/plexspaces:v0.1.0
+
+# Push latest tag
+docker push plexobject/plexspaces:latest
+```
+
+#### Versioning Best Practices
+
+```bash
+# Semantic versioning
+docker build -t plexobject/plexspaces:v1.2.3 .
+docker push plexobject/plexspaces:v1.2.3
+
+# Major version tag (v1)
+docker tag plexobject/plexspaces:v1.2.3 plexobject/plexspaces:v1
+docker push plexobject/plexspaces:v1
+
+# Minor version tag (v1.2)
+docker tag plexobject/plexspaces:v1.2.3 plexobject/plexspaces:v1.2
+docker push plexobject/plexspaces:v1.2
+
+# Latest tag
+docker tag plexobject/plexspaces:v1.2.3 plexobject/plexspaces:latest
+docker push plexobject/plexspaces:latest
+```
+
+#### Publishing from CI/CD
+
+**GitHub Actions Example**:
+
+```yaml
+name: Build and Push Docker Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Extract version from tag
+        id: tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            plexobject/plexspaces:${{ steps.tag.outputs.VERSION }}
+            plexobject/plexspaces:latest
+```
+
+#### Verify Published Image
+
+```bash
+# Pull and test published image
+docker pull plexobject/plexspaces:latest
+
+# Run published image
+docker run --rm \
+  -e PLEXSPACES_DISABLE_AUTH=1 \
+  -p 8000:8000 \
+  -p 8001:8001 \
+  plexobject/plexspaces:latest
+
+# Check image on Docker Hub
+# Visit: https://hub.docker.com/r/plexobject/plexspaces/tags
+```
+
+#### Troubleshooting
+
+**Permission Denied**:
+```bash
+# Ensure you're logged in
+docker login
+
+# Check you have access to plexobject organization
+# Visit: https://hub.docker.com/orgs/plexobject/members
+```
+
+**Image Not Found**:
+```bash
+# Verify image exists locally
+docker images | grep plexspaces
+
+# Check image name matches Docker Hub repository
+# Repository: plexobject/plexspaces
+```
+
+**Push Fails**:
+```bash
+# Check Docker Hub rate limits
+# Free tier: 200 pulls per 6 hours
+# Authenticated: 200 pulls per 6 hours
+# Pro: Unlimited
+
+# Retry push
+docker push plexobject/plexspaces:latest
+```
+
+**Note**: Ensure you have push access to the `plexobject` Docker Hub organization. Contact your organization administrator if you don't have access.
 
 ## Next Steps
 

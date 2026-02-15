@@ -867,14 +867,12 @@ See [`examples/python/apps/bank_account`](../../examples/python/apps/bank_accoun
 
 ## Examples
 
-See [`examples/simple/durable_actor_example`](../../examples/simple/durable_actor_example/) for complete working examples demonstrating:
+See the following examples for complete working demonstrations:
 
-- Basic durability with journaling
-- Checkpoint recovery
-- Side effect caching
-- Channel-based mailbox with ACK/NACK
-- Dead letter queue handling
-- Edge case recovery
+- **Rust SDK**: [`examples/rust/embedded/bank_account/`](../../examples/rust/embedded/bank_account/) - Durable bank account with journaling using SDK annotations (`#[gen_server_actor(facets = ["durability"])]`, `spawn_with_storage()`)
+- **Python WASM**: [`examples/python/apps/bank_account/`](../../examples/python/apps/bank_account/) - Durable bank account using Python SDK (`@actor(facets=["durability"])`, `state()`)
+- **TypeScript WASM**: [`examples/typescript/apps/bank_account/`](../../examples/typescript/apps/bank_account/) - Durable bank account using TypeScript SDK (WIT types auto-generated, iterative serializer)
+- **Legacy Example**: [`examples/simple/durable_actor_example/`](../../examples/simple/durable_actor_example/) - Complete durability example with journaling, checkpoints, replay, side effect caching, channel-based mailboxes, and dead letter queues
 
 ---
 

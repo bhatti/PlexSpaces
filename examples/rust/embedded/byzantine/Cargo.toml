@@ -12,6 +12,8 @@ description = "Byzantine Fault Tolerant consensus using PlexSpaces Application f
 plexspaces-node = { path = "../../../../crates/node" }
 plexspaces-core = { path = "../../../../crates/core" }
 plexspaces-application = { path = "../../../../crates/application" }
+plexspaces-actor = { path = "../../../../crates/actor" }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
 
 # Async runtime
 tokio = { version = "1.45", features = ["full"] }
@@ -24,6 +26,12 @@ serde_json = "1.0"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0"
+
+# ULID for message IDs
+ulid = "1.2"
 
 [[bin]]
 name = "byzantine"

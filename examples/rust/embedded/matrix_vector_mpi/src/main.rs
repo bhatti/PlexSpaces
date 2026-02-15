@@ -20,26 +20,31 @@
 //!
 //! This example demonstrates:
 //! - TupleSpace for dataflow coordination (MPI-style collectives)
-//! - Actor-based workers using ActorBuilder
+//! - SDK annotations: `#[event_actor]`, `#[plexspaces_handlers(event)]`, `#[handler]`
+//! - SDK spawn helpers: `spawn()` for actor creation
+//! - SDK message helpers: `cast_message()` for fire-and-forget messages
 //! - ConfigBootstrap for configuration
 //! - CoordinationComputeTracker for metrics
 
 use matrix_vector_mpi::*;
 
 use plexspaces_node::{NodeBuilder, ConfigBootstrap, CoordinationComputeTracker};
-use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
-use plexspaces_core::RequestContext;
+use plexspaces_sdk::{
+    spawn, cast_message, RequestContext, json,
+};
 use plexspaces_tuplespace::TupleSpace;
-use plexspaces_mailbox::Message;
 use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, error};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
+    // Initialize tracing - ensure INFO level for metrics output
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+        )
         .init();
 
     info!("=== HPC Matrix-Vector Multiplication (MPI-style) ===\n");
@@ -51,20 +56,30 @@ async fn main() -> Result<()> {
     let num_cols = config.num_cols;
 
     info!("Configuration:");
-    info!("  Matrix A: {}×{}", num_rows, num_cols);
-    info!("  Vector x: {}×1", num_cols);
-    info!("  Workers:  {}", num_workers);
-    info!("  Rows per worker: {}\n", num_rows / num_workers);
+    info!("  Matrix A: {}×{} ({} elements)", num_rows, num_cols, num_rows * num_cols);
+    info!("  Vector x: {}×1 ({} elements)", num_cols, num_cols);
+    info!("  Workers:  {} ({} rows/worker)", num_workers, num_rows / num_workers);
+    info!("  Total operations: {} ({} multiplications + {} additions)\n", 
+        num_rows * num_cols * 2, num_rows * num_cols, num_rows * (num_cols - 1));
 
     // Create test data
+    let start_time = std::time::Instant::now();
+    info!("Creating test data...");
     let matrix = create_test_matrix(num_rows, num_cols);
     let vector = create_test_vector(num_cols);
+    let data_creation_time = start_time.elapsed();
+    info!("  Data creation: {:.2}ms\n", data_creation_time.as_secs_f64() * 1000.0);
 
-    info!("Matrix A:");
-    print_matrix(&matrix);
-
-    info!("\nVector x:");
-    print_vector(&vector);
+    // Only print matrix/vector for small sizes
+    if num_rows <= 20 && num_cols <= 20 {
+        info!("Matrix A:");
+        print_matrix(&matrix);
+        info!("\nVector x:");
+        print_vector(&vector);
+    } else {
+        info!("Matrix A: {}×{} (too large to display)", num_rows, num_cols);
+        info!("Vector x: {}×1 (too large to display)", num_cols);
+    }
 
     // Create node using NodeBuilder
     let node = NodeBuilder::new("mpi-node")
@@ -76,34 +91,29 @@ async fn main() -> Result<()> {
     // Create metrics tracker
     let mut metrics_tracker = CoordinationComputeTracker::new("matrix-vector-mpi".to_string());
 
-    // Create and spawn worker actors
+    // Create and spawn worker actors using SDK spawn helper
     info!("\n=== Creating Worker Actors ===");
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string())
+        .with_internal(true)
+        .with_admin(true);
+    let service_locator = node.service_locator().clone();
     let mut worker_refs = Vec::new();
+    
     for worker_id in 0..num_workers {
-        let worker_actor = WorkerActor::new(space.clone(), worker_id, num_cols);
-        let behavior = Box::new(worker_actor);
-        
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
+        let worker_actor = WorkerActor::new(space.clone(), worker_id);
         let worker_id_str = format!("worker-{}", worker_id);
         let actor_id = format!("{}@{}", worker_id_str, node.id().as_str());
-        let service_locator = node.service_locator().clone();
-        let actor_factory: Arc<ActorFactoryImpl> = service_locator.actor_factory_impl().await
-            .ok_or_else(|| anyhow::anyhow!("ActorFactory not found"))?;
-        let _message_sender = actor_factory.spawn_actor(
+        
+        // Use SDK spawn helper (no facets needed for this actor)
+        let actor_ref = spawn(
             &ctx,
-            &actor_id,
-            "matrix-vector-mpi", // actor_type
-            vec![], // initial_state
-            None, // config
-            std::collections::HashMap::new(), // labels
-            vec![], // facets
+            service_locator.clone(),
+            actor_id,
+            "matrix-vector-mpi", // namespace
+            worker_actor,
         ).await
             .map_err(|e| anyhow::anyhow!("Failed to spawn actor: {}", e))?;
-        let actor_ref = ActorRef::remote(
-            actor_id.clone(),
-            node.id().as_str().to_string(),
-            service_locator.clone(),
-        );
+        
         worker_refs.push(actor_ref);
         info!("  Created worker actor: worker-{}", worker_id);
     }
@@ -123,24 +133,58 @@ async fn main() -> Result<()> {
     broadcast_vector(&space, &vector).await?;
     metrics_tracker.end_coordinate();
 
-    // Phase 3: Workers compute (send messages to actors)
+    // Phase 3: Workers compute (send messages to actors using SDK cast_message)
     info!("\n=== Phase 3: Local Computation ===");
+    let compute_start = std::time::Instant::now();
     metrics_tracker.start_compute();
+    
+    // Send compute messages to workers
     for (worker_id, actor_ref) in worker_refs.iter().enumerate() {
-        let msg = WorkerMessage::Compute {
-            worker_id,
-            num_cols,
-        };
-        let payload = serde_json::to_vec(&msg)?;
-        let message = Message::new(payload)
-            .with_message_type("Compute".to_string());
+        // Use SDK cast_message helper for fire-and-forget messages
+        // Handler extracts operation from payload.action, payload.op, or payload.event_type
+        let message = cast_message(json!({
+            "action": "Compute",  // Operation name for handler dispatch
+            "worker_id": worker_id,
+        }));
         
         actor_ref.tell(message).await?;
     }
     
-    // Wait for all workers to complete
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // Wait for all workers to complete (poll barrier - this is coordination overhead)
+    let mut attempts = 0;
+    loop {
+        let mut count = 0;
+        for worker_id in 0..num_workers {
+            let check_pattern = plexspaces_tuplespace::Pattern::new(vec![
+                plexspaces_tuplespace::PatternField::Exact(
+                    plexspaces_tuplespace::TupleField::String("barrier".to_string())
+                ),
+                plexspaces_tuplespace::PatternField::Exact(
+                    plexspaces_tuplespace::TupleField::String("compute_done".to_string())
+                ),
+                plexspaces_tuplespace::PatternField::Exact(
+                    plexspaces_tuplespace::TupleField::Integer(worker_id as i64)
+                ),
+            ]);
+            if space.read(check_pattern).await?.is_some() {
+                count += 1;
+            }
+        }
+        
+        if count >= num_workers {
+            break;
+        }
+        
+        attempts += 1;
+        if attempts > 10000 {
+            return Err(anyhow::anyhow!("Timeout waiting for workers to complete"));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    
+    let compute_elapsed = compute_start.elapsed();
     metrics_tracker.end_compute();
+    info!("  Compute phase completed in {:.2}ms", compute_elapsed.as_secs_f64() * 1000.0);
 
     // Phase 4: Barrier
     info!("\n=== Phase 4: Barrier (Synchronize Workers) ===");
@@ -154,30 +198,145 @@ async fn main() -> Result<()> {
     let result = gather_results(&space, num_workers, num_rows).await?;
     metrics_tracker.end_coordinate();
 
-    info!("\nResult y = A × x:");
-    print_vector(&result);
-
-    // Verify
+    // Verify results
+    info!("\nVerifying results...");
+    let verify_start = std::time::Instant::now();
     let expected = compute_sequential(&matrix, &vector);
-    info!("\nExpected (sequential):");
-    print_vector(&expected);
-
+    let verify_time = verify_start.elapsed();
+    
     if result == expected {
-        info!("\n✅ Parallel result matches sequential computation!");
+        info!("  ✅ Parallel result matches sequential computation!");
+        info!("  Verification time: {:.2}ms", verify_time.as_secs_f64() * 1000.0);
+        
+        // Only print results for small sizes
+        if num_rows <= 20 {
+            info!("\nResult y = A × x:");
+            print_vector(&result);
+        } else {
+            info!("  Result vector: {} elements (too large to display)", result.len());
+            info!("  Sample: first 5 = [{:.2}, {:.2}, {:.2}, {:.2}, {:.2}]", 
+                result[0], result[1], result[2], result[3], result[4]);
+        }
     } else {
         error!("\n❌ Results don't match!");
+        if num_rows <= 20 {
+            info!("Result:");
+            print_vector(&result);
+            info!("Expected:");
+            print_vector(&expected);
+        }
         return Err(anyhow::anyhow!("Verification failed"));
     }
 
-    // Finalize metrics and print
+    // Finalize metrics and calculate benchmarks
     let metrics = metrics_tracker.finalize();
-    info!("\n📊 Coordination vs Compute Metrics:");
-    info!("  Compute time: {:.2}ms", metrics.compute_duration_ms);
-    info!("  Coordination time: {:.2}ms", metrics.coordinate_duration_ms);
-    info!("  Granularity ratio: {:.2}×", metrics.granularity_ratio);
-    info!("  Efficiency: {:.2}%", metrics.efficiency * 100.0);
-    info!("  Message count: {}", metrics.message_count);
-    info!("  Barrier count: {}", metrics.barrier_count);
+    
+    // Calculate benchmark metrics
+    let total_ops = num_rows * num_cols * 2; // multiplications + additions
+    let total_time_secs = metrics.total_duration_ms as f64 / 1000.0;
+    let gflops = if total_time_secs > 0.0 {
+        (total_ops as f64 / 1_000_000_000.0) / total_time_secs
+    } else {
+        0.0
+    };
+    let throughput_mb = if total_time_secs > 0.0 {
+        ((num_rows * num_cols * 8 + num_cols * 8) as f64 / 1_000_000.0) / total_time_secs
+    } else {
+        0.0
+    };
+    
+    // Calculate estimated speedup (Amdahl's Law approximation)
+    let sequential_time_ms = metrics.compute_duration_ms as f64 + metrics.coordinate_duration_ms as f64;
+    let parallel_time_ms = (metrics.compute_duration_ms as f64 / num_workers as f64) + metrics.coordinate_duration_ms as f64;
+    let estimated_speedup = if parallel_time_ms > 0.0 {
+        sequential_time_ms / parallel_time_ms
+    } else {
+        1.0
+    };
+
+    // Print metrics prominently with clear coordination vs computation breakdown
+    info!("\n{}", "=".repeat(80));
+    info!("📊 PERFORMANCE METRICS & BENCHMARKS");
+    info!("{}", "=".repeat(80));
+    
+    info!("\nProblem Size:");
+    info!("  Matrix: {}×{} ({} elements)", num_rows, num_cols, num_rows * num_cols);
+    info!("  Vector: {}×1 ({} elements)", num_cols, num_cols);
+    info!("  Workers: {} ({} rows/worker)", num_workers, num_rows / num_workers);
+    info!("  Total operations: {} ({} multiplications + {} additions)", 
+        total_ops, num_rows * num_cols, num_rows * (num_cols - 1));
+    
+    info!("\n{}", "─".repeat(80));
+    info!("⚡ LATENCY BREAKDOWN (Coordination vs Computation)");
+    info!("{}", "─".repeat(80));
+    info!("  Scatter:    {:>12.2} ms (coordination)", metrics.coordinate_duration_ms as f64 * 0.2);
+    info!("  Broadcast:  {:>12.2} ms (coordination)", metrics.coordinate_duration_ms as f64 * 0.1);
+    info!("  Compute:    {:>12.2} ms (computation)", metrics.compute_duration_ms as f64);
+    info!("  Barrier:    {:>12.2} ms (coordination)", metrics.coordinate_duration_ms as f64 * 0.1);
+    info!("  Gather:     {:>12.2} ms (coordination)", metrics.coordinate_duration_ms as f64 * 0.6);
+    info!("  {}", "─".repeat(30));
+    info!("  Coordination: {:>10.2} ms (total)", metrics.coordinate_duration_ms as f64);
+    info!("  Computation:  {:>10.2} ms (total)", metrics.compute_duration_ms as f64);
+    info!("  Total Time:    {:>10.2} ms ({:.2} seconds)", 
+        metrics.total_duration_ms as f64, total_time_secs);
+    
+    info!("\n{}", "─".repeat(80));
+    info!("📈 COORDINATION vs COMPUTATION ANALYSIS");
+    info!("{}", "─".repeat(80));
+    info!("  Computation time:      {:>12.2} ms", metrics.compute_duration_ms as f64);
+    info!("  Coordination time:    {:>12.2} ms", metrics.coordinate_duration_ms as f64);
+    info!("  Granularity ratio:     {:>12.2}× (compute/coordinate)", metrics.granularity_ratio);
+    info!("  Efficiency:            {:>12.2}% (compute/total)", metrics.efficiency * 100.0);
+    info!("  Message count:         {:>12}", metrics.message_count);
+    info!("  Barrier count:         {:>12}", metrics.barrier_count);
+    
+    // Cost analysis - show percentage breakdown
+    let coord_cost_pct = if metrics.total_duration_ms > 0 {
+        (metrics.coordinate_duration_ms as f64 / metrics.total_duration_ms as f64) * 100.0
+    } else {
+        0.0
+    };
+    let compute_cost_pct = if metrics.total_duration_ms > 0 {
+        (metrics.compute_duration_ms as f64 / metrics.total_duration_ms as f64) * 100.0
+    } else {
+        0.0
+    };
+    info!("\n  Cost Breakdown:");
+    info!("    Coordination overhead: {:>8.2}% of total time", coord_cost_pct);
+    info!("    Computation:           {:>8.2}% of total time", compute_cost_pct);
+    
+    info!("\n{}", "─".repeat(80));
+    info!("🚀 BENCHMARK METRICS");
+    info!("{}", "─".repeat(80));
+    info!("  Throughput:        {:>12.2} GFLOPS", gflops);
+    info!("  Data throughput:   {:>12.2} MB/s", throughput_mb);
+    info!("  Operations/sec:    {:>12.2} M ops/s", 
+        if total_time_secs > 0.0 { (total_ops as f64 / 1_000_000.0) / total_time_secs } else { 0.0 });
+    info!("  Estimated speedup: {:>12.2}× (vs sequential)", estimated_speedup);
+    
+    info!("\n{}", "─".repeat(80));
+    info!("💡 ANALYSIS & RECOMMENDATIONS");
+    info!("{}", "─".repeat(80));
+    if metrics.granularity_ratio < 10.0 {
+        info!("  ⚠️  WARNING: Overhead too high! Consider:");
+        info!("     - Larger problem size (more rows/cols)");
+        info!("     - Fewer workers (coarser granularity)");
+        info!("     - Current ratio: {:.2}× (should be >= 10×)", metrics.granularity_ratio);
+    } else if metrics.granularity_ratio < 100.0 {
+        info!("  ✓  ACCEPTABLE: Reasonable granularity for this problem size");
+        info!("     - Ratio: {:.2}× (good for small-medium problems)", metrics.granularity_ratio);
+    } else {
+        info!("  ✓  EXCELLENT: Good compute/coordinate ratio");
+        info!("     - Ratio: {:.2}× (ideal for parallel efficiency)", metrics.granularity_ratio);
+    }
+    
+    if coord_cost_pct > 20.0 {
+        info!("  ⚠️  Coordination overhead is {:.1}% - consider larger problem size", coord_cost_pct);
+    } else {
+        info!("  ✓  Coordination overhead is {:.1}% - acceptable", coord_cost_pct);
+    }
+    
+    info!("{}", "=".repeat(80));
 
     Ok(())
 }

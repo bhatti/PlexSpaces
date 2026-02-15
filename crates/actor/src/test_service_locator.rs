@@ -271,6 +271,14 @@ impl ServiceLocator for TestServiceLocatorStub {
         // No-op for stub
     }
 
+    async fn get_runtime_config(&self) -> Option<plexspaces_proto::node::v1::RuntimeConfig> {
+        None
+    }
+
+    async fn register_runtime_config(&self, _config: plexspaces_proto::node::v1::RuntimeConfig) {
+        // No-op for stub
+    }
+
     async fn is_auth_disabled(&self) -> bool {
         false // Auth enabled by default for security
     }

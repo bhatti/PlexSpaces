@@ -146,6 +146,7 @@ pub async fn create_default_release_config(
     // Note: base_dir, wasm_apps_directory, db, channel_provider, mailbox_provider
     // are set by config_manager::initialize()
     let runtime = RuntimeConfig {
+        save_wasm_apps: false, // Default: disabled (only for testing)
         grpc: Some(grpc),
         health: Some(health),
         security,

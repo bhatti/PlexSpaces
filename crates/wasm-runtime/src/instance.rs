@@ -110,6 +110,11 @@ pub struct WasmInstance {
     #[cfg(feature = "component-model")]
     durability_enabled: bool,
 
+    /// Original init config (JSON string) used during initial construction.
+    /// Stored so we can replay it during re-instantiation to preserve state.
+    #[cfg(feature = "component-model")]
+    original_init_config: Option<String>,
+
     /// Module metadata
     module: WasmModule,
 }
@@ -128,6 +133,9 @@ pub struct InstanceContext {
 
     /// Resource limits tracker
     pub limits: StoreLimits,
+
+    /// Maximum fuel units for execution (from WasmConfig.limits.max_fuel)
+    pub max_fuel: u64,
 }
 
 // Note: For components requiring WASI, we use a separate ComponentContext that includes WasiCtx.
@@ -201,6 +209,7 @@ impl WasmInstance {
         initial_state: &[u8],
         capabilities: WasmCapabilities,
         limits: StoreLimits,
+        max_fuel: u64,
         channel_service: Option<Arc<dyn ChannelService>>,
         message_sender: Option<Arc<dyn crate::MessageSender>>,
         tuplespace_provider: Option<Arc<dyn plexspaces_core::TupleSpaceProvider>>,
@@ -220,6 +229,7 @@ impl WasmInstance {
         let limits_clone1 = limits.clone();
         let capabilities_clone2 = capabilities.clone();
         let limits_clone2 = limits.clone();
+        let max_fuel_clone = max_fuel;
 
         // Create host functions with all available services
         let host_functions = HostFunctions::with_all_services(
@@ -242,6 +252,7 @@ impl WasmInstance {
             host_functions: host_functions_arc.clone(),
             capabilities,
             limits,
+            max_fuel,
         };
 
         // Create linker with host functions
@@ -253,11 +264,12 @@ impl WasmInstance {
         
         // We need to create the store before the match so it's available after
         // For components, we'll create a separate store, but for traditional modules we use this one
+        let max_fuel_for_store = context.max_fuel;
         let mut store = Store::new(engine, context);
 
         // Add fuel for execution (required when fuel metering is enabled)
-        // Default to 1 million fuel units (enough for most operations)
-        let fuel_set = store.set_fuel(1_000_000);
+        // Use max_fuel from config (default: 10 billion units)
+        let fuel_set = store.set_fuel(max_fuel_for_store);
         if fuel_set.is_ok() {
             metrics::counter!("plexspaces_wasm_fuel_metering_enabled_total").increment(1);
         } else {
@@ -307,6 +319,7 @@ impl WasmInstance {
                             host_functions: host_functions_arc.clone(),
                             capabilities: capabilities_clone1,
                             limits: limits_clone1,
+                            max_fuel,
                         };
                         // Configure WASI context for Python components
                         // Note: Do NOT use inherit_env() - Python's runtime tries to setenv()
@@ -375,10 +388,12 @@ impl WasmInstance {
                         };
                         
                         // Create a new store for the component (not pooled, not Send)
+                        let component_fuel = component_ctx.instance_ctx.max_fuel;
                         let mut component_store = Store::new(engine, component_ctx);
                         
                         // Add fuel and limiter to component store
-                        let _ = component_store.set_fuel(1_000_000);
+                        // Use max_fuel from InstanceContext
+                        let _ = component_store.set_fuel(component_fuel);
                         component_store.limiter(|ctx| &mut ctx.instance_ctx.limits);
                         
                         // Add ALL WASI preview 2 bindings using the recommended approach
@@ -530,6 +545,7 @@ impl WasmInstance {
                             host_functions: context_clone.host_functions.clone(),
                             capabilities: dummy_capabilities,
                             limits: dummy_limits,
+                            max_fuel: max_fuel_clone,
                         };
                         let mut dummy_store = Store::new(engine, dummy_context);
                         let dummy_instance = dummy_linker
@@ -546,7 +562,7 @@ impl WasmInstance {
                             bindings: component_bindings,
                         };
                         
-                        let instance = WasmInstance {
+                        let mut instance = WasmInstance {
                             actor_id: actor_id.clone(),
                             store: Arc::new(RwLock::new(dummy_store)),
                             instance: dummy_instance,
@@ -558,6 +574,8 @@ impl WasmInstance {
                             tuplespace_provider: tuplespace_provider.clone(),
                             #[cfg(feature = "component-model")]
                             durability_enabled,
+                            #[cfg(feature = "component-model")]
+                            original_init_config: None, // Will be set after init() succeeds
                             module,
                         };
                         
@@ -578,6 +596,22 @@ impl WasmInstance {
                             } else {
                                 String::from_utf8_lossy(initial_state).to_string()
                             };
+                            
+                            // Store original config for re-instantiation
+                            let original_config = if config_json.is_empty() {
+                                None
+                            } else {
+                                Some(config_json.clone())
+                            };
+                            
+                            if tracing::enabled!(tracing::Level::DEBUG) {
+                                tracing::debug!(
+                                    actor_id = %actor_id,
+                                    config_len = config_json.len(),
+                                    has_config = original_config.is_some(),
+                                    "Storing original init config for re-instantiation"
+                                );
+                            }
                             
                             match bindings {
                                 ComponentBindings::SimpleActor(simple_bindings) => {
@@ -604,6 +638,16 @@ impl WasmInstance {
                                         return Err(WasmError::ActorFunctionError(format!(
                                             "Simple-actor init() error: {}", result
                                         )));
+                                    }
+                                    
+                                    // Store original config in instance for re-instantiation
+                                    instance.original_init_config = original_config.clone();
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
+                                        tracing::debug!(
+                                            actor_id = %actor_id,
+                                            has_stored_config = instance.original_init_config.is_some(),
+                                            "Stored original init config in WasmInstance"
+                                        );
                                     }
                                 }
                                 ComponentBindings::PlexspacesActor(plexspaces_bindings) => {
@@ -634,6 +678,9 @@ impl WasmInstance {
                                             )));
                                         }
                                         
+                                        // Store original config for PlexspacesActor (as JSON string)
+                                        instance.original_init_config = Some(String::from_utf8_lossy(initial_state).to_string());
+                                        
                                         tracing::info!(
                                             actor_id = %actor_id,
                                             "PlexspacesActor init() succeeded"
@@ -653,8 +700,8 @@ impl WasmInstance {
                 let mut store = Store::new(engine, context);
                 
                 // Add fuel for execution (required when fuel metering is enabled)
-                // Default to 1 million fuel units (enough for most operations)
-                let fuel_set = store.set_fuel(1_000_000);
+                // Use max_fuel from config
+                let fuel_set = store.set_fuel(context.max_fuel);
                 if fuel_set.is_ok() {
                     metrics::counter!("plexspaces_wasm_fuel_metering_enabled_total").increment(1);
                 } else {
@@ -737,6 +784,8 @@ impl WasmInstance {
             tuplespace_provider: None,
             #[cfg(feature = "component-model")]
             durability_enabled,
+            #[cfg(feature = "component-model")]
+            original_init_config: None, // Traditional modules don't use init config
             module,
         })
     }
@@ -1509,7 +1558,8 @@ impl WasmInstance {
             ),
         };
         let mut component_store = Store::new(engine, component_ctx);
-        let _ = component_store.set_fuel(1_000_000);
+        // Use max_fuel from InstanceContext
+        let _ = component_store.set_fuel(instance_ctx.max_fuel);
         component_store.limiter(|ctx| &mut ctx.instance_ctx.limits);
         wasmtime_wasi::add_to_linker_async(&mut component_linker)
             .map_err(|e| WasmError::InstantiationError(format!("Failed to add WASI bindings: {}", e)))?;
@@ -1529,8 +1579,18 @@ impl WasmInstance {
         .map_err(|e| WasmError::InstantiationError(format!(
             "Simple-actor re-instantiation failed: {}", e
         )))?;
+        // Use original init config if available, otherwise use empty string
+        let init_config = self.original_init_config.as_deref().unwrap_or("");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                actor_id = %self.actor_id,
+                config_len = init_config.len(),
+                has_original_config = self.original_init_config.is_some(),
+                "Re-instantiating SimpleActor with original init config"
+            );
+        }
         let result = simple_bindings.plexspaces_simple_actor_actor()
-            .call_init(&mut component_store, "")
+            .call_init(&mut component_store, init_config)
             .await
             .map_err(|e| WasmError::ActorFunctionError(format!("Simple-actor init() on fresh state failed: {}", e)))?;
         if !result.is_empty() {
@@ -1611,7 +1671,8 @@ impl WasmInstance {
             ),
         };
         let mut component_store = Store::new(engine, component_ctx);
-        let _ = component_store.set_fuel(1_000_000);
+        // Use max_fuel from InstanceContext
+        let _ = component_store.set_fuel(instance_ctx.max_fuel);
         component_store.limiter(|ctx| &mut ctx.instance_ctx.limits);
         wasmtime_wasi::add_to_linker_async(&mut component_linker)
             .map_err(|e| WasmError::InstantiationError(format!("Failed to add WASI bindings: {}", e)))?;
@@ -1793,10 +1854,36 @@ impl WasmInstance {
                 // SimpleActor bindings - handle takes JSON strings
                 // Convert payload to JSON string (it should already be JSON)
                 let payload_json = String::from_utf8_lossy(&payload).to_string();
+                
                 let result = simple_bindings.plexspaces_simple_actor_actor()
                     .call_handle(&mut *store, &from_string, &message_type_string, &payload_json)
-                    .await
-                    .map_err(|e| {
+                    .await;
+                
+                // Process the result first (before re-instantiation)
+                // The result is now result<string, string> - actor returns JSON string directly
+                // The iterative serializer avoids WASM recursion during serialization
+                let processed_result: Result<String, WasmError> = match result {
+                    Ok(inner_result) => {
+                        // inner_result is Result<String, String> from WIT
+                        match inner_result {
+                            Ok(json_string) => {
+                                // Actor returned JSON string directly (serialized by iterative serializer)
+                                // Check if it's an error (starts with "ERROR:")
+                                if json_string.starts_with("ERROR:") {
+                                    Err(WasmError::ActorFunctionError(json_string))
+                                } else {
+                                    Ok(json_string)
+                                }
+                            }
+                            Err(e) => {
+                                // WIT-level error (string from actor)
+                                Err(WasmError::ActorFunctionError(format!(
+                                    "Actor returned error: {}", e
+                                )))
+                            }
+                        }
+                    }
+                    Err(e) => {
                         let error_msg = e.to_string();
                         let invocation_label = if message_type_string.eq_ignore_ascii_case("call") { "ask" } else { "tell" };
                         let error_first_line = error_msg.lines().next().unwrap_or("");
@@ -1818,17 +1905,61 @@ impl WasmInstance {
                             );
                         }
                         metrics::counter!("plexspaces_wasm_component_message_errors_total").increment(1);
-                        WasmError::ActorFunctionError(format!(
+                        Err(WasmError::ActorFunctionError(format!(
                             "{}: {}",
                             crate::SIMPLE_ACTOR_HANDLE_FAILED_LOG_MESSAGE,
                             error_msg
-                        ))
-                    })?;
+                        )))
+                    }
+                };
+                
+                // Always re-instantiate after handle() to avoid re-entrancy trap (wasmtime#8943).
+                // WASM components cannot be re-entered after handle() succeeds, so we must replace
+                // the instance with a fresh one. We use original_init_config to preserve initialization.
+                // Note: State changes from handle() are lost on re-instantiation; proper state
+                // persistence requires fix #2 (return state from handle) or fix #3 (host function persistence).
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        has_original_config = self.original_init_config.is_some(),
+                        "Re-instantiating SimpleActor after handle() to avoid re-entrancy trap"
+                    );
+                }
+                let instance_ctx = store.data().instance_ctx.clone();
+                drop(state);
+                let component_state = self.component_state.as_ref().expect("component_state set");
+                match Self::create_fresh_simple_actor_state(self, &instance_ctx).await {
+                    Ok(new_state) => {
+                        let mut guard = component_state.lock().await;
+                        *guard = new_state;
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            tracing::debug!(
+                                actor_id = %self.actor_id,
+                                message_id = %message_id,
+                                "SimpleActor re-instantiation succeeded"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            actor_id = %self.actor_id,
+                            error = %e,
+                            "SimpleActor re-instantiation after handle() failed; next call may trap"
+                        );
+                    }
+                }
+                
+                // Now process the result (after re-instantiation)
+                // Result is already serialized JSON string from structured types
+                let final_result = processed_result?;
                 
                 let duration = start_time.elapsed();
-                // Result is a string - "ERROR:..." means error, otherwise it's the response
-                if result.starts_with("ERROR:") {
-                    let error_message = result.strip_prefix("ERROR:").unwrap_or(&result);
+                
+                // Result is a JSON string - check if it's an error response
+                // Error responses have {"status":"error",...} format
+                if final_result.starts_with("ERROR:") {
+                    let error_message = final_result.strip_prefix("ERROR:").unwrap_or(&final_result);
                     metrics::counter!("plexspaces_wasm_component_message_errors_total").increment(1);
                     tracing::warn!(
                         actor_id = %self.actor_id,
@@ -1846,54 +1977,15 @@ impl WasmInstance {
                         "Actor error: {}", error_message
                     )))
                 } else {
-                    // Clone instance_ctx while we still have store; call_get_state consumes store.
-                    let instance_ctx = store.data().instance_ctx.clone();
-                    // Save actor state (e.g. lock_version for leader election) before re-instantiation
-                    // so the next handle() sees the same state (renew_lead can succeed).
-                    let saved_state_result = simple_bindings
-                        .plexspaces_simple_actor_actor()
-                        .call_get_state(store)
-                        .await;
-                    let saved_state_json = match &saved_state_result {
-                        Ok(s) => Some(s.clone()),
-                        Err(e) => {
-                            tracing::warn!(
-                                actor_id = %self.actor_id,
-                                error = %e,
-                                "SimpleActor get_state before re-instantiation failed"
-                            );
-                            None
-                        }
-                    };
-                    // Replace component state with a fresh Store+instance so the next handle() does not
-                    // trap with "cannot enter component instance" (wasmtime#8943).
-                    drop(state);
-                    let component_state = self.component_state.as_ref().expect("component_state set");
-                    match Self::create_fresh_simple_actor_state(self, &instance_ctx).await {
-                        Ok(new_state) => {
-                            let mut guard = component_state.lock().await;
-                            *guard = new_state;
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                actor_id = %self.actor_id,
-                                error = %e,
-                                "SimpleActor re-instantiation after handle() failed; next call may trap"
-                            );
-                        }
-                    }
-                    // Restore state on the new instance so lock_version etc. persist across invocations.
-                    if let Some(ref json) = saved_state_json {
-                        if !json.is_empty() {
-                            if let Err(e) = self.set_state_component(json).await {
-                                tracing::warn!(
-                                    actor_id = %self.actor_id,
-                                    error = %e,
-                                    "SimpleActor state restore after re-instantiation failed"
-                                );
-                            }
-                        }
-                    }
+                    // Re-instantiation already happened above (before processing result).
+                    // We use original_init_config to ensure proper initialization, but state changes
+                    // from handle() are lost. For proper state preservation, we need fix #2 (return
+                    // state from handle) or fix #3 (host function persistence).
+                    tracing::debug!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        "SimpleActor handle() succeeded, re-instantiated with original config"
+                    );
                     metrics::histogram!("plexspaces_wasm_component_message_duration_seconds")
                         .record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_component_message_success_total").increment(1);
@@ -1904,7 +1996,7 @@ impl WasmInstance {
                             "handle_message_component END SimpleActor Ok"
                         );
                     }
-                    Ok(result.into_bytes())
+                    Ok(final_result.into_bytes())
                 }
             }
         }

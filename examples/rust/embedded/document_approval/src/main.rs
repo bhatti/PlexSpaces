@@ -26,9 +26,10 @@ use plexspaces_sdk::{
     NodeBuilder, spawn_workflow_actor, WorkflowRef, TimerFacet,
 };
 // Note: run_handler, signal_handler, query_handler are used via #[plexspaces_handlers(workflow)]
+use plexspaces_node::CoordinationComputeTracker;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{info, warn, Level};
 use chrono::{DateTime, Utc};
 
@@ -477,11 +478,11 @@ impl DocumentApprovalWorkflow {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
+    // Initialize tracing - use try_init() to avoid panic if already initialized
+    let _ = tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
         .with_env_filter("document_approval=info,plexspaces=warn")
-        .init();
+        .try_init();
 
     println!("╔════════════════════════════════════════════════════════════════╗");
     println!("║     Document Approval Workflow (DocuSign-like)                 ║");
@@ -489,12 +490,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!();
     println!("Use Case: Contract approval with multiple signers and escalation");
     println!();
+    
+    // Create metrics tracker for coordination vs computation analysis
+    let mut metrics_tracker = CoordinationComputeTracker::new("document-approval".to_string());
+    let total_start = Instant::now();
 
     // =========================================================================
     // Step 1: Create Node
     // =========================================================================
     println!("Step 1: Create PlexSpaces Node");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    metrics_tracker.start_coordinate();
+    let node_start = Instant::now();
     
     let node = NodeBuilder::new("approval-node")
         .with_clustering_enabled(false)
@@ -507,13 +515,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
     
-    println!("  ✓ Node 'approval-node' created");
+    let node_time = node_start.elapsed();
+    metrics_tracker.end_coordinate();
+    
+    println!("  ✓ Node 'approval-node' created ({:.2}ms)", node_time.as_secs_f64() * 1000.0);
     println!();
 
     // =========================================================================
-    // Step 2: Spawn Workflow Actor with Timer Facet
+    // Step 2: Spawn Workflow Actors with Timer Facet
     // =========================================================================
-    println!("Step 2: Spawn Document Approval Workflow");
+    println!("Step 2: Spawn Document Approval Workflows");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     let ctx = RequestContext::new_without_auth(
@@ -521,140 +532,191 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "contracts".to_string(),
     );
     
-    // Create timer facet for reminders/escalation
-    let timer_facet = TimerFacet::new(serde_json::json!({}), 50);
+    // Spawn multiple workflows to demonstrate scalability and show real metrics
+    let num_workflows = 10;
+    let mut workflows: Vec<WorkflowRef> = Vec::new();
     
-    // Use WorkflowRef for clean, typed workflow interaction
-    let workflow: WorkflowRef = spawn_workflow_actor(
-        &ctx,
-        node.service_locator(),
-        "contract-approval-001@approval-node",
-        "contracts",
-        DocumentApprovalWorkflow::new(),
-        vec![Box::new(timer_facet)],
-    ).await?;
+    metrics_tracker.start_coordinate();
+    let spawn_start = Instant::now();
     
-    println!("  ✓ Workflow spawned: {}", workflow.id());
+    for i in 0..num_workflows {
+        let workflow_id = format!("contract-approval-{:03}@approval-node", i);
+        let workflow: WorkflowRef = spawn_workflow_actor(
+            &ctx,
+            node.service_locator(),
+            &workflow_id,
+            DocumentApprovalWorkflow::new(),
+            vec![Box::new(TimerFacet::new(serde_json::json!({}), 50, node.service_locator()))],
+        ).await?;
+        
+        workflows.push(workflow);
+        metrics_tracker.increment_message();
+    }
+    
+    let spawn_time = spawn_start.elapsed();
+    metrics_tracker.end_coordinate();
+    
+    println!("  ✓ Spawned {} workflows in {:.2}ms", num_workflows, spawn_time.as_secs_f64() * 1000.0);
     println!("  Facets: TimerFacet (for reminders/escalation)");
     println!();
 
     // =========================================================================
-    // Step 3: Submit Document for Approval
+    // Step 3: Submit Documents for Approval (Multiple Documents)
     // =========================================================================
-    println!("Step 3: Submit Document for Approval");
+    println!("Step 3: Submit Documents for Approval");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    let approval_request = ApprovalRequest {
-        document: Document {
-            id: "DOC-2025-001".to_string(),
-            title: "Q1 Vendor Contract - Acme Supplies".to_string(),
-            content_hash: "sha256:abc123...".to_string(),
-            submitter: "john.doe@acme.com".to_string(),
-            submitted_at: Utc::now(),
-        },
-        approvers: vec![
-            Approver {
-                user_id: "alice".to_string(),
-                name: "Alice Johnson".to_string(),
-                email: "alice@acme.com".to_string(),
-                role: "Legal Review".to_string(),
-                required: true,
-            },
-            Approver {
-                user_id: "bob".to_string(),
-                name: "Bob Smith".to_string(),
-                email: "bob@acme.com".to_string(),
-                role: "Finance Approval".to_string(),
-                required: true,
-            },
-            Approver {
-                user_id: "carol".to_string(),
-                name: "Carol Williams".to_string(),
-                email: "carol@acme.com".to_string(),
-                role: "Executive Sign-off".to_string(),
-                required: true,
-            },
-        ],
-        timeout_minutes: 60,
-        escalation_chain: vec![
-            "manager@acme.com".to_string(),
-            "director@acme.com".to_string(),
-            "vp@acme.com".to_string(),
-        ],
-    };
+    // Create multiple approval requests with more approvers to show real complexity
+    let num_approvers = 8; // Increased from 3 to show more realistic workflow
     
-    // Use typed WorkflowRef API - no manual Message construction needed!
-    let state: WorkflowState = workflow.run(&approval_request).await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-    println!("  Status: {}", state.status);
+    let mut approval_requests: Vec<ApprovalRequest> = Vec::new();
+    for i in 0..num_workflows {
+        let approvers: Vec<Approver> = (0..num_approvers)
+            .map(|j| {
+                let roles = vec!["Legal Review", "Finance Approval", "Security Review", 
+                                 "Compliance Check", "Risk Assessment", "Executive Sign-off",
+                                 "Board Approval", "Final Review"];
+                Approver {
+                    user_id: format!("approver-{}", j),
+                    name: format!("Approver {} {}", j + 1, if j % 2 == 0 { "A" } else { "B" }),
+                    email: format!("approver{}@acme.com", j),
+                    role: roles[j % roles.len()].to_string(),
+                    required: true,
+                }
+            })
+            .collect();
+        
+        approval_requests.push(ApprovalRequest {
+            document: Document {
+                id: format!("DOC-2025-{:03}", i + 1),
+                title: format!("Q1 Vendor Contract #{} - Acme Supplies", i + 1),
+                content_hash: format!("sha256:hash{}...", i),
+                submitter: format!("submitter{}@acme.com", i),
+                submitted_at: Utc::now(),
+            },
+            approvers,
+            timeout_minutes: 60,
+            escalation_chain: vec![
+                "manager@acme.com".to_string(),
+                "director@acme.com".to_string(),
+                "vp@acme.com".to_string(),
+            ],
+        });
+    }
+    
+    // Submit all documents
+    metrics_tracker.start_coordinate();
+    let submit_start = Instant::now();
+    
+    for (i, (workflow_ref, request)) in workflows.iter().zip(approval_requests.iter()).enumerate() {
+        metrics_tracker.start_compute();
+        let workflow_start = Instant::now();
+        
+        let state: WorkflowState = workflow_ref.run(request).await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        
+        let workflow_time = workflow_start.elapsed();
+        metrics_tracker.end_compute();
+        metrics_tracker.increment_message();
+        
+        if i < 3 || i == num_workflows - 1 {
+            println!("  ✓ Document {} submitted: {} ({:.2}ms)", 
+                i + 1, state.status, workflow_time.as_secs_f64() * 1000.0);
+        }
+    }
+    
+    let submit_time = submit_start.elapsed();
+    metrics_tracker.end_coordinate();
+    
+    println!("  Submitted {} documents in {:.2}ms", num_workflows, submit_time.as_secs_f64() * 1000.0);
     println!();
 
     // =========================================================================
-    // Step 4: First Approver (Alice) Approves
+    // Step 4: Process Approvals (All Approvers for First Document)
     // =========================================================================
-    println!("Step 4: Alice (Legal Review) Approves");
+    println!("Step 4: Process Approvals (Demonstrating Sequential Routing)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // Use typed signal API - clean and simple!
-    workflow.signal("approve", &serde_json::json!({
-        "approver_id": "alice",
-        "comment": "Legal terms verified, all clauses acceptable"
-    })).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Process approvals for the first workflow to demonstrate the full flow
+    metrics_tracker.start_coordinate();
+    let approval_start = Instant::now();
+    
+    for approver_idx in 0..num_approvers {
+        metrics_tracker.start_compute();
+        let signal_start = Instant::now();
+        
+        workflows[0].signal("approve", &serde_json::json!({
+            "approver_id": format!("approver-{}", approver_idx),
+            "comment": format!("Approved by {} (step {}/{})", 
+                if approver_idx % 2 == 0 { "Reviewer A" } else { "Reviewer B" },
+                approver_idx + 1, num_approvers)
+        })).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        
+        let signal_time = signal_start.elapsed();
+        metrics_tracker.end_compute();
+        metrics_tracker.increment_message();
+        
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        
+        if approver_idx < 3 || approver_idx == num_approvers - 1 {
+            println!("  ✓ Approver {} approved ({:.2}ms)", approver_idx + 1, signal_time.as_secs_f64() * 1000.0);
+        }
+    }
+    
+    let approval_time = approval_start.elapsed();
+    metrics_tracker.end_coordinate();
+    
+    println!("  Processed {} approvals in {:.2}ms", num_approvers, approval_time.as_secs_f64() * 1000.0);
     println!();
 
     // =========================================================================
-    // Step 5: Query Status
+    // Step 5: Query Status (Multiple Queries)
     // =========================================================================
     println!("Step 5: Query Workflow Status");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // Use typed query API - no manual Message construction!
-    let status: serde_json::Value = workflow.query("status").await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-    println!("  Status: {}", status["status"]);
-    println!("  Current Approver: {:?}", status["current_approver"]);
-    println!("  Progress: {}/{}", status["approvals_completed"], status["approvals_total"]);
+    metrics_tracker.start_coordinate();
+    let query_start = Instant::now();
+    
+    // Query status for multiple workflows
+    for i in 0..std::cmp::min(5, num_workflows) {
+        let status: serde_json::Value = workflows[i].query("status").await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        
+        if i == 0 {
+            println!("  Workflow {}: Status={}, Progress={}/{}", 
+                i + 1, status["status"], status["approvals_completed"], status["approvals_total"]);
+        }
+        metrics_tracker.increment_message();
+    }
+    
+    let query_time = query_start.elapsed();
+    metrics_tracker.end_coordinate();
+    
+    println!("  Queried {} workflows in {:.2}ms", std::cmp::min(5, num_workflows), query_time.as_secs_f64() * 1000.0);
     println!();
 
+
     // =========================================================================
-    // Step 6: Second Approver (Bob) Approves
+    // Step 6: Query Audit Trail
     // =========================================================================
-    println!("Step 6: Bob (Finance) Approves");
+    println!("Step 6: Query Audit Trail");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    workflow.signal("approve", &serde_json::json!({
-        "approver_id": "bob",
-        "comment": "Budget approved, within Q1 allocation"
-    })).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    println!();
-
-    // =========================================================================
-    // Step 7: Third Approver (Carol) Approves
-    // =========================================================================
-    println!("Step 7: Carol (Executive) Approves");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    workflow.signal("approve", &serde_json::json!({
-        "approver_id": "carol",
-        "comment": "Approved for execution"
-    })).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    println!();
-
-    // =========================================================================
-    // Step 8: Query Audit Trail
-    // =========================================================================
-    println!("Step 8: Query Audit Trail");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    metrics_tracker.start_coordinate();
+    let audit_start = Instant::now();
     
     // Query audit trail with typed API
-    let audit_trail: Vec<AuditEntry> = workflow.query("audit_trail").await
+    let audit_trail: Vec<AuditEntry> = workflows[0].query("audit_trail").await
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
     
-    println!("  Audit Trail ({} entries):", audit_trail.len());
-    for entry in &audit_trail {
+    let audit_time = audit_start.elapsed();
+    metrics_tracker.end_coordinate();
+    metrics_tracker.increment_message();
+    
+    println!("  Audit Trail ({} entries) queried in {:.2}ms", audit_trail.len(), audit_time.as_secs_f64() * 1000.0);
+    println!("  Sample entries (showing first 5):");
+    for entry in audit_trail.iter().take(5) {
         println!("    {} | {} | {} | {}", 
             entry.timestamp.format("%H:%M:%S"),
             entry.action,
@@ -665,10 +727,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!();
 
     // =========================================================================
-    // Summary
+    // Performance Metrics & Benchmarks
     // =========================================================================
+    let total_time = total_start.elapsed();
+    let metrics = metrics_tracker.finalize();
+    
+    println!("╔════════════════════════════════════════════════════════════════╗");
+    println!("║        PERFORMANCE METRICS & BENCHMARKS                         ║");
+    println!("╚════════════════════════════════════════════════════════════════╝");
+    println!();
+    
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("COORDINATION vs COMPUTATION ANALYSIS");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("Total Time:                    {:.2}ms", total_time.as_secs_f64() * 1000.0);
+    println!("Coordination Time:             {:.2}ms ({:.1}%)", 
+        metrics.coordinate_duration_ms,
+        if metrics.total_duration_ms > 0 {
+            (metrics.coordinate_duration_ms as f64 / metrics.total_duration_ms as f64) * 100.0
+        } else {
+            0.0
+        });
+    println!("Computation Time:              {:.2}ms ({:.1}%)", 
+        metrics.compute_duration_ms,
+        if metrics.total_duration_ms > 0 {
+            (metrics.compute_duration_ms as f64 / metrics.total_duration_ms as f64) * 100.0
+        } else {
+            0.0
+        });
+    println!("Granularity Ratio:             {:.2}x", metrics.granularity_ratio);
+    println!("Efficiency:                    {:.1}%", metrics.efficiency * 100.0);
+    println!("Total Messages:                {}", metrics.message_count);
+    println!();
+    
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("BENCHMARK METRICS");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    let workflows_per_sec = num_workflows as f64 / total_time.as_secs_f64();
+    let approvals_per_sec = (num_workflows * num_approvers) as f64 / total_time.as_secs_f64();
+    println!("Workflows Processed:           {}", num_workflows);
+    println!("Approvers per Workflow:        {}", num_approvers);
+    println!("Total Approvals:               {}", num_workflows * num_approvers);
+    println!("Workflows/Second:              {:.2}", workflows_per_sec);
+    println!("Approvals/Second:              {:.2}", approvals_per_sec);
+    println!("Avg Latency per Workflow:      {:.2}ms", total_time.as_secs_f64() * 1000.0 / num_workflows as f64);
+    println!("Avg Latency per Approval:     {:.2}ms", total_time.as_secs_f64() * 1000.0 / (num_workflows * num_approvers) as f64);
+    println!();
+    
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("ANALYSIS & RECOMMENDATIONS");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    if metrics.granularity_ratio >= 10.0 {
+        println!("✓ Excellent granularity ratio (>= 10x) - coordination overhead is minimal");
+    } else {
+        println!("⚠ Granularity ratio below 10x - consider batching operations to reduce coordination overhead");
+    }
+    if metrics.efficiency >= 0.9 {
+        println!("✓ High efficiency (>= 90%) - system is well-balanced");
+    } else {
+        println!("⚠ Efficiency below 90% - consider optimizing coordination patterns");
+    }
+    println!();
+    
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("✅ Document Approval Workflow Complete!");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!();
     println!("SDK Annotations Used:");
     println!("  • #[workflow_actor] - Durable workflow execution");

@@ -67,6 +67,9 @@ pub const ENV_GRPC_ADDRESS: &str = "PLEXSPACES_GRPC_ADDRESS";
 /// WASM applications directory for auto-deploy
 pub const ENV_WASM_APPS_DIR: &str = "PLEXSPACES_WASM_APPS_DIR";
 
+/// Save deployed WASM applications to wasm_apps_directory (for testing only)
+pub const ENV_SAVE_WASM_APPS: &str = "PLEXSPACES_SAVE_WASM_APPS";
+
 /// Base directory for PlexSpaces data (default: $HOME/plexspaces)
 pub const ENV_BASE_DIR: &str = "PLEXSPACES_BASE_DIR";
 
@@ -348,6 +351,8 @@ pub struct EnvConfig {
     pub grpc_address: Option<String>,
     /// WASM apps directory (from PLEXSPACES_WASM_APPS_DIR)
     pub wasm_apps_dir: Option<String>,
+    /// Save deployed WASM apps to disk (from PLEXSPACES_SAVE_WASM_APPS)
+    pub save_wasm_apps: bool,
     /// Base directory (from PLEXSPACES_BASE_DIR)
     pub base_dir: Option<String>,
     /// Release config path (from PLEXSPACES_RELEASE_CONFIG_PATH)
@@ -380,6 +385,7 @@ impl EnvConfig {
             listen_addr: get_env(ENV_LISTEN_ADDR),
             grpc_address: get_env(ENV_GRPC_ADDRESS),
             wasm_apps_dir: get_env(ENV_WASM_APPS_DIR),
+            save_wasm_apps: get_env_bool(ENV_SAVE_WASM_APPS),
             base_dir: get_env(ENV_BASE_DIR),
             release_config_path: get_env(ENV_RELEASE_CONFIG_PATH),
             jwt_secret: get_env(ENV_JWT_SECRET),
@@ -569,6 +575,16 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
     if let Err(e) = std::fs::create_dir_all(&wasm_apps_dir) {
         tracing::warn!(wasm_apps_dir = %wasm_apps_dir, error = %e, "Failed to create WASM apps directory");
     }
+
+    // ===========================================
+    // 2a. Set save_wasm_apps flag
+    // ===========================================
+    // Default: false (only enable for testing)
+    // Can be overridden via environment variable or config file
+    if config.save_wasm_apps {
+        runtime.save_wasm_apps = true;
+    }
+    // Note: If config.save_wasm_apps is false, we keep the existing value from proto (defaults to false)
 
     // ===========================================
     // 4. Set locks_provider default

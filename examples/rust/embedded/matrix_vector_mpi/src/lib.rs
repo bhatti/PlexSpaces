@@ -26,12 +26,9 @@ pub mod metrics;
 pub mod worker_actor;
 pub mod config;
 
-// Application framework integration (Phase 2.5)
-pub mod application;
-
 pub use mpi_ops::*;
 pub use metrics::*;
-pub use worker_actor::{WorkerActor, WorkerMessage};
+pub use worker_actor::WorkerActor;
 pub use config::MatrixVectorConfig;
 
 use std::sync::Arc;

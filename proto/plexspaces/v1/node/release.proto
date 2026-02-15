@@ -523,6 +523,20 @@ message RuntimeConfig {
   // Default (set by config_manager): {base_dir}/apps
   // Environment variable: PLEXSPACES_WASM_APPS_DIR
   string wasm_apps_directory = 11;
+
+  // Save deployed WASM applications to wasm_apps_directory (default: false)
+  //
+  // When enabled, WASM modules deployed via API are atomically saved to
+  // wasm_apps_directory/<app-name>/app.wasm for persistence and auto-deploy
+  // on next node restart. Uses atomic file operations (temp file then move)
+  // to prevent half-completed files.
+  //
+  // Security: Only enable for testing/development. Production should use
+  // proper deployment pipelines and not save arbitrary WASM files to disk.
+  //
+  // Default: false (disabled)
+  // Environment variable: PLEXSPACES_SAVE_WASM_APPS
+  bool save_wasm_apps = 12;
 }
 
 // gRPC server configuration

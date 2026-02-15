@@ -463,6 +463,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             grpc_address: String::new(),
         }),
         runtime: Some(RuntimeConfig {
+            save_wasm_apps: false, // Default: disabled (only for testing)
             grpc: Some(GrpcConfig {
                 enabled: toml.runtime.grpc.enabled,
                 address: toml.runtime.grpc.address,
@@ -1042,6 +1043,7 @@ mod tests {
                 grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
+                save_wasm_apps: false, // Default: disabled (only for testing)
                 grpc: None,
                 health: None,
                 security: None,
@@ -1178,6 +1180,7 @@ mod tests {
                 grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
+                save_wasm_apps: false, // Default: disabled (only for testing)
                 grpc: None,
                 health: None,
                 security: None,
@@ -1279,6 +1282,7 @@ mod tests {
                 grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
+                save_wasm_apps: false, // Default: disabled (only for testing)
                 grpc: None,
                 health: None,
                 security: None,
@@ -1398,6 +1402,7 @@ mod tests {
                 grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
+                save_wasm_apps: false, // Default: disabled (only for testing)
                 grpc: None,
                 health: None,
                 security: None,
@@ -1483,6 +1488,7 @@ mod tests {
                 grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
+                save_wasm_apps: false, // Default: disabled (only for testing)
                 grpc: None,
                 health: None,
                 security: None,
@@ -1555,6 +1561,7 @@ mod tests {
                 grpc_address: String::new(),
             }),
             runtime: Some(RuntimeConfig {
+                save_wasm_apps: false, // Default: disabled (only for testing)
                 grpc: None,
                 health: None,
                 security: None,

@@ -51,7 +51,7 @@ fn test_scan_nonexistent_directory() {
 fn test_scan_single_app_without_config() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let app_dir = temp_dir.path().join("my_app");
-    fs::create_dir(&app_dir).unwrap();
+    fs::create_dir_all(&app_dir).unwrap();
     fs::write(app_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
@@ -65,10 +65,10 @@ fn test_scan_single_app_without_config() {
 fn test_scan_single_app_with_config() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let app_dir = temp_dir.path().join("bank_account");
-    fs::create_dir(&app_dir).unwrap();
+    fs::create_dir_all(&app_dir).unwrap();
     fs::write(app_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
     fs::write(
-        app_dir.join("app-config.toml"),
+        app_dir.join("application-spec.toml"),
         create_sample_config("2.0.0"),
     )
     .unwrap();
@@ -88,24 +88,24 @@ fn test_scan_multiple_apps() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
 
     // Create first app
-    let app1_dir = temp_dir.path().join("app_alpha");
-    fs::create_dir(&app1_dir).unwrap();
-    fs::write(app1_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
+    let app_alpha_dir = temp_dir.path().join("app_alpha");
+    fs::create_dir_all(&app_alpha_dir).unwrap();
+    fs::write(app_alpha_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     // Create second app with config
-    let app2_dir = temp_dir.path().join("app_beta");
-    fs::create_dir(&app2_dir).unwrap();
-    fs::write(app2_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
+    let app_beta_dir = temp_dir.path().join("app_beta");
+    fs::create_dir_all(&app_beta_dir).unwrap();
+    fs::write(app_beta_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
     fs::write(
-        app2_dir.join("app-config.toml"),
+        app_beta_dir.join("application-spec.toml"),
         create_sample_config("3.0.0"),
     )
     .unwrap();
 
     // Create third app
-    let app3_dir = temp_dir.path().join("app_gamma");
-    fs::create_dir(&app3_dir).unwrap();
-    fs::write(app3_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
+    let app_gamma_dir = temp_dir.path().join("app_gamma");
+    fs::create_dir_all(&app_gamma_dir).unwrap();
+    fs::write(app_gamma_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
     assert_eq!(apps.len(), 3);
@@ -121,14 +121,14 @@ fn test_scan_multiple_apps() {
 fn test_scan_skips_hidden_directories() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
 
-    // Create a hidden directory with valid WASM
+    // Create a hidden directory (should be skipped)
     let hidden_dir = temp_dir.path().join(".hidden_app");
-    fs::create_dir(&hidden_dir).unwrap();
+    fs::create_dir_all(&hidden_dir).unwrap();
     fs::write(hidden_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     // Create a normal app
     let normal_dir = temp_dir.path().join("normal_app");
-    fs::create_dir(&normal_dir).unwrap();
+    fs::create_dir_all(&normal_dir).unwrap();
     fs::write(normal_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
@@ -140,14 +140,14 @@ fn test_scan_skips_hidden_directories() {
 fn test_scan_skips_directories_without_wasm() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
 
-    // Create directory without app.wasm
-    let invalid_dir = temp_dir.path().join("no_wasm");
-    fs::create_dir(&invalid_dir).unwrap();
-    fs::write(invalid_dir.join("readme.txt"), "not a wasm file").unwrap();
+    // Create directory without app.wasm (should be skipped)
+    let no_wasm_dir = temp_dir.path().join("no_wasm_dir");
+    fs::create_dir_all(&no_wasm_dir).unwrap();
+    fs::write(no_wasm_dir.join("readme.txt"), "not a wasm file").unwrap();
 
     // Create valid app
     let valid_dir = temp_dir.path().join("valid_app");
-    fs::create_dir(&valid_dir).unwrap();
+    fs::create_dir_all(&valid_dir).unwrap();
     fs::write(valid_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
@@ -159,14 +159,14 @@ fn test_scan_skips_directories_without_wasm() {
 fn test_scan_skips_invalid_wasm_files() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
 
-    // Create directory with invalid WASM (no magic number)
+    // Create invalid WASM file (no magic number)
     let invalid_dir = temp_dir.path().join("invalid_wasm");
-    fs::create_dir(&invalid_dir).unwrap();
+    fs::create_dir_all(&invalid_dir).unwrap();
     fs::write(invalid_dir.join("app.wasm"), b"not wasm content").unwrap();
 
     // Create valid app
     let valid_dir = temp_dir.path().join("valid_app");
-    fs::create_dir(&valid_dir).unwrap();
+    fs::create_dir_all(&valid_dir).unwrap();
     fs::write(valid_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
@@ -175,15 +175,17 @@ fn test_scan_skips_invalid_wasm_files() {
 }
 
 #[test]
-fn test_scan_skips_files_not_directories() {
+fn test_scan_skips_directories_without_app_wasm() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
 
-    // Create a file (not directory) in the root
-    fs::write(temp_dir.path().join("not_a_directory.txt"), "hello").unwrap();
+    // Create a directory with non-WASM file (should be skipped)
+    let no_wasm_dir = temp_dir.path().join("no_wasm_dir");
+    fs::create_dir_all(&no_wasm_dir).unwrap();
+    fs::write(no_wasm_dir.join("not_a_wasm_file.txt"), "hello").unwrap();
 
     // Create valid app
     let valid_dir = temp_dir.path().join("valid_app");
-    fs::create_dir(&valid_dir).unwrap();
+    fs::create_dir_all(&valid_dir).unwrap();
     fs::write(valid_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
@@ -194,8 +196,6 @@ fn test_scan_skips_files_not_directories() {
 #[test]
 fn test_wasm_magic_number_validation() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    let app_dir = temp_dir.path().join("test_app");
-    fs::create_dir(&app_dir).unwrap();
 
     // Test various invalid WASM files (all should be rejected)
     let invalid_contents = vec![
@@ -205,14 +205,20 @@ fn test_wasm_magic_number_validation() {
         b"WASM".to_vec(),                       // Text instead of binary magic
     ];
 
-    for content in invalid_contents {
-        fs::write(app_dir.join("app.wasm"), &content).unwrap();
+    for (idx, content) in invalid_contents.iter().enumerate() {
+        let invalid_dir = temp_dir.path().join(format!("invalid_{}", idx));
+        fs::create_dir_all(&invalid_dir).unwrap();
+        fs::write(invalid_dir.join("app.wasm"), content).unwrap();
         let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
         assert!(apps.is_empty(), "Invalid WASM content {:?} should be rejected", content);
+        // Clean up for next iteration
+        fs::remove_dir_all(&invalid_dir).unwrap();
     }
 
     // Valid WASM (magic number + version = 8 bytes minimum) should work
-    fs::write(app_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
+    let valid_dir = temp_dir.path().join("valid_app");
+    fs::create_dir_all(&valid_dir).unwrap();
+    fs::write(valid_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
     assert_eq!(apps.len(), 1);
 }
@@ -224,8 +230,9 @@ fn test_config_parsing_all_supervision_strategies() {
     let strategies = ["one_for_one", "one_for_all", "rest_for_one"];
 
     for strategy in &strategies {
-        let app_dir = temp_dir.path().join(format!("app_{}", strategy));
-        fs::create_dir(&app_dir).unwrap();
+        let app_name = format!("app_{}", strategy);
+        let app_dir = temp_dir.path().join(&app_name);
+        fs::create_dir_all(&app_dir).unwrap();
         fs::write(app_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
         let config = format!(
@@ -236,7 +243,7 @@ max_restarts = 5
 "#,
             strategy
         );
-        fs::write(app_dir.join("app-config.toml"), config).unwrap();
+        fs::write(app_dir.join("application-spec.toml"), config).unwrap();
     }
 
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
@@ -247,7 +254,7 @@ max_restarts = 5
 fn test_config_parsing_child_restart_policies() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let app_dir = temp_dir.path().join("test_app");
-    fs::create_dir(&app_dir).unwrap();
+    fs::create_dir_all(&app_dir).unwrap();
     fs::write(app_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     let config = r#"version = "1.0.0"
@@ -271,7 +278,7 @@ id = "temporary-worker"
 type = "worker"
 restart = "temporary"
 "#;
-    fs::write(app_dir.join("app-config.toml"), config).unwrap();
+    fs::write(app_dir.join("application-spec.toml"), config).unwrap();
 
     let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
     assert_eq!(apps.len(), 1);
@@ -287,7 +294,7 @@ fn test_env_var_wasm_apps_dir() {
     // Note: The actual integration with Node::start() requires more setup
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let app_dir = temp_dir.path().join("env_test_app");
-    fs::create_dir(&app_dir).unwrap();
+    fs::create_dir_all(&app_dir).unwrap();
     fs::write(app_dir.join("app.wasm"), create_minimal_wasm()).unwrap();
 
     // Set env var (for this test's scope only)
@@ -339,10 +346,11 @@ async fn test_node_auto_deploy_with_webapps_directory() {
         return;
     }
     
-    // Verify calculator app exists
-    let calculator_wasm = webapps_path.join("calculator/app.wasm");
+    // Verify calculator app exists (using subdirectory format)
+    let calculator_dir = webapps_path.join("calculator");
+    let calculator_wasm = calculator_dir.join("app.wasm");
     if !calculator_wasm.exists() {
-        eprintln!("⚠️  Skipping test: calculator app.wasm not found at {:?}", calculator_wasm);
+        eprintln!("⚠️  Skipping test: calculator/app.wasm not found at {:?}", calculator_wasm);
         return;
     }
     
@@ -466,20 +474,16 @@ fn test_webapps_directory_structure() {
         return;
     }
     
-    // Check calculator app structure
+    // Check calculator app structure (subdirectory format)
     let calculator_dir = webapps_path.join("calculator");
-    assert!(calculator_dir.exists(), "calculator directory should exist");
-    
     let app_wasm = calculator_dir.join("app.wasm");
+    
     assert!(app_wasm.exists(), "calculator/app.wasm should exist");
     
-    let app_config = calculator_dir.join("app-config.toml");
-    assert!(app_config.exists(), "calculator/app-config.toml should exist");
-    
     // Verify WASM file has correct magic number
-    let wasm_bytes = fs::read(&app_wasm).expect("Should be able to read app.wasm");
+    let wasm_bytes = fs::read(&app_wasm).expect("Should be able to read calculator/app.wasm");
     assert!(wasm_bytes.len() >= 4, "WASM file should have at least 4 bytes");
     assert_eq!(&wasm_bytes[0..4], b"\0asm", "WASM file should have correct magic number");
     
-    eprintln!("✅ webapps/calculator structure verified: app.wasm ({} bytes), app-config.toml", wasm_bytes.len());
+    eprintln!("✅ webapps calculator structure verified: calculator/app.wasm ({} bytes), application-spec.toml", wasm_bytes.len());
 }

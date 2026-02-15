@@ -18,6 +18,7 @@ plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
 plexspaces-core = { path = "../../../../crates/core" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-node = { path = "../../../../crates/node" }
+anyhow = "1.0"
 
 # ULID for message IDs
 ulid = "1.1"

@@ -495,6 +495,7 @@ impl WasmRuntime {
             initial_state,
             config.capabilities,
             limits,
+            config.limits.max_fuel,
             channel_service,
             message_sender,
             tuplespace_provider,
@@ -698,6 +699,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             initial_state,
             capabilities,
             limits,
+            wasm_config.limits.max_fuel,
             channel_service,
             None, // message_sender - trait types differ, pass None
             tuplespace_provider,

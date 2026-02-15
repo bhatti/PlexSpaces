@@ -34,7 +34,7 @@ pub struct MatrixVectorConfig {
     pub num_workers: usize,
 }
 
-fn default_num_rows() -> usize { 8 }
-fn default_num_cols() -> usize { 4 }
-fn default_num_workers() -> usize { 2 }
+fn default_num_rows() -> usize { 2000 }
+fn default_num_cols() -> usize { 2000 }
+fn default_num_workers() -> usize { 4 }
 

@@ -200,7 +200,11 @@ curl -X POST http://localhost:8094/api/v1/deploy \
 
 ### TypeScript Actor (WASM with SDK)
 
-The [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) uses inheritance: extend `PlexSpacesActor<TState>` and implement `on<Op>(payload)` handlers. Same WIT world as Python (`plexspaces-simple-actor`). Build with `jco componentize ... --disable all`. See [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a full example and E2E test.
+The [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) uses inheritance: extend `PlexSpacesActor<TState>` and implement `on<Op>(payload)` handlers. Same WIT world as Python (`plexspaces-simple-actor`). Build with `jco componentize ... --disable all`. 
+
+**SDK Simplification**: The SDK automatically generates WIT TypeScript types during build - you don't need to run `jco types` or import generated files. The SDK uses iterative JSON serialization to avoid WASM recursion issues. Just extend the base class and implement handlers - the SDK handles all WIT details.
+
+See [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a full example and E2E test.
 
 See [SDK Guide](sdk.md) for complete Python and TypeScript SDK documentation.
 See [WASM Deployment](wasm-deployment.md) and [Examples](examples.md) for Python, TypeScript, and other WASM actor examples.

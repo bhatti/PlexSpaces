@@ -79,7 +79,8 @@ services:
     container_name: plexspaces-node
     hostname: node1
     ports:
-      - "8000:8000"
+      - "8000:8000"  # gRPC
+      - "8001:8001"  # HTTP Gateway
     environment:
       # Node configuration
       - NODE_ID=node1
@@ -107,8 +108,26 @@ services:
       - BLOB_ACCESS_KEY_ID=minioadmin
       - BLOB_SECRET_ACCESS_KEY=minioadmin
       
-      # Logging
-      - RUST_LOG=info
+      # Security configuration
+      # Auth is ENABLED by default (production-ready)
+      # To disable auth for testing, uncomment the line below or override via:
+      # docker-compose run -e PLEXSPACES_DISABLE_AUTH=1 plexspaces-node
+      # - PLEXSPACES_DISABLE_AUTH=1
+      
+      # JWT configuration (required when auth is enabled)
+      # Set JWT secret for production, or disable auth for testing
+      - PLEXSPACES_JWT_SECRET=${PLEXSPACES_JWT_SECRET:-test-secret}
+      
+      # mTLS configuration (optional, can use auto-generation)
+      # Uncomment and mount certs volume for production:
+      # - PLEXSPACES_MTLS_CA_CERT=/app/certs/ca.crt
+      # - PLEXSPACES_MTLS_SERVER_CERT=/app/certs/server.crt
+      # - PLEXSPACES_MTLS_SERVER_KEY=/app/certs/server.key
+      
+      # Logging (default: info)
+      # For debug logs similar to scripts/server.sh, set:
+      # RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug
+      - RUST_LOG=${RUST_LOG:-info}
     volumes:
       - ./config:/app/config:ro
     healthcheck:

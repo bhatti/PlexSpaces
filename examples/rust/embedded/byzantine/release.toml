@@ -2,8 +2,14 @@
 # Loaded via ConfigBootstrap
 
 # Total number of generals (minimum 4)
-general_count = 4
+# Increased for non-trivial benchmarks (runs for 2+ seconds)
+general_count = 20
 
 # Number of Byzantine (faulty) generals
 # Must be < general_count/3 for consensus to work
-fault_count = 1
+# With 20 generals, max is 6 (20/3 = 6.67, so 6 is safe)
+fault_count = 5
+
+# Number of consensus rounds to run
+# More rounds = more messages = better metrics
+num_rounds = 5

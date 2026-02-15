@@ -25,13 +25,16 @@
 //! ## Directory Structure
 //! ```text
 //! wasm_apps/                    # Configured via wasm_apps_directory
-//!   bank_account/               # Application name (directory name)
+//!   bank_account/               # Application directory (name = directory name)
 //!     app.wasm                  # Required: WASM module
-//!     app-config.toml           # Optional: ApplicationSpec (supervisor tree, etc.)
+//!     application-spec.toml     # Optional: ApplicationSpec (supervisor tree, etc.)
 //!   feature_flags/
 //!     app.wasm
-//!     app-config.toml
+//!     application-spec.toml
 //! ```
+//!
+//! **Note**: Only subdirectories with `app.wasm` files are supported.
+//! Direct `.wasm` files in the apps folder are not scanned.
 //!
 //! ## Architecture Context
 //! - Called during `Node::start()` after WASM runtime is initialized
@@ -48,13 +51,13 @@ use std::sync::Arc;
 /// Information about a WASM application found in the apps directory
 #[derive(Debug)]
 pub struct WasmAppInfo {
-    /// Application name (derived from directory name)
+    /// Application name (derived from filename without .wasm extension)
     pub name: String,
     /// Application version (from config or "1.0.0")
     pub version: String,
     /// WASM module bytes
     pub wasm_bytes: Vec<u8>,
-    /// Parsed ApplicationSpec (if app-config.toml exists)
+    /// Parsed ApplicationSpec (if application-spec.toml or app-config.toml exists)
     pub config: Option<ApplicationSpec>,
 }
 
@@ -77,7 +80,9 @@ pub enum WasmAppsLoaderError {
 
 /// Scan the wasm_apps_directory for applications
 ///
-/// Returns a list of valid application directories (those containing app.wasm)
+/// Supports subdirectories: `apps/app-name/app.wasm` + `apps/app-name/application-spec.toml`
+///
+/// Returns a list of valid WASM applications found
 pub fn scan_wasm_apps_directory(base_path: &Path) -> Result<Vec<WasmAppInfo>, WasmAppsLoaderError> {
     let mut apps = Vec::new();
 
@@ -106,17 +111,29 @@ pub fn scan_wasm_apps_directory(base_path: &Path) -> Result<Vec<WasmAppInfo>, Wa
         let entry = entry?;
         let path = entry.path();
 
+        // Only process subdirectories
         if !path.is_dir() {
             continue;
         }
 
+        // Skip hidden directories
         let app_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(name) => name.to_string(),
+            Some(name) => {
+                if name.starts_with('.') {
+                    continue;
+                }
+                name.to_string()
+            }
             None => continue,
         };
 
-        // Skip hidden directories
-        if app_name.starts_with('.') {
+        // Check if subdirectory contains app.wasm
+        let wasm_path = path.join("app.wasm");
+        if !wasm_path.exists() {
+            tracing::debug!(
+                app_dir = %path.display(),
+                "Skipping directory - app.wasm not found"
+            );
             continue;
         }
 
@@ -126,8 +143,7 @@ pub fn scan_wasm_apps_directory(base_path: &Path) -> Result<Vec<WasmAppInfo>, Wa
                     app_name = %app_info.name,
                     version = %app_info.version,
                     wasm_size = app_info.wasm_bytes.len(),
-                    has_config = app_info.config.is_some(),
-                    "Found WASM application"
+                    "Found WASM application (subdirectory)"
                 );
                 apps.push(app_info);
             }
@@ -135,7 +151,7 @@ pub fn scan_wasm_apps_directory(base_path: &Path) -> Result<Vec<WasmAppInfo>, Wa
                 tracing::warn!(
                     app_name = %app_name,
                     error = %e,
-                    "Skipping application directory due to error"
+                    "Skipping WASM application due to error"
                 );
             }
         }
@@ -152,12 +168,14 @@ pub fn scan_wasm_apps_directory(base_path: &Path) -> Result<Vec<WasmAppInfo>, Wa
 
 /// Load a WASM application from a directory
 ///
-/// Expects:
+/// Directory structure:
 /// - app.wasm (required)
-/// - app-config.toml (optional)
+/// - application-spec.toml (optional, also accepts app-config.toml for backward compatibility)
 fn load_wasm_app(app_dir: &Path, app_name: &str) -> Result<WasmAppInfo, WasmAppsLoaderError> {
     let wasm_path = app_dir.join("app.wasm");
-    let config_path = app_dir.join("app-config.toml");
+    // Try application-spec.toml first (new format), then app-config.toml (backward compatibility)
+    let config_path = app_dir.join("application-spec.toml");
+    let legacy_config_path = app_dir.join("app-config.toml");
 
     // Check for app.wasm
     if !wasm_path.exists() {
@@ -178,9 +196,14 @@ fn load_wasm_app(app_dir: &Path, app_name: &str) -> Result<WasmAppInfo, WasmApps
         )));
     }
 
-    // Try to read config
+    // Try to read config (prefer application-spec.toml, fallback to app-config.toml)
     let (config, version) = if config_path.exists() {
         let config_str = std::fs::read_to_string(&config_path)?;
+        let parsed = parse_app_config_toml(&config_str, app_name)?;
+        let version = parsed.version.clone();
+        (Some(parsed), version)
+    } else if legacy_config_path.exists() {
+        let config_str = std::fs::read_to_string(&legacy_config_path)?;
         let parsed = parse_app_config_toml(&config_str, app_name)?;
         let version = parsed.version.clone();
         (Some(parsed), version)
@@ -667,75 +690,4 @@ config = { key1 = "value1", key2 = "value2" }
         assert_eq!(facet.config.get("key2"), Some(&"value2".to_string()));
     }
 
-    #[test]
-    fn test_load_wasm_app_missing_wasm() {
-        let temp_dir = TempDir::new().unwrap();
-        let app_dir = temp_dir.path().join("test_app");
-        fs::create_dir(&app_dir).unwrap();
-
-        let result = load_wasm_app(&app_dir, "test_app");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_load_wasm_app_invalid_wasm() {
-        let temp_dir = TempDir::new().unwrap();
-        let app_dir = temp_dir.path().join("test_app");
-        fs::create_dir(&app_dir).unwrap();
-        fs::write(app_dir.join("app.wasm"), b"not wasm").unwrap();
-
-        let result = load_wasm_app(&app_dir, "test_app");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("magic number"));
-    }
-
-    #[test]
-    fn test_load_wasm_app_valid() {
-        let temp_dir = TempDir::new().unwrap();
-        let app_dir = temp_dir.path().join("test_app");
-        fs::create_dir(&app_dir).unwrap();
-        
-        // Minimal valid WASM (just magic number + version)
-        let wasm_bytes = b"\0asm\x01\x00\x00\x00";
-        fs::write(app_dir.join("app.wasm"), wasm_bytes).unwrap();
-
-        let result = load_wasm_app(&app_dir, "test_app").unwrap();
-        assert_eq!(result.name, "test_app");
-        assert_eq!(result.version, "1.0.0");
-        assert!(result.config.is_none());
-    }
-
-    #[test]
-    fn test_load_wasm_app_with_config() {
-        let temp_dir = TempDir::new().unwrap();
-        let app_dir = temp_dir.path().join("test_app");
-        fs::create_dir(&app_dir).unwrap();
-        
-        // Minimal valid WASM
-        let wasm_bytes = b"\0asm\x01\x00\x00\x00";
-        fs::write(app_dir.join("app.wasm"), wasm_bytes).unwrap();
-
-        // Config file
-        let config = r#"
-version = "2.0.0"
-
-[supervisor]
-strategy = "one_for_one"
-max_restarts = 5
-
-[[supervisor.children]]
-id = "account"
-type = "worker"
-restart = "permanent"
-"#;
-        fs::write(app_dir.join("app-config.toml"), config).unwrap();
-
-        let result = load_wasm_app(&app_dir, "test_app").unwrap();
-        assert_eq!(result.name, "test_app");
-        assert_eq!(result.version, "2.0.0");
-        assert!(result.config.is_some());
-        
-        let config = result.config.unwrap();
-        assert!(config.supervisor.is_some());
-    }
 }

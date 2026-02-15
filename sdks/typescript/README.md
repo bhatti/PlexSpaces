@@ -66,6 +66,21 @@ export const actor = {
 
 See [examples/typescript/apps/bank_account](../../examples/typescript/apps/bank_account) for a full example and E2E test.
 
+## Virtual Actors (Orleans-Style)
+
+Virtual actors are automatically activated on first message and deactivated after idle timeout. Configure via `app-config.toml`:
+
+```toml
+[[supervisor.children]]
+id = "my-actor"
+type = "worker"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+]
+```
+
+The TypeScript SDK works seamlessly with virtual actors - no code changes needed. The framework handles activation/deactivation automatically.
+
 ## API
 
 - **`PlexSpacesActor<TState>`**  
@@ -86,9 +101,31 @@ See [examples/typescript/apps/bank_account](../../examples/typescript/apps/bank_
 - **`protected json(obj), error(msg)`**  
   Helpers for returning JSON or error strings.
 
-## WIT
+## WIT Interface
 
 The SDK targets the **plexspaces-simple-actor** WIT world: `init`, `handle`, `get-state`, `set-state`. All data crosses the boundary as strings (JSON). See `wit/plexspaces-simple-actor/world.wit`.
+
+### Host Functions
+
+The SDK uses WIT host functions for runtime capabilities. Host functions are provided by the PlexSpaces runtime when the WASM component is instantiated.
+
+**Virtual Import Pattern**: jco componentize uses virtual imports for WIT host interfaces. The SDK handles these internally - you don't need to import them directly.
+
+The SDK automatically handles logging via `host.log()` for error reporting and observability. In non-WASM environments (e.g., Node.js verification), host functions are undefined and logging gracefully degrades to no-op.
+
+**Available Host Functions** (from `plexspaces:simple-actor/host@0.1.0`):
+- `log(level: string, message: string)` - Log a message (used internally by SDK)
+- `send(to: string, msgType: string, payloadJson: string)` - Send message to another actor
+- `now_ms()` - Get current timestamp in milliseconds
+- `kv_get(key: string)`, `kv_put(key: string, value: string)`, etc. - Key-value storage
+- `ts_write(tupleJson: string)`, `ts_read(patternJson: string)`, etc. - TupleSpace operations
+- See `wit/plexspaces-simple-actor/world.wit` for complete interface
+
+**Note**: The SDK uses `host.log()` internally for error logging. For custom logging in your actors, you can import and use host functions directly using the virtual import pattern (future enhancement: SDK may provide helper methods).
+
+### Type Generation
+
+WIT TypeScript types are generated automatically as part of the SDK build process (`npm run build`). These types are optional and only used internally by the SDK for type checking. Client code doesn't need to generate or import these types - the SDK abstracts all WIT details away.
 
 ## License
 

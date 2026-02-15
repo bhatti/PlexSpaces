@@ -21,7 +21,6 @@ name = "e2e_application"
 path = "tests/e2e_application.rs"
 
 [dependencies]
-plexspaces = { path = "../../.." }
 plexspaces-core = { path = "../../../../crates/core" }
 plexspaces-proto = { path = "../../../../crates/proto" }
 plexspaces-actor = { path = "../../../../crates/actor" }
@@ -30,6 +29,8 @@ plexspaces-mailbox = { path = "../../../../crates/mailbox" }
 plexspaces-persistence = { path = "../../../../crates/persistence" }
 plexspaces-tuplespace = { path = "../../../../crates/tuplespace" }
 plexspaces-node = { path = "../../../../crates/node" }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-sdk-macros = { path = "../../../../sdks/rust/plexspaces-sdk-macros" }
 # plexspaces-supervisor merged into plexspaces-actor
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

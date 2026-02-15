@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
-// Session Manager Example (TimerFacet) - SDK Annotations Demo
+// Timers Example (TimerFacet) - SDK Annotations Demo
 //
 // Demonstrates in-memory timers using PlexSpaces TimerFacet:
 // - register_once(): One-shot timer (idle timeout)
 // - register_periodic(): Repeating timer (heartbeat)
+// - cancel(): Cancel active timers
 // - Timer fires message to actor.handle_message()
+// - CoordinationComputeTracker metrics for timer overhead analysis
 //
 // ## SDK Annotations Used
 // - `#[actor(facets = ["timer"])]` - marks struct as actor with timer facet
@@ -14,15 +16,34 @@
 // - `#[handler("timer_fired", cast)]` - fire-and-forget handler for timers
 //
 // Use Case: Session timeout, heartbeat, retry with backoff
+//
+// ## Architecture
+//
+// This example demonstrates TimerFacet for in-memory timer management:
+// 1. **TimerFacet**: Facet that adds timer capability to actors
+// 2. **One-shot timers**: register_once() for idle timeout, retry
+// 3. **Periodic timers**: register_periodic() for heartbeat, polling
+// 4. **Timer cancellation**: cancel() to stop active timers
+// 5. **Metrics**: CoordinationComputeTracker tracks coordination overhead vs timer processing
+//
+// ## Design Principles
+//
+// - **Core Functionality**: TimerFacet lives in main crates
+// - **No Hacks**: Proper trait usage, no cyclic dependencies
+// - **Observability**: CoordinationComputeTracker for metrics
+// - **Tenant Isolation**: Explicit RequestContext with tenant/namespace (no internal())
 
 use plexspaces_sdk::{
-    actor, plexspaces_handlers, handler,
-    ActorContext, BehaviorError, Message, RequestContext, spawn_actor, TimerFacet,
+    actor, plexspaces_handlers,
+    ActorContext, BehaviorError, Message, RequestContext, spawn_with_facets, TimerFacet,
 };
-use plexspaces_node::NodeBuilder;
+use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
+use plexspaces_core::ActorId;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tracing::info;
+use anyhow::Result;
 
 // Required for macro-generated code
 extern crate plexspaces_core;
@@ -42,6 +63,7 @@ struct SessionActor {
     user_id: String,
     is_active: bool,
     activity_count: u32,
+    timer_fire_count: u32,
 }
 
 impl SessionActor {
@@ -50,6 +72,7 @@ impl SessionActor {
             user_id: user_id.to_string(),
             is_active: true,
             activity_count: 0,
+            timer_fire_count: 0,
         }
     }
 }
@@ -67,23 +90,26 @@ impl SessionActor {
         msg: &Message,
     ) -> Result<(), BehaviorError> {
         let timer_name = String::from_utf8_lossy(&msg.payload).to_string();
+        self.timer_fire_count += 1;
         
         match timer_name.as_str() {
             "idle_timeout" => {
-                println!("  [TIMER] idle_timeout fired - session expired!");
                 self.is_active = false;
             }
             "heartbeat" => {
-                println!("  [TIMER] heartbeat fired - session still active");
+                // Heartbeat received - session still active
+            }
+            "retry" => {
+                // Retry timer fired - would retry operation
             }
             _ => {
-                println!("  [TIMER] {} fired", timer_name);
+                // Unknown timer
             }
         }
         Ok(())
     }
 
-    /// Handle activity events
+    /// Handle activity events (simulates user activity)
     #[handler("activity", cast)]
     async fn handle_activity(
         &mut self,
@@ -91,8 +117,6 @@ impl SessionActor {
         _msg: &Message,
     ) -> Result<(), BehaviorError> {
         self.activity_count += 1;
-        println!("  Activity #{} from {} - would reset idle timer", 
-            self.activity_count, self.user_id);
         Ok(())
     }
 }
@@ -102,130 +126,325 @@ impl SessionActor {
 // =============================================================================
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("╔════════════════════════════════════════════════════════════════╗");
-    println!("║           Session Manager Example (TimerFacet)                 ║");
-    println!("╚════════════════════════════════════════════════════════════════╝");
+async fn main() -> Result<()> {
+    // Initialize tracing
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("timers=info,plexspaces=warn"))
+        )
+        .try_init();
+
+    info!("╔════════════════════════════════════════════════════════════════╗");
+    info!("║           Timers Example (TimerFacet)                         ║");
+    info!("╚════════════════════════════════════════════════════════════════╝");
     println!();
-    println!("Demonstrates PlexSpaces TimerFacet for in-memory timers");
+    info!("Multi-tenancy: RequestContext with tenant/namespace (no internal())");
+    info!("API: TimerFacet for in-memory timer management");
+    info!("Pattern: Session timeout, heartbeat, retry with backoff");
     println!();
 
-    // =========================================================================
-    // Step 1: Create node
-    // =========================================================================
-    println!("Step 1: Create node");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    // Configuration: Use non-trivial scenario (many sessions, various timer patterns)
+    let num_sessions = 80;
+    let idle_timeout_secs = 30;
+    let heartbeat_interval_secs = 5;
+    let retry_delay_secs = 2;
+    
+    info!("Configuration:");
+    info!("  Sessions: {}", num_sessions);
+    info!("  Idle timeout: {}s", idle_timeout_secs);
+    info!("  Heartbeat interval: {}s", heartbeat_interval_secs);
+    info!("  Retry delay: {}s", retry_delay_secs);
+    println!();
 
-    let node = Arc::new(NodeBuilder::new("session-node").build().await);
+    // Create metrics tracker
+    let mut metrics_tracker = CoordinationComputeTracker::new("timers".to_string());
+    let total_start = Instant::now();
+
+    // =========================================================================
+    // Step 1: Create Node
+    // =========================================================================
+    info!("Step 1: Create PlexSpaces Node");
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    metrics_tracker.start_coordinate();
+    let node_start = Instant::now();
+    
+    let node = Arc::new(NodeBuilder::new("timers-node").build().await);
     let service_locator = node.service_locator();
     let ctx = RequestContext::new_without_auth("acme-corp".to_string(), "sessions".to_string());
     
-    println!("  Node: session-node");
-    println!();
-
-    // =========================================================================
-    // Step 2: Create TimerFacet
-    // =========================================================================
-    println!("Step 2: Create TimerFacet");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    let node_time = node_start.elapsed();
+    metrics_tracker.end_coordinate();
     
-    let timer_facet = TimerFacet::new(json!({}), 50);
-    println!("  TimerFacet created (priority: 50)");
+    info!("  Node: timers-node");
+    info!("  Created in {:.2}ms", node_time.as_secs_f64() * 1000.0);
     println!();
 
     // =========================================================================
-    // Step 3: Create actor WITH TimerFacet attached (using SDK spawn_actor)
+    // Step 2: Create Session Actors with TimerFacet (coordination phase)
     // =========================================================================
-    println!("Step 3: Create session actor with TimerFacet (SDK style)");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    info!("Step 2: Create {} session actors with TimerFacet", num_sessions);
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    metrics_tracker.start_coordinate();
+    let spawn_start = Instant::now();
     
-    // Using SDK spawn_actor (like Python @actor(facets=["timer"]))
-    let _actor_ref = spawn_actor(
-        &ctx,
-        service_locator.clone(),
-        "session-user-123@session-node",
-        "sessions",
-        SessionActor::new("user-123"),
-        vec![Box::new(timer_facet)],  // <-- Attach TimerFacet
-    )
-    .await
-    .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    let mut session_ids: Vec<ActorId> = Vec::new();
     
-    println!("  Actor: session-user-123@session-node");
-    println!("  TimerFacet attached via spawn_actor(..., facets)");
-    println!("  Using SDK annotations: #[actor], #[plexspaces_handlers], #[handler]");
+    for i in 0..num_sessions {
+        let user_id = format!("user-{}", i);
+        let actor_id = ActorId::from(format!("session-{}@timers-node", user_id));
+        
+        // Create TimerFacet for this session
+        let timer_facet = Box::new(TimerFacet::new(json!({}), 50, service_locator.clone()));
+        
+        // Spawn actor with TimerFacet attached
+        let _actor_ref = spawn_with_facets(
+            &ctx,
+            service_locator.clone(),
+            &actor_id,
+            "sessions",
+            SessionActor::new(&user_id),
+            vec![timer_facet],
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to spawn actor {}: {}", actor_id, e))?;
+        
+        session_ids.push(actor_id);
+        
+        if i < 3 || i == num_sessions - 1 {
+            info!("  Spawned session actor: {}", session_ids[i]);
+        }
+        
+        metrics_tracker.increment_message();
+    }
+    
+    let spawn_time = spawn_start.elapsed();
+    metrics_tracker.end_coordinate();
+    
+    info!("  Created {} session actors in {:.2}ms", num_sessions, spawn_time.as_secs_f64() * 1000.0);
+    info!("  Average spawn time: {:.2}ms per actor", spawn_time.as_secs_f64() * 1000.0 / num_sessions as f64);
     println!();
 
     // =========================================================================
-    // Step 4: TimerFacet API demonstration
+    // Step 3: Register Timers for Each Session (coordination phase)
     // =========================================================================
-    println!("Step 4: TimerFacet API");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!();
-    println!("  TimerFacet provides:");
-    println!();
-    println!("    // One-shot timer (fires once after delay)");
-    println!("    facet.register_once(\"idle_timeout\", Duration::from_secs(30)).await?;");
-    println!();
-    println!("    // Periodic timer (fires repeatedly)");
-    println!("    facet.register_periodic(\"heartbeat\", Duration::from_secs(5)).await?;");
-    println!();
-    println!("    // Cancel a timer");
-    println!("    facet.cancel(\"idle_timeout\").await?;");
-    println!();
-    println!("    // List active timers");
-    println!("    let timers = facet.list_active_timers().await;");
-    println!();
-    println!("  When timer fires, actor receives message with:");
-    println!("    message.message_type = \"timer_fired\"");
-    println!("    message.payload = timer_name.as_bytes()");
+    info!("Step 3: Register timers for all sessions");
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    metrics_tracker.start_coordinate();
+    let timer_registration_start = Instant::now();
+    
+    let mut total_timers_registered = 0u64;
+    
+    for (i, actor_id) in session_ids.iter().enumerate() {
+        // Get TimerFacet from node (facets are configured with actor_ref and actor_service after spawn)
+        let facets_arc = node.get_facets(actor_id).await
+            .ok_or_else(|| anyhow::anyhow!("Facets not found for actor {}", actor_id))?;
+        
+        let facets_guard = facets_arc.read().await;
+        let timer_facet_arc = facets_guard.get_facet("timer")
+            .ok_or_else(|| anyhow::anyhow!("TimerFacet not found for actor {}", actor_id))?;
+        
+        let timer_facet_guard = timer_facet_arc.read().await;
+        let timer_facet = timer_facet_guard.as_any().downcast_ref::<TimerFacet>()
+            .ok_or_else(|| anyhow::anyhow!("Failed to downcast to TimerFacet for actor {}", actor_id))?;
+        
+        // Register idle timeout (one-shot)
+        timer_facet.register_once("idle_timeout", Duration::from_secs(idle_timeout_secs)).await
+            .map_err(|e| anyhow::anyhow!("Failed to register idle_timeout for {}: {}", actor_id, e))?;
+        total_timers_registered += 1;
+        
+        // Register heartbeat (periodic)
+        timer_facet.register_periodic("heartbeat", Duration::from_secs(heartbeat_interval_secs)).await
+            .map_err(|e| anyhow::anyhow!("Failed to register heartbeat for {}: {}", actor_id, e))?;
+        total_timers_registered += 1;
+        
+        // Register retry timer (one-shot) for some sessions
+        if i % 3 == 0 {
+            timer_facet.register_once("retry", Duration::from_secs(retry_delay_secs)).await
+                .map_err(|e| anyhow::anyhow!("Failed to register retry for {}: {}", actor_id, e))?;
+            total_timers_registered += 1;
+        }
+        
+        if i < 3 || i == num_sessions - 1 {
+            info!("  Registered timers for {}", actor_id);
+        }
+        
+        metrics_tracker.increment_message();
+    }
+    
+    let timer_registration_time = timer_registration_start.elapsed();
+    metrics_tracker.end_coordinate();
+    
+    info!("  Registered {} timers in {:.2}ms", total_timers_registered, timer_registration_time.as_secs_f64() * 1000.0);
+    info!("  Average registration time: {:.2}ms per timer", timer_registration_time.as_secs_f64() * 1000.0 / total_timers_registered as f64);
     println!();
 
     // =========================================================================
-    // Step 5: Example timer usage
+    // Step 4: Simulate Timer Processing (computation phase)
     // =========================================================================
-    println!("Step 5: Example timer workflow");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    info!("Step 4: Simulate timer processing");
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // Simulate timer processing time (computation)
+    // In real scenario, timers fire asynchronously and actors process them
+    metrics_tracker.start_compute();
+    let processing_start = Instant::now();
+    
+    // Simulate processing timer events (heartbeat fires every 5s, retry fires after 2s)
+    // Wait for a short duration to allow some timer events to fire
+    let simulation_duration = Duration::from_millis(2500); // 2.5 seconds
+    tokio::time::sleep(simulation_duration).await;
+    
+    let processing_time = processing_start.elapsed();
+    metrics_tracker.end_compute();
+    
+    info!("  Simulated timer processing for {:.2}s", processing_time.as_secs_f64());
     println!();
-    println!("  User logs in:");
-    println!("    → register_once(\"idle_timeout\", 30min)");
-    println!("    → register_periodic(\"heartbeat\", 5min)");
+
+    // =========================================================================
+    // Step 5: Cancel Some Timers (coordination phase)
+    // =========================================================================
+    info!("Step 5: Cancel timers for some sessions (simulate activity)");
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    metrics_tracker.start_coordinate();
+    let cancel_start = Instant::now();
+    
+    let mut timers_cancelled = 0u64;
+    
+    // Cancel idle_timeout for first 20 sessions (simulate user activity)
+    for actor_id in session_ids.iter().take(20) {
+        // Get TimerFacet from node
+        let facets_arc = node.get_facets(actor_id).await
+            .ok_or_else(|| anyhow::anyhow!("Failed to get facets for {}", actor_id))?;
+        let facets_guard = facets_arc.read().await;
+        let timer_facet_arc = facets_guard.get_facet("timer")
+            .ok_or_else(|| anyhow::anyhow!("TimerFacet not found for {}", actor_id))?;
+        let timer_facet_guard = timer_facet_arc.read().await;
+        let timer_facet = timer_facet_guard.as_any()
+            .downcast_ref::<TimerFacet>()
+            .ok_or_else(|| anyhow::anyhow!("Failed to downcast TimerFacet for {}", actor_id))?;
+        
+        timer_facet.unregister_timer("idle_timeout").await
+            .map_err(|e| anyhow::anyhow!("Failed to cancel idle_timeout for {}: {}", actor_id, e))?;
+        timers_cancelled += 1;
+        
+        // Re-register idle_timeout (reset timer)
+        timer_facet.register_once("idle_timeout", Duration::from_secs(idle_timeout_secs)).await
+            .map_err(|e| anyhow::anyhow!("Failed to re-register idle_timeout for {}: {}", actor_id, e))?;
+        
+        drop(timer_facet_guard);
+        drop(facets_guard);
+        
+        metrics_tracker.increment_message();
+    }
+    
+    let cancel_time = cancel_start.elapsed();
+    metrics_tracker.end_coordinate();
+    
+    info!("  Cancelled and re-registered {} timers in {:.2}ms", timers_cancelled, cancel_time.as_secs_f64() * 1000.0);
     println!();
-    println!("  User activity detected:");
-    println!("    → cancel(\"idle_timeout\")");
-    println!("    → register_once(\"idle_timeout\", 30min)  // Reset");
+
+    // =========================================================================
+    // Step 6: Performance Metrics
+    // =========================================================================
+    info!("Step 6: Performance Metrics");
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!();
-    println!("  Heartbeat timer fires:");
-    println!("    → handle_message() receives \"timer_fired\" + \"heartbeat\"");
-    println!("    → Send ping to client");
+
+    let total_time = total_start.elapsed();
+    let metrics = metrics_tracker.finalize();
+
+    let coordinate_time = Duration::from_millis(metrics.coordinate_duration_ms);
+    let compute_time = Duration::from_millis(metrics.compute_duration_ms);
+    
+    // Calculate benchmark metrics
+    let timer_ops_per_sec = total_timers_registered as f64 / total_time.as_secs_f64();
+    let sessions_per_sec = num_sessions as f64 / total_time.as_secs_f64();
+
+    info!("Execution Summary:");
+    info!("  Total execution time: {:.2}ms ({:.2}s)", 
+          total_time.as_secs_f64() * 1000.0,
+          total_time.as_secs_f64());
+    info!("  Sessions: {}", num_sessions);
+    info!("  Timers registered: {}", total_timers_registered);
+    info!("  Timers cancelled: {}", timers_cancelled);
     println!();
-    println!("  Idle timeout fires (no activity):");
-    println!("    → handle_message() receives \"timer_fired\" + \"idle_timeout\"");
-    println!("    → Close session, disconnect user");
+
+    info!("Coordination vs Computation Breakdown:");
+    info!("  Coordination time: {:.2}ms ({:.1}%)", 
+          coordinate_time.as_secs_f64() * 1000.0,
+          (coordinate_time.as_secs_f64() / total_time.as_secs_f64()) * 100.0);
+    info!("  Computation time: {:.2}ms ({:.1}%)",
+          compute_time.as_secs_f64() * 1000.0,
+          (compute_time.as_secs_f64() / total_time.as_secs_f64()) * 100.0);
+    info!("  Efficiency (compute/total): {:.1}%", metrics.efficiency * 100.0);
+    println!();
+
+    info!("Timer Operations Metrics:");
+    info!("  Total timer operations: {}", metrics.message_count);
+    if metrics.message_count > 0 {
+        let avg_latency_ms = coordinate_time.as_secs_f64() * 1000.0 / metrics.message_count as f64;
+        info!("  Average latency per operation: {:.2}ms", avg_latency_ms);
+        info!("  Timer operations per second: {:.1}", timer_ops_per_sec);
+        info!("  Sessions per second: {:.1}", sessions_per_sec);
+    }
+    println!();
+
+    info!("Benchmark Metrics:");
+    info!("  Timer operations per second: {:.1}", timer_ops_per_sec);
+    info!("  Sessions per second: {:.1}", sessions_per_sec);
+    println!();
+
+    info!("Granularity Analysis:");
+    if coordinate_time.as_secs_f64() > 0.0 {
+        info!("  Granularity ratio (compute/coordinate): {:.2}", metrics.granularity_ratio);
+        if metrics.granularity_ratio >= 100.0 {
+            info!("  ✅ Excellent granularity (coordination overhead is negligible)");
+        } else if metrics.granularity_ratio >= 10.0 {
+            info!("  ✅ Good granularity (coordination overhead is low)");
+        } else if metrics.granularity_ratio >= 1.0 {
+            info!("  ⚠️  Moderate granularity (coordination overhead is noticeable)");
+        } else {
+            info!("  ❌ Poor granularity (coordination overhead dominates)");
+        }
+    } else {
+        info!("  Granularity ratio: N/A (no coordination overhead)");
+    }
     println!();
 
     // =========================================================================
     // Summary
     // =========================================================================
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("Session Manager Example Complete");
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    info!("Timers Example Complete");
     println!();
-    println!("PlexSpaces APIs Used:");
-    println!("  • TimerFacet - In-memory timer management");
-    println!("  • ActorBuilder.with_facet() - Attach facet to actor");
-    println!("  • register_once/periodic() - Create timers");
-    println!("  • cancel() - Stop a timer");
+    info!("Key Concepts:");
+    info!("  - TimerFacet: Adds timer capability to actors");
+    info!("  - One-shot timers: register_once() for idle timeout, retry");
+    info!("  - Periodic timers: register_periodic() for heartbeat, polling");
+    info!("  - Timer cancellation: cancel() to stop active timers");
+    info!("  - In-memory: Timers are NOT persisted (lost on crash)");
     println!();
-    println!("Key Concepts:");
-    println!("  • Timers are IN-MEMORY (lost on crash)");
-    println!("  • Timer fires message to actor.handle_message()");
-    println!("  • Use ReminderFacet for DURABLE timers");
+    info!("PlexSpaces Integration:");
+    info!("  - TimerFacet: register_once, register_periodic, cancel");
+    info!("  - Timer fires message to actor.handle_message()");
+    info!("  - RequestContext: Explicit tenant/namespace (no internal())");
+    info!("  - SDK annotations: #[actor], #[plexspaces_handlers], #[handler]");
     println!();
-    println!("Use Cases:");
-    println!("  • Session idle timeout");
-    println!("  • Heartbeat / keep-alive");
-    println!("  • Retry with exponential backoff");
-    println!("  • Debounce / throttle");
+    info!("Use Cases:");
+    info!("  - Session idle timeout (disconnect after inactivity)");
+    info!("  - Heartbeat / keep-alive (periodic ping to client)");
+    info!("  - Retry with exponential backoff (retry failed operations)");
+    info!("  - Debounce / throttle (rate-limit rapid events)");
+    info!("  - Scheduled tasks (periodic cleanup, maintenance)");
+    println!();
+    info!("Timers vs Reminders:");
+    info!("  - TimerFacet: In-memory, high-frequency, short-lived");
+    info!("  - ReminderFacet: Durable (DB), long-lived, critical");
     println!();
 
     Ok(())

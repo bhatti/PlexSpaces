@@ -174,6 +174,9 @@ pub trait Facet: Send + Sync + Any {
 
     /// Get facet priority
     fn get_priority(&self) -> i32;
+    
+    /// Check if this facet requires actor_ref and actor_service configuration.
+    ///
 
     /// Called when actor receives EXIT signal from linked actor
     /// Only called if actor has trap_exit=true
@@ -308,6 +311,10 @@ pub enum FacetError {
     /// Facet with given type not found
     #[error("Facet not found: {0}")]
     NotFound(String),
+    
+    /// Configuration error (e.g., failed to downcast types)
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
 
     /// Facet of this type already attached
     #[error("Facet already attached: {0}")]

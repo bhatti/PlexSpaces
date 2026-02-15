@@ -16,6 +16,7 @@ plexspaces-process-groups = { path = "../../../../crates/process-groups" }
 plexspaces-keyvalue = { path = "../../../../crates/keyvalue", features = ["sql-backend"] }
 plexspaces-core = { path = "../../../../crates/core" }
 plexspaces-tuplespace = { path = "../../../../crates/tuplespace" }
+plexspaces-node = { path = "../../../../crates/node" }
 
 # Serialization for TupleSpace payloads (scatter/gather chunks)
 serde = { version = "1", features = ["derive"] }
@@ -23,3 +24,10 @@ serde_json = "1"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+
+# Tracing for metrics output
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1.0"

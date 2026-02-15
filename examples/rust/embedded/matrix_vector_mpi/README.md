@@ -6,11 +6,13 @@ This example demonstrates **high-level MPI collective operations** (scatter, bro
 
 ## Key Features
 
+- **SDK Annotations**: Uses `#[event_actor]`, `#[plexspaces_handlers(event)]`, `#[handler]` for clean actor definitions
+- **SDK Spawn Helpers**: Uses `spawn()` instead of low-level ActorFactory APIs
+- **SDK Message Helpers**: Uses `cast_message()` for fire-and-forget messages
 - **TupleSpace for Dataflow**: Uses TupleSpace for coordination (designed for dataflow patterns)
 - **Actor-based Workers**: Worker actors process matrix rows in parallel
 - **ConfigBootstrap**: Erlang/OTP-style configuration loading
 - **CoordinationComputeTracker**: Framework metrics for coordination vs compute
-- **Application Trait**: Demonstrates building applications with multiple actors/supervisors
 
 ## Problem: Parallel Matrix-Vector Multiplication
 
@@ -125,18 +127,24 @@ Environment variables can override these values (with `MATRIX_VECTOR_MPI_` prefi
 
 ## Key Framework Features Used
 
-1. **ConfigBootstrap**: Erlang/OTP-style configuration loading
-2. **CoordinationComputeTracker**: Metrics for coordination vs compute
-3. **NodeBuilder**: Fluent API for node creation
-4. **ActorBuilder**: Fluent API for actor creation
-5. **TupleSpace**: Dataflow coordination (scatter, broadcast, gather, barrier)
-6. **Application Trait**: Building applications with multiple actors
+1. **SDK Annotations**: `#[event_actor]` for GenEvent behavior, `#[plexspaces_handlers(event)]` for handler dispatch
+2. **SDK Spawn Helpers**: `spawn()` for actor creation (simplifies ActorFactory usage)
+3. **SDK Message Helpers**: `cast_message()` for fire-and-forget messages
+4. **ConfigBootstrap**: Erlang/OTP-style configuration loading
+5. **CoordinationComputeTracker**: Metrics for coordination vs compute
+6. **NodeBuilder**: Fluent API for node creation
+7. **TupleSpace**: Dataflow coordination (scatter, broadcast, gather, barrier)
 
 ## Implementation Details
 
 ### Worker Actors
 
-Worker actors (`WorkerActor`) implement `ActorBehavior` and:
+Worker actors (`WorkerActor`) use SDK annotations:
+- `#[event_actor]` - GenEvent behavior (fire-and-forget)
+- `#[plexspaces_handlers(event)]` - Generates EventHandler dispatch
+- `#[handler("Compute", cast)]` - Handles Compute messages
+
+Worker behavior:
 - Read assigned matrix rows from TupleSpace (scatter pattern)
 - Read broadcast vector from TupleSpace
 - Compute local matrix-vector product
@@ -145,25 +153,55 @@ Worker actors (`WorkerActor`) implement `ActorBehavior` and:
 
 **File**: `src/worker_actor.rs`
 
-### Application Implementation
-
-The `MatrixVectorApplication` implements the `Application` trait and demonstrates:
-- Spawning multiple worker actors
-- Coordinating via TupleSpace
-- Tracking metrics using `CoordinationComputeTracker`
-- Graceful shutdown
-
-**File**: `src/application.rs`
-
 ### Main Entry Point
 
 The `main.rs` demonstrates:
-- Using `NodeBuilder` and `ActorBuilder`
+- SDK spawn helpers: `spawn()` for actor creation
+- SDK message helpers: `cast_message()` for fire-and-forget messages
+- `NodeBuilder` for node creation
 - ConfigBootstrap for configuration
 - CoordinationComputeTracker for metrics
 - TupleSpace for dataflow coordination
 
 **File**: `src/main.rs`
+
+### SDK Pattern Example
+
+```rust
+// Define actor with SDK annotation
+#[event_actor]
+pub struct WorkerActor {
+    tuplespace: Arc<TupleSpace>,
+    worker_id: usize,
+}
+
+// Generate handler dispatch
+#[plexspaces_handlers(event)]
+impl WorkerActor {
+    #[handler("Compute", cast)]
+    async fn handle_compute(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<(), BehaviorError> {
+        // Process computation
+        self.compute().await?;
+        Ok(())
+    }
+}
+
+// Spawn actor using SDK helper
+let actor_ref = spawn(
+    &ctx,
+    service_locator,
+    actor_id,
+    "matrix-vector-mpi",
+    worker_actor,
+).await?;
+
+// Send message using SDK helper
+let message = cast_message(json!({
+    "action": "Compute",
+    "worker_id": worker_id,
+}));
+actor_ref.tell(message).await?;
+```
 
 ## Performance Characteristics
 
@@ -218,10 +256,46 @@ This example implements patterns from:
 | **Synchronization** | Barrier ensures consistency |
 | **Load Balancing** | Equal row distribution |
 
+## Real-World Use Cases
+
+This example demonstrates patterns used in:
+
+1. **Scientific Computing**
+   - Linear algebra operations (iterative solvers: CG, GMRES)
+   - Sparse matrix-vector products
+   - Finite element method (FEM) computations
+   - Computational fluid dynamics (CFD)
+
+2. **Machine Learning**
+   - Distributed training (gradient computation)
+   - Batch processing of feature vectors
+   - Neural network forward/backward passes
+   - Large-scale data transformations
+
+3. **Data Processing**
+   - Parallel data transformations
+   - Batch processing pipelines
+   - ETL (Extract, Transform, Load) operations
+   - Distributed aggregations
+
+4. **HPC Workloads**
+   - Parallel algorithms requiring collective communication
+   - Distributed memory parallelism
+   - Scientific simulations
+   - High-performance numerical computing
+
+### When to Use This Pattern
+
+- **Use when**: You need parallel computation with coordination (scatter/gather patterns)
+- **Use when**: Problem can be decomposed into independent work units (rows, chunks)
+- **Use when**: Collective communication patterns are needed (MPI-style operations)
+- **Avoid when**: Problem is too small (coordination overhead dominates)
+- **Avoid when**: Work units are highly dependent (not suitable for parallelization)
+
 ## Further Reading
 
+- SDK documentation: `docs/sdk.md`
 - Framework behavior documentation: `crates/behavior/src/mod.rs`
 - Config bootstrap: `crates/node/src/config_bootstrap.rs`
 - Metrics helper: `crates/node/src/metrics_helper.rs`
 - TupleSpace: `crates/tuplespace/src/lib.rs`
-- Application trait: `crates/core/src/application.rs`

@@ -48,6 +48,7 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             framework_info: None, // Set at runtime
             base_dir: yaml.runtime.base_dir, // Set by config_manager::initialize if empty
             wasm_apps_directory: yaml.runtime.wasm_apps_directory, // Set by config_manager::initialize if empty
+            save_wasm_apps: false, // Default: disabled (only for testing)
         }),
         system_applications: yaml.system_applications,
         applications: yaml

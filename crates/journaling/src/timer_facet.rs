@@ -40,7 +40,7 @@
 //! ```
 
 use async_trait::async_trait;
-use plexspaces_core::{ActorRef, ActorService};
+use plexspaces_core::{ActorService, ServiceLocator};
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
@@ -84,11 +84,8 @@ pub struct TimerFacet {
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
     
-    /// Actor reference for sending timer fired messages
-    actor_ref: Arc<RwLock<Option<ActorRef>>>,
-    
-    /// ActorService for sending messages (required since ActorRef is now pure data)
-    actor_service: Arc<RwLock<Option<Arc<dyn ActorService>>>>,
+    /// ServiceLocator for looking up ActorService when sending messages
+    service_locator: Arc<dyn ServiceLocator>,
     
     /// Active timers: timer_name -> TimerHandle
     timers: Arc<RwLock<HashMap<String, TimerHandle>>>,
@@ -119,16 +116,16 @@ impl TimerFacet {
     /// ## Arguments
     /// * `config` - Facet configuration (can be empty object `{}` for defaults)
     /// * `priority` - Facet priority (default: 50)
+    /// * `service_locator` - ServiceLocator for looking up ActorService when sending messages
     ///
     /// ## Returns
     /// New TimerFacet ready to attach to an actor
-    pub fn new(config: Value, priority: i32) -> Self {
+    pub fn new(config: Value, priority: i32, service_locator: Arc<dyn ServiceLocator>) -> Self {
         TimerFacet {
             config,
             priority,
             actor_id: Arc::new(RwLock::new(None)),
-            actor_ref: Arc::new(RwLock::new(None)),
-            actor_service: Arc::new(RwLock::new(None)),
+            service_locator,
             timers: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "locks")]
             lock_manager: None,
@@ -143,6 +140,7 @@ impl TimerFacet {
     /// * `node_id` - Node ID for lock holder identification
     /// * `config` - Facet configuration
     /// * `priority` - Facet priority
+    /// * `service_locator` - ServiceLocator for looking up ActorService when sending messages
     ///
     /// ## Returns
     /// New TimerFacet with distributed locking support
@@ -152,13 +150,13 @@ impl TimerFacet {
         node_id: String,
         config: Value,
         priority: i32,
+        service_locator: Arc<dyn ServiceLocator>,
     ) -> Self {
         TimerFacet {
             config,
             priority,
             actor_id: Arc::new(RwLock::new(None)),
-            actor_ref: Arc::new(RwLock::new(None)),
-            actor_service: Arc::new(RwLock::new(None)),
+            service_locator,
             timers: Arc::new(RwLock::new(HashMap::new())),
             lock_manager: Some(lock_manager),
             node_id: Arc::new(RwLock::new(Some(node_id))),
@@ -173,23 +171,6 @@ impl TimerFacet {
         }
     }
     
-    /// Set actor reference (called during attachment)
-    ///
-    /// ## Arguments
-    /// * `actor_ref` - Reference to the actor for sending messages
-    pub async fn set_actor_ref(&self, actor_ref: ActorRef) {
-        let mut ref_guard = self.actor_ref.write().await;
-        *ref_guard = Some(actor_ref);
-    }
-    
-    /// Set ActorService (called during attachment)
-    ///
-    /// ## Arguments
-    /// * `actor_service` - ActorService for sending messages
-    pub async fn set_actor_service(&self, actor_service: Arc<dyn ActorService>) {
-        let mut service_guard = self.actor_service.write().await;
-        *service_guard = Some(actor_service);
-    }
     
     /// Register a timer
     ///
@@ -229,11 +210,8 @@ impl TimerFacet {
             return Err(TimerError::InvalidRegistration("periodic timer must have interval > 0".to_string()));
         }
         
-        // Get actor reference and service for sending messages
-        let actor_ref_opt = self.actor_ref.read().await.clone();
-        let actor_ref = actor_ref_opt.ok_or_else(|| TimerError::NotAttached)?;
-        let actor_service_opt = self.actor_service.read().await.clone();
-        let actor_service = actor_service_opt.ok_or_else(|| TimerError::NotAttached)?;
+        // Get actor_id for sending messages
+        let actor_id_clone = actor_id.clone();
         
         // Get lock manager and node ID for distributed locking (if enabled)
         #[cfg(feature = "locks")]
@@ -243,13 +221,14 @@ impl TimerFacet {
             (lock_mgr, node_id_val)
         };
         
+        // Clone ServiceLocator for spawned task
+        let service_locator_clone = self.service_locator.clone();
+        
         // Create timer task
         let timer_name_for_task = registration.timer_name.clone();
         let timer_name_for_return = registration.timer_name.clone();
         let callback_data = registration.callback_data.clone();
         let periodic = registration.periodic;
-        let actor_id_clone = actor_id.clone();
-        let actor_ref_clone = actor_ref.clone();
         
         let handle = tokio::spawn(async move {
             #[cfg(feature = "locks")]
@@ -280,17 +259,24 @@ impl TimerFacet {
                 let mut headers = std::collections::HashMap::new();
                 headers.insert("type".to_string(), "TimerFired".to_string());
                 headers.insert("timer_name".to_string(), timer_name_for_task.clone());
-                let message = Message {
+                let mut message = Message {
                     id: ulid::Ulid::new().to_string(),
                     payload,
                     message_type: "TimerFired".to_string(),
                     headers,
+                    receiver_id: actor_id_clone.clone(), // Set receiver_id to target actor
+                    sender_id: String::new(), // Timer messages don't have a sender
                     ..Default::default()
                 };
                 
-                // Use ActorService to send message (handles local/remote routing)
-                if let Err(e) = actor_service.send(actor_ref_clone.id.as_str(), message).await {
-                    tracing::warn!("Failed to send timer message: {}", e);
+                // Get ActorService from ServiceLocator when needed
+                if let Some(actor_service) = service_locator_clone.get_actor_service().await {
+                    // Use ActorService to send message (handles local/remote routing)
+                    if let Err(e) = actor_service.send(&actor_id_clone, message).await {
+                        tracing::warn!("Failed to send timer message: {}", e);
+                    }
+                } else {
+                    tracing::warn!("ActorService not available, cannot send timer message");
                 }
                 true
             };
@@ -564,14 +550,9 @@ impl Facet for TimerFacet {
     }
     
     async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
-        // Use stored config, ignore parameter (config is set in constructor)
+        // Store actor_id for message sending
         let mut id = self.actor_id.write().await;
         *id = Some(actor_id.to_string());
-        
-        // Try to get actor_ref from config (if provided)
-        // TODO: This might need to be set separately via set_actor_ref()
-        // For now, we'll require it to be set after attachment
-        drop(id);
         Ok(())
     }
     
@@ -583,13 +564,9 @@ impl Facet for TimerFacet {
         }
         timers.clear();
         
-        // Clear actor ID and reference
+        // Clear actor ID
         let mut id = self.actor_id.write().await;
         *id = None;
-        drop(id);
-        
-        let mut ref_guard = self.actor_ref.write().await;
-        *ref_guard = None;
         
         Ok(())
     }
@@ -685,6 +662,7 @@ impl Facet for TimerFacet {
     fn get_priority(&self) -> i32 {
         self.priority
     }
+    
 }
 
 /// Timer errors

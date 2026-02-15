@@ -215,6 +215,12 @@ pub trait ServiceLocator: Send + Sync {
     
     /// Register security config
     async fn register_security_config(&self, config: plexspaces_proto::node::v1::SecurityConfig);
+
+    /// Get RuntimeConfig (for accessing wasm_apps_directory, save_wasm_apps, etc.)
+    async fn get_runtime_config(&self) -> Option<plexspaces_proto::node::v1::RuntimeConfig>;
+    
+    /// Register RuntimeConfig
+    async fn register_runtime_config(&self, config: plexspaces_proto::node::v1::RuntimeConfig);
     
     /// Check if authentication is disabled
     /// 

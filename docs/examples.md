@@ -75,8 +75,12 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 |---------|-------------|------------------|--------|
 | **webhook_handler** | GenServer (request-reply); HTTP deliver/list webhooks | `#[gen_server_actor]`, `#[plexspaces_handlers]`, `#[handler]` | [embedded](../examples/rust/embedded/webhook_handler/) |
 | **session_manager** | Custom actor + TimerFacet (idle timeout, heartbeat) | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]` | [apps](../examples/rust/apps/session_manager/README.md) |
-| **timers** | In-memory timers with TimerFacet | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]` | [embedded](../examples/rust/embedded/timers/README.md) |
+| **timers** | In-memory timers with TimerFacet (session management, idle timeout, heartbeat, retry) | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]`, `spawn_with_facets()`, `CoordinationComputeTracker` | [embedded](../examples/rust/embedded/timers/README.md) |
 | **reminders** | Durable reminders with ReminderFacet | `#[actor]`, `#[plexspaces_handlers(custom)]`, `#[handler]` | [embedded](../examples/rust/embedded/reminders/README.md) |
+| **bank_account** | Durable bank account with journaling (banking use case) | `#[gen_server_actor(facets = ["durability"])]`, `#[plexspaces_handlers]`, `#[handler]`, `spawn_with_storage()` | [embedded](../examples/rust/embedded/bank_account/README.md) |
+| **heat_diffusion** | Thermal simulation with TupleSpace coordination (stencil computation, ghost cell exchange, barrier sync) | `#[gen_server_actor]`, `#[plexspaces_handlers]`, `#[handler]`, `spawn()`, `GenServerRef.call()`, `ActorContext::get_tuplespace()` | [embedded](../examples/rust/embedded/heat_diffusion/README.md) |
+| **matrix_multiply** | Parallel matrix multiplication with scatter-gather pattern (master-worker, scientific computing) | `#[gen_server_actor]`, `#[plexspaces_handlers]`, `#[handler]`, `spawn()`, `GenServerRef.call()` | [embedded](../examples/rust/embedded/matrix_multiply/README.md) |
+| **chat_room** | Process groups for broadcast messaging (pub/sub, Slack/Discord-style) | `ProcessGroupRegistry`, `RequestContext`, `CoordinationComputeTracker` | [embedded](../examples/rust/embedded/chat_room/README.md) |
 | **timeseries_forecasting** | Pipeline via ActorFactory (type-name spawn); see README for Factory vs SDK | ActorFactory pattern | [embedded](../examples/rust/embedded/timeseries_forecasting/README.md) |
 | **firecracker_multi_tenant** | Data-parallel actors (DPA-inspired) with worker pools, **health-aware node connectivity** (liveness/readiness checks, exponential backoff retry), resource-based routing, coordination/compute metrics | `ParallelClient`, `UnifiedShardGroupClient`, `NodeClient` (with health checks) | [embedded](../examples/rust/embedded/firecracker_multi_tenant/README.md) |
 
@@ -113,6 +117,8 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 - `examples/rust/embedded/webhook_handler/` - Webhook handler (FaaS-style HTTP deliver/list)
 
 **Durable Actors** (State Persistence):
+- `examples/python/apps/bank_account/` - Python WASM durable bank account (SDK)
+- `examples/rust/embedded/bank_account/` - Rust durable bank account with journaling (SDK)
 - `examples/simple/wasm_calculator/actors/python/durable_calculator_actor.py` - Python durable actor
 - `examples/simple/durable_actor_example/` - Complete durability example with journaling, checkpoints, replay
 - `examples/domains/genomics-pipeline/src/workers/` - Durable workers with state recovery
@@ -147,7 +153,7 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 **TupleSpace Coordination**:
 - `examples/simple/wasm_calculator/actors/python/tuplespace_calculator_actor.py` - TupleSpace for result sharing
 - `examples/TUPLESPACE_COORDINATION.md` - Comprehensive TupleSpace examples and patterns
-- `examples/intermediate/heat_diffusion/` - Region-based coordination via TupleSpace
+- `examples/rust/embedded/heat_diffusion/` - Thermal simulation with TupleSpace coordination (stencil computation, ghost cell exchange, barrier sync)
 
 **Key-Value Store**:
 - `examples/wasm_showcase/` - Key-value operations via WIT host functions
@@ -165,7 +171,7 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 
 **Process Groups**:
 - `examples/simple/process_groups_pubsub/` - Actor clustering and group messaging
-- `examples/simple/actor_groups_sharding/` - Hash-based routing and load distribution
+- `examples/rust/embedded/event_analytics/` - Distributed event analytics with shard groups (hash-based routing)
 
 **Distributed Locks (Task Queue)**:
 - `examples/python/apps/task-queue/` - Distributed task queue with LockFacet
@@ -276,22 +282,28 @@ cd examples/simple/wasm_calculator
 - [WASM Deployment Guide](wasm-deployment.md) - Deployment instructions and API reference
 - [Polyglot WASM Development Guide](polyglot.md) - Comprehensive guide for polyglot development with all WIT abstractions and language-specific examples
 
-### Actor Groups (Sharding)
+### Event Analytics (Shard Groups)
 
-**Location**: `examples/simple/actor_groups_sharding/`
+**Location**: `examples/rust/embedded/event_analytics/`
 
-Learn actor groups for horizontal scaling with hash-based routing.
+**Real-World Use Case**: Web analytics/event tracking system (Google Analytics, Mixpanel-style) that tracks page views, clicks, and conversions across multiple shards for horizontal scaling.
 
 **Features**:
-- Actor groups
-- Hash-based routing
-- Load distribution
+- Shard Groups - Data-parallel horizontal scaling via hash-based sharding
+- Hash-based routing - Partition key (user_id) → hash → shard_id
+- Scatter-gather queries - Aggregate metrics across all shards
+- SDK patterns - `#[gen_server_actor]`, `spawn_gen_server()`, `GenServerRef.cast()`/`call()`
+- Performance metrics - Coordination vs computation analysis, throughput metrics
 
 **Run**:
 ```bash
-cd examples/simple/actor_groups_sharding
+cd examples/rust/embedded/event_analytics
 cargo run
 ```
+
+**See Also**:
+- [Architecture: Data-Parallel Actors](../docs/architecture.md#data-parallel-actors-shardgroup)
+- [SDK: Unified ShardGroup Client](../docs/sdk.md#unified-shardgroup-client-data-parallel-actors)
 
 ### Webhook Handler (HTTP-Based Actor)
 
@@ -337,9 +349,13 @@ cargo run
 
 ### Heat Diffusion
 
-**Location**: `examples/intermediate/heat_diffusion/`
+**Location**: `examples/rust/embedded/heat_diffusion/`
 
-Multi-actor simulation with region-based coordination.
+Thermal simulation with TupleSpace coordination demonstrating parallel stencil computation:
+- **Ghost Cell Exchange**: Actors exchange boundary values via TupleSpace
+- **Barrier Synchronization**: All regions synchronize before next iteration
+- **SDK Patterns**: Uses `#[gen_server_actor]`, `spawn()`, `GenServerRef.call()`
+- **Metrics**: CoordinationComputeTracker for coordination vs computation analysis
 
 **Features**:
 - Multi-actor simulation
@@ -348,8 +364,8 @@ Multi-actor simulation with region-based coordination.
 
 **Run**:
 ```bash
-cd examples/intermediate/heat_diffusion
-cargo run
+cd examples/rust/embedded/heat_diffusion
+cargo run --bin heat_diffusion
 ```
 
 ### Matrix Vector MPI

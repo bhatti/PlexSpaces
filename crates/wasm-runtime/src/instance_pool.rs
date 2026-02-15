@@ -139,6 +139,7 @@ impl InstancePool {
             &[],
             self.config.capabilities.clone(),
             limits,
+            self.config.limits.max_fuel,
             None, // ChannelService not available at pool level
             None, // MessageSender not available at pool level
             None, // TupleSpaceProvider not available at pool level

@@ -576,7 +576,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Spawn DocumentProcessor (FSM - state machine with TimerFacet)
     print!("│  [3/3] DocumentProcessor (FSM)... ");
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
-    let timer_facet = TimerFacet::new(json!({}), 50);
+    let timer_facet = TimerFacet::new(json!({}), 50, service_locator.clone());
     let doc_processor = spawn_with_facets(
         &ctx,
         service_locator.clone(),

@@ -161,7 +161,41 @@ All routing functions include comprehensive metrics:
 
 All routing functions accept `RequestContext` as the first parameter, ensuring proper tenant/namespace isolation. The `tenant_id` flows from API → ActorBuilder → ActorRef → RequestContext → routing functions.
 
-**See Also**: [Message Routing Design](message-routing.md) - Comprehensive documentation of routing patterns and implementation details
+**Hash-Based Sharding**:
+
+For shard groups (data-parallel actors), routing uses hash-based partitioning:
+
+```rust
+// Hash-based routing: partition key → shard_id
+fn route_to_shard(key: &str, shard_count: usize) -> usize {
+    let hash = key.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    (hash % shard_count as u64) as usize
+}
+
+// Route event to shard based on user_id
+let shard_id = route_to_shard(&event.user_id, shard_count);
+shards[shard_id].cast("track_event", &event_data).await?;
+```
+
+**Scatter-Gather Pattern**:
+
+Query all shards in parallel and aggregate results:
+
+```rust
+// Query all shards in parallel using GenServerRef.call()
+let mut query_futures = Vec::new();
+for shard in &shards {
+    query_futures.push(shard.call::<_, ShardMetrics>("get_metrics", &json!({})));
+}
+
+// Collect and aggregate results
+let results: Vec<Result<ShardMetrics, _>> = futures::future::join_all(query_futures).await;
+let total: u64 = results.iter().map(|r| r.as_ref().map(|m| m.total).unwrap_or(0)).sum();
+```
+
+**See Also**: 
+- [Message Routing Design](message-routing.md) - Comprehensive documentation of routing patterns and implementation details
+- [Event Analytics Example](../examples/rust/embedded/event_analytics/) - Complete shard groups demonstration with hash-based routing
 
 ## Behaviors
 

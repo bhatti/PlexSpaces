@@ -72,7 +72,7 @@
 
 use async_trait::async_trait;
 use metrics;
-use plexspaces_core::{ActorId, ActorRef, ActorService, JournalStorage};
+use plexspaces_core::{ActorId, ActorService, JournalStorage, ServiceLocator};
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
@@ -140,11 +140,8 @@ pub struct ReminderFacet {
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
 
-    /// Actor reference for sending reminder fired messages
-    actor_ref: Arc<RwLock<Option<ActorRef>>>,
-
-    /// ActorService for sending messages (required since ActorRef is now pure data)
-    actor_service: Arc<RwLock<Option<Arc<dyn ActorService>>>>,
+    /// ServiceLocator for looking up ActorService when sending messages
+    service_locator: Arc<dyn ServiceLocator>,
 
     /// Journal storage backend (trait object for runtime polymorphism)
     storage: Arc<dyn JournalStorage>,
@@ -172,6 +169,7 @@ impl ReminderFacet {
     /// * `storage` - Journal storage backend as trait object
     /// * `config` - Facet configuration (can be empty object `{}` for defaults)
     /// * `priority` - Facet priority (default: 50)
+    /// * `service_locator` - ServiceLocator for looking up ActorService when sending messages
     ///
     /// ## Returns
     /// New ReminderFacet ready to attach to an actor
@@ -179,23 +177,22 @@ impl ReminderFacet {
     /// ## Example
     /// ```rust,no_run
     /// # use plexspaces_journaling::*;
-    /// # use plexspaces_core::JournalStorage;
+    /// # use plexspaces_core::{JournalStorage, ServiceLocator};
     /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let storage: Arc<dyn JournalStorage> = Arc::new(
     ///     SqliteJournalStorage::new(":memory:").await?
     /// );
-    /// let facet = ReminderFacet::new(storage, serde_json::json!({}), 50);
+    /// let facet = ReminderFacet::new(storage, serde_json::json!({}), 50, service_locator);
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(storage: Arc<dyn JournalStorage>, config: Value, priority: i32) -> Self {
+    pub fn new(storage: Arc<dyn JournalStorage>, config: Value, priority: i32, service_locator: Arc<dyn ServiceLocator>) -> Self {
         ReminderFacet {
             config,
             priority,
             actor_id: Arc::new(RwLock::new(None)),
-            actor_ref: Arc::new(RwLock::new(None)),
-            actor_service: Arc::new(RwLock::new(None)),
+            service_locator,
             storage,
             reminders: Arc::new(RwLock::new(HashMap::new())),
             background_task: Arc::new(RwLock::new(None)),
@@ -208,11 +205,12 @@ impl ReminderFacet {
     ///
     /// ## Arguments
     /// * `storage` - Journal storage backend as trait object
+    /// * `service_locator` - ServiceLocator for looking up ActorService when sending messages
     ///
     /// ## Returns
     /// New ReminderFacet with default priority (50) and empty config
-    pub fn with_storage(storage: Arc<dyn JournalStorage>) -> Self {
-        Self::new(storage, serde_json::json!({}), REMINDER_FACET_DEFAULT_PRIORITY)
+    pub fn with_storage(storage: Arc<dyn JournalStorage>, service_locator: Arc<dyn ServiceLocator>) -> Self {
+        Self::new(storage, serde_json::json!({}), REMINDER_FACET_DEFAULT_PRIORITY, service_locator)
     }
 
     /// Create a new reminder facet with activation provider
@@ -222,6 +220,7 @@ impl ReminderFacet {
     /// * `activation_provider` - Provider for activating virtual actors
     /// * `config` - Facet configuration
     /// * `priority` - Facet priority
+    /// * `service_locator` - ServiceLocator for looking up ActorService when sending messages
     ///
     /// ## Returns
     /// New ReminderFacet ready to attach to an actor
@@ -234,13 +233,13 @@ impl ReminderFacet {
         activation_provider: Arc<dyn ActivationProvider>,
         config: Value,
         priority: i32,
+        service_locator: Arc<dyn ServiceLocator>,
     ) -> Self {
         ReminderFacet {
             config,
             priority,
             actor_id: Arc::new(RwLock::new(None)),
-            actor_ref: Arc::new(RwLock::new(None)),
-            actor_service: Arc::new(RwLock::new(None)),
+            service_locator,
             storage,
             reminders: Arc::new(RwLock::new(HashMap::new())),
             background_task: Arc::new(RwLock::new(None)),
@@ -249,23 +248,6 @@ impl ReminderFacet {
         }
     }
 
-    /// Set actor reference (called during attachment)
-    ///
-    /// ## Arguments
-    /// * `actor_ref` - Reference to the actor for sending messages
-    pub async fn set_actor_ref(&self, actor_ref: ActorRef) {
-        let mut ref_guard = self.actor_ref.write().await;
-        *ref_guard = Some(actor_ref);
-    }
-
-    /// Set ActorService (called during attachment)
-    ///
-    /// ## Arguments
-    /// * `actor_service` - ActorService for sending messages
-    pub async fn set_actor_service(&self, actor_service: Arc<dyn ActorService>) {
-        let mut service_guard = self.actor_service.write().await;
-        *service_guard = Some(actor_service);
-    }
 
     /// Register a reminder
     ///
@@ -403,8 +385,7 @@ impl ReminderFacet {
 
         let reminders = self.reminders.clone();
         let storage = self.storage.clone();
-        let actor_ref = self.actor_ref.clone();
-        let actor_service = self.actor_service.clone();
+        let service_locator = self.service_locator.clone();
         let shutdown_tx = self.shutdown_tx.clone();
         let activation_provider_clone = self.activation_provider.clone();
 
@@ -454,19 +435,12 @@ impl ReminderFacet {
                     // If actor is deactivated and we have an activation provider, activate it
                     if should_activate {
                         if let Some(provider) = &activation_provider_clone {
-                            if let Ok(activated_ref) = provider.activate_actor(&actor_id).await {
-                                // Update actor_ref with activated reference
-                                *actor_ref.write().await = Some(activated_ref);
-                            }
+                            let _ = provider.activate_actor(&actor_id).await;
                         }
                     }
 
-                    // Fire reminder
-                    let actor_ref_opt = actor_ref.read().await.clone();
-                    let actor_service_opt = actor_service.read().await.clone();
-                    if let (Some(ref_guard), Some(service_guard)) =
-                        (actor_ref_opt.as_ref(), actor_service_opt.as_ref())
-                    {
+                    // Fire reminder - get ActorService from ServiceLocator when needed
+                    if let Some(actor_service) = service_locator.get_actor_service().await {
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             tracing::debug!("Firing reminder: {}", reg.reminder_name);
                         }
@@ -484,21 +458,23 @@ impl ReminderFacet {
                         let mut headers = std::collections::HashMap::new();
                         headers.insert("type".to_string(), "ReminderFired".to_string());
                         headers.insert("reminder_name".to_string(), reg.reminder_name.clone());
-                        let message = Message {
+                        let mut message = Message {
                             id: ulid::Ulid::new().to_string(),
                             payload,
                             message_type: "ReminderFired".to_string(),
                             headers,
+                            receiver_id: actor_id_str.clone(),
+                            sender_id: String::new(),
                             ..Default::default()
                         };
 
                         // Use ActorService to send message (handles local/remote routing)
-                        if let Err(e) = service_guard.send(ref_guard.id.as_str(), message).await {
+                        if let Err(e) = actor_service.send(&actor_id_str, message).await {
                             tracing::warn!("Failed to send reminder message: {}", e);
                         }
                     } else {
                         tracing::warn!(
-                            "Skipping reminder {}: actor_ref or actor_service not set",
+                            "Skipping reminder {}: ActorService not available",
                             reg.reminder_name
                         );
                     }
@@ -634,13 +610,9 @@ impl Facet for ReminderFacet {
         let mut reminders = self.reminders.write().await;
         reminders.clear();
 
-        // Clear actor ID and reference
+        // Clear actor ID
         let mut id = self.actor_id.write().await;
         *id = None;
-        drop(id);
-
-        let mut ref_guard = self.actor_ref.write().await;
-        *ref_guard = None;
 
         Ok(())
     }
@@ -756,6 +728,7 @@ impl Facet for ReminderFacet {
     fn get_priority(&self) -> i32 {
         self.priority
     }
+    
 }
 
 /// Reminder errors
@@ -806,14 +779,17 @@ mod tests {
 
     /// Creates a test facet with SQLite :memory: backend.
     /// Uses in-memory SQLite for fast, isolated test execution.
-    async fn create_test_facet() -> (ReminderFacet, ActorRef) {
+    async fn create_test_facet() -> ReminderFacet {
+        use plexspaces_services::ServiceLocatorImpl;
+        use plexspaces_core::ServiceLocator;
+        use std::sync::Arc;
+        
         let storage: Arc<dyn JournalStorage> =
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        let facet = ReminderFacet::new(storage, serde_json::json!({}), 75);
+        let service_locator: Arc<dyn ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+        let facet = ReminderFacet::new(storage, serde_json::json!({}), 75, service_locator);
 
-        let actor_ref = ActorRef::new("test-actor@test-node".to_string()).unwrap();
-
-        (facet, actor_ref)
+        facet
     }
 
     fn create_test_reminder_registration(

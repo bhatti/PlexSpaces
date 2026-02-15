@@ -43,27 +43,38 @@ COPY sdks/ ./sdks/
 COPY crates/ ./crates/
 COPY wit/ ./wit/
 
-# Build arguments for features (dashboard is enabled by default via default features)
-# Can override with --build-arg FEATURES="firecracker" or --build-arg FEATURES="dashboard,firecracker"
-ARG FEATURES=""
+# Copy release.yaml from root directory (config/release.yaml is excluded by .dockerignore)
+RUN mkdir -p ./config
+COPY release.yaml ./config/release.yaml
+
+# Build arguments for features
+# Default: Build with ALL features enabled
+# - plexspaces-cli: firecracker feature
+# - plexspaces-node: dashboard and firecracker features (via package/feature syntax)
+# Can override with --build-arg FEATURES="" to build with default features only
+ARG FEATURES="firecracker"
 
 # Build the plexspaces CLI binary (includes node start command)
 # Use BuildKit cache mounts for Cargo registry, git cache, and target directory
 # This dramatically speeds up rebuilds by caching dependencies and incremental compilation
 # Docker will cache this layer unless source code or dependencies changed
-# Dashboard is enabled by default, additional features can be specified via FEATURES
+# By default, builds with ALL features (dashboard, firecracker) for production-ready image
 # Cache-busting: Force rebuild by touching a file (increment version to bust cache)
-# Version: 2026-02-06-v1.0 (updated after fixing bindgen type resolution errors)
-RUN echo "Build cache version: 2026-02-06-v1.0" > /tmp/build_version.txt && cat /tmp/build_version.txt
+# Version: 2026-02-09-v1.0 (updated to build with all features by default)
+RUN echo "Build cache version: 2026-02-09-v1.0" > /tmp/build_version.txt && cat /tmp/build_version.txt
 
+# Build with ALL features enabled:
+# - plexspaces-cli/firecracker: Enables Firecracker support in CLI
+# - plexspaces-node/dashboard: Enables dashboard UI
+# - plexspaces-node/firecracker: Enables Firecracker VM support in node
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    if [ -z "${FEATURES}" ]; then \
-        cargo build --release -p plexspaces; \
-    else \
-        cargo build --release -p plexspaces --features "${FEATURES}"; \
-    fi
+    cargo build --release -p plexspaces-cli \
+        --features "${FEATURES}" \
+        --features "plexspaces-node/dashboard" \
+        --features "plexspaces-node/firecracker" && \
+    cp /app/target/release/plexspaces /tmp/plexspaces
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim
@@ -86,16 +97,17 @@ RUN useradd -m -u 1000 plexspaces
 
 WORKDIR /app
 
-# Copy the compiled binary from builder
-COPY --from=builder /app/target/release/plexspaces /usr/local/bin/plexspaces
+# Copy the compiled binary from builder (built with all features)
+# Binary was copied to /tmp/plexspaces in builder stage to work around cache mount limitations
+COPY --from=builder /tmp/plexspaces /usr/local/bin/plexspaces
 
 # Create config and data directories
 # Data directory for SQLite databases and LocalFileSystem blob storage
 RUN mkdir -p /app/config /app/data /app/data/blob /app/certs && \
     chown -R plexspaces:plexspaces /app
 
-# Copy default release configuration (if exists)
-COPY config/release.yaml /app/config/release.yaml 2>/dev/null || echo "# Default release config" > /app/config/release.yaml
+# Copy default release configuration from builder stage
+COPY --from=builder /app/config/release.yaml /app/config/release.yaml
 RUN chown plexspaces:plexspaces /app/config/release.yaml
 
 # Switch to non-root user
@@ -110,6 +122,11 @@ ENV PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
 ENV PLEXSPACES_NODE_ID=node1
 ENV PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
 ENV PLEXSPACES_BASE_DIR=/app/data
+
+# Security configuration
+# Auth is enabled by default - override via PLEXSPACES_DISABLE_AUTH=1 for testing
+# Production should use proper JWT/mTLS configuration
+# ENV PLEXSPACES_DISABLE_AUTH=1  # Uncomment for testing only
 
 # Database configuration (defaults to SQLite file-based, don't override)
 # Leave blank/default - config manager will use PLEXSPACES_BASE_DIR
@@ -129,5 +146,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Run the PlexSpaces node using CLI start command
 # Framework starts empty, ready to accept deployments via gRPC
+# Use shell form to allow environment variable expansion
 ENTRYPOINT ["plexspaces", "start"]
-CMD ["--node-id", "${PLEXSPACES_NODE_ID}", "--listen-addr", "${PLEXSPACES_LISTEN_ADDR}", "--release-config", "${PLEXSPACES_RELEASE_CONFIG}"]
+CMD ["--node-id", "node1", "--listen-addr", "0.0.0.0:8000", "--release-config", "/app/config/release.yaml"]

@@ -30,7 +30,7 @@ Or run the test script (debug build + run with timeout):
 ## PlexSpaces APIs (SDK style)
 
 - **SDK spawn**: `plexspaces_sdk::spawn_actor(ctx, service_locator, actor_id, namespace, SessionActor::new(...), facets)` — facets passed at spawn (like Python `@actor(facets=[...])`).
-- **Handler dispatch**: `plexspaces_impl_handlers!(SessionActor, BehaviorType::Custom("SessionActor".into()), timer_fired => handle_timer_fired, activity => handle_activity)` — message_type → method (like Python `@handler("timer_fired")`).
+- **Handler dispatch**: `#[plexspaces_handlers]` with `#[handler("timer_fired")]` — message_type → method (like Python `@handler("timer_fired")`).
 - `NodeBuilder`, `RequestContext`, `TimerFacet::new()`, `register_once()`, `register_periodic()`
 - `node.get_facets()`, facet downcast via `as_any().downcast_ref::<TimerFacet>()`
 

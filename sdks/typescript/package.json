@@ -11,12 +11,16 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p .",
+    "build": "npm run generate:types && tsc -p .",
+    "generate:types": "node scripts/generate-types.mjs",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
+    "@bytecodealliance/jco": "^1.17.0",
     "typescript": "^5.0.0"
   },
   "license": "LGPL-2.1-or-later"

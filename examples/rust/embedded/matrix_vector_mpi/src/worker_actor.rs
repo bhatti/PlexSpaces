@@ -20,25 +20,21 @@
 //!
 //! Worker actors read matrix rows and vector from TupleSpace,
 //! compute the local matrix-vector product, and write results back.
+//!
+//! Uses SDK annotations:
+//! - `#[event_actor]` - GenEvent behavior (fire-and-forget)
+//! - `#[plexspaces_handlers(event)]` - Generates EventHandler dispatch
+//! - `#[handler("Compute", cast)]` - Fire-and-forget handler
 
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
-use plexspaces_mailbox::Message;
+use plexspaces_sdk::{
+    event_actor, plexspaces_handlers,
+    ActorContext, BehaviorError, Message,
+};
 use plexspaces_tuplespace::{TupleSpace, Tuple, TupleField, Pattern, PatternField};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use anyhow::Result;
 
-/// Worker message types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WorkerMessage {
-    /// Start computation for this worker
-    Compute {
-        worker_id: usize,
-        num_cols: usize,
-    },
-}
-
-/// Worker Actor Behavior
+/// Worker Actor
 ///
 /// Each worker actor:
 /// 1. Reads assigned matrix rows from TupleSpace (scatter pattern)
@@ -46,18 +42,17 @@ pub enum WorkerMessage {
 /// 3. Computes local matrix-vector product
 /// 4. Writes results back to TupleSpace (gather pattern)
 /// 5. Signals barrier completion
+#[event_actor]
 pub struct WorkerActor {
     tuplespace: Arc<TupleSpace>,
     worker_id: usize,
-    num_cols: usize,
 }
 
 impl WorkerActor {
-    pub fn new(tuplespace: Arc<TupleSpace>, worker_id: usize, num_cols: usize) -> Self {
+    pub fn new(tuplespace: Arc<TupleSpace>, worker_id: usize) -> Self {
         Self {
             tuplespace,
             worker_id,
-            num_cols,
         }
     }
 
@@ -128,28 +123,36 @@ impl WorkerActor {
     }
 }
 
-#[async_trait::async_trait]
-impl ActorTrait for WorkerActor {
-    fn behavior_type(&self) -> BehaviorType {
-        BehaviorType::GenEvent
-    }
-
-    async fn handle_message(
+/// SDK-generated handler dispatch for GenEvent behavior
+#[plexspaces_handlers(event)]
+impl WorkerActor {
+    /// Handle Compute message (fire-and-forget)
+    #[handler("Compute", cast)]
+    async fn handle_compute(
         &mut self,
-        _context: &ActorContext,
-        message: Message,
-    ) -> Result<(), plexspaces_core::BehaviorError> {
-        // Deserialize message
-        let payload = message.payload();
-        let worker_msg: WorkerMessage = serde_json::from_slice(payload)
-            .map_err(|e| plexspaces_core::BehaviorError::ProcessingError(e.to_string()))?;
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<(), BehaviorError> {
+        // Deserialize payload (extract worker_id and num_cols from JSON)
+        let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse payload: {}", e)))?;
 
-        match worker_msg {
-            WorkerMessage::Compute { .. } => {
-                self.compute().await
-                    .map_err(|e| plexspaces_core::BehaviorError::ProcessingError(e.to_string()))?;
-            }
+        let worker_id = payload["worker_id"]
+            .as_u64()
+            .ok_or_else(|| BehaviorError::ProcessingError("Missing or invalid worker_id".to_string()))?
+            as usize;
+
+        // Verify worker_id matches
+        if worker_id != self.worker_id {
+            return Err(BehaviorError::ProcessingError(format!(
+                "Worker ID mismatch: expected {}, got {}",
+                self.worker_id, worker_id
+            )));
         }
+
+        // Perform computation
+        self.compute().await
+            .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
 
         Ok(())
     }

@@ -15,10 +15,10 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
+    // Initialize tracing - use try_init() to avoid panic if already initialized
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+        .try_init();
 
     println!("╔════════════════════════════════════════════════════════════╗");
     println!("║     Byzantine Generals - Consensus Example                ║");

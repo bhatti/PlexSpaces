@@ -1814,6 +1814,10 @@ impl ActorFactoryImpl {
     }
 }
 
+/// Configure facets that need actor_ref and actor_service after actor spawn.
+///
+/// ## Purpose
+
 // Implement Service trait so ActorFactoryImpl can be registered in ServiceLocator
 impl Service for ActorFactoryImpl {
     fn service_name(&self) -> String {

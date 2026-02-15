@@ -6,37 +6,101 @@
 // Demonstrates parallel stencil computation using PlexSpaces:
 // - TupleSpace for ghost cell exchange between neighbors
 // - Barrier synchronization between iterations
+// - Actual actors (not structs) using SDK patterns
+// - CoordinationComputeTracker metrics
 //
 // Use Case: Thermal simulation, image processing, weather modeling
+//
+// Architecture:
+// - GridRegionActor: Each actor manages a horizontal strip of the grid
+// - TupleSpace: Ghost cell exchange (boundary values) between neighbors
+// - Barrier: Synchronize iterations (all regions compute before next iteration)
+// - Metrics: Track coordination vs. computation time
 
-use plexspaces_tuplespace::TupleSpace;
-use plexspaces_core::RequestContext;
+use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, handler, json, spawn, GenServerRef, RequestContext};
+use plexspaces_tuplespace::{TupleSpace, Tuple, TupleField, Pattern, PatternField};
+use plexspaces_node::{NodeBuilder, CoordinationComputeTracker, service_wrappers::TupleSpaceProviderWrapper};
+use plexspaces_core::{ActorId, TupleSpaceProvider, BehaviorError, ActorContext, Message};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tracing::info;
+use anyhow::Result;
 
 // =============================================================================
-// Grid Region (would be an Actor in full implementation)
+// GridRegionActor - Manages a horizontal strip of the grid
 // =============================================================================
 
-struct GridRegion {
-    id: usize,
+/// Grid region actor for heat diffusion simulation
+///
+/// ## Purpose
+/// Each actor manages a horizontal strip of the 2D grid and performs stencil computation.
+/// Ghost cells (boundaries) are exchanged via TupleSpace for neighbor communication.
+///
+/// ## Architecture
+/// - Actor receives compute requests with iteration number
+/// - Writes boundary values to TupleSpace for neighbors
+/// - Reads neighbor boundaries from TupleSpace
+/// - Computes new values using 5-point stencil
+/// - Returns max difference for convergence check
+#[gen_server_actor]
+struct GridRegionActor {
+    /// Region ID (0 = top, 1 = bottom, etc.)
+    region_id: usize,
+    /// Current temperature values (1D strip)
     data: Vec<f64>,
+    /// Grid width (number of columns)
     width: usize,
+    /// Fixed boundary values (north for top region, south for bottom region)
+    fixed_boundary: Vec<f64>,
 }
 
-impl GridRegion {
-    fn new(id: usize, width: usize, initial: Vec<f64>) -> Self {
-        Self { id, data: initial, width }
+impl GridRegionActor {
+    /// Create a new grid region actor
+    ///
+    /// ## Arguments
+    /// - `region_id`: Unique identifier for this region
+    /// - `width`: Number of columns in the grid
+    /// - `initial`: Initial temperature values
+    /// - `fixed_boundary`: Fixed boundary values (north for top, south for bottom)
+    fn new(region_id: usize, width: usize, initial: Vec<f64>, fixed_boundary: Vec<f64>) -> Self {
+        Self {
+            region_id,
+            data: initial,
+            width,
+            fixed_boundary,
+        }
     }
 
+    /// Compute new values using 5-point stencil with ghost cells
+    ///
+    /// ## Stencil Pattern
+    /// 5-point stencil averages four neighbors (north, south, east, west):
+    /// ```
+    ///     N
+    ///   W C E
+    ///     S
+    /// ```
+    /// New value = (W + E + N + S) / 4.0
+    ///
+    /// ## Arguments
+    /// - `north`: Ghost cells from north neighbor (or fixed boundary for top region)
+    /// - `south`: Ghost cells from south neighbor (or fixed boundary for bottom region)
+    ///
+    /// ## Returns
+    /// Tuple of (new_data, max_diff) where:
+    /// - `new_data`: Updated temperature values after one iteration
+    /// - `max_diff`: Maximum absolute change across all cells (for convergence check)
     fn compute_with_boundaries(&self, north: &[f64], south: &[f64]) -> (Vec<f64>, f64) {
         let mut new_data = self.data.clone();
         let mut max_diff = 0.0f64;
 
-        // Interior cells only (boundaries are fixed)
+        // Interior cells only (boundaries at indices 0 and len-1 are fixed)
         for i in 1..self.data.len() - 1 {
             let left = self.data[i - 1];
             let right = self.data[i + 1];
             let top = north[i];
             let bottom = south[i];
+            // 5-point stencil: average of four neighbors
             let new_val = (left + right + top + bottom) / 4.0;
             max_diff = max_diff.max((new_val - self.data[i]).abs());
             new_data[i] = new_val;
@@ -46,166 +110,443 @@ impl GridRegion {
     }
 }
 
+#[plexspaces_handlers(gen_server)]
+impl GridRegionActor {
+    /// Handle compute request for an iteration
+    ///
+    /// ## Request Format
+    /// ```json
+    /// {
+    ///   "iteration": 1,
+    ///   "tuplespace": "reference to TupleSpace"
+    /// }
+    /// ```
+    ///
+    /// ## Response Format
+    /// ```json
+    /// {
+    ///   "max_diff": 12.5,
+    ///   "converged": false
+    /// }
+    /// ```
+    #[handler("compute")]
+    async fn handle_compute(
+        &mut self,
+        ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<serde_json::Value, BehaviorError> {
+        let request: serde_json::Value = serde_json::from_slice(&msg.payload)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Invalid compute request: {}", e)))?;
+
+        let iteration = request["iteration"]
+            .as_u64()
+            .ok_or_else(|| BehaviorError::ProcessingError("Missing iteration".to_string()))? as usize;
+
+        // Get TupleSpace from ActorContext
+        let tuplespace_provider = ctx.get_tuplespace().await
+            .ok_or_else(|| BehaviorError::ProcessingError("TupleSpace not available".to_string()))?;
+
+        // Write phase: publish boundary to TupleSpace
+        let boundary_data = serde_json::to_vec(&self.data)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Serialization error: {}", e)))?;
+
+        let south_tuple = Tuple::new(vec![
+            TupleField::String("boundary".to_string()),
+            TupleField::Integer(iteration as i64),
+            TupleField::Integer(self.region_id as i64),
+            TupleField::String("south".to_string()),
+            TupleField::Binary(boundary_data.clone()),
+        ]);
+
+        tuplespace_provider.write(south_tuple).await
+            .map_err(|e| BehaviorError::ProcessingError(format!("TupleSpace write error: {}", e)))?;
+
+        let north_tuple = Tuple::new(vec![
+            TupleField::String("boundary".to_string()),
+            TupleField::Integer(iteration as i64),
+            TupleField::Integer(self.region_id as i64),
+            TupleField::String("north".to_string()),
+            TupleField::Binary(boundary_data),
+        ]);
+
+        tuplespace_provider.write(north_tuple).await
+            .map_err(|e| BehaviorError::ProcessingError(format!("TupleSpace write error: {}", e)))?;
+
+        // Read phase: get neighbor boundaries from TupleSpace
+        // Neighbor matching logic:
+        // - North neighbor: region_id - 1 (top region has no north neighbor)
+        // - South neighbor: region_id + 1 (bottom region has no south neighbor)
+        // Edge regions fall back to fixed boundaries if neighbor doesn't exist
+        let north_neighbor_id = if self.region_id > 0 { self.region_id - 1 } else { usize::MAX };
+        let south_neighbor_id = self.region_id + 1;
+
+        // Read neighbor boundaries (only if neighbors exist)
+        let north_tuples = if north_neighbor_id != usize::MAX {
+            let north_pattern = Pattern::new(vec![
+                PatternField::Exact(TupleField::String("boundary".to_string())),
+                PatternField::Exact(TupleField::Integer(iteration as i64)),
+                PatternField::Exact(TupleField::Integer(north_neighbor_id as i64)),
+                PatternField::Exact(TupleField::String("south".to_string())), // Neighbor's south = our north
+                PatternField::Wildcard,
+            ]);
+            tuplespace_provider.read(&north_pattern).await
+                .map_err(|e| BehaviorError::ProcessingError(format!("TupleSpace read error: {}", e)))?
+        } else {
+            Vec::new() // Top region - no north neighbor
+        };
+
+        // Read south neighbor boundary
+        // If south_neighbor_id doesn't exist (bottom region), read will return empty and we use fixed boundary
+        let south_pattern = Pattern::new(vec![
+            PatternField::Exact(TupleField::String("boundary".to_string())),
+            PatternField::Exact(TupleField::Integer(iteration as i64)),
+            PatternField::Exact(TupleField::Integer(south_neighbor_id as i64)),
+            PatternField::Exact(TupleField::String("north".to_string())), // Neighbor's north = our south
+            PatternField::Wildcard,
+        ]);
+        let south_tuples = tuplespace_provider.read(&south_pattern).await
+            .map_err(|e| BehaviorError::ProcessingError(format!("TupleSpace read error: {}", e)))?;
+
+        // Extract neighbor data from tuples (fallback to fixed boundary if no neighbor found)
+        // Tuple structure: ("boundary", iteration, region_id, edge, data)
+        // Field index 4 contains serialized Vec<f64> boundary data
+        let north_ghost = if let Some(tuple) = north_tuples.first() {
+            if let Some(TupleField::Binary(data)) = tuple.fields().get(4) {
+                serde_json::from_slice::<Vec<f64>>(data)
+                    .unwrap_or_else(|_| self.fixed_boundary.clone())
+            } else {
+                self.fixed_boundary.clone()
+            }
+        } else {
+            // No north neighbor found (top region) - use fixed boundary
+            self.fixed_boundary.clone()
+        };
+
+        let south_ghost = if let Some(tuple) = south_tuples.first() {
+            if let Some(TupleField::Binary(data)) = tuple.fields().get(4) {
+                serde_json::from_slice::<Vec<f64>>(data)
+                    .unwrap_or_else(|_| self.fixed_boundary.clone())
+            } else {
+                self.fixed_boundary.clone()
+            }
+        } else {
+            // No south neighbor found (bottom region or neighbor not ready) - use fixed boundary
+            self.fixed_boundary.clone()
+        };
+
+        // Compute phase: update values using 5-point stencil
+        // This is the actual computation work (coordination overhead excluded)
+        let compute_start = Instant::now();
+        let (new_data, max_diff) = self.compute_with_boundaries(&north_ghost, &south_ghost);
+        self.data = new_data;
+        let compute_time = compute_start.elapsed();
+
+        // Barrier synchronization: write barrier tuple after computation completes
+        // Barrier pattern: ("barrier", iteration, region_id)
+        // Coordinator waits for all regions to write barrier tuples before next iteration
+        let barrier_tuple = Tuple::new(vec![
+            TupleField::String("barrier".to_string()),
+            TupleField::Integer(iteration as i64),
+            TupleField::Integer(self.region_id as i64),
+        ]);
+        tuplespace_provider.write(barrier_tuple.clone()).await
+            .map_err(|e| BehaviorError::ProcessingError(format!("Barrier write error: {}", e)))?;
+        
+        tracing::debug!("Region {} wrote barrier tuple for iteration {}", self.region_id, iteration);
+
+        // Return result with convergence status and computation time
+        // Coordinator uses max_diff to check convergence across all regions
+        Ok(json!({
+            "max_diff": max_diff,
+            "converged": max_diff < 0.5, // Tolerance threshold
+            "compute_time_ms": compute_time.as_millis() as u64,
+        }))
+    }
+}
+
 // =============================================================================
 // Main - Demonstrates TupleSpace coordination for stencil computation
 // =============================================================================
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("╔════════════════════════════════════════════════════════════════╗");
-    println!("║       Heat Diffusion with TupleSpace Coordination              ║");
-    println!("╚════════════════════════════════════════════════════════════════╝");
+async fn main() -> Result<()> {
+    // Initialize tracing
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("heat_diffusion=debug,plexspaces=warn"))
+        )
+        .try_init();
+
+    info!("╔════════════════════════════════════════════════════════════════╗");
+    info!("║       Heat Diffusion with TupleSpace Coordination              ║");
+    info!("╚════════════════════════════════════════════════════════════════╝");
     println!();
-    println!("PlexSpaces APIs demonstrated:");
-    println!("  - TupleSpace::write() - publish ghost cells to neighbors");
-    println!("  - TupleSpace::read()  - receive ghost cells from neighbors");
-    println!("  - TupleSpace barrier  - synchronize iterations");
-    println!();
-
-    // Setup TupleSpace for coordination
-    let tuplespace = TupleSpace::with_tenant_namespace("heat-sim", "diffusion");
-    let ctx = RequestContext::new_without_auth("heat-sim".to_string(), "diffusion".to_string());
-
-    // =========================================================================
-    // Step 1: Initialize grid partitions (simulating 2 region actors)
-    // =========================================================================
-    println!("Step 1: Initialize grid with 2 region actors");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-    // Two horizontal strips of a grid
-    // Region 0: top half (cold boundary at top)
-    // Region 1: bottom half (hot boundary at bottom)
-    let width = 6;
-    
-    let mut region0 = GridRegion::new(0, width, vec![0.0; width]); // Cold top
-    let mut region1 = GridRegion::new(1, width, vec![100.0; width]); // Hot bottom
-
-    println!("  Region 0 (top):    {:?}", region0.data);
-    println!("  Region 1 (bottom): {:?}", region1.data);
+    info!("Multi-tenancy: RequestContext with tenant/namespace (no internal())");
+    info!("TupleSpace: ghost cell exchange, barrier synchronization");
+    info!("SDK: gen_server_actor, spawn(), GenServerRef");
     println!();
 
-    // =========================================================================
-    // Step 2: Iterative diffusion with TupleSpace coordination
-    // =========================================================================
-    println!("Step 2: Run diffusion with TupleSpace ghost cell exchange");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-    let max_iterations = 20;
+    // Configuration: Use non-trivial data sizes (run for several seconds to show real metrics)
+    let width = 1000; // 1000 columns per region (increased for substantial computation)
+    let num_regions = 8; // 8 horizontal strips (increased parallelism)
+    let max_iterations = 100;
     let tolerance = 0.5;
 
+    info!("Configuration:");
+    info!("  Grid width: {} columns", width);
+    info!("  Regions: {} horizontal strips", num_regions);
+    info!("  Max iterations: {}", max_iterations);
+    info!("  Tolerance: {}", tolerance);
+    println!();
+
+    // Create metrics tracker
+    let mut metrics_tracker = CoordinationComputeTracker::new("heat-diffusion".to_string());
+    let total_start = Instant::now();
+
+    // RequestContext: explicit tenant/namespace for multi-tenancy
+    let tenant_id = "heat-sim";
+    let namespace = "diffusion";
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
+    // Setup: Node and TupleSpace
+    let node = NodeBuilder::new("heat-node".to_string())
+        .build()
+        .await;
+    let service_locator = node.service_locator();
+
+    // Create TupleSpace and register with ServiceLocator so actors can access it
+    let tuplespace = Arc::new(TupleSpace::with_tenant_namespace(tenant_id, namespace));
+    let tuplespace_provider: Arc<dyn TupleSpaceProvider> = Arc::new(TupleSpaceProviderWrapper::new(tuplespace.clone()));
+    service_locator.register_tuplespace_provider(tuplespace_provider).await;
+
+    // =========================================================================
+    // Step 1: Spawn region actors
+    // =========================================================================
+    info!("Step 1: Spawn {} region actors", num_regions);
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!();
+
+    let mut region_refs: Vec<GenServerRef> = Vec::new();
+
+    for region_id in 0..num_regions {
+        // Initial temperature: linear gradient from cold (top) to hot (bottom)
+        let initial_temp = (region_id as f64) * (100.0 / (num_regions - 1) as f64);
+        let initial_data = vec![initial_temp; width];
+
+        // Fixed boundaries: cold at top (region 0), hot at bottom (last region)
+        let fixed_boundary = if region_id == 0 {
+            vec![0.0; width] // Cold top
+        } else if region_id == num_regions - 1 {
+            vec![100.0; width] // Hot bottom
+        } else {
+            vec![initial_temp; width] // Interior regions use initial temp
+        };
+
+        let actor = GridRegionActor::new(region_id, width, initial_data, fixed_boundary);
+        let actor_id = ActorId::from(format!("region-{}@heat-node", region_id));
+
+        let actor_ref = spawn(&ctx, service_locator.clone(), actor_id.clone(), namespace, actor).await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn region {}: {}", region_id, e))?;
+
+        let region_ref = GenServerRef::new(actor_ref);
+        region_refs.push(region_ref);
+
+        if region_id < 3 || region_id == num_regions - 1 {
+            info!("  Spawned region-{} (initial temp: {:.1}°C)", region_id, initial_temp);
+        }
+    }
+    println!();
+
+    // =========================================================================
+    // Step 2: Run diffusion iterations with TupleSpace coordination
+    // =========================================================================
+    info!("Step 2: Run diffusion with TupleSpace ghost cell exchange");
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!();
+
+    let mut converged = false;
+    let mut final_iteration = 0;
+    let mut iteration_metrics: Vec<(usize, Duration, Duration, Duration, f64)> = Vec::new();
+
     for iteration in 1..=max_iterations {
-        // -----------------------------------------------------------------
-        // WRITE PHASE: Each region publishes its boundary to TupleSpace
-        // -----------------------------------------------------------------
-        // In real code: tuplespace.write(&ctx, tuple!["boundary", iteration, region_id, "south", data]).await?
+        let iteration_start = Instant::now();
+
+        // Computation phase: send requests and wait for actor responses
+        // Actors perform stencil computation and write barrier tuples after compute
+        let request = json!({
+            "iteration": iteration,
+        });
+        let mut max_diff: f64 = 0.0;
         
-        let region0_south = region0.data.clone();
-        let region1_north = region1.data.clone();
-
-        if iteration <= 3 {
-            println!("  Iteration {}: WRITE phase", iteration);
-            println!("    Region 0 writes south boundary to TupleSpace: {:?}", 
-                     region0_south.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
-            println!("    Region 1 writes north boundary to TupleSpace: {:?}",
-                     region1_north.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
+        metrics_tracker.start_compute();
+        let compute_phase_start = Instant::now();
+        for region_ref in &region_refs {
+            let result: serde_json::Value = region_ref.call("compute", &request).await
+                .map_err(|e| anyhow::anyhow!("Region compute failed: {}", e))?;
+            
+            let diff = result["max_diff"].as_f64().unwrap_or(0.0);
+            max_diff = max_diff.max(diff);
+            if result["converged"].as_bool().unwrap_or(false) {
+                converged = true;
+            }
+            
+            metrics_tracker.increment_message();
         }
+        let compute_phase_time = compute_phase_start.elapsed();
+        metrics_tracker.end_compute();
 
-        // -----------------------------------------------------------------
-        // READ PHASE: Each region reads neighbor's boundary from TupleSpace
-        // -----------------------------------------------------------------
-        // In real code: let tuple = tuplespace.read(&ctx, pattern!["boundary", iteration, neighbor_id, edge, _]).await?
+        // Coordination phase: verify barrier synchronization
+        // All actors have written barrier tuples during compute phase
+        // Since we await all actor responses above, barrier tuples should already exist
+        // This verification measures coordination overhead (tuple space operations)
+        metrics_tracker.start_coordinate();
+        let coordinate_phase_start = Instant::now();
+        let barrier_pattern = Pattern::new(vec![
+            PatternField::Exact(TupleField::String("barrier".to_string())),
+            PatternField::Exact(TupleField::Integer(iteration as i64)),
+            PatternField::Wildcard, // Any region ID
+        ]);
         
-        // Region 0 needs south neighbor (region 1's north boundary)
-        let region0_gets_south = region1_north.clone();
-        // Region 1 needs north neighbor (region 0's south boundary)  
-        let region1_gets_north = region0_south.clone();
+        // Verify all barrier tuples exist (actors write them during compute)
+        // Since we await all actor responses sequentially, tuples should be written by now
+        // This is a quick verification to measure coordination overhead
+        let count = tuplespace.count(barrier_pattern.clone()).await
+            .unwrap_or(0);
+        tracing::debug!("Iteration {}: Found {}/{} barrier tuples", iteration, count, num_regions);
+        if count < num_regions {
+            return Err(anyhow::anyhow!("Barrier verification failed: only {}/{} barrier tuples found", count, num_regions));
+        }
+        
+        let coordinate_phase_time = coordinate_phase_start.elapsed();
+        metrics_tracker.increment_barrier();
+        metrics_tracker.end_coordinate();
 
-        if iteration <= 3 {
-            println!("    Region 0 reads from TupleSpace (south neighbor): {:?}",
-                     region0_gets_south.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
-            println!("    Region 1 reads from TupleSpace (north neighbor): {:?}",
-                     region1_gets_north.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
+        let iteration_time = iteration_start.elapsed();
+        
+        // Store iteration metrics for detailed reporting
+        iteration_metrics.push((
+            iteration,
+            compute_phase_time,
+            coordinate_phase_time,
+            iteration_time,
+            max_diff,
+        ));
+
+        if iteration <= 5 || iteration % 20 == 0 {
+            let compute_pct = (compute_phase_time.as_secs_f64() / iteration_time.as_secs_f64()) * 100.0;
+            let coord_pct = (coordinate_phase_time.as_secs_f64() / iteration_time.as_secs_f64()) * 100.0;
+            info!("  Iteration {}: max_diff={:.4}, total={:.2}ms (compute={:.2}ms/{:.1}%, coord={:.2}ms/{:.1}%)", 
+                  iteration, max_diff, 
+                  iteration_time.as_secs_f64() * 1000.0,
+                  compute_phase_time.as_secs_f64() * 1000.0, compute_pct,
+                  coordinate_phase_time.as_secs_f64() * 1000.0, coord_pct);
         }
 
-        // -----------------------------------------------------------------
-        // COMPUTE PHASE: Each region computes new values using ghost cells
-        // -----------------------------------------------------------------
-        let cold_boundary = vec![0.0; width]; // Fixed cold top
-        let hot_boundary = vec![100.0; width]; // Fixed hot bottom
-
-        let (new_data0, diff0) = region0.compute_with_boundaries(&cold_boundary, &region0_gets_south);
-        let (new_data1, diff1) = region1.compute_with_boundaries(&region1_gets_north, &hot_boundary);
-
-        region0.data = new_data0;
-        region1.data = new_data1;
-
-        let max_diff = diff0.max(diff1);
-
-        if iteration <= 3 || iteration % 5 == 0 {
-            println!("    Region 0 after compute: {:?}", 
-                     region0.data.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
-            println!("    Region 1 after compute: {:?}",
-                     region1.data.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
-            println!("    Max diff: {:.2}", max_diff);
-            println!();
-        }
-
-        // -----------------------------------------------------------------
-        // BARRIER: Wait for all regions before next iteration
-        // -----------------------------------------------------------------
-        // In real code: tuplespace.barrier(&ctx, format!("iteration_{}", iteration), num_regions).await?
-
-        if max_diff < tolerance {
-            println!("  Converged at iteration {} (diff {:.2} < {:.2})", iteration, max_diff, tolerance);
+        if converged || max_diff < tolerance {
+            final_iteration = iteration;
+            if converged {
+                info!("  Converged at iteration {} (diff {:.4} < {:.2})", iteration, max_diff, tolerance);
+            }
             break;
         }
     }
     println!();
 
     // =========================================================================
-    // Step 3: Final state
+    // Step 3: Final metrics
     // =========================================================================
-    println!("Step 3: Final grid state");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("  Top boundary (cold):  {:?}", vec![0.0; width].iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
-    println!("  Region 0:             {:?}", region0.data.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
-    println!("  Region 1:             {:?}", region1.data.iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
-    println!("  Bottom boundary (hot):{:?}", vec![100.0; width].iter().map(|x| format!("{:.1}", x)).collect::<Vec<_>>());
+    info!("Step 3: Performance Metrics");
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!();
 
-    // =========================================================================
-    // Summary
-    // =========================================================================
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("Heat Diffusion Example Complete");
-    println!();
-    println!("TupleSpace Coordination Pattern:");
-    println!();
-    println!("  ┌──────────────┐          ┌──────────────┐");
-    println!("  │  Region 0    │          │  Region 1    │");
-    println!("  │  (Actor)     │          │  (Actor)     │");
-    println!("  └──────┬───────┘          └──────┬───────┘");
-    println!("         │ write south              │ write north");
-    println!("         ▼                          ▼");
-    println!("  ┌─────────────────────────────────────────┐");
-    println!("  │            TupleSpace                   │");
-    println!("  │  [\"boundary\", iter, region, edge, data] │");
-    println!("  └─────────────────────────────────────────┘");
-    println!("         │ read north               │ read south");
-    println!("         ▼                          ▼");
-    println!("  ┌──────────────┐          ┌──────────────┐");
-    println!("  │  compute()   │          │  compute()   │");
-    println!("  └──────────────┘          └──────────────┘");
-    println!();
-    println!("Key APIs:");
-    println!("  - tuplespace.write(&ctx, tuple![...]) - publish ghost cells");
-    println!("  - tuplespace.read(&ctx, pattern![...]) - receive ghost cells");
-    println!("  - tuplespace.barrier(&ctx, name, count) - sync iterations");
+    let total_time = total_start.elapsed();
+    let metrics = metrics_tracker.finalize();
+
+    let coordinate_time = Duration::from_millis(metrics.coordinate_duration_ms);
+    let compute_time = Duration::from_millis(metrics.compute_duration_ms);
+    let total_data_points = width * num_regions * final_iteration;
+
+    info!("Execution Summary:");
+    info!("  Total execution time: {:.2}ms ({:.2}s)", 
+          total_time.as_secs_f64() * 1000.0,
+          total_time.as_secs_f64());
+    info!("  Iterations completed: {}", final_iteration);
+    info!("  Data points processed: {} ({} per iteration)", 
+          total_data_points,
+          width * num_regions);
+    info!("  Grid size: {} columns × {} regions = {} points", 
+          width, num_regions, width * num_regions);
     println!();
 
-    // Keep tuplespace in scope
-    drop(tuplespace);
-    drop(ctx);
+    info!("Coordination vs Computation Breakdown:");
+    info!("  Coordination time: {:.2}ms ({:.1}%)", 
+          coordinate_time.as_secs_f64() * 1000.0,
+          (coordinate_time.as_secs_f64() / total_time.as_secs_f64()) * 100.0);
+    info!("  Computation time: {:.2}ms ({:.1}%)",
+          compute_time.as_secs_f64() * 1000.0,
+          (compute_time.as_secs_f64() / total_time.as_secs_f64()) * 100.0);
+    info!("  Efficiency (compute/total): {:.1}%", metrics.efficiency * 100.0);
+    println!();
+
+    info!("Message & Barrier Metrics:");
+    info!("  Total messages sent: {}", metrics.message_count);
+    info!("  Total barriers: {}", metrics.barrier_count);
+    if metrics.message_count > 0 {
+        let avg_latency_ms = compute_time.as_secs_f64() * 1000.0 / metrics.message_count as f64;
+        info!("  Average latency per message: {:.2}ms", avg_latency_ms);
+        let throughput = metrics.message_count as f64 / total_time.as_secs_f64();
+        info!("  Message throughput: {:.1} msg/s", throughput);
+    }
+    println!();
+
+    // Per-iteration statistics
+    if !iteration_metrics.is_empty() {
+        let avg_iter_time: f64 = iteration_metrics.iter()
+            .map(|(_, _, _, it, _)| it.as_secs_f64() * 1000.0)
+            .sum::<f64>() / iteration_metrics.len() as f64;
+        let avg_compute_time: f64 = iteration_metrics.iter()
+            .map(|(_, ct, _, _, _)| ct.as_secs_f64() * 1000.0)
+            .sum::<f64>() / iteration_metrics.len() as f64;
+        let avg_coord_time: f64 = iteration_metrics.iter()
+            .map(|(_, _, cot, _, _)| cot.as_secs_f64() * 1000.0)
+            .sum::<f64>() / iteration_metrics.len() as f64;
+        
+        info!("Per-Iteration Averages:");
+        info!("  Average iteration time: {:.2}ms", avg_iter_time);
+        info!("  Average compute time: {:.2}ms ({:.1}%)", 
+              avg_compute_time,
+              (avg_compute_time / avg_iter_time) * 100.0);
+        info!("  Average coordinate time: {:.2}ms ({:.1}%)", 
+              avg_coord_time,
+              (avg_coord_time / avg_iter_time) * 100.0);
+        println!();
+    }
+
+    info!("Granularity Analysis:");
+    if coordinate_time.as_secs_f64() > 0.0 {
+        info!("  Granularity ratio (compute/coordinate): {:.2}", metrics.granularity_ratio);
+        if metrics.granularity_ratio >= 100.0 {
+            info!("  ✅ Excellent granularity (coordination overhead is negligible)");
+        } else if metrics.granularity_ratio >= 10.0 {
+            info!("  ✅ Good granularity (coordination overhead is low)");
+        } else if metrics.granularity_ratio >= 1.0 {
+            info!("  ⚠️  Moderate granularity (coordination overhead is noticeable)");
+        } else {
+            info!("  ❌ Poor granularity (coordination overhead dominates)");
+        }
+    } else {
+        info!("  Granularity ratio: N/A (no coordination overhead)");
+    }
+    println!();
+
+    // Graceful shutdown
+    info!("Shutting down...");
+    node.shutdown(Duration::from_secs(5)).await?;
+
+    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    info!("Heat Diffusion Example Complete");
+    println!();
 
     Ok(())
 }

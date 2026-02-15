@@ -440,6 +440,8 @@ graph TB
 - **Temporary Sender Pattern**: Uses single temporary sender ActorRef with per-shard correlation IDs for reply routing
 - **ReplyWaiterRegistry**: Centralized registry for async reply waiting (not used for routing, only waiting)
 
+**Example**: See [Event Analytics Example](../examples/rust/embedded/event_analytics/) for a complete demonstration of shard groups with hash-based routing and scatter-gather queries using SDK patterns (`#[gen_server_actor]`, `spawn_gen_server()`, `GenServerRef.cast()`/`call()`).
+
 **Routing Architecture**:
 - **Unified Routing Module**: `crates/actor/src/routing.rs` centralizes all routing logic
 - **Location Transparency**: `is_actor_local()` determines locality by comparing node_id from actor_id with local_node_id
@@ -851,7 +853,7 @@ pub enum PatternField {
 struct Actor {
     id: ActorId,
     state: ActorState,
-    behavior: Box<dyn ActorBehavior>,
+    behavior: Box<dyn Actor>,  // Actor trait
     mailbox: Mailbox,
     facets: Vec<Box<dyn Facet>>,
 }

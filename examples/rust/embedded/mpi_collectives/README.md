@@ -1,15 +1,15 @@
 # MPI Collectives Example (PlexSpaces APIs)
 
-**Purpose**: Demonstrate MPI/Hadoop-style scatter/gather and map/reduce using PlexSpaces **TupleSpace** and ProcessGroupRegistry.
+**Purpose**: Demonstrate MPI/Hadoop-style scatter/gather and map/reduce using PlexSpaces **TupleSpace** and ProcessGroupRegistry with comprehensive performance metrics.
 
-**PlexSpaces APIs**: `TupleSpace` (scatter, gather, reduce, barrier), `ProcessGroupRegistry` (broadcast, all-reduce), `RequestContext` (multi-tenancy; no `internal()`).
+**PlexSpaces APIs**: `TupleSpace` (scatter, gather, reduce, barrier), `ProcessGroupRegistry` (broadcast, all-reduce), `RequestContext` (multi-tenancy; no `internal()`), `CoordinationComputeTracker` (metrics).
 
 ## Quick Start
 
 ```bash
 cd examples/rust/embedded/mpi_collectives
 
-# Build
+# Build (uses shared workspace target directory)
 cargo build
 
 # Run
@@ -22,6 +22,15 @@ cargo run
 - **ProcessGroupRegistry**: broadcast (publish_to_group), all-reduce (reduce via TupleSpace then broadcast).
 - **Multi-tenancy**: `RequestContext::new_without_auth(tenant, namespace)` with explicit tenant/namespace. In production use `RequestContext::from_auth(tenant_from_jwt, namespace, ...)` or extract from gRPC/HTTP; auth token can be added when JWT/mTLS is enabled.
 - **Storage**: SqliteKVStore `:memory:` for process groups (keyvalue `sql-backend`).
+- **Performance Metrics**: `CoordinationComputeTracker` tracks coordination vs computation time, granularity ratio, efficiency, and benchmark metrics (throughput, ops/sec).
+
+## Real-World Use Cases
+
+- **Distributed Machine Learning**: Gradient averaging across workers (AllReduce pattern)
+- **Monte Carlo Simulations**: Aggregate random samples from multiple workers (Reduce pattern)
+- **MapReduce Workloads**: Scatter map tasks, gather results (TupleSpace scatter/gather)
+- **Consensus Algorithms**: Barrier synchronization + broadcast for voting/agreement
+- **Scientific Computing**: Parallel reduction operations (sum, max, min across distributed data)
 
 ## MPI → PlexSpaces API Mapping
 
@@ -98,6 +107,29 @@ tuplespace.write(tuple!("barrier", barrier_id)).await?;
 let _ = rx.recv().await;
 ```
 
+### Performance Metrics
+
+```rust
+use plexspaces_node::CoordinationComputeTracker;
+
+let mut metrics_tracker = CoordinationComputeTracker::new("mpi-collectives".to_string());
+
+// Track coordination (message passing, barriers)
+metrics_tracker.start_coordinate();
+// ... coordination operations ...
+metrics_tracker.end_coordinate();
+
+// Track computation (actual work)
+metrics_tracker.start_compute();
+// ... computation ...
+metrics_tracker.end_compute();
+
+// Get final metrics
+let metrics = metrics_tracker.finalize();
+println!("Granularity ratio: {:.2}×", metrics.granularity_ratio);
+println!("Efficiency: {:.2}%", metrics.efficiency * 100.0);
+```
+
 ## Architecture
 
 ```
@@ -113,21 +145,74 @@ BROADCAST (ProcessGroupRegistry)     SCATTER/GATHER/REDUCE (TupleSpace)
 
 ## Expected Output
 
+The example runs with non-trivial data sizes (800k elements total, 100k per worker) to demonstrate real performance metrics:
+
 ```
+╔════════════════════════════════════════════════════════════════╗
+║     MPI Collectives with TupleSpace + ProcessGroupRegistry     ║
+╚════════════════════════════════════════════════════════════════╝
+
+Configuration:
+  Workers: 8
+  Data size per worker: 100000 elements
+  Total data size: 800000 elements
+
 Step 1: BROADCAST via ProcessGroupRegistry
   worker-0@mpi-node joined 'workers' group
   ...
+  Broadcast time: 2.34ms
+
 Step 2: SCATTER via TupleSpace (write tasks, take by workers)
-  Coordinator writes one tuple per worker ...
+  Scatter time: 15.67ms
   Workers take their task (take pattern), process, write gather_result:
+  Compute time: 234.56ms
+
 Step 3: GATHER via TupleSpace (read_all gather_result)
-  Gathered partial sums (sorted): [3.0, 7.0, 11.0, 15.0]
+  Gather time: 8.23ms
+
 Step 4: REDUCE via TupleSpace ...
-  Coordinator read_all(partial_sum) -> global sum = 36
+  Reduce time: 3.45ms
+
 Step 5: BARRIER via TupleSpace ...
-  All workers arrived - barrier released!
+  Barrier time: 1.23ms
+
 Step 6: ALL_REDUCE = Reduce + Broadcast
+  AllReduce time: 1.89ms
+
+================================================================================
+📊 PERFORMANCE METRICS & BENCHMARKS
+================================================================================
+
+⚡ LATENCY BREAKDOWN (Coordination vs Computation)
+  Coordination:     32.81 ms (total)
+  Computation:     234.56 ms (total)
+  Total Time:      267.37 ms (0.27 seconds)
+
+📈 COORDINATION vs COMPUTATION ANALYSIS
+  Granularity ratio:     7.15× (compute/coordinate)
+  Efficiency:           87.73% (compute/total)
+  Message count:        25
+  Barrier count:        1
+
+🚀 BENCHMARK METRICS
+  Throughput:        2.99 M ops/s
+  Data throughput:   23.92 MB/s
 ```
+
+## Performance Metrics Explained
+
+### Granularity Ratio
+- **< 10×**: Too much overhead, consider coarser granularity
+- **10×-100×**: Acceptable for small-medium problems
+- **> 100×**: Excellent efficiency, parallelism beneficial
+
+### Efficiency
+- Percentage of time spent on actual computation vs coordination
+- Higher is better (closer to 100% means less overhead)
+
+### Cost Breakdown
+- Shows percentage of total time spent on coordination vs computation
+- Helps identify bottlenecks and optimization opportunities
 
 ## Key APIs
 
@@ -140,6 +225,20 @@ Step 6: ALL_REDUCE = Reduce + Broadcast
 | Barrier | TupleSpace `barrier` + `write` + `recv` | Synchronization point |
 | AllReduce | Reduce + Broadcast | Combine then broadcast |
 
+## Configuration
+
+The example uses non-trivial data sizes by default:
+- **Workers**: 8
+- **Data per worker**: 100,000 elements
+- **Total data**: 800,000 elements
+
+This ensures the example runs for 2+ seconds to show realistic performance metrics.
+
+## Build Configuration
+
+- **Shared Target Directory**: Uses workspace shared `target/` directory (configured via `.cargo/config.toml`)
+- **Debug Builds**: Uses debug builds (not `--release`) for faster iteration
+
 ## Use Cases
 
 - **Distributed ML**: Gradient averaging (AllReduce)
@@ -149,6 +248,6 @@ Step 6: ALL_REDUCE = Reduce + Broadcast
 
 ## See Also
 
-- [Feature Flags](../feature_flags/) - Broadcast pattern, SqliteKVStore
+- [Matrix Vector MPI](../matrix_vector_mpi/) - Similar MPI-style example with actors and SDK patterns
 - [Chat Room](../chat_room/) - Process groups, publish_to_group, list_groups
 - [Heat Diffusion](../heat_diffusion/) - TupleSpace coordination

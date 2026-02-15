@@ -1,0 +1,7 @@
+node_modules/
+*.wasm
+*.js
+*.mjs
+*.d.ts
+src/generated/
+.DS_Store

@@ -21,10 +21,11 @@
 //! Comprehensive test suite for TimerFacet following TDD principles.
 //! Tests cover registration, unregistration, firing, and lifecycle.
 
-use plexspaces_core::{ActorId, ActorRef, ActorService, Message};
+use plexspaces_core::{ActorId, ActorRef, ActorService, Message, ServiceLocator};
 use plexspaces_journaling::{TimerFacet, TimerError, TimerRegistration};
 use plexspaces_facet::Facet;
 use plexspaces_proto::prost_types;
+use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -64,39 +65,44 @@ impl ActorService for MockActorService {
     }
 }
 
-/// Helper to setup a timer facet with all required services
-async fn setup_facet_with_services(
-    mut facet: TimerFacet,
-    actor_id: &str,
-) -> (TimerFacet, Arc<MockActorService>) {
-    facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
-    
-    let actor_ref = ActorRef::new(format!("{}@test-node", actor_id)).unwrap();
+/// Helper to create a test ServiceLocator with ActorService registered
+async fn create_test_service_locator() -> (Arc<dyn ServiceLocator>, Arc<MockActorService>) {
+    let service_locator = Arc::new(ServiceLocatorImpl::new());
     let mock_service = Arc::new(MockActorService::new());
     let actor_service: Arc<dyn ActorService> = mock_service.clone();
-    
-    facet.set_actor_ref(actor_ref).await;
-    facet.set_actor_service(actor_service).await;
-    
+    service_locator.register_actor_service(actor_service).await;
+    (service_locator, mock_service)
+}
+
+/// Helper to setup a timer facet with all required services
+async fn setup_facet_with_services(
+    actor_id: &str,
+) -> (TimerFacet, Arc<MockActorService>) {
+    let (service_locator, mock_service) = create_test_service_locator().await;
+    let mut facet = TimerFacet::new(serde_json::json!({}), 50, service_locator);
+    facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
     (facet, mock_service)
 }
 
 #[tokio::test]
 async fn test_timer_facet_creation() {
-    let facet = TimerFacet::new(serde_json::json!({}), 75);
+    let (service_locator, _mock_service) = create_test_service_locator().await;
+    let facet = TimerFacet::new(serde_json::json!({}), 75, service_locator);
     assert_eq!(facet.facet_type(), "timer");
 }
 
 #[tokio::test]
 async fn test_timer_facet_attach() {
-    let mut facet = TimerFacet::new(serde_json::json!({}), 50);
+    let (service_locator, _mock_service) = create_test_service_locator().await;
+    let mut facet = TimerFacet::new(serde_json::json!({}), 50, service_locator);
     let result = facet.on_attach("test-actor", serde_json::json!({})).await;
     assert!(result.is_ok());
 }
 
 #[tokio::test]
 async fn test_timer_facet_detach() {
-    let mut facet = TimerFacet::new(serde_json::json!({}), 50);
+    let (service_locator, _mock_service) = create_test_service_locator().await;
+    let mut facet = TimerFacet::new(serde_json::json!({}), 50, service_locator);
     facet.on_attach("test-actor", serde_json::json!({})).await.unwrap();
     let result = facet.on_detach("test-actor").await;
     assert!(result.is_ok());
@@ -104,8 +110,7 @@ async fn test_timer_facet_detach() {
 
 #[tokio::test]
 async fn test_register_one_time_timer() {
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     let registration = TimerRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -128,8 +133,7 @@ async fn test_register_one_time_timer() {
 
 #[tokio::test]
 async fn test_register_periodic_timer() {
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     let registration = TimerRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -152,8 +156,7 @@ async fn test_register_periodic_timer() {
 
 #[tokio::test]
 async fn test_register_duplicate_timer_fails() {
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     let registration = TimerRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -182,8 +185,7 @@ async fn test_register_duplicate_timer_fails() {
 
 #[tokio::test]
 async fn test_unregister_timer() {
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     let registration = TimerRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -208,7 +210,8 @@ async fn test_unregister_timer() {
 
 #[tokio::test]
 async fn test_unregister_nonexistent_timer_fails() {
-    let mut facet = TimerFacet::new(serde_json::json!({}), 50);
+    let (service_locator, _mock_service) = create_test_service_locator().await;
+    let mut facet = TimerFacet::new(serde_json::json!({}), 50, service_locator);
     facet.on_attach("test-actor", serde_json::json!({})).await.unwrap();
     
     let result = facet.unregister_timer("nonexistent").await;
@@ -218,8 +221,7 @@ async fn test_unregister_nonexistent_timer_fails() {
 
 #[tokio::test]
 async fn test_periodic_timer_requires_interval() {
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     let registration = TimerRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -245,8 +247,7 @@ async fn test_periodic_timer_requires_interval() {
 async fn test_timer_fires_and_sends_message() {
     // Test that timer registration works and timer is properly configured
     // Note: Actual firing is tested in integration tests with longer timeouts
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     let registration = TimerRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -280,8 +281,7 @@ async fn test_timer_fires_and_sends_message() {
 async fn test_periodic_timer_fires_multiple_times() {
     // Test that periodic timer registration works
     // Note: Actual firing is tested in integration tests with longer timeouts
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     let registration = TimerRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -314,8 +314,7 @@ async fn test_periodic_timer_fires_multiple_times() {
 
 #[tokio::test]
 async fn test_timers_cleared_on_detach() {
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     let registration = TimerRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -345,8 +344,7 @@ async fn test_timers_cleared_on_detach() {
 #[tokio::test]
 async fn test_multiple_timers_simultaneously() {
     // Test that multiple timers can be registered simultaneously
-    let facet = TimerFacet::new(serde_json::json!({}), 50);
-    let (mut facet, _mailbox) = setup_facet_with_services(facet, "test-actor").await;
+    let (mut facet, _mock_service) = setup_facet_with_services("test-actor").await;
     
     // Register multiple timers
     for i in 0..5 {

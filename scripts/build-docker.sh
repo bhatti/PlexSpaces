@@ -16,12 +16,17 @@ set -euo pipefail
 
 TAG="${1:-latest}"
 REGISTRY="${2:-plexspaces}"
+# Note: FEATURES arg is for plexspaces-cli features (firecracker)
+# plexspaces-node features (dashboard, firecracker) are always enabled in Dockerfile
+FEATURES="${3:-firecracker}"  # Default: build with all features
 IMAGE_NAME="${REGISTRY}:${TAG}"
 
 echo "🐳 Building Docker image: ${IMAGE_NAME}"
+echo "📦 Features: ${FEATURES} (plexspaces-cli)"
+echo "📦 All features enabled: plexspaces-cli/firecracker, plexspaces-node/dashboard, plexspaces-node/firecracker"
 
-# Build image
-docker build -t "${IMAGE_NAME}" .
+# Build image with all features by default
+docker build --build-arg FEATURES="${FEATURES}" -t "${IMAGE_NAME}" .
 
 echo "✅ Build complete!"
 echo ""

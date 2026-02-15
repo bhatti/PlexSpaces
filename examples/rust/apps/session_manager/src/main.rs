@@ -122,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Node started");
 
     // Spawn with TimerFacet (like Python @actor(facets=["timer"]))
-    let timer_facet = TimerFacet::new(json!({}), 50);
+    let timer_facet = TimerFacet::new(json!({}), 50, service_locator.clone());
     let actor_ref = spawn_actor(
         &ctx,
         service_locator.clone(),

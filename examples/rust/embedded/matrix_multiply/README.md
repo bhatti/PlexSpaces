@@ -1,134 +1,150 @@
-# Matrix Multiplication Example (Actor Workers)
+# Matrix Multiplication - Parallel Computation with Scatter-Gather Pattern
 
-**Purpose**: Demonstrate actor-based parallel computation with tell/ask patterns.
+**Real-world use case**: Scientific computing, ML inference, graphics, signal processing - parallel matrix multiplication using master-worker pattern with scatter-gather coordination.
 
-**PlexSpaces APIs**: `ActorBuilder::spawn()`, `ActorRef::tell()`, `ActorRef::ask()`
+**Pattern**: Scatter-gather pattern (cast for distribution, call for collection) demonstrating parallel computation with actor workers.
+
+## Overview
+
+This example demonstrates parallel matrix multiplication (C = A × B) using PlexSpaces actors and the scatter-gather pattern. A master actor distributes row partitions to worker actors via `cast()` (scatter) and collects results via `call()` (gather).
+
+## Architecture
+
+### MatrixWorker Actor
+
+Each worker actor computes a partition of rows:
+- **State**: Worker ID, computed result rows
+- **Computation**: Standard matrix multiplication algorithm (O(n³))
+- **Coordination**: Receives work via `cast()`, returns results via `call()`
+
+### Scatter-Gather Pattern
+
+1. **Scatter Phase**: Master distributes work to workers via `cast()` (fire-and-forget)
+2. **Compute Phase**: Workers perform matrix multiplication in parallel
+3. **Gather Phase**: Master collects results via `call()` (request-reply)
+
+### Coordination vs. Computation Metrics
+
+- **Coordination**: Message sending/receiving overhead (scatter phase)
+- **Computation**: Actual matrix multiplication work (gather phase includes computation)
+- **Granularity Ratio**: compute_time / coordinate_time (target: >10x)
+
+## SDK Features Demonstrated
+
+- `#[gen_server_actor]` - Declares GenServer behavior
+- `#[plexspaces_handlers(gen_server)]` - Auto-generated message dispatch
+- `#[handler("compute_rows")]` - Compute handler (supports both call and cast)
+- `#[handler("get_result")]` - Result retrieval handler
+- `spawn()` - SDK helper for spawning actors
+- `GenServerRef.cast()` - Fire-and-forget messaging (scatter)
+- `GenServerRef.call()` - Request-reply messaging (gather)
+
+## Communication Patterns
+
+### Scatter (Fire-and-Forget)
+
+```rust
+use plexspaces_sdk::{GenServerRef, json};
+
+// Distribute work to workers
+let work_request = json!({
+    "start_row": 0,
+    "end_row": 100,
+    "matrix_a": matrix_a,
+    "matrix_b": matrix_b,
+});
+
+worker_ref.cast("compute_rows", &work_request).await?;
+```
+
+### Gather (Request-Reply)
+
+```rust
+// Collect results from workers
+let result: serde_json::Value = worker_ref.call("get_result", &json!({})).await?;
+let rows: Vec<Vec<f64>> = serde_json::from_value(result["rows"].clone())?;
+```
 
 ## Quick Start
 
 ```bash
 cd examples/rust/embedded/matrix_multiply
-
-# Build
-cargo build
-
-# Run
-cargo run
-```
-
-## What It Demonstrates
-
-1. **Actor Workers**: Create worker actors to compute row partitions
-2. **Scatter via tell()**: Distribute work to workers (fire-and-forget)
-3. **Gather via ask()**: Collect results from workers (request-reply)
-
-## PlexSpaces API Usage
-
-### Create Worker Actors
-
-```rust
-use plexspaces_actor::ActorBuilder;
-use plexspaces_node::NodeBuilder;
-use plexspaces_core::RequestContext;
-
-let node = Arc::new(NodeBuilder::new("matrix-node").build().await);
-let service_locator = node.service_locator();
-let ctx = RequestContext::new_without_auth("tenant".into(), "compute".into());
-
-// Create worker actor with custom behavior
-let worker = ActorBuilder::new(Box::new(MatrixWorker::new(id)))
-    .with_id(format!("worker-{}@matrix-node", id))
-    .with_namespace("compute")
-    .spawn(&ctx, service_locator.clone())
-    .await?;
-```
-
-### Scatter Work via tell()
-
-```rust
-use plexspaces_mailbox::Message;
-
-// Distribute row partitions to workers
-let work = WorkerMessage::ComputeRows {
-    start_row: 0,
-    end_row: 2,
-    matrix_a: a.clone(),
-    matrix_b: b.clone(),
-};
-
-let msg = Message::json(&work)?.with_message_type("compute_rows");
-worker.tell(msg).await?;  // Fire-and-forget
-```
-
-### Gather Results via ask()
-
-```rust
-// Collect results from workers
-let response = worker.ask(
-    Message::json(&WorkerMessage::GetResult)?,
-    Duration::from_secs(5)
-).await?;
-
-let result: WorkerResult = serde_json::from_slice(&response.payload)?;
-```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    Master                           │
-│  - Partition rows among workers                     │
-│  - Distribute via tell() (scatter)                  │
-│  - Collect via ask() (gather)                       │
-└─────────────────┬───────────────────────────────────┘
-                  │
-      ┌───────────┼───────────┐
-      ▼           ▼           ▼
-┌──────────┐ ┌──────────┐ ┌──────────┐
-│ Worker 0 │ │ Worker 1 │ │ Worker N │
-│ rows 0-1 │ │ rows 2-3 │ │ rows ... │
-└──────────┘ └──────────┘ └──────────┘
+cargo run --bin matrix_multiply
 ```
 
 ## Expected Output
 
 ```
-Step 1: Create node and worker actors
-  Created worker-0
-  Created worker-1
+╔════════════════════════════════════════════════════════════════╗
+║       Matrix Multiplication with Actor Workers                 ║
+╚════════════════════════════════════════════════════════════════╝
 
-Step 3: SCATTER work via ActorRef::tell()
-  tell(worker-0, ComputeRows { rows: 0..1 })
-    Worker 0: computing rows 0..1
-    Worker 0: done
-  tell(worker-1, ComputeRows { rows: 2..3 })
-    Worker 1: computing rows 2..3
-    Worker 1: done
+Configuration:
+  Matrix size: 1000×1000
+  Workers: 8
+  Total operations: 2000000000 (2×1000³)
 
-Step 4: GATHER results via ActorRef::ask()
-  ask(worker-0, GetResult)
-    Worker 0: returning 2 rows starting at 0
-  ask(worker-1, GetResult)
-    Worker 1: returning 2 rows starting at 2
+Step 1: Spawn 8 worker actors
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Spawned worker-0
+  Spawned worker-1
+  ...
+
+Step 3: SCATTER work via GenServerRef::cast()
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  cast(worker-0, compute_rows, rows 0..124)
+  cast(worker-1, compute_rows, rows 125..249)
+  ...
+  Scattered work to 8 workers in 12.34ms
+
+Step 4: GATHER results via GenServerRef::call()
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  call(worker-0, get_result) -> 125 rows in 1234.56ms
+  call(worker-1, get_result) -> 125 rows in 1234.78ms
+  ...
+  Gathered results from 8 workers in 9876.54ms
+
+Step 6: Performance Metrics
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Execution Summary:
+  Total execution time: 10000.00ms (10.00s)
+  Matrix size: 1000×1000
+  Workers: 8
+  Total operations: 2000000000 (2×1000³)
+
+Coordination vs Computation Breakdown:
+  Coordination time: 12.34ms (0.1%)
+  Computation time: 9876.54ms (98.8%)
+  Efficiency (compute/total): 98.8%
+
+Benchmark Metrics:
+  Performance: 0.20 GFLOPS
+  Data processed: 22.89 MB
+  Throughput: 2.29 MB/s
+
+Granularity Analysis:
+  Granularity ratio (compute/coordinate): 800.00
+  ✅ Excellent granularity (coordination overhead is negligible)
 ```
 
-## Key APIs
+## Real-World Use Cases
 
-| Operation | PlexSpaces API |
-|-----------|----------------|
-| Create actor | `ActorBuilder::new(behavior).spawn(&ctx, service_locator)` |
-| Send work | `actor_ref.tell(msg).await` |
-| Get result | `actor_ref.ask(msg, timeout).await` |
+- **Scientific Computing**: Large-scale linear algebra operations
+- **ML Inference**: Neural network forward pass (matrix-vector multiplication)
+- **Graphics**: 3D transformations, rendering pipelines
+- **Signal Processing**: FFT, convolution operations
+- **Data Analytics**: Feature transformations, dimensionality reduction
 
-## Use Cases
+## Design Principles
 
-- **Scientific computing**: Matrix operations, linear algebra
-- **ML inference**: Neural network forward pass
-- **Graphics**: 3D transformations, rendering
-- **Signal processing**: FFT, convolution
+- **Scatter-Gather Pattern**: Efficient work distribution and result collection
+- **Parallel Computation**: Workers compute independently in parallel
+- **Coordination Overhead**: Minimal compared to computation (target: <1%)
+- **Scalability**: Performance improves with more workers (up to matrix size)
 
 ## See Also
 
-- [Heat Diffusion](../heat_diffusion/) - TupleSpace coordination
-- [MPI Collectives](../mpi_collectives/) - Collective patterns
-- [Actor Groups](../actor_groups_sharding/) - Sharding pattern
+- [Heat Diffusion](../heat_diffusion/) - TupleSpace coordination for stencil computation
+- [MPI Collectives](../mpi_collectives/) - Collective communication patterns
+- [Event Analytics](../event_analytics/) - Shard groups for distributed analytics

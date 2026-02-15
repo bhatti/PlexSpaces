@@ -254,6 +254,7 @@ Actors are defined in `ApplicationSpec` and spawned automatically. Applications 
   ```
 - `ActorFactory` uses `BehaviorRegistry` to create behaviors when spawning actors
 - If behavior is not registered, `spawn_actor` will fail with a clear error message
+- Use SDK helper `spawn_with_behavior_type()` for convenient spawning with BehaviorRegistry-based actors
 
 **WASM Applications:**
 - WASM module is deployed at the **application level** via `DeployApplicationRequest.wasm_module`

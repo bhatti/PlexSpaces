@@ -69,6 +69,7 @@ pub mod dashboard_service;
 pub mod process_group_service;
 pub mod node_registry;
 pub mod node_service;
+pub mod wasm_file_saver;
 
 // Re-export ProcessGroupServiceImpl for convenience
 pub use process_group_service::ProcessGroupServiceImpl;

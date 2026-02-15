@@ -16,11 +16,12 @@ use std::collections::HashMap;
 // =============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action")]
 pub enum GeneralMessage {
     /// Initialize with peer information
     Init { peer_ids: Vec<usize> },
     /// Receive a vote from another general
-    Vote { from: usize, path: String, value: Value },
+    Vote { from: usize, path: String, value: String },
     /// Request current decision
     GetDecision,
 }
@@ -112,6 +113,15 @@ impl General {
             is_faulty: self.is_faulty,
         }
     }
+    
+    /// Parse value string to Value enum
+    fn parse_value(s: &str) -> Value {
+        match s {
+            "Zero" => Value::Zero,
+            "One" => Value::One,
+            _ => Value::Retreat,
+        }
+    }
 }
 
 // =============================================================================
@@ -122,7 +132,7 @@ impl General {
 impl Actor for General {
     async fn handle_message(
         &mut self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         // Deserialize message
@@ -133,18 +143,45 @@ impl Actor for General {
             GeneralMessage::Init { peer_ids } => {
                 self.peer_ids = peer_ids;
             }
-            GeneralMessage::Vote { path, value, .. } => {
-                self.record_vote(path, value);
+            GeneralMessage::Vote { from, path, value } => {
+                let vote_value = Self::parse_value(&value);
+                self.record_vote(path, vote_value);
             }
             GeneralMessage::GetDecision => {
-                // In a real implementation, we'd send reply via ctx.send_reply()
                 let decision = self.decision();
-                tracing::info!(
-                    general_id = self.id,
-                    decision = ?decision.value,
-                    is_faulty = decision.is_faulty,
-                    "General decision"
-                );
+                
+                // Send reply for call messages
+                if msg.message_type == "call" && !msg.sender_id.is_empty() {
+                    let reply_payload = serde_json::to_vec(&decision)
+                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to serialize decision: {}", e)))?;
+                    
+                    let reply_msg = Message {
+                        id: ulid::Ulid::new().to_string(),
+                        message_type: "reply".to_string(),
+                        payload: reply_payload,
+                        ..Default::default()
+                    };
+                    
+                    // Get current actor ID from self_ref or use receiver_id from message
+                    let current_actor_id = ctx.self_ref()
+                        .map(|r| r.id().clone())
+                        .unwrap_or_else(|| msg.receiver_id.clone());
+                    
+                    // Extract correlation_id - Message has String, not Option<String>
+                    let correlation_id_opt = if msg.correlation_id.is_empty() {
+                        None
+                    } else {
+                        Some(msg.correlation_id.as_str())
+                    };
+                    
+                    ctx.send_reply(
+                        correlation_id_opt,
+                        &msg.sender_id,
+                        current_actor_id.clone(),
+                        reply_msg,
+                    ).await
+                    .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                }
             }
         }
         

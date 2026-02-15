@@ -10,6 +10,6 @@
     "declaration": true,
     "declarationMap": false
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/generated/**/*.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

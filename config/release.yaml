@@ -32,9 +32,22 @@ runtime:
     registry_url: ""
   
   security:
+    # Authentication is enabled by default for production security
+    # Override via PLEXSPACES_DISABLE_AUTH=1 environment variable for testing
+    disable_auth: false
     service_identity: {}
-    mtls: {}
-    jwt: {}
+    mtls:
+      enable_mtls: false
+      auto_generate_certs: false
+    jwt:
+      enable_jwt: false
+      # JWT secret should be set via PLEXSPACES_JWT_SECRET env var
+      secret: ""
+      issuer: ""
+      jwks_url: ""
+      allowed_audiences: []
+      tenant_id_claim: "tenant_id"
+      user_id_claim: "sub"
     api_keys: []
   
   blob:

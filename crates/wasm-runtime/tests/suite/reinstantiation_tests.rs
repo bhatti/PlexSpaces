@@ -106,17 +106,16 @@ mod tests {
             Err(_) => panic!("Instantiation timed out"),
         };
 
-        // First call: add 1 + 2
-        let payload1 = br#"{"op":"add","a":1,"b":2}"#.to_vec();
+        // First call: add [10, 20] => msg_type "add", payload {"operands": [10, 20]}
+        let payload1 = br#"{"operands":[10,20]}"#.to_vec();
         let result1 = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "call", payload1)
+            instance.handle_message("sender", "add", payload1)
         ).await;
-        let response1 = match result1 {
+        match result1 {
             Ok(Ok(resp)) => {
                 let resp_str = String::from_utf8_lossy(&resp);
                 eprintln!("First handle() response: {}", resp_str);
-                resp
             }
             Ok(Err(e)) if should_skip(&e) => {
                 eprintln!("SKIP (first call): {}", e);
@@ -124,18 +123,15 @@ mod tests {
             }
             Ok(Err(e)) => {
                 eprintln!("First handle() error: {}", e);
-                // Non-fatal: the calculator may not support this exact payload format
-                // The important thing is whether the SECOND call works
-                vec![]
             }
             Err(_) => panic!("First handle() timed out"),
         };
 
-        // Second call: add 3 + 4 (this goes through re-instantiation in current code)
-        let payload2 = br#"{"op":"add","a":3,"b":4}"#.to_vec();
+        // Second call: add [3, 4] (this goes through re-instantiation in current code)
+        let payload2 = br#"{"operands":[3,4]}"#.to_vec();
         let result2 = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "call", payload2)
+            instance.handle_message("sender", "add", payload2)
         ).await;
         match result2 {
             Ok(Ok(resp)) => {
@@ -153,7 +149,6 @@ mod tests {
                     );
                 } else {
                     eprintln!("Second handle() returned error (not re-entry related): {}", err_str);
-                    // Non-fatal: error may be from actor logic, not re-entry
                 }
             }
             Err(_) => panic!("Second handle() timed out"),
@@ -206,30 +201,40 @@ mod tests {
             Err(_) => panic!("Instantiation timed out"),
         };
 
-        // Call 1: add 10 + 20 = 30
-        let payload1 = br#"{"op":"add","a":10,"b":20}"#.to_vec();
+        // Call 1: add [10, 20] — uses msg_type "add" which routes to add() handler
+        let payload1 = br#"{"operands":[10,20]}"#.to_vec();
         let result1 = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "call", payload1)
+            instance.handle_message("sender", "add", payload1)
         ).await;
         match &result1 {
             Ok(Ok(resp)) => {
                 let resp_str = String::from_utf8_lossy(resp);
-                eprintln!("Call 1 (add 10+20) response: {}", resp_str);
+                eprintln!("Call 1 (add [10,20]) response: {}", resp_str);
+                // Verify the add operation returned result 30
+                assert!(
+                    resp_str.contains("30") || resp_str.contains("result"),
+                    "Expected add result in response, got: {}",
+                    resp_str
+                );
             }
             Ok(Err(e)) if should_skip(e) => {
                 eprintln!("SKIP: {}", e);
                 return;
             }
-            Ok(Err(e)) => eprintln!("Call 1 error: {}", e),
+            Ok(Err(e)) => {
+                eprintln!("Call 1 error: {}", e);
+                // Don't fail — error may be non-fatal
+            }
             Err(_) => panic!("Call 1 timed out"),
         }
 
-        // Call 2: get_state to see if history was preserved
-        let payload2 = br#"{"op":"get_state"}"#.to_vec();
+        // Call 2: get_state — uses msg_type "get_state" which routes to get_state_handler
+        // State should include the add operation from Call 1 if state was preserved
+        let payload2 = br#"{}"#.to_vec();
         let result2 = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "call", payload2)
+            instance.handle_message("sender", "get_state", payload2)
         ).await;
         match &result2 {
             Ok(Ok(resp)) => {
@@ -237,13 +242,13 @@ mod tests {
                 eprintln!("Call 2 (get_state) response: {}", resp_str);
 
                 // Check if the state includes the first operation
-                if resp_str.contains("add") || resp_str.contains("30") || resp_str.contains("history") {
-                    eprintln!("PASS: State preserved across calls (history contains add operation)");
-                } else if resp_str.contains("last_operation") && resp_str.contains("\"\"") {
-                    eprintln!(
-                        "CONFIRMED BUG: State was LOST after re-instantiation. \
-                         last_operation is empty, history is empty. \
-                         The get_state/set_state fix is needed."
+                if resp_str.contains("\"add\"") && resp_str.contains("30") {
+                    eprintln!("PASS: State preserved across calls (history contains add operation with result 30)");
+                } else if resp_str.contains("\"last_operation\": null") || resp_str.contains("\"history\": []") {
+                    panic!(
+                        "FAIL: State was LOST after re-instantiation. \
+                         Expected history to contain add operation, got: {}",
+                        resp_str
                     );
                 } else {
                     eprintln!(
@@ -299,14 +304,17 @@ mod tests {
             Err(_) => panic!("Instantiation timed out"),
         };
 
-        // Call handle to modify state
-        let payload = br#"{"op":"add","a":5,"b":3}"#.to_vec();
+        // Call handle to modify state — use "add" msg_type to trigger add() handler
+        let payload = br#"{"operands":[5,3]}"#.to_vec();
         let handle_result = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "call", payload)
+            instance.handle_message("sender", "add", payload)
         ).await;
         match &handle_result {
-            Ok(Ok(resp)) => eprintln!("handle() response: {}", String::from_utf8_lossy(resp)),
+            Ok(Ok(resp)) => {
+                let resp_str = String::from_utf8_lossy(resp);
+                eprintln!("handle(add [5,3]) response: {}", resp_str);
+            }
             Ok(Err(e)) if should_skip(e) => {
                 eprintln!("SKIP: {}", e);
                 return;
@@ -315,7 +323,9 @@ mod tests {
             Err(_) => panic!("handle() timed out"),
         }
 
-        // Now call get_state_component() to get the current state
+        // Now call get_state_component() to verify state was preserved
+        // After the state preservation fix, get_state() should return state
+        // that includes the add operation from the handle() call above
         let state_result = timeout(
             Duration::from_secs(10),
             instance.get_state_component()
@@ -325,29 +335,30 @@ mod tests {
                 let state_str = String::from_utf8_lossy(&state_bytes);
                 eprintln!("get_state_component() returned: {}", state_str);
 
-                // After re-instantiation, get_state() returns the RE-INITIALIZED state
-                // (not the state after handle), because re-instantiation calls init()
-                // which resets state. This confirms the state loss bug.
-                if state_str.contains("add") || state_str.contains("8") {
-                    eprintln!("NOTE: State includes handle() result — get_state() captures post-handle state");
+                if state_str.contains("\"add\"") && state_str.contains("8") {
+                    eprintln!("PASS: get_state_component() includes handle() state (add result 8)");
+                } else if state_str.contains("\"last_operation\": null") {
+                    panic!(
+                        "FAIL: get_state_component() shows state was lost. \
+                         Expected add operation in state, got: {}",
+                        state_str
+                    );
                 } else {
                     eprintln!(
-                        "NOTE: State does NOT include handle() result — confirms re-instantiation \
-                         resets state. The get_state() call happens on the NEW (re-initialized) instance."
+                        "INCONCLUSIVE: get_state_component() returned unexpected format: {}",
+                        state_str
                     );
                 }
             }
             Ok(Err(e)) => {
-                // get_state_component might trap if called after re-instantiation
-                // (the new instance might need another handle cycle)
-                eprintln!("get_state_component() error: {}", e);
                 let err_str = e.to_string();
                 if err_str.contains("cannot enter") {
-                    eprintln!(
-                        "IMPORTANT: get_state_component() got 'cannot enter' trap. \
-                         This means even get_state() fails after re-instantiation, \
-                         which has implications for the state preservation fix."
+                    panic!(
+                        "FAIL: get_state_component() got 'cannot enter' trap: {}",
+                        err_str
                     );
+                } else {
+                    eprintln!("get_state_component() error (non-fatal): {}", e);
                 }
             }
             Err(_) => panic!("get_state_component() timed out"),

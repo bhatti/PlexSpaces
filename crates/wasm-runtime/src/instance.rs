@@ -1903,30 +1903,90 @@ impl WasmInstance {
                     }
                 };
                 
-                // Always re-instantiate after handle() to avoid re-entrancy trap (wasmtime#8943).
-                // WASM components cannot be re-entered after handle() succeeds, so we must replace
-                // the instance with a fresh one. We use original_init_config to preserve initialization.
-                // Note: State changes from handle() are lost on re-instantiation; proper state
-                // persistence requires fix #2 (return state from handle) or fix #3 (host function persistence).
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        actor_id = %self.actor_id,
-                        message_id = %message_id,
-                        has_original_config = self.original_init_config.is_some(),
-                        "Re-instantiating SimpleActor after handle() to avoid re-entrancy trap"
-                    );
-                }
+                // Re-instantiate after handle() to avoid re-entrancy trap (wasmtime component model).
+                // Preserve state across re-instantiation via get_state/set_state cycle:
+                //   1. Call get_state() on the OLD instance to capture current state
+                //   2. Create fresh instance (new Store + component + init())
+                //   3. Call set_state() on the NEW instance to restore state
+
+                // Step 1: Capture state from the old instance before dropping it
+                let saved_state = match simple_bindings.plexspaces_simple_actor_actor()
+                    .call_get_state(&mut *store)
+                    .await
+                {
+                    Ok(state_json) => {
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            tracing::debug!(
+                                actor_id = %self.actor_id,
+                                message_id = %message_id,
+                                state_len = state_json.len(),
+                                "Captured actor state before re-instantiation"
+                            );
+                        }
+                        Some(state_json)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            actor_id = %self.actor_id,
+                            message_id = %message_id,
+                            error = %e,
+                            "Failed to capture state before re-instantiation; state will be lost"
+                        );
+                        None
+                    }
+                };
+
+                // Step 2: Create fresh instance
                 let instance_ctx = store.data().instance_ctx.clone();
                 drop(state);
                 let component_state = self.component_state.as_ref().expect("component_state set");
                 match Self::create_fresh_simple_actor_state(self, &instance_ctx).await {
                     Ok(new_state) => {
+                        // Step 3: Restore state on the new instance
                         let mut guard = component_state.lock().await;
                         *guard = new_state;
+
+                        if let Some(ref state_json) = saved_state {
+                            let ComponentState { store: new_store, bindings: new_bindings } = &mut *guard;
+                            if let ComponentBindings::SimpleActor(ref new_simple) = new_bindings {
+                                match new_simple.plexspaces_simple_actor_actor()
+                                    .call_set_state(new_store, state_json)
+                                    .await
+                                {
+                                    Ok(result) if result.is_empty() => {
+                                        if tracing::enabled!(tracing::Level::DEBUG) {
+                                            tracing::debug!(
+                                                actor_id = %self.actor_id,
+                                                message_id = %message_id,
+                                                "State restored on new instance after re-instantiation"
+                                            );
+                                        }
+                                    }
+                                    Ok(result) => {
+                                        tracing::warn!(
+                                            actor_id = %self.actor_id,
+                                            message_id = %message_id,
+                                            error = %result,
+                                            "set_state() returned error on new instance"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            actor_id = %self.actor_id,
+                                            message_id = %message_id,
+                                            error = %e,
+                                            "set_state() call failed on new instance; state may be lost"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             tracing::debug!(
                                 actor_id = %self.actor_id,
                                 message_id = %message_id,
+                                state_preserved = saved_state.is_some(),
                                 "SimpleActor re-instantiation succeeded"
                             );
                         }

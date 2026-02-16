@@ -1,5 +1,22 @@
 # PlexSpaces WASM & SDK Design Document
 
+## Implementation Status
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Re-instantiation fix (state preservation) | **Done** | get_state/set_state cycle in `handle_message_component()` |
+| WIT handle() return type fix | **Done** | Reverted to `string` to match compiled components |
+| WIT host extensions (14 functions) | **Done** | ask, self-id, parent-id, spawn, stop, link, unlink, monitor, demonitor, send-after, cancel-timer, pg-join, pg-leave, pg-members, pg-broadcast |
+| Rust host bindings (SimpleHostImpl) | **Done** | All 14 new functions implemented |
+| Python SDK parity | **Done** | Host class + MockHost updated with all functions |
+| TypeScript SDK parity | **Done** | New host.ts with Host class + ProcessGroups |
+| Go SDK foundation | **Done** | actor.go, host.go, host_imports.go (//go:wasmimport) |
+| Test suite fixes | **Done** | Fixed max_fuel param in all test files |
+| PlexspacesActor state preservation | Pending | Needs set-state in plexspaces-actor WIT |
+| parent-id tracking | Pending | Need to store parent_id during actor construction |
+| Timer cancellation | Pending | Need to track tokio JoinHandles |
+| Polyglot examples | Pending | Port bank_account/migrating examples |
+
 ## Table of Contents
 1. [Architecture Overview](#1-architecture-overview)
 2. [Re-instantiation Analysis & Fix](#2-re-instantiation-analysis--fix)

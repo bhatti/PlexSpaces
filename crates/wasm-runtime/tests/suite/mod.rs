@@ -20,4 +20,5 @@ pub mod tuplespace_host_functions_tests;
 pub mod wasm_actor_implementation_tests;
 pub mod wasm_component_integration;
 pub mod wasm_fuel_limit_tests;
+pub mod reinstantiation_tests;
 pub mod wasm_state_persistence_tests;

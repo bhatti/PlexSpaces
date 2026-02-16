@@ -20,14 +20,14 @@ interface actor {
     /// - `payload-json`: JSON message content
     /// 
     /// # Returns
-    /// - `ok(string)`: JSON-serialized result (host parses JSON)
-    /// - `err(string)`: Error message
-    /// 
+    /// JSON-serialized result string (host parses JSON).
+    /// Errors encoded in JSON payload (e.g., {"error": "message"}).
+    ///
     /// # Design Rationale
-    /// Returns JSON string instead of structured types because jco componentize's
-    /// conversion of structured types to WIT types causes recursion in StarlingMonkey.
-    /// The iterative serializer avoids recursion during serialization.
-    handle: func(from-actor: string, msg-type: string, payload-json: string) -> result<string, string>;
+    /// Returns plain string (not result<string, string>) because componentize-py
+    /// generates bindings that return str directly. Error handling is done at the
+    /// JSON level within the returned string.
+    handle: func(from-actor: string, msg-type: string, payload-json: string) -> string;
     
     /// Get state as JSON
     get-state: func() -> string;

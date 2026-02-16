@@ -1860,27 +1860,17 @@ impl WasmInstance {
                     .await;
                 
                 // Process the result first (before re-instantiation)
-                // The result is now result<string, string> - actor returns JSON string directly
-                // The iterative serializer avoids WASM recursion during serialization
+                // handle() returns a plain string (JSON-serialized result)
+                // Errors are encoded in the JSON payload (e.g., {"error": "message"})
+                // or prefixed with "ERROR:" for framework-level errors
                 let processed_result: Result<String, WasmError> = match result {
-                    Ok(inner_result) => {
-                        // inner_result is Result<String, String> from WIT
-                        match inner_result {
-                            Ok(json_string) => {
-                                // Actor returned JSON string directly (serialized by iterative serializer)
-                                // Check if it's an error (starts with "ERROR:")
-                                if json_string.starts_with("ERROR:") {
-                                    Err(WasmError::ActorFunctionError(json_string))
-                                } else {
-                                    Ok(json_string)
-                                }
-                            }
-                            Err(e) => {
-                                // WIT-level error (string from actor)
-                                Err(WasmError::ActorFunctionError(format!(
-                                    "Actor returned error: {}", e
-                                )))
-                            }
+                    Ok(json_string) => {
+                        // Actor returned JSON string directly (serialized by iterative serializer)
+                        // Check if it's a framework-level error (starts with "ERROR:")
+                        if json_string.starts_with("ERROR:") {
+                            Err(WasmError::ActorFunctionError(json_string))
+                        } else {
+                            Ok(json_string)
                         }
                     }
                     Err(e) => {

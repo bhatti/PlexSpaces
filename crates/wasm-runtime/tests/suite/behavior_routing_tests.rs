@@ -151,6 +151,7 @@ async fn test_genserver_routes_call_to_handle_request() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -196,6 +197,7 @@ async fn test_genevent_routes_cast_to_handle_event() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -240,6 +242,7 @@ async fn test_genevent_routes_info_to_handle_event() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -283,6 +286,7 @@ async fn test_genfsm_routes_to_handle_transition() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -327,6 +331,7 @@ async fn test_fallback_to_handle_message() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -370,6 +375,7 @@ async fn test_genserver_fallback_on_missing_handle_request() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider

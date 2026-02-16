@@ -185,10 +185,6 @@ class _MockHost:
         """Self ID (mock). Returns mock actor ID."""
         return "mock-actor"
 
-    def parent_id(self) -> str:
-        """Parent ID (mock). Returns empty."""
-        return ""
-
     def spawn(self, module_ref: str, actor_id: str, init_config_json: str) -> str:
         """Spawn (mock). Returns empty on success."""
         print(f"[MOCK] spawn({module_ref}, {actor_id})")
@@ -218,10 +214,6 @@ class _MockHost:
     def send_after(self, delay_ms: int, msg_type: str, payload_json: str) -> str:
         """Send-after (mock). Returns timer ID."""
         return "mock-timer-1"
-
-    def cancel_timer(self, timer_id: str) -> str:
-        """Cancel timer (mock). Returns empty on success."""
-        return ""
 
     def pg_join(self, group_name: str) -> str:
         """Process group join (mock). Returns empty on success."""
@@ -579,11 +571,6 @@ class Host:
         h = _get_host()
         return h.self_id()
 
-    def parent_id(self) -> str:
-        """Get parent/supervisor actor ID. Returns empty string if no parent."""
-        h = _get_host()
-        return h.parent_id()
-
     # ========================================================================
     # Actor Lifecycle
     # ========================================================================
@@ -669,22 +656,23 @@ class Host:
         """
         Send a message to self after a delay.
 
+        The host spawns a tracked background task that delivers the message
+        after delay_ms milliseconds. The timer-id is returned for observability.
+
+        Note: Timer cancellation is managed by the framework's TimerFacet/ReminderFacet,
+        not by individual actors. Stop the actor to cancel pending timers.
+
         Args:
             delay_ms: Delay in milliseconds
             msg_type: Message type
             payload: Optional payload (will be JSON-serialized)
 
         Returns:
-            Timer ID string (for cancellation)
+            Timer ID string (for tracking/observability)
         """
         h = _get_host()
         payload_json = json.dumps(payload) if payload is not None else "{}"
         return h.send_after(delay_ms, msg_type, payload_json)
-
-    def cancel_timer(self, timer_id: str) -> str:
-        """Cancel a pending timer."""
-        h = _get_host()
-        return h.cancel_timer(timer_id)
 
 
 # Global host instance

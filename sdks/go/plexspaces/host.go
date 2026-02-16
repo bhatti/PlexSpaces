@@ -62,11 +62,6 @@ func (h *Host) SelfID() string {
 	return hostSelfID()
 }
 
-// ParentID returns the parent/supervisor actor ID (empty if no parent).
-func (h *Host) ParentID() string {
-	return hostParentID()
-}
-
 // ========================================================================
 // Actor Lifecycle
 // ========================================================================
@@ -119,16 +114,12 @@ func (h *Host) Demonitor(monitorRef string) error {
 // Timers
 // ========================================================================
 
-// SendAfter sends a message to self after a delay. Returns a timer ID.
+// SendAfter sends a message to self after a delay. Returns a timer ID for tracking.
+// Timer cancellation is managed by the framework's TimerFacet/ReminderFacet.
+// Stop the actor to cancel pending timers.
 func (h *Host) SendAfter(delayMs uint64, msgType string, payload any) string {
 	payloadJSON := marshalPayload(payload)
 	return hostSendAfter(delayMs, msgType, payloadJSON)
-}
-
-// CancelTimer cancels a pending timer.
-func (h *Host) CancelTimer(timerID string) error {
-	result := hostCancelTimer(timerID)
-	return checkError(result)
 }
 
 // ========================================================================

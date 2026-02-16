@@ -6,16 +6,25 @@
 |------|--------|-------|
 | Re-instantiation fix (state preservation) | **Done** | get_state/set_state cycle in `handle_message_component()` |
 | WIT handle() return type fix | **Done** | Reverted to `string` to match compiled components |
-| WIT host extensions (14 functions) | **Done** | ask, self-id, parent-id, spawn, stop, link, unlink, monitor, demonitor, send-after, cancel-timer, pg-join, pg-leave, pg-members, pg-broadcast |
-| Rust host bindings (SimpleHostImpl) | **Done** | All 14 new functions implemented |
-| Python SDK parity | **Done** | Host class + MockHost updated with all functions |
-| TypeScript SDK parity | **Done** | New host.ts with Host class + ProcessGroups |
+| WIT host extensions (12 functions) | **Done** | ask, self-id, spawn, stop, link, unlink, monitor, demonitor, send-after, pg-join, pg-leave, pg-members, pg-broadcast |
+| Rust host bindings (SimpleHostImpl) | **Done** | All host functions implemented with metrics/tracing |
+| Python SDK parity | **Done** | Host class + MockHost with all functions |
+| TypeScript SDK parity | **Done** | host.ts with Host class + ProcessGroups |
 | Go SDK foundation | **Done** | actor.go, host.go, host_imports.go (//go:wasmimport) |
 | Test suite fixes | **Done** | Fixed max_fuel param in all test files |
+| send-after JoinHandle tracking | **Done** | Tracked in `pending_timers` with self-cleanup |
+| Bank account WASM validation | **Done** | Builds and validates with updated WIT |
 | PlexspacesActor state preservation | Pending | Needs set-state in plexspaces-actor WIT |
-| parent-id tracking | Pending | Need to store parent_id during actor construction |
-| Timer cancellation | Pending | Need to track tokio JoinHandles |
 | Polyglot examples | Pending | Port bank_account/migrating examples |
+
+### Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Removed `parent-id`** | Framework uses Erlang-style supervisor trees, not explicit parent/child tracking for actors. Supervision hierarchy is managed by `ActorRegistry.register_parent_child()` at the framework level, not exposed to individual WASM actors. |
+| **Removed `cancel-timer`** | Timers are managed by the framework's `TimerFacet`/`ReminderFacet` (actor facets), not by individual actors. Actors can be stopped to cancel their pending timers. `TimerFacet::unregister_timer()` exists for framework-level timer management. |
+| **`send-after` returns timer-id with tracked JoinHandle** | Timer tasks are stored in `SimpleHostImpl::pending_timers` for cleanup when the actor stops. Self-cleanup removes entries after delivery. Timer-ids are for observability, not cancellation. |
+| **SDKs as thin decorators over framework** | WIT/SDK layer delegates to `HostFunctions` → `MessageSender` → framework services. No business logic in the SDK layer. |
 
 ## Table of Contents
 1. [Architecture Overview](#1-architecture-overview)
@@ -273,9 +282,6 @@ interface host {
     /// Trivial: returns SimpleHostImpl.actor_id.
     self-id: func() -> string;
 
-    /// Get parent/supervisor actor ID. Returns actor ID or empty string if no parent.
-    parent-id: func() -> string;
-
     // ========== New: Actor Lifecycle ==========
 
     /// Spawn a child actor from a WASM module.
@@ -305,10 +311,9 @@ interface host {
 
     // ========== New: Timers ==========
 
-    /// Schedule message to self after delay.
-    /// Returns timer ID (string) or "ERROR:...".
+    /// Schedule message to self after delay. Returns timer ID (string) or "ERROR:...".
+    /// Timer cancellation is managed by the framework's TimerFacet/ReminderFacet.
     send-after: func(delay-ms: u64, msg-type: string, payload-json: string) -> string;
-    cancel-timer: func(timer-id: string) -> string;
 
     // ========== New: Process Groups (Erlang pg2-style) ==========
 
@@ -339,16 +344,9 @@ async fn ask(&mut self, to: String, msg_type: String, payload_json: String, time
     }
 }
 
-// self-id — trivial
+// self-id — trivial, returns ActorId assigned during registration
 fn self_id(&mut self) -> String {
     self.actor_id.clone()
-}
-
-// parent-id — look up from ActorRegistry metadata
-fn parent_id(&mut self) -> String {
-    // TODO: Store parent_id in SimpleHostImpl during construction
-    // For now, return empty string
-    String::new()
 }
 
 // spawn — delegates to MessageSender::spawn_actor
@@ -454,7 +452,11 @@ interface messaging {
 }
 ```
 
-Note: `self-id`, `parent-id`, `now`, `sleep` don't need context (they're actor-intrinsic).
+Note: `self-id`, `now`, `sleep` don't need context (they're actor-intrinsic).
+Note: `parent-id` and `cancel-timer` exist in the typed plexspaces-actor WIT (for Rust)
+but are **not exposed** in the simple-actor WIT (for Python/TypeScript/Go) because:
+- Parent/child hierarchy is managed by the framework's supervisor tree, not by individual actors.
+- Timer cancellation is managed by TimerFacet/ReminderFacet (actor facets), not by the WIT host API.
 
 ---
 
@@ -486,11 +488,7 @@ class Host:
         """Get this actor's ID (e.g., 'account-alice@node-1')."""
         return _host.self_id()
 
-    def parent_id(self) -> str:
-        """Get parent/supervisor actor ID. Empty string if no parent."""
-        return _host.parent_id()
-
-    # === New Lifecycle ===
+    # === Actor Lifecycle ===
     def spawn(self, module_ref: str, actor_id: str = "", config: dict = None) -> str:
         """Spawn a child actor.
         module_ref: Deployed module (name@version or hash)
@@ -541,12 +539,7 @@ class Host:
             raise PlexSpacesError(result[6:])
         return result
 
-    def cancel_timer(self, timer_id: str) -> None:
-        result = _host.cancel_timer(timer_id)
-        if result.startswith("ERROR:"):
-            raise PlexSpacesError(result[6:])
-
-    # === New Process Groups ===
+    # === Process Groups ===
     def pg_join(self, group: str, topics: list = None) -> None:
         result = _host.pg_join(group, json.dumps(topics or []))
         if result.startswith("ERROR:"):
@@ -582,15 +575,13 @@ declare const hostBindings: {
   send(to: string, msgType: string, payloadJson: string): string;
   ask(to: string, msgType: string, payloadJson: string, timeoutMs: bigint): string;
   selfId(): string;
-  parentId(): string;
   spawn(moduleRef: string, actorId: string, initConfigJson: string): string;
-  stop(actorId: string, timeoutMs: bigint): string;
+  stop(actorId: string): string;
   link(actorId: string): string;
   unlink(actorId: string): string;
   monitor(actorId: string): string;
   demonitor(monitorRef: string): string;
   sendAfter(delayMs: bigint, msgType: string, payloadJson: string): string;
-  cancelTimer(timerId: string): string;
   log(level: string, message: string): void;
   nowMs(): bigint;
   kvGet(key: string): string;
@@ -636,7 +627,6 @@ export const host = {
     return parseJson(result);
   },
   selfId(): string { return hostBindings.selfId(); },
-  parentId(): string { return hostBindings.parentId(); },
 
   // --- Lifecycle ---
   spawn(moduleRef: string, actorId = '', config: Record<string, unknown> = {}): string {
@@ -656,8 +646,6 @@ export const host = {
   sendAfter(delayMs: number, msgType: string, payload: unknown): string {
     return checkError(hostBindings.sendAfter(BigInt(delayMs), msgType, JSON.stringify(payload)));
   },
-  cancelTimer(timerId: string): void { checkError(hostBindings.cancelTimer(timerId)); },
-
   // --- Logging ---
   log(level: string, message: string): void { hostBindings.log(level, message); },
   debug(message: string): void { hostBindings.log('debug', message); },

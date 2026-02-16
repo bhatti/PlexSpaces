@@ -64,10 +64,6 @@ interface host {
     /// Returns actor ID string (e.g., "calculator-1")
     self-id: func() -> string;
 
-    /// Get parent/supervisor actor ID
-    /// Returns actor ID string, or empty string if no parent
-    parent-id: func() -> string;
-
     // ============================================================================
     // Actor Lifecycle
     // ============================================================================
@@ -107,14 +103,13 @@ interface host {
     // Timers (Delayed Messaging)
     // ============================================================================
 
-    /// Send a message to self after a delay
-    /// delay-ms: delay in milliseconds
-    /// Returns timer-id string on success, or "ERROR:message"
+    /// Send a message to self after a delay.
+    /// The host spawns a background task that delivers the message after delay-ms.
+    /// Returns timer-id string on success, or "ERROR:message".
+    /// The timer-id can be used for observability/tracking.
+    /// Note: Timer cancellation is managed by the framework's TimerFacet/ReminderFacet,
+    /// not by individual actors. Actors can be stopped to cancel their pending timers.
     send-after: func(delay-ms: u64, msg-type: string, payload-json: string) -> string;
-
-    /// Cancel a pending timer
-    /// Returns empty on success, or "ERROR:message"
-    cancel-timer: func(timer-id: string) -> string;
 
     // ============================================================================
     // Process Groups

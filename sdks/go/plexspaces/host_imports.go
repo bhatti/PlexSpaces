@@ -30,9 +30,6 @@ func hostAsk(to, msgType, payloadJSON string, timeoutMs uint64) string
 //go:wasmimport plexspaces:simple-actor/host@0.1.0 self-id
 func hostSelfID() string
 
-//go:wasmimport plexspaces:simple-actor/host@0.1.0 parent-id
-func hostParentID() string
-
 // ========================================================================
 // Actor Lifecycle
 // ========================================================================
@@ -65,9 +62,6 @@ func hostDemonitor(monitorRef string) string
 
 //go:wasmimport plexspaces:simple-actor/host@0.1.0 send-after
 func hostSendAfter(delayMs uint64, msgType, payloadJSON string) string
-
-//go:wasmimport plexspaces:simple-actor/host@0.1.0 cancel-timer
-func hostCancelTimer(timerID string) string
 
 // ========================================================================
 // Logging & Time

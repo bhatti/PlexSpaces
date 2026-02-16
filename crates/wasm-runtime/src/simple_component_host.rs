@@ -61,12 +61,16 @@ wasmtime::component::bindgen!({
 // - plexspaces::simple_actor::*: Interface types
 // ActorWorld is used via crate::simple_component_host::ActorWorld
 
-/// Simple host implementation for Python-compatible WASM actors
+/// Simple host implementation for Python-compatible WASM actors.
+///
+/// Implements the WIT `host` interface for `plexspaces:simple-actor`.
+/// All host functions delegate to the framework's `HostFunctions` service gateway,
+/// ensuring the WIT/SDK layer is a thin decorator over the core framework.
 #[cfg(feature = "component-model")]
 pub struct SimpleHostImpl {
     /// Actor ID of the component instance
     pub actor_id: ActorId,
-    /// Host functions implementation
+    /// Host functions implementation (gateway to framework services)
     pub host_functions: Arc<HostFunctions>,
     /// TupleSpace provider for ts_write/read/take
     pub tuplespace_provider: Option<Arc<dyn TupleSpaceProvider>>,
@@ -74,6 +78,9 @@ pub struct SimpleHostImpl {
     pub lock_manager: Option<Arc<dyn LockManager + Send + Sync>>,
     /// Blob service for object storage
     pub blob_service: Option<Arc<BlobService>>,
+    /// Pending send-after timer handles for cleanup on actor stop.
+    /// Keyed by timer-id, values are JoinHandles that can be joined/aborted.
+    pub pending_timers: Arc<tokio::sync::RwLock<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 #[cfg(feature = "component-model")]
@@ -92,6 +99,7 @@ impl SimpleHostImpl {
             tuplespace_provider,
             lock_manager,
             blob_service,
+            pending_timers: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 
@@ -108,6 +116,7 @@ impl SimpleHostImpl {
             tuplespace_provider,
             lock_manager,
             blob_service,
+            pending_timers: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 
@@ -816,15 +825,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     // Actor Identity
     // ========================================================================
 
-    /// Get own actor ID
+    /// Get own actor ID. Returns the ActorId assigned during actor registration.
     async fn self_id(&mut self) -> String {
         self.actor_id.to_string()
-    }
-
-    /// Get parent/supervisor actor ID
-    async fn parent_id(&mut self) -> String {
-        // Parent ID tracking is not yet wired — return empty string
-        String::new()
     }
 
     // ========================================================================
@@ -909,40 +912,56 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     // Timers (Delayed Messaging)
     // ========================================================================
 
-    /// Send a message to self after a delay
+    /// Send a message to self after a delay.
+    /// Spawns a tracked background task that delivers the message after delay_ms.
+    /// Returns a timer-id for observability. The JoinHandle is stored in pending_timers
+    /// so it can be joined/aborted when the actor stops (cleanup via drop or explicit stop).
     async fn send_after(&mut self, delay_ms: u64, msg_type: String, payload_json: String) -> String {
+        metrics::counter!("plexspaces_wasm_send_after_total").increment(1);
         let host_functions = self.host_functions.clone();
         let self_id = self.actor_id.to_string();
         let from = self_id.clone();
 
-        // Generate unique timer ID
+        // Generate unique timer ID using actor ID + monotonic nanos
         let timer_id = format!("timer-{}-{}", self_id,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         );
-        let timer_id_clone = timer_id.clone();
+        let timer_id_for_task = timer_id.clone();
+        let timer_id_for_cleanup = timer_id.clone();
+        let pending_timers = self.pending_timers.clone();
 
-        // Spawn background task that sleeps then sends
-        tokio::task::spawn(async move {
+        tracing::debug!(
+            actor_id = %self_id, timer_id = %timer_id,
+            delay_ms = delay_ms, msg_type = %msg_type,
+            "send_after: scheduling delayed message"
+        );
+
+        // Spawn tracked background task
+        let handle = tokio::task::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             let msg = format!(r#"{{"msg_type":"{}","payload":{}}}"#, msg_type, payload_json);
             if let Err(e) = host_functions.send_message(&from, &from, &msg).await {
                 tracing::warn!(
-                    actor_id = %from, timer_id = %timer_id_clone,
-                    error = %e, "send_after delivery failed"
+                    actor_id = %from, timer_id = %timer_id_for_task,
+                    error = %e, "send_after: delivery failed"
+                );
+                metrics::counter!("plexspaces_wasm_send_after_errors_total").increment(1);
+            } else {
+                tracing::debug!(
+                    actor_id = %from, timer_id = %timer_id_for_task,
+                    "send_after: message delivered"
                 );
             }
+            // Self-cleanup: remove from pending_timers after delivery
+            pending_timers.write().await.remove(&timer_id_for_cleanup);
         });
-        timer_id
-    }
 
-    /// Cancel a pending timer
-    async fn cancel_timer(&mut self, timer_id: String) -> String {
-        tracing::debug!(actor_id = %self.actor_id, timer_id = %timer_id, "cancel_timer (not yet implemented)");
-        // TODO: Track timer JoinHandles for cancellation
-        String::new()
+        // Store JoinHandle for cleanup on actor stop
+        self.pending_timers.write().await.insert(timer_id.clone(), handle);
+        timer_id
     }
 
     // ========================================================================

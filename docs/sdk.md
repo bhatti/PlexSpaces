@@ -9,7 +9,7 @@ PlexSpaces provides language-specific SDKs for building actors with minimal boil
 | **Python** | ✅ Available | `sdks/python/` | WASM actors (componentize-py) |
 | **TypeScript** | ✅ Available | `sdks/typescript/` | WASM actors (jco componentize) |
 | **Rust** | ✅ Available | `sdks/rust/plexspaces-sdk` | Native (embedded) actors; annotations + spawn_actor + facets |
-| Go | 📋 Planned | `sdks/go/` | WASM actors |
+| **Go** | ✅ Available | `sdks/go/` | WASM actors (TinyGo) |
 
 ## Python SDK
 
@@ -180,7 +180,22 @@ class ChatRoom:
 
 | Function | Description |
 |----------|-------------|
-| `host.send(to, msg_type, payload)` | Send message to another actor |
+| **Messaging** | |
+| `host.send(to, msg_type, payload)` | Send message to another actor (fire-and-forget) |
+| `host.ask(to, msg_type, payload, timeout_ms)` | Request-reply: send and wait for response. Raises RuntimeError on timeout/error. |
+| **Actor Identity** | |
+| `host.self_id()` | Get own actor ID (e.g., `"account-alice"`) |
+| **Actor Lifecycle** | |
+| `host.spawn(module_ref, actor_id, init_config)` | Spawn a new actor from a deployed WASM module |
+| `host.stop(actor_id)` | Stop an actor gracefully |
+| **Linking & Monitoring (Erlang/OTP)** | |
+| `host.link(actor_id)` | Bidirectional link: if either actor crashes, the other is notified |
+| `host.unlink(actor_id)` | Remove a bidirectional link |
+| `host.monitor(actor_id)` | Unidirectional monitor: receive DOWN notification when target exits. Returns monitor ref. |
+| `host.demonitor(monitor_ref)` | Cancel a monitor |
+| **Timers** | |
+| `host.send_after(delay_ms, msg_type, payload)` | Send message to self after delay. Returns timer-id for tracking. |
+| **Logging & Time** | |
 | `host.log(level, message)` | Log a message |
 | `host.info(message)` | Log info message |
 | `host.debug(message)` | Log debug message |
@@ -198,18 +213,19 @@ class ChatRoom:
 | `host.ts_take(pattern_json)` | Take tuple (destructive). Returns and removes matched tuple. |
 | `host.ts_read_all(pattern_json)` | Read all matching tuples. Returns JSON array of tuples. |
 | **Distributed Locks** | |
-| `host.lock_acquire(lock_id, timeout_ms)` | Acquire lock. Returns lock version on success. |
-| `host.lock_release(lock_id, lock_version)` | Release lock. Returns empty on success. |
+| `host.lock_acquire(tenant_id, namespace, holder_id, lock_name, lease_secs, timeout_ms)` | Acquire lock. Returns JSON with lock_key, version, holder_id. |
+| `host.lock_release(lock_id, tenant_id, namespace, holder_id, lock_version)` | Release lock. Returns empty on success. |
+| `host.lock_renew(lock_id, tenant_id, namespace, holder_id, lock_version, lease_secs)` | Renew lock lease. Returns new version. |
 | **Blob Storage** | |
 | `host.blob_upload(path, data, content_type)` | Upload blob (base64 data). Returns empty on success. |
 | `host.blob_download(path)` | Download blob. Returns base64 data or empty if not found. |
 | `host.blob_delete(path)` | Delete blob. Returns empty on success. |
 | `host.blob_list(prefix)` | List blobs by prefix. Returns JSON array of blob IDs. |
 | **Process Groups** | |
-| `host.process_groups.join(group, actor_id)` | Join a process group |
-| `host.process_groups.leave(group, actor_id)` | Leave a process group |
-| `host.process_groups.publish(group, message)` | Broadcast to group |
-| `host.process_groups.get_members(group)` | Get group members |
+| `host.process_groups.join(group)` | Join a process group (uses self actor ID) |
+| `host.process_groups.leave(group)` | Leave a process group |
+| `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members |
+| `host.process_groups.members(group)` | Get group member IDs |
 
 #### Key-Value Storage (WASM)
 

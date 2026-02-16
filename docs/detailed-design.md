@@ -15,7 +15,8 @@ This document provides detailed information about PlexSpaces abstractions, compo
 7. [Journaling](#journaling)
 8. [Supervision](#supervision)
 9. [Observability](#observability)
-10. [Database Models and ER Diagram](#database-models-and-er-diagram)
+10. [WASM Runtime & SDKs](#wasm-runtime--sdks)
+11. [Database Models and ER Diagram](#database-models-and-er-diagram)
 
 ## Actors
 
@@ -2871,6 +2872,70 @@ pub trait ObjectRegistry: Send + Sync {
     ) -> Result<(), Error>;
 }
 ```
+
+## WASM Runtime & SDKs
+
+### Architecture
+
+The WASM runtime provides polyglot actor support via two WIT interface worlds:
+
+```
+SDK Layer (Python/TypeScript/Go/Rust)
+  ↓ decorators (@actor, @handler, state())
+WIT Interface (Contract)
+  simple-actor (JSON strings) │ plexspaces-actor (typed)
+  ↓
+Host Bindings
+  SimpleHostImpl            │ ComponentHost
+  ↓
+HostFunctions (Service Gateway)
+  ↓ delegates to framework services
+Framework (ActorFactory, ActorRef, ActorRegistry, TimerFacet, etc.)
+```
+
+### WIT Host Interface (simple-actor)
+
+The `plexspaces:simple-actor` WIT world is the primary interface for Python, TypeScript, and Go WASM actors. All functions use JSON strings for payload interchange. Error convention: empty string = success, `"ERROR:message"` = failure.
+
+| Category | Functions |
+|----------|-----------|
+| **Messaging** | `send`, `ask` (request-reply with timeout) |
+| **Actor Identity** | `self-id` |
+| **Actor Lifecycle** | `spawn`, `stop` |
+| **Linking & Monitoring** | `link`, `unlink`, `monitor`, `demonitor` |
+| **Timers** | `send-after` (returns timer-id for tracking) |
+| **Logging & Time** | `log`, `now-ms` |
+| **Key-Value Store** | `kv-get`, `kv-put`, `kv-delete`, `kv-list` |
+| **TupleSpace** | `ts-write`, `ts-read`, `ts-take`, `ts-read-all` |
+| **Distributed Locks** | `lock-acquire`, `lock-release`, `lock-renew` |
+| **Blob Storage** | `blob-upload`, `blob-download`, `blob-delete`, `blob-list` |
+| **Process Groups** | `pg-join`, `pg-leave`, `pg-members`, `pg-broadcast` |
+
+### State Preservation
+
+WASM components are re-instantiated after each `handle()` call (wasmtime Component Model re-entrancy guard). State is preserved via a `get_state` → drop → `set_state` cycle:
+
+1. After `handle()` completes, call `get_state()` on the current instance
+2. Drop the old Store and create a fresh WASM instance
+3. Call `init(config)` on the fresh instance
+4. Call `set_state(saved_state)` to restore actor state
+
+### Design Decisions
+
+- **No `parent-id`**: The framework uses Erlang-style supervisor trees for hierarchy, not explicit parent/child tracking exposed to individual WASM actors.
+- **No `cancel-timer`**: Timer/reminder management is handled by the framework's `TimerFacet`/`ReminderFacet` (actor facets). Actors can be stopped to cancel pending timers.
+- **`send-after` with tracked JoinHandles**: Timer tasks are stored in `SimpleHostImpl::pending_timers` for proper cleanup when the actor stops.
+
+### SDKs
+
+| Language | Location | Build Tool | Status |
+|----------|----------|------------|--------|
+| Python | `sdks/python/` | componentize-py | Available |
+| TypeScript | `sdks/typescript/` | jco componentize | Available |
+| Go | `sdks/go/` | TinyGo | Available |
+| Rust | `sdks/rust/plexspaces-sdk` | cargo (native) | Available |
+
+See [SDK documentation](sdk.md) and [WASM deployment guide](wasm-deployment.md) for details.
 
 ## Database Models and ER Diagram
 

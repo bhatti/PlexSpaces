@@ -295,10 +295,13 @@ graph TB
 
 Portable, secure actors:
 
-- **Polyglot Support**: Write actors in any language
+- **Polyglot Support**: Write actors in Python, TypeScript, Go, or Rust via language-specific SDKs
+- **Two WIT Worlds**: `plexspaces-actor` (typed, for Rust) and `plexspaces:simple-actor` (JSON strings, for Python/TypeScript/Go)
+- **Rich Host Interface**: Messaging (send, ask), actor lifecycle (spawn, stop), linking/monitoring, timers, process groups, KV store, TupleSpace, distributed locks, blob storage
 - **Portable**: Run anywhere WASM runs
 - **Secure**: WASM sandbox provides isolation
-- **Fast**: Near-native performance
+- **State Preservation**: Automatic get_state/set_state cycle across WASM re-instantiation
+- **Fast**: Near-native performance with wasmtime Component Model
 
 ### 5. Firecracker Isolation
 

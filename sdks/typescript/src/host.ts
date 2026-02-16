@@ -6,7 +6,8 @@
 // Provides TypeScript wrappers for WIT host imports.
 // Uses virtual imports from 'plexspaces:simple-actor/host@0.1.0'.
 
-// Virtual imports provided by jco componentize at runtime
+// Virtual imports provided by jco componentize at runtime.
+// These map 1:1 to the WIT host interface functions.
 // @ts-ignore
 import {
   send as hostSend,
@@ -14,7 +15,6 @@ import {
   log as hostLog,
   nowMs as hostNowMs,
   selfId as hostSelfId,
-  parentId as hostParentId,
   spawn as hostSpawn,
   stop as hostStop,
   link as hostLink,
@@ -22,7 +22,6 @@ import {
   monitor as hostMonitor,
   demonitor as hostDemonitor,
   sendAfter as hostSendAfter,
-  cancelTimer as hostCancelTimer,
   kvGet as hostKvGet,
   kvPut as hostKvPut,
   kvDelete as hostKvDelete,
@@ -146,11 +145,6 @@ export class Host {
     return safeCall(hostSelfId) as string;
   }
 
-  /** Get parent/supervisor actor ID (empty string if no parent) */
-  parentId(): string {
-    return safeCall(hostParentId) as string;
-  }
-
   // ========================================================================
   // Actor Lifecycle
   // ========================================================================
@@ -213,15 +207,14 @@ export class Host {
   // Timers
   // ========================================================================
 
-  /** Send message to self after delay (returns timer ID) */
+  /**
+   * Send message to self after delay (returns timer ID for tracking).
+   * Timer cancellation is managed by the framework's TimerFacet/ReminderFacet.
+   * Stop the actor to cancel pending timers.
+   */
   sendAfter(delayMs: number, msgType: string, payload?: unknown): string {
     const payloadJson = payload !== undefined ? JSON.stringify(payload) : '{}';
     return safeCall(hostSendAfter, BigInt(delayMs), msgType, payloadJson) as string;
-  }
-
-  /** Cancel a pending timer */
-  cancelTimer(timerId: string): void {
-    safeCall(hostCancelTimer, timerId);
   }
 
   // ========================================================================

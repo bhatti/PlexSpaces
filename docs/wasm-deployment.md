@@ -1004,11 +1004,31 @@ interface actor {
 }
 
 interface host {
+    // Messaging
     send: func(to: string, msg-type: string, payload-json: string) -> string;
+    ask: func(to: string, msg-type: string, payload-json: string, timeout-ms: u64) -> string;
+    // Actor Identity
+    self-id: func() -> string;
+    // Actor Lifecycle
+    spawn: func(module-ref: string, actor-id: string, init-config-json: string) -> string;
+    stop: func(actor-id: string) -> string;
+    // Linking & Monitoring (Erlang/OTP patterns)
+    link: func(actor-id: string) -> string;
+    unlink: func(actor-id: string) -> string;
+    monitor: func(actor-id: string) -> string;
+    demonitor: func(monitor-ref: string) -> string;
+    // Timers (Delayed Messaging)
+    send-after: func(delay-ms: u64, msg-type: string, payload-json: string) -> string;
+    // Logging & Time
     log: func(level: string, message: string);
     now-ms: func() -> u64;
+    // Key-Value Store
     kv-get: func(key: string) -> string;
     kv-put: func(key: string, value: string) -> string;
+    kv-delete: func(key: string) -> string;
+    kv-list: func(prefix: string) -> string;
+    // TupleSpace, Locks, Blob Storage, Process Groups
+    // (see wit/plexspaces-simple-actor/world.wit for full interface)
 }
 
 world actor-world {

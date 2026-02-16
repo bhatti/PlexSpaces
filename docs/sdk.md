@@ -186,7 +186,7 @@ class ChatRoom:
 | **Actor Identity** | |
 | `host.self_id()` | Get own actor ID (e.g., `"account-alice"`) |
 | **Actor Lifecycle** | |
-| `host.spawn(module_ref, actor_id, init_config)` | Spawn a new actor from a deployed WASM module |
+| `host.spawn(module_ref, actor_id, init_config)` | Spawn a new actor. Returns spawned actor ID (auto-generated ULID if actor_id is empty). |
 | `host.stop(actor_id)` | Stop an actor gracefully |
 | **Linking & Monitoring (Erlang/OTP)** | |
 | `host.link(actor_id)` | Bidirectional link: if either actor crashes, the other is notified |
@@ -1162,13 +1162,17 @@ sdks/
 ├── typescript/            # TypeScript SDK (inheritance-based)
 │   ├── src/
 │   │   ├── actor.ts       # PlexSpacesActor base class
+│   │   ├── host.ts        # Host function wrappers
 │   │   └── index.ts       # Exports
 │   ├── package.json
 │   └── README.md          # TypeScript SDK docs
 ├── rust/                  # Rust SDK (native embedded actors)
 │   ├── plexspaces-sdk/    # Re-exports, spawn_actor, plexspaces_impl_handlers!
 │   └── plexspaces-sdk-macros/  # #[derive(PlexSpacesActor)]
-└── go/                    # Planned
+└── go/                    # Go SDK (TinyGo WASM actors)
+    └── plexspaces/
+        ├── host.go        # Host function wrappers
+        └── host_imports.go # WIT wasmimport directives
 ```
 
 ---

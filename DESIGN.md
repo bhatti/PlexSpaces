@@ -6,7 +6,7 @@
 |------|--------|-------|
 | Re-instantiation fix (state preservation) | **Done** | get_state/set_state cycle in `handle_message_component()` |
 | WIT handle() return type fix | **Done** | Reverted to `string` to match compiled components |
-| WIT host extensions (12 functions) | **Done** | ask, self-id, spawn, stop, link, unlink, monitor, demonitor, send-after, pg-join, pg-leave, pg-members, pg-broadcast |
+| WIT host extensions (31 functions) | **Done** | Messaging (send, ask), Identity (self-id), Lifecycle (spawn, stop), Linking (link, unlink, monitor, demonitor), Timers (send-after), Process Groups (pg-join/leave/members/broadcast), Logging (log, now-ms), KV (kv-get/put/delete/list), TupleSpace (ts-write/read/take/read-all), Locks (lock-acquire/release/renew), Blobs (blob-upload/download/delete/list) |
 | Rust host bindings (SimpleHostImpl) | **Done** | All host functions implemented with metrics/tracing |
 | Python SDK parity | **Done** | Host class + MockHost with all functions |
 | TypeScript SDK parity | **Done** | host.ts with Host class + ProcessGroups |
@@ -24,6 +24,8 @@
 | **Removed `parent-id`** | Framework uses Erlang-style supervisor trees, not explicit parent/child tracking for actors. Supervision hierarchy is managed by `ActorRegistry.register_parent_child()` at the framework level, not exposed to individual WASM actors. |
 | **Removed `cancel-timer`** | Timers are managed by the framework's `TimerFacet`/`ReminderFacet` (actor facets), not by individual actors. Actors can be stopped to cancel their pending timers. `TimerFacet::unregister_timer()` exists for framework-level timer management. |
 | **`send-after` returns timer-id with tracked JoinHandle** | Timer tasks are stored in `SimpleHostImpl::pending_timers` for cleanup when the actor stops. Self-cleanup removes entries after delivery. Timer-ids are for observability, not cancellation. |
+| **Spawn returns actor ID** | `spawn()` returns the actual spawned actor ID across all SDKs. Empty actor_id → framework generates ULID. Consistent with `ActorFactory::spawn_actor()` → `ActorServiceMessageSender::spawn_actor()` chain. |
+| **Unified void-return error handling** | Operations with no meaningful return (stop, link, unlink, demonitor, pg-join/leave/broadcast) raise/throw/return errors but do not return a value. Consistent across Python (raises RuntimeError), TypeScript (throws Error), Go (returns error). |
 | **SDKs as thin decorators over framework** | WIT/SDK layer delegates to `HostFunctions` → `MessageSender` → framework services. No business logic in the SDK layer. |
 
 ## Table of Contents

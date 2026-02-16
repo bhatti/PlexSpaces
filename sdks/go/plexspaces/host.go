@@ -158,17 +158,86 @@ func (h *Host) NowMs() uint64 {
 // Key-Value Store
 // ========================================================================
 
-// KVGet retrieves a value by key.
+// KVGet retrieves a value by key. Returns value or empty if not found.
+// Errors return "ERROR:message".
 func (h *Host) KVGet(key string) string { return hostKVGet(key) }
 
-// KVPut stores a value.
+// KVPut stores a value. Returns empty on success, "ERROR:message" on failure.
 func (h *Host) KVPut(key, value string) string { return hostKVPut(key, value) }
 
-// KVDelete removes a key.
+// KVDelete removes a key. Returns empty on success, "ERROR:message" on failure.
 func (h *Host) KVDelete(key string) string { return hostKVDelete(key) }
 
-// KVList lists keys with a prefix.
+// KVList lists keys with a prefix. Returns JSON array of keys.
+// Errors return "ERROR:message".
 func (h *Host) KVList(prefix string) string { return hostKVList(prefix) }
+
+// ========================================================================
+// TupleSpace (Linda-style coordination)
+// ========================================================================
+
+// TSWrite writes a tuple to the TupleSpace.
+// tupleJSON: JSON array of strings/numbers, e.g. ["task","worker-1",123].
+// Returns empty on success, "ERROR:message" on failure.
+func (h *Host) TSWrite(tupleJSON string) string { return hostTSWrite(tupleJSON) }
+
+// TSRead performs a non-destructive read from the TupleSpace.
+// patternJSON: JSON array with wildcards (null or "*" matches any), e.g. ["task","*",null].
+// Returns matched tuple as JSON array, or empty if not found.
+func (h *Host) TSRead(patternJSON string) string { return hostTSRead(patternJSON) }
+
+// TSTake performs a destructive read (removes the matched tuple).
+// patternJSON: JSON array with wildcards.
+// Returns matched tuple as JSON array and removes it, or empty if not found.
+func (h *Host) TSTake(patternJSON string) string { return hostTSTake(patternJSON) }
+
+// TSReadAll reads all matching tuples (non-destructive).
+// patternJSON: JSON array with wildcards.
+// Returns JSON array of matched tuples, e.g. [["task","w1",1],["task","w2",2]].
+func (h *Host) TSReadAll(patternJSON string) string { return hostTSReadAll(patternJSON) }
+
+// ========================================================================
+// Distributed Locks
+// ========================================================================
+
+// LockAcquire acquires a distributed lock.
+// Returns JSON on success with lock details, or "ERROR:message" on failure/timeout.
+func (h *Host) LockAcquire(tenantID, namespace, holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64) string {
+	return hostLockAcquire(tenantID, namespace, holderID, lockName, leaseDurationSecs, timeoutMs)
+}
+
+// LockRelease releases a distributed lock.
+// Returns empty on success, "ERROR:message" on failure.
+func (h *Host) LockRelease(lockID, tenantID, namespace, holderID, lockVersion string) string {
+	return hostLockRelease(lockID, tenantID, namespace, holderID, lockVersion)
+}
+
+// LockRenew renews the lease on a held lock (heartbeat).
+// Returns new lock version on success, or "ERROR:message" on failure.
+func (h *Host) LockRenew(lockID, tenantID, namespace, holderID, lockVersion string, leaseDurationSecs uint32) string {
+	return hostLockRenew(lockID, tenantID, namespace, holderID, lockVersion, leaseDurationSecs)
+}
+
+// ========================================================================
+// Blob Storage
+// ========================================================================
+
+// BlobUpload uploads blob data (base64-encoded).
+// Returns empty on success, "ERROR:message" on failure.
+func (h *Host) BlobUpload(blobID, data, contentType string) string {
+	return hostBlobUpload(blobID, data, contentType)
+}
+
+// BlobDownload downloads blob data.
+// Returns base64-encoded content on success, empty if not found, "ERROR:message" on failure.
+func (h *Host) BlobDownload(blobID string) string { return hostBlobDownload(blobID) }
+
+// BlobDelete deletes a blob. Returns empty on success, "ERROR:message" on failure.
+func (h *Host) BlobDelete(blobID string) string { return hostBlobDelete(blobID) }
+
+// BlobList lists blobs with a prefix. Returns JSON array of blob IDs.
+// Errors return "ERROR:message".
+func (h *Host) BlobList(prefix string) string { return hostBlobList(prefix) }
 
 // ========================================================================
 // Process Groups

@@ -596,41 +596,38 @@ class Host:
             raise RuntimeError(result)
         return result
 
-    def stop(self, actor_id: str) -> str:
+    def stop(self, actor_id: str) -> None:
         """
         Stop an actor gracefully.
 
         Args:
             actor_id: ID of the actor to stop
 
-        Returns:
-            Empty string on success, raises RuntimeError on failure
+        Raises:
+            RuntimeError: on failure
         """
         h = _get_host()
         result = h.stop(actor_id)
         if result.startswith("ERROR:"):
             raise RuntimeError(result)
-        return result
 
     # ========================================================================
     # Actor Linking & Monitoring (Erlang/OTP patterns)
     # ========================================================================
 
-    def link(self, actor_id: str) -> str:
+    def link(self, actor_id: str) -> None:
         """Bidirectional link: if either actor crashes, the other is notified."""
         h = _get_host()
         result = h.link(actor_id)
         if result.startswith("ERROR:"):
             raise RuntimeError(result)
-        return result
 
-    def unlink(self, actor_id: str) -> str:
+    def unlink(self, actor_id: str) -> None:
         """Remove a bidirectional link."""
         h = _get_host()
         result = h.unlink(actor_id)
         if result.startswith("ERROR:"):
             raise RuntimeError(result)
-        return result
 
     def monitor(self, actor_id: str) -> str:
         """
@@ -642,13 +639,12 @@ class Host:
             raise RuntimeError(result)
         return result
 
-    def demonitor(self, monitor_ref: str) -> str:
+    def demonitor(self, monitor_ref: str) -> None:
         """Cancel a monitor."""
         h = _get_host()
         result = h.demonitor(monitor_ref)
         if result.startswith("ERROR:"):
             raise RuntimeError(result)
-        return result
 
     # ========================================================================
     # Timers (Delayed Messaging)

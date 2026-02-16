@@ -790,6 +790,237 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             },
         }
     }
+
+    // ========================================================================
+    // Messaging: ask (request-reply)
+    // ========================================================================
+
+    /// Send request and wait for response. Delegates to HostFunctions::ask().
+    async fn ask(&mut self, to: String, msg_type: String, payload_json: String, timeout_ms: u64) -> String {
+        let self_id = self.actor_id.to_string();
+        tracing::debug!(
+            actor_id = %self_id, to = %to, msg_type = %msg_type,
+            timeout_ms = timeout_ms, "simple actor ask"
+        );
+        match self.host_functions.ask(
+            &self_id, &to, &msg_type,
+            payload_json.into_bytes(),
+            timeout_ms,
+        ).await {
+            Ok(response_bytes) => String::from_utf8_lossy(&response_bytes).into_owned(),
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    // ========================================================================
+    // Actor Identity
+    // ========================================================================
+
+    /// Get own actor ID
+    async fn self_id(&mut self) -> String {
+        self.actor_id.to_string()
+    }
+
+    /// Get parent/supervisor actor ID
+    async fn parent_id(&mut self) -> String {
+        // Parent ID tracking is not yet wired — return empty string
+        String::new()
+    }
+
+    // ========================================================================
+    // Actor Lifecycle: spawn, stop
+    // ========================================================================
+
+    /// Spawn a new actor. Delegates to HostFunctions::spawn_actor().
+    async fn spawn(&mut self, module_ref: String, actor_id: String, init_config_json: String) -> String {
+        let self_id = self.actor_id.to_string();
+        tracing::debug!(
+            actor_id = %self_id, module_ref = %module_ref,
+            new_actor_id = %actor_id, "simple actor spawn"
+        );
+        match self.host_functions.spawn_actor(
+            &self_id,
+            &module_ref,
+            init_config_json.into_bytes(),
+            Some(actor_id),
+            vec![],  // no labels
+            false,   // not durable by default
+        ).await {
+            Ok(_spawned_id) => String::new(),
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    /// Stop an actor. Delegates to HostFunctions::stop_actor().
+    async fn stop(&mut self, actor_id: String) -> String {
+        let self_id = self.actor_id.to_string();
+        tracing::debug!(actor_id = %self_id, target = %actor_id, "simple actor stop");
+        match self.host_functions.stop_actor(&self_id, &actor_id, 5000).await {
+            Ok(()) => String::new(),
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    // ========================================================================
+    // Actor Linking & Monitoring (Erlang/OTP patterns)
+    // ========================================================================
+
+    /// Bidirectional link
+    async fn link(&mut self, actor_id: String) -> String {
+        let self_id = self.actor_id.to_string();
+        match self.host_functions.link_actor(&self_id, &self_id, &actor_id).await {
+            Ok(()) => String::new(),
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    /// Remove bidirectional link
+    async fn unlink(&mut self, actor_id: String) -> String {
+        let self_id = self.actor_id.to_string();
+        match self.host_functions.unlink_actor(&self_id, &self_id, &actor_id).await {
+            Ok(()) => String::new(),
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    /// Unidirectional monitor — returns monitor reference as string
+    async fn monitor(&mut self, actor_id: String) -> String {
+        let self_id = self.actor_id.to_string();
+        match self.host_functions.monitor_actor(&self_id, &actor_id).await {
+            Ok(monitor_ref) => monitor_ref.to_string(),
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    /// Cancel a monitor
+    async fn demonitor(&mut self, monitor_ref: String) -> String {
+        let self_id = self.actor_id.to_string();
+        let ref_id: u64 = match monitor_ref.parse() {
+            Ok(id) => id,
+            Err(_) => return format!("ERROR: invalid monitor ref: {}", monitor_ref),
+        };
+        match self.host_functions.demonitor_actor(&self_id, "", ref_id).await {
+            Ok(()) => String::new(),
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    // ========================================================================
+    // Timers (Delayed Messaging)
+    // ========================================================================
+
+    /// Send a message to self after a delay
+    async fn send_after(&mut self, delay_ms: u64, msg_type: String, payload_json: String) -> String {
+        let host_functions = self.host_functions.clone();
+        let self_id = self.actor_id.to_string();
+        let from = self_id.clone();
+
+        // Generate unique timer ID
+        let timer_id = format!("timer-{}-{}", self_id,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let timer_id_clone = timer_id.clone();
+
+        // Spawn background task that sleeps then sends
+        tokio::task::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            let msg = format!(r#"{{"msg_type":"{}","payload":{}}}"#, msg_type, payload_json);
+            if let Err(e) = host_functions.send_message(&from, &from, &msg).await {
+                tracing::warn!(
+                    actor_id = %from, timer_id = %timer_id_clone,
+                    error = %e, "send_after delivery failed"
+                );
+            }
+        });
+        timer_id
+    }
+
+    /// Cancel a pending timer
+    async fn cancel_timer(&mut self, timer_id: String) -> String {
+        tracing::debug!(actor_id = %self.actor_id, timer_id = %timer_id, "cancel_timer (not yet implemented)");
+        // TODO: Track timer JoinHandles for cancellation
+        String::new()
+    }
+
+    // ========================================================================
+    // Process Groups
+    // ========================================================================
+
+    /// Join a named process group
+    async fn pg_join(&mut self, group_name: String) -> String {
+        let self_id = self.actor_id.clone();
+        let ctx = RequestContext::new_without_auth(String::new(), self_id.to_string());
+        match self.host_functions.process_group_registry() {
+            Some(registry) => {
+                match registry.join_group(&ctx, &group_name, &self_id, vec![]).await {
+                    Ok(()) => String::new(),
+                    Err(e) => format!("ERROR: {}", e),
+                }
+            }
+            None => "ERROR: ProcessGroupRegistry not configured".to_string(),
+        }
+    }
+
+    /// Leave a named process group
+    async fn pg_leave(&mut self, group_name: String) -> String {
+        let self_id = self.actor_id.clone();
+        let ctx = RequestContext::new_without_auth(String::new(), self_id.to_string());
+        match self.host_functions.process_group_registry() {
+            Some(registry) => {
+                match registry.leave_group(&ctx, &group_name, &self_id).await {
+                    Ok(()) => String::new(),
+                    Err(e) => format!("ERROR: {}", e),
+                }
+            }
+            None => "ERROR: ProcessGroupRegistry not configured".to_string(),
+        }
+    }
+
+    /// List members of a process group
+    async fn pg_members(&mut self, group_name: String) -> String {
+        let self_id = self.actor_id.to_string();
+        let ctx = RequestContext::new_without_auth(String::new(), self_id);
+        match self.host_functions.process_group_registry() {
+            Some(registry) => {
+                match registry.get_members(&ctx, &group_name).await {
+                    Ok(members) => {
+                        let ids: Vec<String> = members.iter().map(|m| m.to_string()).collect();
+                        serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
+                    }
+                    Err(e) => format!("ERROR: {}", e),
+                }
+            }
+            None => "ERROR: ProcessGroupRegistry not configured".to_string(),
+        }
+    }
+
+    /// Broadcast message to all members of a process group
+    async fn pg_broadcast(&mut self, group_name: String, _msg_type: String, payload_json: String) -> String {
+        let self_id = self.actor_id.to_string();
+        let ctx = RequestContext::new_without_auth(String::new(), self_id.clone());
+        let registry = match self.host_functions.process_group_registry() {
+            Some(r) => r.clone(),
+            None => return "ERROR: ProcessGroupRegistry not configured".to_string(),
+        };
+        let members = match registry.get_members(&ctx, &group_name).await {
+            Ok(m) => m,
+            Err(e) => return format!("ERROR: {}", e),
+        };
+        for member in &members {
+            let member_str = member.to_string();
+            if let Err(e) = self.host_functions.send_message(&self_id, &member_str, &payload_json).await {
+                tracing::warn!(
+                    actor_id = %self_id, group = %group_name,
+                    target = %member_str, error = %e,
+                    "pg_broadcast: failed to send to member"
+                );
+            }
+        }
+        String::new()
+    }
 }
 
 /// Check if a WASM component uses the simple-actor interface by examining its imports.

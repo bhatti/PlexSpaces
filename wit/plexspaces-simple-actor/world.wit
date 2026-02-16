@@ -70,9 +70,9 @@ interface host {
 
     /// Spawn a new actor. Delegates to ActorFactory::spawn_actor()
     /// module-ref: actor type/module reference (e.g., "calculator")
-    /// actor-id: unique ID for the new actor
+    /// actor-id: unique ID for the new actor (empty string = auto-generated ULID)
     /// init-config-json: JSON config passed to the new actor's init()
-    /// Returns empty string on success, or "ERROR:message" on failure
+    /// Returns spawned actor ID on success (may be auto-generated), or "ERROR:message" on failure
     spawn: func(module-ref: string, actor-id: string, init-config-json: string) -> string;
 
     /// Stop an actor gracefully. Delegates to ActorFactory::stop_actor()

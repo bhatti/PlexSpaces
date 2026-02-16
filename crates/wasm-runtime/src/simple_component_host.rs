@@ -834,9 +834,17 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     // Actor Lifecycle: spawn, stop
     // ========================================================================
 
-    /// Spawn a new actor. Delegates to HostFunctions::spawn_actor().
+    /// Spawn a new actor. Delegates to HostFunctions::spawn_actor() which calls
+    /// ActorServiceMessageSender → ActorService → ActorFactory::spawn_actor().
+    ///
+    /// If actor_id is empty, the framework generates a ULID-based ID automatically.
+    /// Returns the actual spawned actor ID on success (important when auto-generated),
+    /// or "ERROR:message" on failure.
     async fn spawn(&mut self, module_ref: String, actor_id: String, init_config_json: String) -> String {
+        metrics::counter!("plexspaces_wasm_spawn_total").increment(1);
         let self_id = self.actor_id.to_string();
+        // Pass None for empty actor_id so the framework generates a ULID
+        let requested_id = if actor_id.is_empty() { None } else { Some(actor_id.clone()) };
         tracing::debug!(
             actor_id = %self_id, module_ref = %module_ref,
             new_actor_id = %actor_id, "simple actor spawn"
@@ -845,12 +853,23 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             &self_id,
             &module_ref,
             init_config_json.into_bytes(),
-            Some(actor_id),
-            vec![],  // no labels
-            false,   // not durable by default
+            requested_id,
+            vec![],  // labels not exposed in simple-actor WIT
+            false,   // durability configured at framework level via facets
         ).await {
-            Ok(_spawned_id) => String::new(),
-            Err(e) => format!("ERROR: {}", e),
+            Ok(spawned_id) => {
+                metrics::counter!("plexspaces_wasm_spawn_success_total").increment(1);
+                tracing::debug!(
+                    actor_id = %self_id, spawned_id = %spawned_id,
+                    "simple actor spawn success"
+                );
+                // Return the actual spawned actor ID (may differ from requested if auto-generated)
+                spawned_id
+            }
+            Err(e) => {
+                metrics::counter!("plexspaces_wasm_spawn_errors_total").increment(1);
+                format!("ERROR: {}", e)
+            }
         }
     }
 

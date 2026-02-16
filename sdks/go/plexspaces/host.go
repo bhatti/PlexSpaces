@@ -66,11 +66,17 @@ func (h *Host) SelfID() string {
 // Actor Lifecycle
 // ========================================================================
 
-// Spawn creates a new actor.
-func (h *Host) Spawn(moduleRef, actorID string, initConfig any) error {
+// Spawn creates a new actor. Delegates to ActorFactory::spawn_actor() via the host.
+// moduleRef is the actor type/module reference (must be a deployed WASM module or registered behavior).
+// actorID is the unique ID for the new actor (empty = auto-generated ULID).
+// Returns the spawned actor ID (may be auto-generated if actorID was empty).
+func (h *Host) Spawn(moduleRef, actorID string, initConfig any) (string, error) {
 	configJSON := marshalPayload(initConfig)
 	result := hostSpawn(moduleRef, actorID, configJSON)
-	return checkError(result)
+	if len(result) > 6 && result[:6] == "ERROR:" {
+		return "", &HostError{result}
+	}
+	return result, nil
 }
 
 // Stop gracefully stops an actor.

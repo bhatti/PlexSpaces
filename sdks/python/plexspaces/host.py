@@ -186,9 +186,10 @@ class _MockHost:
         return "mock-actor"
 
     def spawn(self, module_ref: str, actor_id: str, init_config_json: str) -> str:
-        """Spawn (mock). Returns empty on success."""
-        print(f"[MOCK] spawn({module_ref}, {actor_id})")
-        return ""
+        """Spawn (mock). Returns spawned actor ID."""
+        spawned_id = actor_id if actor_id else f"mock-{module_ref}-1"
+        print(f"[MOCK] spawn({module_ref}, {actor_id}) -> {spawned_id}")
+        return spawned_id
 
     def stop(self, actor_id: str) -> str:
         """Stop (mock). Returns empty on success."""
@@ -575,17 +576,18 @@ class Host:
     # Actor Lifecycle
     # ========================================================================
 
-    def spawn(self, module_ref: str, actor_id: str, init_config: Any = None) -> str:
+    def spawn(self, module_ref: str, actor_id: str = "", init_config: Any = None) -> str:
         """
-        Spawn a new actor.
+        Spawn a new actor. Delegates to ActorFactory::spawn_actor() via the host.
 
         Args:
-            module_ref: Actor type/module reference
-            actor_id: Unique ID for the new actor
+            module_ref: Actor type/module reference (must be a deployed WASM module or registered behavior)
+            actor_id: Unique ID for the new actor (empty = auto-generated ULID)
             init_config: Optional config passed to the new actor's init()
 
         Returns:
-            Empty string on success, raises RuntimeError on failure
+            Spawned actor ID string (may be auto-generated if actor_id was empty).
+            Raises RuntimeError on failure.
         """
         h = _get_host()
         config_json = json.dumps(init_config) if init_config is not None else "{}"

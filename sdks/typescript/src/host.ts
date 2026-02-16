@@ -149,13 +149,20 @@ export class Host {
   // Actor Lifecycle
   // ========================================================================
 
-  /** Spawn a new actor */
-  spawn(moduleRef: string, actorId: string, initConfig?: unknown): void {
+  /**
+   * Spawn a new actor. Delegates to ActorFactory::spawn_actor() via the host.
+   * @param moduleRef - Actor type/module reference (must be deployed)
+   * @param actorId - Unique ID for the new actor (empty = auto-generated ULID)
+   * @param initConfig - Optional config passed to the new actor's init()
+   * @returns Spawned actor ID string (may be auto-generated if actorId was empty)
+   */
+  spawn(moduleRef: string, actorId: string = '', initConfig?: unknown): string {
     const configJson = initConfig !== undefined ? JSON.stringify(initConfig) : '{}';
     const result = safeCall(hostSpawn, moduleRef, actorId, configJson) as string;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
+    return result as string;
   }
 
   /** Stop an actor gracefully */

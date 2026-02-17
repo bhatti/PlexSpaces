@@ -1,5 +1,5 @@
 # PlexSpaces Rust SDK – high-level API and annotations (like Python SDK decorators)
-# Use: plexspaces_sdk::Actor, #[derive(PlexSpacesActor)], and re-exported types.
+# Use: plexspaces_sdk::Actor, #[actor], #[gen_server_actor], and re-exported types.
 # Part of root workspace (see Cargo.toml members).
 
 [package]

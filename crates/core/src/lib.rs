@@ -45,7 +45,7 @@ pub mod service_locator_trait;
 pub use service_locator_trait::{ServiceLocator, ApplicationManager, WasmRuntimeTrait, BlobServiceTrait, NodeRegistryTrait};
 pub mod service_locator;
 pub mod keyvalue_store;
-pub use keyvalue_store::KeyValueStore;
+pub use keyvalue_store::{KeyValueStore, KeyValueStoreError, KeyValueStoreResult};
 // LockManager trait is in plexspaces-locks crate - re-export for convenience
 pub use plexspaces_locks::{LockManager, LockError, LockResult};
 pub use plexspaces_proto::locks::prv::{Lock, AcquireLockOptions, RenewLockOptions, ReleaseLockOptions};
@@ -80,7 +80,7 @@ pub mod health;
 pub use health::reporter::HealthReporter;
 pub use health::checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, run_health_check};
 pub use health::service::PlexSpacesHealthReporter;
-// Backward compatibility aliases
+// Health sub-modules re-exported for direct access
 pub use health::reporter as health_reporter;
 pub use health::checker as health_checker;
 pub use health::service as health_service;
@@ -103,7 +103,7 @@ pub use actor_context::ObjectRegistration;
 pub use actor_registry::{ActorRegistry, ActorRegistryError, ActorRoutingInfo, MonitorLink, TemporarySenderEntry};
 // Re-export VirtualActorManager and VirtualActorMetadata (source of truth for virtual actors)
 pub use virtual_actor_manager::{VirtualActorManager, VirtualActorError, VirtualActorMetadata};
-// FacetManager re-exported from plexspaces-facet crate (for backward compatibility)
+// FacetManager re-exported from plexspaces-facet crate for convenience
 pub use plexspaces_facet::FacetManager;
 // Re-export MessageSender trait (for sending messages to actors)
 pub use actor_trait::MessageSender;

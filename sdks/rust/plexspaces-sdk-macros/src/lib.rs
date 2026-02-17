@@ -47,7 +47,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, Attribute, DeriveInput, ItemImpl, ItemStruct, ImplItem};
+use syn::{parse_macro_input, Attribute, ItemImpl, ItemStruct, ImplItem};
 
 // ============================================================================
 // Helper: Parse facets from attribute like `facets = ["durability", "timer"]`
@@ -1203,68 +1203,3 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
     TokenStream::from(expanded)
 }
 
-// ============================================================================
-// Legacy: #[derive(PlexSpacesActor)] - kept for backward compatibility
-// ============================================================================
-
-fn behavior_type_expr_legacy(
-    name: &syn::Ident,
-    behavior: Option<&str>,
-    custom_name: Option<&str>,
-) -> TokenStream2 {
-    match behavior {
-        Some("GenServer") => quote! { plexspaces_core::BehaviorType::GenServer },
-        Some("GenEvent") => quote! { plexspaces_core::BehaviorType::GenEvent },
-        Some("GenStateMachine") => quote! { plexspaces_core::BehaviorType::GenStateMachine },
-        Some("Workflow") => quote! { plexspaces_core::BehaviorType::Workflow },
-        _ => {
-            let name_str = custom_name
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| name.to_string());
-            quote! { plexspaces_core::BehaviorType::Custom(#name_str.to_string()) }
-        }
-    }
-}
-
-fn parse_plexspaces_actor_attrs(attrs: &[Attribute]) -> (Option<String>, Option<String>) {
-    let mut behavior = None;
-    let mut name = None;
-    for attr in attrs {
-        if !attr.path().is_ident("plexspaces_actor") {
-            continue;
-        }
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("behavior") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                behavior = Some(s.value());
-            } else if meta.path.is_ident("name") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                name = Some(s.value());
-            }
-            Ok(())
-        });
-    }
-    (behavior, name)
-}
-
-/// Legacy derive macro for backward compatibility.
-/// Prefer `#[actor]` or `#[gen_server_actor]` for new code.
-#[proc_macro_derive(PlexSpacesActor, attributes(plexspaces_actor))]
-pub fn derive_plexspaces_actor(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
-    let (behavior, custom_name) = parse_plexspaces_actor_attrs(&input.attrs);
-    let behavior_opt = behavior.as_deref();
-    let name_opt = custom_name.as_deref();
-    let expr = behavior_type_expr_legacy(name, behavior_opt, name_opt);
-    let expanded = quote! {
-        impl plexspaces_core::Actor for #name {
-            fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-                #expr
-            }
-        }
-    };
-    TokenStream::from(expanded)
-}

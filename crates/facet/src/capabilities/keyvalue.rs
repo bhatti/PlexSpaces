@@ -94,46 +94,42 @@ struct KeyValueMetrics {
     misses: u64,
 }
 
-/// Trait for key-value store implementations
-#[async_trait]
-pub trait KeyValueStore: Send + Sync {
-    /// Get value for key
-    async fn get(&self, ctx: &plexspaces_common::RequestContext, key: &str) -> Result<Option<Vec<u8>>, String>;
-    /// Set value for key with optional TTL
-    async fn set(&self, ctx: &plexspaces_common::RequestContext, key: &str, value: Vec<u8>, ttl: Option<u64>) -> Result<(), String>;
-    /// Delete key, returns true if key existed
-    async fn delete(&self, ctx: &plexspaces_common::RequestContext, key: &str) -> Result<bool, String>;
-    /// Check if key exists
-    async fn exists(&self, ctx: &plexspaces_common::RequestContext, key: &str) -> Result<bool, String>;
-    /// List all keys matching prefix
-    async fn list_keys(&self, ctx: &plexspaces_common::RequestContext, prefix: &str) -> Result<Vec<String>, String>;
-}
+// Re-export the unified KeyValueStore trait from common crate.
+// This ensures a single trait definition across core, facet, and keyvalue crates.
+pub use plexspaces_common::{KeyValueStore, KeyValueStoreError, KeyValueStoreResult};
 
-/// In-memory key-value store
+/// In-memory key-value store (used as default backend for KeyValueFacet)
 struct MemoryStore {
     data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 #[async_trait]
 impl KeyValueStore for MemoryStore {
-    async fn get(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> Result<Option<Vec<u8>>, String> {
+    async fn get(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> KeyValueStoreResult<Option<Vec<u8>>> {
         Ok(self.data.read().await.get(key).cloned())
     }
 
-    async fn set(&self, _ctx: &plexspaces_common::RequestContext, key: &str, value: Vec<u8>, _ttl: Option<u64>) -> Result<(), String> {
+    async fn put(&self, _ctx: &plexspaces_common::RequestContext, key: &str, value: Vec<u8>) -> KeyValueStoreResult<()> {
         self.data.write().await.insert(key.to_string(), value);
         Ok(())
     }
 
-    async fn delete(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> Result<bool, String> {
-        Ok(self.data.write().await.remove(key).is_some())
+    async fn put_with_ttl(&self, _ctx: &plexspaces_common::RequestContext, key: &str, value: Vec<u8>, _ttl: std::time::Duration) -> KeyValueStoreResult<()> {
+        // In-memory store ignores TTL (no background expiry thread)
+        self.data.write().await.insert(key.to_string(), value);
+        Ok(())
     }
 
-    async fn exists(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> Result<bool, String> {
+    async fn delete(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> KeyValueStoreResult<()> {
+        self.data.write().await.remove(key);
+        Ok(())
+    }
+
+    async fn exists(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> KeyValueStoreResult<bool> {
         Ok(self.data.read().await.contains_key(key))
     }
 
-    async fn list_keys(&self, _ctx: &plexspaces_common::RequestContext, prefix: &str) -> Result<Vec<String>, String> {
+    async fn list_keys(&self, _ctx: &plexspaces_common::RequestContext, prefix: &str) -> KeyValueStoreResult<Vec<String>> {
         Ok(self
             .data
             .read()
@@ -142,6 +138,28 @@ impl KeyValueStore for MemoryStore {
             .filter(|k| k.starts_with(prefix))
             .cloned()
             .collect())
+    }
+
+    async fn cas(&self, _ctx: &plexspaces_common::RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> KeyValueStoreResult<bool> {
+        let mut data = self.data.write().await;
+        let current = data.get(key).cloned();
+        if current == expected {
+            data.insert(key.to_string(), new_value);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn increment(&self, _ctx: &plexspaces_common::RequestContext, key: &str, delta: i64) -> KeyValueStoreResult<i64> {
+        let mut data = self.data.write().await;
+        let current: i64 = data.get(key)
+            .and_then(|v| String::from_utf8(v.clone()).ok())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let new_val = current + delta;
+        data.insert(key.to_string(), new_val.to_string().into_bytes());
+        Ok(new_val)
     }
 }
 
@@ -208,7 +226,7 @@ impl KeyValueFacet {
         })
     }
     
-    /// Create with specific configuration (legacy method for backward compatibility)
+    /// Create with specific configuration
     pub fn with_config(config: KeyValueConfig) -> Result<Self, FacetError> {
         let config_value = serde_json::to_value(&config).unwrap_or(serde_json::json!({}));
         Self::with_config_internal(config, config_value, KEYVALUE_FACET_DEFAULT_PRIORITY)
@@ -246,7 +264,7 @@ impl KeyValueFacet {
                         metrics.misses += 1;
                         Ok(vec![])
                     }
-                    Err(e) => Err(FacetError::InterceptionFailed(e)),
+                    Err(e) => Err(FacetError::InterceptionFailed(e.to_string())),
                 }
             }
             "kv_set" => {
@@ -263,10 +281,18 @@ impl KeyValueFacet {
                 self.metrics.write().await.sets += 1;
 
                 let store = self.store.read().await;
-                store
-                    .set(&ctx, &args.key, args.value, args.ttl.or(self.config.default_ttl))
-                    .await
-                    .map_err(FacetError::InterceptionFailed)?;
+                let effective_ttl = args.ttl.or(self.config.default_ttl);
+                if let Some(ttl_secs) = effective_ttl {
+                    store
+                        .put_with_ttl(&ctx, &args.key, args.value, std::time::Duration::from_secs(ttl_secs))
+                        .await
+                        .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
+                } else {
+                    store
+                        .put(&ctx, &args.key, args.value)
+                        .await
+                        .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
+                }
 
                 Ok(vec![])
             }
@@ -277,12 +303,12 @@ impl KeyValueFacet {
                 self.metrics.write().await.deletes += 1;
 
                 let store = self.store.read().await;
-                let deleted = store
+                store
                     .delete(&ctx, &key)
                     .await
-                    .map_err(FacetError::InterceptionFailed)?;
+                    .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
 
-                Ok(serde_json::to_vec(&deleted).unwrap())
+                Ok(serde_json::to_vec(&true).unwrap())
             }
             "kv_exists" => {
                 let key: String = serde_json::from_slice(args)
@@ -292,7 +318,7 @@ impl KeyValueFacet {
                 let exists = store
                     .exists(&ctx, &key)
                     .await
-                    .map_err(FacetError::InterceptionFailed)?;
+                    .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
 
                 Ok(serde_json::to_vec(&exists).unwrap())
             }
@@ -304,7 +330,7 @@ impl KeyValueFacet {
                 let keys = store
                     .list_keys(&ctx, &prefix)
                     .await
-                    .map_err(FacetError::InterceptionFailed)?;
+                    .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
 
                 Ok(serde_json::to_vec(&keys).unwrap())
             }

@@ -30,6 +30,7 @@ pub mod security_validator;
 pub mod release_config;
 pub mod release_parser;
 pub mod config_manager;
+pub mod keyvalue_store;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
@@ -42,4 +43,5 @@ pub use release_parser::{Release, ReleaseError};
 pub use config_manager::{
     EnvConfig, initialize, get_env, get_env_or, get_env_bool, get_env_u32, get_env_u64,
 };
+pub use keyvalue_store::{KeyValueStore, KeyValueStoreError, KeyValueStoreResult};
 

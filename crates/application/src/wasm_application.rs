@@ -419,11 +419,28 @@ impl WasmApplication {
         let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(
             plexspaces_wasm_runtime::WasmConfig::default()
         );
-        
+
+        // Build init config from child_spec so actors know their role.
+        // This enables Erlang-style ApplicationSpec where one WASM module
+        // serves multiple actor types (e.g., ParameterServer + DataWorker).
+        let mut init_config = serde_json::Map::new();
+        init_config.insert("actor_id".to_string(), serde_json::Value::String(child_spec.id.clone()));
+        if let Some(ref bk) = child_spec.behavior_kind {
+            init_config.insert("behavior_kind".to_string(), serde_json::Value::String(bk.clone()));
+        }
+        if !child_spec.args.is_empty() {
+            let args_obj: serde_json::Map<String, serde_json::Value> = child_spec.args.iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+            init_config.insert("args".to_string(), serde_json::Value::Object(args_obj));
+        }
+        let init_config_json = serde_json::to_vec(&serde_json::Value::Object(init_config))
+            .unwrap_or_default();
+
         let instance_any = runtime.instantiate(
             module_any,
             actor_id.to_string(),
-            &[],
+            &init_config_json,
             config_any,
             Some(channel_service),
             None,

@@ -83,7 +83,7 @@ def generate_wrapper(actor_classes: List[Type], module_name: str) -> str:
     if len(actor_classes) == 1:
         # Single actor - simple path
         class_selection = f"    _actor_class = {default_class}"
-        role_lookup = ""
+        role_lookup = "\n    _ROLE_MAP = {}"
     else:
         # Multiple actors - use ACTOR_ROLES dict from module, fall back to
         # prefix matching on actor_id

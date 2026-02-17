@@ -1,243 +1,326 @@
 """
-Ray Parameter Server Actors - Distributed ML Training (Python WASM with SDK)
+Ray Parameter Server - Distributed ML Training (Python WASM)
 
-Demonstrates distributed ML training with parameter server pattern:
-- Centralized model weights management
-- Gradient aggregation from multiple workers
-- Synchronous/asynchronous training patterns
+Demonstrates the Ray parameter server pattern for distributed ML training:
+- ParameterServer actor manages centralized model weights
+- DataWorker actors compute gradients on data shards in parallel
+- Training is orchestrated via inter-actor messaging (host.ask)
 
-Real-world use case: Distributed ML training (TensorFlow, PyTorch, Ray style).
+Real-world use case: Distributed ML training (TensorFlow, PyTorch, Ray).
 
 ## SDK Features Used
 
 - @actor: Marks classes as PlexSpaces actors
 - state(): Defines persistent state
 - @handler(): Routes operations
+- host.ask(): Inter-actor request-reply (coordinates workers)
+- host.now_ms(): Timing for benchmarks
+- ACTOR_ROLES: Multi-actor ApplicationSpec support
 """
 
-import json
+import math
 from typing import List, Dict, Any
 from plexspaces import actor, state, handler, init_handler, host
 
 
 @actor
 class ParameterServer:
-    """Parameter server for distributed ML training (Ray-style)."""
-    
-    # Model weights (simplified 2-layer neural network)
-    # w1: 200x784 (hidden layer: 784 inputs -> 200 hidden units)
-    # w2: 200 (output layer: 200 hidden -> 1 output)
-    w1: List[List[float]] = state(default_factory=lambda: [[0.1] * 784 for _ in range(200)])
-    w2: List[float] = state(default_factory=lambda: [0.1] * 200)
-    
-    # Training state
+    """Centralized parameter server for distributed ML training."""
+
+    # Model architecture: 2-layer neural network
+    # Layer 1: input_dim x hidden_dim (e.g., 100x64 = 6,400 weights)
+    # Layer 2: hidden_dim bias (e.g., 64 weights)
+    # Total: 6,464 parameters
+    input_dim: int = state(default=100)
+    hidden_dim: int = state(default=64)
+    w1: List[List[float]] = state(default_factory=list)
+    w2: List[float] = state(default_factory=list)
     learning_rate: float = state(default=0.01)
     iteration: int = state(default=0)
-    
+    num_workers: int = state(default=4)
+    worker_ids: List[str] = state(default_factory=list)
+
+    # Benchmark tracking
+    total_coord_ms: float = state(default=0.0)
+    total_compute_ms: float = state(default=0.0)
+
     @init_handler
     def on_init(self, config: dict):
-        """Initialize parameter server from config."""
-        self.learning_rate = config.get("learning_rate", 0.01)
+        """Initialize parameter server from framework config."""
+        # Config comes from child_spec: {"actor_id": "parameter-server", "args": {...}}
+        args = config.get("args", {})
+        lr = args.get("learning_rate", None)
+        self.learning_rate = float(lr) if lr else 0.01
+        inp = args.get("input_dim", None)
+        self.input_dim = int(inp) if inp else 100
+        hid = args.get("hidden_dim", None)
+        self.hidden_dim = int(hid) if hid else 64
+        nw = args.get("num_workers", None)
+        self.num_workers = int(nw) if nw else 4
         self.iteration = 0
-        # Initialize weights if not already set
-        if not self.w1 or len(self.w1) == 0:
-            self.w1 = [[0.1] * 784 for _ in range(200)]
-        if not self.w2 or len(self.w2) == 0:
-            self.w2 = [0.1] * 200
-        host.info(f"Parameter server initialized: lr={self.learning_rate}")
-    
+        self.total_coord_ms = 0.0
+        self.total_compute_ms = 0.0
+
+        # Xavier-like weight initialization (deterministic for reproducibility)
+        self.w1 = []
+        for i in range(self.hidden_dim):
+            row = []
+            for j in range(self.input_dim):
+                val = ((i * 7 + j * 13 + 42) % 1000 - 500) / (500.0 * math.sqrt(self.input_dim))
+                row.append(val)
+            self.w1.append(row)
+        self.w2 = [((i * 11 + 7) % 1000 - 500) / (500.0 * math.sqrt(self.hidden_dim))
+                    for i in range(self.hidden_dim)]
+
+        # Build worker IDs from config
+        self.worker_ids = [f"data-worker-{i}" for i in range(self.num_workers)]
+        total_params = self.input_dim * self.hidden_dim + self.hidden_dim
+        host.info(f"ParameterServer: {self.input_dim}x{self.hidden_dim} ({total_params} params), "
+                   f"lr={self.learning_rate}, workers={self.num_workers}")
+
     @handler("get_weights")
     def get_weights(self) -> dict:
-        """Get current model weights."""
-        return {
-            "status": "ok",
-            "weights": {
-                "w1": self.w1,
-                "w2": self.w2
-            },
-            "iteration": self.iteration
-        }
-    
-    @handler("apply_gradients")
-    def apply_gradients(self, gradients: List[Dict[str, Any]] = None) -> dict:
-        """
-        Apply gradients from multiple workers (aggregate and update weights).
-        
-        Args:
-            gradients: List of gradient dictionaries, each with d_w1 and d_w2
-        """
-        if not gradients or len(gradients) == 0:
-            return {"status": "error", "error": "No gradients provided"}
-        
-        num_workers = len(gradients)
-        host.info(f"Applying gradients from {num_workers} workers (iteration {self.iteration})")
-        
-        # Aggregate gradients (sum across all workers)
-        aggregated_d_w1 = [[0.0] * 784 for _ in range(200)]
-        aggregated_d_w2 = [0.0] * 200
-        
-        for grad in gradients:
-            d_w1 = grad.get("d_w1", [])
-            d_w2 = grad.get("d_w2", [])
-            
-            # Sum gradients
-            for i in range(200):
-                for j in range(784):
-                    if i < len(d_w1) and j < len(d_w1[i]):
-                        aggregated_d_w1[i][j] += d_w1[i][j]
-                if i < len(d_w2):
-                    aggregated_d_w2[i] += d_w2[i]
-        
-        # Average gradients (divide by number of workers)
-        for i in range(200):
-            for j in range(784):
-                aggregated_d_w1[i][j] /= num_workers
-            aggregated_d_w2[i] /= num_workers
-        
-        # Update weights using SGD: w = w - lr * grad
-        for i in range(200):
-            for j in range(784):
-                self.w1[i][j] -= self.learning_rate * aggregated_d_w1[i][j]
-            self.w2[i] -= self.learning_rate * aggregated_d_w2[i]
-        
-        self.iteration += 1
-        
-        return {
-            "status": "ok",
-            "weights": {
-                "w1": self.w1,
-                "w2": self.w2
-            },
-            "iteration": self.iteration,
-            "num_workers": num_workers
-        }
-    
-    @handler("stats")
-    def get_stats(self) -> dict:
-        """Get training statistics."""
-        # Calculate weight statistics
+        """Get current model weights summary (for external inspection)."""
         w1_flat = [w for row in self.w1 for w in row]
         w1_mean = sum(w1_flat) / len(w1_flat) if w1_flat else 0.0
-        w1_max = max(w1_flat) if w1_flat else 0.0
-        w1_min = min(w1_flat) if w1_flat else 0.0
-        
         w2_mean = sum(self.w2) / len(self.w2) if self.w2 else 0.0
-        w2_max = max(self.w2) if self.w2 else 0.0
-        w2_min = min(self.w2) if self.w2 else 0.0
-        
         return {
             "status": "ok",
             "iteration": self.iteration,
-            "learning_rate": self.learning_rate,
-            "w1_stats": {
-                "mean": w1_mean,
-                "max": w1_max,
-                "min": w1_min,
-                "shape": [len(self.w1), len(self.w1[0]) if self.w1 else 0]
-            },
-            "w2_stats": {
-                "mean": w2_mean,
-                "max": w2_max,
-                "min": w2_min,
-                "shape": [len(self.w2)]
+            "total_params": self.input_dim * self.hidden_dim + self.hidden_dim,
+            "w1_mean": w1_mean,
+            "w2_mean": w2_mean,
+        }
+
+    @handler("train")
+    def train(self, iterations: int = 10) -> dict:
+        """
+        Run synchronous distributed training for N iterations.
+
+        Each iteration:
+        1. Fan-out: send weights to all workers via host.ask (coordination)
+        2. Workers: compute gradients on their data shards (computation)
+        3. Fan-in: aggregate gradients and update weights (computation)
+        """
+        if not isinstance(iterations, int):
+            iterations = int(iterations)
+        total_params = self.input_dim * self.hidden_dim + self.hidden_dim
+        results = []
+
+        for it in range(iterations):
+            # -- Coordination: fan-out weights to workers --
+            coord_start = host.now_ms()
+            weights_payload = {
+                "weights": {"w1": self.w1, "w2": self.w2},
+                "input_dim": self.input_dim,
+                "hidden_dim": self.hidden_dim,
             }
+
+            # Collect gradients from all workers via host.ask (request-reply)
+            all_gradients = []
+            for worker_id in self.worker_ids:
+                try:
+                    resp = host.ask(worker_id, "compute_gradients", weights_payload, timeout_ms=30000)
+                    if isinstance(resp, dict) and resp.get("status") == "ok":
+                        all_gradients.append(resp.get("gradients", {}))
+                except Exception as e:
+                    host.warn(f"Worker {worker_id} failed: {e}")
+
+            coord_end = host.now_ms()
+            coord_ms = coord_end - coord_start
+
+            if not all_gradients:
+                results.append({"iteration": self.iteration, "error": "no gradients"})
+                continue
+
+            # -- Computation: aggregate gradients and update weights --
+            compute_start = host.now_ms()
+            n_workers = len(all_gradients)
+
+            # Average gradients across workers
+            agg_d_w1 = [[0.0] * self.input_dim for _ in range(self.hidden_dim)]
+            agg_d_w2 = [0.0] * self.hidden_dim
+
+            for grad in all_gradients:
+                d_w1 = grad.get("d_w1", [])
+                d_w2 = grad.get("d_w2", [])
+                for i in range(min(self.hidden_dim, len(d_w1))):
+                    row = d_w1[i] if i < len(d_w1) else []
+                    for j in range(min(self.input_dim, len(row))):
+                        agg_d_w1[i][j] += row[j]
+                    if i < len(d_w2):
+                        agg_d_w2[i] += d_w2[i]
+
+            for i in range(self.hidden_dim):
+                for j in range(self.input_dim):
+                    agg_d_w1[i][j] /= n_workers
+                agg_d_w2[i] /= n_workers
+
+            # SGD update: w = w - lr * grad
+            for i in range(self.hidden_dim):
+                for j in range(self.input_dim):
+                    self.w1[i][j] -= self.learning_rate * agg_d_w1[i][j]
+                self.w2[i] -= self.learning_rate * agg_d_w2[i]
+
+            compute_end = host.now_ms()
+            compute_ms = compute_end - compute_start
+
+            self.iteration += 1
+            self.total_coord_ms += coord_ms
+            self.total_compute_ms += compute_ms
+
+            # Compute loss proxy (RMS of weights - tracks convergence)
+            loss = sum(w * w for row in self.w1 for w in row) + sum(w * w for w in self.w2)
+            loss = math.sqrt(loss / total_params)
+
+            results.append({
+                "iteration": self.iteration,
+                "loss": loss,
+                "coord_ms": coord_ms,
+                "compute_ms": compute_ms,
+                "workers": n_workers,
+            })
+
+        return {
+            "status": "ok",
+            "iterations_completed": self.iteration,
+            "results": results,
+            "total_coord_ms": self.total_coord_ms,
+            "total_compute_ms": self.total_compute_ms,
+        }
+
+    @handler("stats")
+    def get_stats(self) -> dict:
+        """Get comprehensive training statistics and benchmarks."""
+        total_params = self.input_dim * self.hidden_dim + self.hidden_dim
+        w1_flat = [w for row in self.w1 for w in row]
+        w1_mean = sum(w1_flat) / len(w1_flat) if w1_flat else 0.0
+        w2_mean = sum(self.w2) / len(self.w2) if self.w2 else 0.0
+
+        total_time = self.total_coord_ms + self.total_compute_ms
+        coord_pct = (self.total_coord_ms / total_time * 100) if total_time > 0 else 0
+        compute_pct = (self.total_compute_ms / total_time * 100) if total_time > 0 else 0
+        granularity = (self.total_compute_ms / self.total_coord_ms) if self.total_coord_ms > 0 else 0
+        params_per_sec = (total_params * self.iteration * 1000 / total_time) if total_time > 0 else 0
+        flops = total_params * self.iteration * 4
+        gflops = flops / (total_time / 1000) / 1e9 if total_time > 0 else 0
+
+        return {
+            "status": "ok",
+            "model": {"arch": f"{self.input_dim}x{self.hidden_dim}", "params": total_params,
+                      "w1_mean": w1_mean, "w2_mean": w2_mean},
+            "training": {"iterations": self.iteration, "lr": self.learning_rate,
+                         "workers": self.num_workers},
+            "benchmarks": {"total_ms": total_time, "coord_ms": self.total_coord_ms,
+                           "compute_ms": self.total_compute_ms, "coord_pct": coord_pct,
+                           "compute_pct": compute_pct, "granularity": granularity,
+                           "params_per_sec": params_per_sec, "gflops": gflops},
         }
 
 
 @actor
 class DataWorker:
-    """Data worker for distributed gradient computation (Ray-style)."""
-    
-    # Worker state
+    """Data worker for distributed gradient computation."""
+
     worker_id: str = state(default="")
-    data_shard: List[List[float]] = state(default_factory=list)  # List of [input_vector, target]
-    batch_size: int = state(default=128)  # Increased from 32 to 128 for better benchmarks
-    
+    shard_size: int = state(default=2000)
+    batch_size: int = state(default=256)
+    data_shard: List[List[float]] = state(default_factory=list)
+
     @init_handler
     def on_init(self, config: dict):
-        """Initialize data worker from config."""
-        self.worker_id = config.get("worker_id", "")
-        self.batch_size = config.get("batch_size", 32)
-        
-        # Generate synthetic data shard if not provided
-        # Use larger shard size for non-trivial benchmarks (runs for several seconds)
-        if not self.data_shard:
-            shard_size = config.get("shard_size", 5000)  # Increased from 1000 to 5000
-            self.data_shard = []
-            for i in range(shard_size):
-                # Generate synthetic input (784 features) and target
-                input_vec = [(i + j) * 0.001 for j in range(784)]
-                target = float(i % 10)
-                self.data_shard.append([input_vec, target])
-        
-        host.info(f"Data worker {self.worker_id} initialized: {len(self.data_shard)} samples")
-    
+        """Initialize data worker with synthetic data shard."""
+        actor_id = config.get("actor_id", "")
+        self.worker_id = actor_id
+
+        # Generate synthetic data shard (worker-specific seed for diversity)
+        seed = hash(actor_id) % 10000
+        self.data_shard = []
+        for i in range(self.shard_size):
+            sample = []
+            for j in range(100):  # 100 input features
+                val = ((seed + i * 7 + j * 13) % 1000) / 1000.0 - 0.5
+                sample.append(val)
+            target = float((seed + i) % 10)
+            sample.append(target)
+            self.data_shard.append(sample)
+        host.info(f"DataWorker {self.worker_id}: {self.shard_size} samples, batch={self.batch_size}")
+
     @handler("compute_gradients")
-    def compute_gradients(self, weights: Dict[str, Any] = None) -> dict:
+    def compute_gradients(self, weights: Dict[str, Any] = None,
+                          input_dim: int = 100, hidden_dim: int = 64) -> dict:
         """
-        Compute gradients on this worker's data shard.
-        
-        Args:
-            weights: Model weights dictionary with w1 (200x784) and w2 (200)
-        
-        Returns:
-            Gradients dictionary with d_w1 and d_w2
+        Compute gradients via forward+backward pass on data shard.
+
+        Forward: h = ReLU(X @ W1.T), y_pred = h @ W2
+        Backward: MSE loss gradients via chain rule
         """
         if not weights:
             return {"status": "error", "error": "No weights provided"}
-        
         w1 = weights.get("w1", [])
         w2 = weights.get("w2", [])
-        
         if not w1 or not w2:
-            return {"status": "error", "error": "Invalid weights structure"}
-        
-        host.info(f"[Worker {self.worker_id}] Computing gradients on {len(self.data_shard)} samples")
-        
-        # Initialize gradient accumulators
-        d_w1 = [[0.0] * 784 for _ in range(200)]
-        d_w2 = [0.0] * 200
-        
-        # Process batch (simulate gradient computation)
-        # In real ML training, this would do forward/backward pass
+            return {"status": "error", "error": "Invalid weights"}
+        if not isinstance(input_dim, int):
+            input_dim = int(input_dim)
+        if not isinstance(hidden_dim, int):
+            hidden_dim = int(hidden_dim)
+
+        d_w1 = [[0.0] * input_dim for _ in range(hidden_dim)]
+        d_w2 = [0.0] * hidden_dim
         batch = self.data_shard[:self.batch_size]
-        
+        n = len(batch)
+
         for sample in batch:
-            input_vec = sample[0] if len(sample) > 0 else []
-            target = sample[1] if len(sample) > 1 else 0.0
-            
-            # Simulate gradient computation (simplified)
-            # Real implementation would compute actual gradients via backpropagation
-            for i in range(200):
-                for j in range(min(784, len(input_vec))):
-                    # Simulated gradient: simplified computation
-                    d_w1[i][j] += input_vec[j] * 0.001
-                # Simulated gradient for output layer
-                d_w2[i] += 0.001
-        
-        # Average gradients over batch
-        if batch:
-            for i in range(200):
-                for j in range(784):
-                    d_w1[i][j] /= len(batch)
-                d_w2[i] /= len(batch)
-        
+            x = sample[:input_dim]
+            target = sample[input_dim] if len(sample) > input_dim else 0.0
+
+            # Forward: h = ReLU(W1 @ x)
+            h = [0.0] * hidden_dim
+            for i in range(hidden_dim):
+                val = 0.0
+                w1r = w1[i] if i < len(w1) else []
+                for j in range(min(input_dim, len(x), len(w1r))):
+                    val += w1r[j] * x[j]
+                h[i] = max(0.0, val)
+
+            # Forward: y_pred = W2 @ h
+            y_pred = sum(w2[i] * h[i] for i in range(min(hidden_dim, len(w2))))
+            error = y_pred - target
+
+            # Backward: dL/dW2 = error * h
+            for i in range(hidden_dim):
+                d_w2[i] += error * h[i]
+            # Backward: dL/dW1 = error * W2 * ReLU'(z) * x
+            for i in range(hidden_dim):
+                if h[i] > 0:
+                    gs = error * (w2[i] if i < len(w2) else 0.0)
+                    for j in range(min(input_dim, len(x))):
+                        d_w1[i][j] += gs * x[j]
+
+        # Average over batch
+        if n > 0:
+            for i in range(hidden_dim):
+                for j in range(input_dim):
+                    d_w1[i][j] /= n
+                d_w2[i] /= n
+
         return {
             "status": "ok",
-            "gradients": {
-                "d_w1": d_w1,
-                "d_w2": d_w2
-            },
+            "gradients": {"d_w1": d_w1, "d_w2": d_w2},
             "worker_id": self.worker_id,
-            "samples_processed": len(batch)
+            "samples": n,
         }
-    
+
     @handler("stats")
     def get_stats(self) -> dict:
-        """Get worker statistics."""
-        return {
-            "status": "ok",
-            "worker_id": self.worker_id,
-            "shard_size": len(self.data_shard),
-            "batch_size": self.batch_size
-        }
+        return {"status": "ok", "worker_id": self.worker_id,
+                "shard_size": self.shard_size, "batch_size": self.batch_size}
+
+
+# Multi-actor role mapping: child_spec.id prefix -> actor class
+# Framework passes {"actor_id": "parameter-server"} or {"actor_id": "data-worker-0"}
+ACTOR_ROLES = {
+    "parameter-server": ParameterServer,
+    "data-worker": DataWorker,
+}

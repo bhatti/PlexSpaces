@@ -411,6 +411,26 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
         vec![]
     };
 
+    // Parse args map (string -> string) from TOML
+    let args = if let Some(args_val) = value.get("args") {
+        let mut map = std::collections::HashMap::new();
+        if let Some(args_table) = args_val.as_table() {
+            for (key, val) in args_table {
+                let val_str = match val {
+                    toml::Value::String(s) => s.clone(),
+                    toml::Value::Integer(i) => i.to_string(),
+                    toml::Value::Float(f) => f.to_string(),
+                    toml::Value::Boolean(b) => b.to_string(),
+                    other => other.to_string(),
+                };
+                map.insert(key.clone(), val_str);
+            }
+        }
+        map
+    } else {
+        std::collections::HashMap::new()
+    };
+
     Ok(ChildSpec {
         id,
         r#type: child_type as i32,
@@ -420,6 +440,7 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
             nanos: 0,
         }),
         facets,
+        args,
         ..Default::default()
     })
 }

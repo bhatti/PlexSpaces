@@ -5,3 +5,4 @@
 //
 // Build actors with minimal boilerplate via inheritance (mirrors Python SDK's decorators).
 export { PlexSpacesActor } from "./actor.js";
+export { Host, ProcessGroups, host } from "./host.js";

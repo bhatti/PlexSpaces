@@ -234,25 +234,16 @@ pub fn parse_app_config_toml(toml_str: &str, app_name: &str) -> Result<Applicati
         .unwrap_or("1.0.0")
         .to_string();
 
-    // Extract namespace (required for WASM deployment).
-    // Actor IDs use name:namespace@node_id format; falls back to app name if not specified.
+    // Extract namespace from TOML config (optional).
+    // Actor IDs use name:namespace@node_id format.
+    // If not set in TOML, leave empty so the application_service can default
+    // to application_id (from the deploy request), which is the correct namespace
+    // for HTTP-deployed apps (e.g., "ray-ps" for /api/v1/actors/ray-ps/parameter-server).
     let namespace = parsed
         .get("namespace")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    // If namespace not explicitly set in TOML, use app name as default
-    let namespace = if namespace.is_empty() {
-        tracing::info!(
-            "No namespace specified in TOML config, defaulting to app name as namespace"
-        );
-        parsed.get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default")
-            .to_string()
-    } else {
-        namespace
-    };
 
     // Extract supervisor configuration
     let supervisor = if let Some(sup_table) = parsed.get("supervisor") {

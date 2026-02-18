@@ -349,12 +349,21 @@ impl WasmApplication {
             .unwrap_or_default()
     }
     
-    /// Set tenant_id and namespace from API request
-    /// 
-    /// ## Purpose
+    /// Set tenant_id and namespace from API request.
+    ///
     /// Called by ApplicationManager before start() to set tenant_id/namespace from API request.
-    /// These values are used when spawning actors instead of hardcoded defaults.
+    /// These values are used when spawning actors (actor IDs use name:namespace@node_id format).
+    ///
+    /// ## Panics
+    /// Debug-asserts that namespace is non-empty (required for WASM deployment).
     pub async fn set_tenant_namespace(&self, tenant_id: String, namespace: String) {
+        debug_assert!(!namespace.is_empty(), "namespace must not be empty for WASM deployment");
+        if namespace.is_empty() {
+            tracing::warn!(
+                application = %self.name,
+                "set_tenant_namespace called with empty namespace - actor ID format will be degraded"
+            );
+        }
         *self.tenant_id.write().await = tenant_id;
         *self.namespace.write().await = namespace;
     }
@@ -554,6 +563,8 @@ impl WasmApplication {
         let module_hash = self.module_hash.clone();
         let runtime = self.runtime.clone();
         let node_id = node.id().to_string();
+        // Namespace is required for consistent actor ID format (name:namespace@node_id)
+        let namespace = self.namespace.read().await.clone();
 
         for child_spec in &child_specs {
             let behavior_name = child_spec.id.clone();
@@ -562,6 +573,7 @@ impl WasmApplication {
             let module_hash_clone = module_hash.clone();
             let runtime_clone = runtime.clone();
             let node_id_clone = node_id.clone();
+            let namespace_clone = namespace.clone();
 
             // Register async behavior constructor
             let behavior_name_for_error = behavior_name.clone();
@@ -575,9 +587,10 @@ impl WasmApplication {
                 let name_for_error = behavior_name_for_error.clone();
 
                 // Create WASM instance asynchronously (no block_on deadlock)
+                let ns = namespace_clone.clone();
                 Box::pin(async move {
-                    // Generate unique actor_id for this instance
-                    let actor_id = format!("{}@{}", spec.id, nid);
+                    // Generate actor_id with consistent name:namespace@node_id format
+                    let actor_id = format!("{}:{}@{}", spec.id, ns, nid);
                     
                     let instance = Self::create_wasm_instance_for_behavior(
                         node_ref,
@@ -666,12 +679,9 @@ impl WasmApplication {
         };
         let final_namespace = namespace; // Must come from user request; never substitute with config
 
-        // Precompute expected actor_id for error logging (final_namespace is moved into spawn_worker_actor_internal).
-        let expected_actor_id = if final_namespace.is_empty() {
-            format!("{}@{}", self.name, node.id())
-        } else {
-            format!("{}:{}@{}", self.name, final_namespace.as_str(), node.id())
-        };
+        // Precompute expected actor_id for error logging.
+        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
+        let expected_actor_id = format!("{}:{}@{}", self.name, final_namespace, node.id());
 
         // Create a simple ChildSpec for the actor
         use plexspaces_proto::application::v1::{ChildSpec, ChildType, RestartPolicy};
@@ -1039,13 +1049,8 @@ impl WasmApplication {
     ) -> Result<ActorChildSpec, ApplicationError> {
         let node_id = node.id().to_string();
         let child_id = proto_child_spec.id.clone();
-        // Include namespace in actor_id to match build_wasm_actor's format:
-        // "child_spec_id:namespace@node_id" (with namespace) or "child_spec_id@node_id" (without)
-        let actor_id = if namespace.is_empty() {
-            format!("{}@{}", child_id, node_id)
-        } else {
-            format!("{}:{}@{}", child_id, namespace, node_id)
-        };
+        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
+        let actor_id = format!("{}:{}@{}", child_id, namespace, node_id);
         
         // Capture context for factory
         let node_clone = node.clone();
@@ -1141,30 +1146,17 @@ impl WasmApplication {
         let service_locator = node.service_locator()
             .ok_or_else(|| ApplicationError::Other("ServiceLocator not available".to_string()))?;
 
-        // Resolve module by hash and create WASM instance using helper
-        // Include namespace in instance ID so WASM actors can qualify sibling IDs correctly
+        // Resolve module by hash and create WASM instance using helper.
+        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
         let node_id = node.id().to_string();
-        let actor_id_for_instance = if namespace.is_empty() {
-            format!("{}@{}", child_spec.id, node_id)
-        } else {
-            format!("{}:{}@{}", child_spec.id, namespace, node_id)
-        };
+        let actor_id = format!("{}:{}@{}", child_spec.id, namespace, node_id);
         let wasm_instance = Self::create_wasm_instance_for_behavior(
             node.clone(),
             child_spec,
             module_hash,
             runtime,
-            &actor_id_for_instance,
+            &actor_id,
         ).await?;
-
-        // Create behavior (behavior_kind from spec for logging)
-        // Include namespace in actor_id so multiple apps (e.g. leader-election-term1, leader-election-term2)
-        // get distinct actors that can contend for the same lock (e.g. leader election).
-        let actor_id = if namespace.is_empty() {
-            format!("{}@{}", child_spec.id, node.id())
-        } else {
-            format!("{}:{}@{}", child_spec.id, namespace, node.id())
-        };
         let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
         let behavior: Box<dyn CoreActor> = Box::new(WasmActorBehavior {
             instance: wasm_instance.clone(),

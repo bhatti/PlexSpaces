@@ -234,13 +234,25 @@ pub fn parse_app_config_toml(toml_str: &str, app_name: &str) -> Result<Applicati
         .unwrap_or("1.0.0")
         .to_string();
 
-    // Extract namespace (explicit property for multi-tenancy)
-    // If not specified in config, will be set to application_id during deployment
+    // Extract namespace (required for WASM deployment).
+    // Actor IDs use name:namespace@node_id format; falls back to app name if not specified.
     let namespace = parsed
         .get("namespace")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    // If namespace not explicitly set in TOML, use app name as default
+    let namespace = if namespace.is_empty() {
+        tracing::info!(
+            "No namespace specified in TOML config, defaulting to app name as namespace"
+        );
+        parsed.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default")
+            .to_string()
+    } else {
+        namespace
+    };
 
     // Extract supervisor configuration
     let supervisor = if let Some(sup_table) = parsed.get("supervisor") {

@@ -286,6 +286,7 @@ async fn test_invoke_actor_get_success() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     // Actor registration is synchronous - no wait needed
@@ -345,6 +346,7 @@ async fn test_invoke_actor_post_success() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     // Actor registration is synchronous - no wait needed
@@ -420,6 +422,7 @@ async fn test_invoke_actor_missing_actor_type() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     let result = service.invoke_actor(Request::new(request)).await;
@@ -444,6 +447,7 @@ async fn test_invoke_actor_not_found() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     let result = service.invoke_actor(Request::new(request)).await;
@@ -468,6 +472,7 @@ async fn test_invoke_actor_multiple_actors_random_selection() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     // Actor registration is synchronous - no wait needed
@@ -509,6 +514,7 @@ async fn test_invoke_actor_default_tenant_id() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     // Actor registration is synchronous - no wait needed
@@ -550,6 +556,7 @@ async fn test_invoke_actor_get_query_params_to_json() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     // Actor registration is synchronous - no wait needed
@@ -594,6 +601,7 @@ async fn test_invoke_actor_post_headers_preserved() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     // Actor registration is synchronous - no wait needed
@@ -634,6 +642,7 @@ async fn test_invoke_actor_with_namespace() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     // Actor registration is synchronous - no wait needed
@@ -686,6 +695,7 @@ async fn test_invoke_actor_without_tenant_id_in_path() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     };
     
     // Actor registration is synchronous - no wait needed

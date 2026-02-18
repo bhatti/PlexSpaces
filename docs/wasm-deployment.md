@@ -12,6 +12,32 @@ PlexSpaces supports deploying WebAssembly (WASM) applications from multiple lang
 
 ## Architecture
 
+### Namespace (Required)
+
+Namespace is now **required** for all WASM deployments. It scopes all actors within an application and is used to construct actor IDs.
+
+- If not explicitly specified in the TOML config or API request, the namespace **defaults to the application name**.
+- Actor IDs use the format: **`name:namespace@node_id`**
+
+**Example**: An application named `my-app` deployed to node `node-1` without an explicit namespace will have actors with IDs like `my-app:my-app@node-1`.
+
+**Specifying in TOML config**:
+```toml
+name = "my-app"
+version = "1.0.0"
+namespace = "my-app"  # Required: all actors scoped to this namespace
+```
+
+**Specifying in API request** (form field):
+```bash
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
+  -F "application_id=my-app" \
+  -F "name=my-app" \
+  -F "namespace=my-app" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@my_actor.wasm"
+```
+
 ### WASM Dependencies Verification
 
 **✅ WASM actors only use WIT (WebAssembly Interface Types) APIs** - they do NOT include framework dependencies:
@@ -423,6 +449,20 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "wasm_file=@calculator_actor.wasm" \
   -F "config=@config.toml"
 ```
+
+### HTTP Timeout Query Parameter
+
+For long-running operations (e.g., actors performing heavy computation or large data processing), you can specify a timeout in seconds using the `?timeout=` query parameter. This overrides the default request timeout and keeps the connection open for the specified duration.
+
+**Usage**: Append `?timeout=<seconds>` to any actor API endpoint.
+
+**Example**:
+```bash
+# Wait up to 30 seconds for the trainer actor to respond
+curl "http://localhost:7993/api/v1/actors/my-app/trainer?timeout=30"
+```
+
+Without the timeout parameter, the default HTTP timeout applies. Use this when interacting with actors that perform long-running tasks such as model training, batch processing, or complex simulations.
 
 ### HTTP Undeploy
 
@@ -1184,6 +1224,12 @@ class StatefulActor:
 - **Graceful degradation**: `set-state()` should handle empty/null input
 - **Size matters**: Keep state small for fast checkpointing
 
+### State Serialization: Float Safety
+
+Float values in actor state are automatically sanitized for WASM safety. The runtime detects special IEEE 754 float values (`NaN`, `Infinity`, `-Infinity`) that are not valid in JSON and replaces them with safe defaults before serialization. On deserialization, these values are restored transparently.
+
+This means actors can use float arithmetic freely (including operations that produce `NaN` or infinity) without worrying about state serialization failures. The sanitization and restoration process is fully transparent to the actor -- no special handling is required in actor code.
+
 ### Metrics
 
 State operations are fully instrumented with Prometheus metrics:
@@ -1225,6 +1271,20 @@ WasmApplication
        ├── worker-1 (WASM actor) ← Factory can recreate on crash
        └── worker-2 (WASM actor) ← Factory can recreate on crash
 ```
+
+### Supervisor Tree Actor ID Format
+
+Applications with supervisor trees create actors whose IDs incorporate the child spec ID, namespace, and node ID. The format is:
+
+**`child_spec_id:namespace@node_id`**
+
+For example, given an application with namespace `my-app` deployed to `node-1` with a child spec ID of `worker-1`, the actor ID will be:
+
+```
+worker-1:my-app@node-1
+```
+
+This format ensures that all actors within a supervisor tree are uniquely identifiable and properly scoped to their namespace, even when multiple applications share the same node.
 
 ### Key Components
 
@@ -1273,6 +1333,10 @@ To customize supervisor settings, provide a config TOML file:
 
 ```toml
 # app-config.toml
+name = "my-app"
+version = "1.0.0"
+namespace = "my-app"  # Required: all actors scoped to this namespace
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10

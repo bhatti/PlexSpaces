@@ -1468,10 +1468,14 @@ impl ActorServiceTrait for ActorServiceImpl {
         message.uri_path = full_path.clone();
         message.uri_method = http_method.clone();
 
-        // route_message: wait_for_response=true => ask (request-reply), false => tell (fire-and-forget)
+        // route_message: wait_for_response=true => ask (request-reply), false => tell (fire-and-forget).
+        // Use timeout from request if provided, otherwise default to 5 seconds for ask operations.
         let wait_for_response = use_ask;
         let timeout = if wait_for_response {
-            Some(std::time::Duration::from_secs(5))
+            req.timeout.map(|d| {
+                std::time::Duration::from_secs(d.seconds as u64)
+                    + std::time::Duration::from_nanos(d.nanos as u64)
+            }).or_else(|| Some(std::time::Duration::from_secs(5)))
         } else {
             None
         };

@@ -2,6 +2,10 @@
 
 PlexSpaces provides language-specific SDKs for building actors with minimal boilerplate. The SDKs are inspired by industry-leading frameworks like [Ray](https://docs.ray.io/en/latest/ray-core/api/doc/ray.remote.html), [Temporal](https://docs.temporal.io/), and [Orleans](https://learn.microsoft.com/en-us/dotnet/orleans/).
 
+## SDK Architecture
+
+The SDK is a **thin decorator layer** over the core framework crates. Core functionality -- actor registry, message routing, supervision, and state management -- lives in the main crates (`crates/behavior`, `crates/services`, `crates/core`). The SDK simplifies the developer experience by removing boilerplate: decorators like `@actor` and `@handler` generate the WIT interface glue, state serialization, and message dispatch that you would otherwise write by hand. This means the SDK adds no new runtime capabilities; it is purely a developer ergonomics layer that compiles down to the same WIT exports the framework already expects.
+
 ## Available SDKs
 
 | Language | Status | Location | Build Target |
@@ -68,6 +72,23 @@ curl -X POST http://localhost:8094/api/v1/deploy \
   -F "actor_type=bank_account" \
   -F "wasm=@bank_account_actor.wasm"
 ```
+
+### Actor ID Format
+
+All WASM actors use the `name:namespace@node_id` format for actor identification. The namespace component is **required** for WASM deployment -- it determines where the actor is registered and how it is addressed by other actors.
+
+| Component | Required | Description | Example |
+|-----------|----------|-------------|---------|
+| `name` | Yes | Actor instance name | `account-alice` |
+| `namespace` | Yes (WASM) | Deployment namespace | `default`, `banking` |
+| `node_id` | Optional | Target node (for remote addressing) | `node-abc123` |
+
+**Examples:**
+- `account-alice:default` -- actor "account-alice" in the "default" namespace
+- `worker-1:ml-training@node-abc123` -- actor "worker-1" in the "ml-training" namespace on a specific node
+- When calling `host.self_id()`, the returned ID includes the namespace
+
+When deploying via the HTTP API, the namespace is specified in the deploy request (`-F "namespace=default"`). When sending messages between actors, use the full `name:namespace` format in the `to` field.
 
 ### API Reference
 
@@ -141,6 +162,8 @@ class Counter:
     count: int = state(default=0)           # Immutable default
     history: list = state(default_factory=list)  # Mutable default (use factory)
 ```
+
+**State Serialization Safety (WASM JSON):** The SDK automatically handles float-to-string conversion for WASM JSON safety. When state is serialized via `get_state()`, the internal `_sanitize_payload_for_wasm` function converts float values to string representations to avoid JSON precision issues in WASM runtimes. When state is restored via `set_state()`, the `_desanitize_from_wasm` function converts them back. This is fully transparent to user code -- you read and write normal Python floats, and the SDK handles the round-trip safety automatically.
 
 #### Message Handlers
 
@@ -226,6 +249,44 @@ class ChatRoom:
 | `host.process_groups.leave(group)` | Leave a process group |
 | `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members |
 | `host.process_groups.members(group)` | Get group member IDs |
+
+#### Ask Pattern (Request-Reply Between WASM Actors)
+
+The `host.ask(to, msg_type, payload, timeout_ms)` function enables synchronous request-reply communication between WASM actors. Unlike `host.send()` (fire-and-forget), `host.ask()` blocks the caller until a response is received or the timeout expires.
+
+```python
+import json
+from plexspaces import actor, handler, host, state
+
+@actor
+class TrainingWorker:
+    worker_id: str = state(default="")
+
+    @handler("train_step")
+    def train_step(self) -> dict:
+        # Request current weights from the parameter server
+        result = host.ask(
+            "parameter-server:ml-training",  # target actor (name:namespace)
+            "get_weights",                    # message type
+            json.dumps({"worker_id": self.worker_id}),  # payload
+            5000                              # timeout in milliseconds
+        )
+        weights = json.loads(result)
+
+        # ... perform training step with weights ...
+
+        # Push gradient update (fire-and-forget)
+        host.send("parameter-server:ml-training", "push_gradient",
+                   json.dumps({"worker_id": self.worker_id, "gradient": [0.1, -0.2]}))
+
+        return {"status": "step_complete"}
+```
+
+**Behavior:**
+- Returns the response payload as a string on success.
+- Raises `RuntimeError` if the target actor does not respond within `timeout_ms`.
+- Raises `RuntimeError` if the target actor returns an error.
+- The caller actor is blocked during the ask; other messages to it are queued.
 
 #### Key-Value Storage (WASM)
 
@@ -401,6 +462,71 @@ plexspaces-py build myactor.py -v
 # Custom WIT directory
 plexspaces-py build myactor.py --wit-dir /path/to/wit
 ```
+
+### Multi-Actor Modules
+
+A single WASM module can contain multiple actor classes using the `ACTOR_ROLES` mapping. This allows you to deploy related actors together (e.g., a parameter server and its workers) while keeping them as separate logical actors.
+
+```python
+# ml_actors.py
+import json
+from plexspaces import actor, handler, host, state
+
+@actor
+class ParameterServer:
+    weights: dict = state(default_factory=dict)
+
+    @handler("get_weights")
+    def get_weights(self, worker_id: str) -> dict:
+        return {"weights": self.weights}
+
+    @handler("push_gradient")
+    def push_gradient(self, worker_id: str, gradient: list) -> dict:
+        # Apply gradient update
+        return {"status": "applied"}
+
+@actor
+class TrainingWorker:
+    worker_id: str = state(default="")
+    epoch: int = state(default=0)
+
+    @handler("train_step")
+    def train_step(self) -> dict:
+        result = host.ask("parameter-server:ml-training", "get_weights",
+                          json.dumps({"worker_id": self.worker_id}), 5000)
+        # ... train ...
+        return {"epoch": self.epoch}
+
+# Map role names to actor classes
+ACTOR_ROLES = {
+    "parameter-server": ParameterServer,
+    "training-worker": TrainingWorker,
+}
+```
+
+When the WASM module is loaded, the runtime inspects `ACTOR_ROLES` to determine which actor class to instantiate based on the role specified at spawn time. Each role is an independent actor with its own state and message handlers, but they share the same WASM binary.
+
+### HTTP Invocation with Timeout
+
+When invoking actors via the HTTP API, you can specify a `timeout` query parameter for long-running operations. This is particularly useful for actors that perform expensive computation (e.g., ML training steps, data aggregation).
+
+```bash
+# Default timeout: 5 seconds
+curl -X POST http://localhost:8094/api/v1/actors/my-actor:default/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"msg_type": "train", "payload": {"epochs": 10}}'
+
+# Extended timeout: 30 seconds for long-running operations
+curl -X POST "http://localhost:8094/api/v1/actors/my-actor:default/invoke?timeout=30" \
+  -H "Content-Type: application/json" \
+  -d '{"msg_type": "train", "payload": {"epochs": 10}}'
+```
+
+| Parameter | Default | Max | Description |
+|-----------|---------|-----|-------------|
+| `timeout` | 5 seconds | 3600 seconds (1 hour) | How long the HTTP gateway waits for the actor response |
+
+If the actor does not respond within the specified timeout, the HTTP API returns a `504 Gateway Timeout`. The actor itself continues running -- only the HTTP caller's wait is bounded.
 
 ---
 

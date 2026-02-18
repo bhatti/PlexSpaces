@@ -265,8 +265,9 @@ impl ApplicationService for ApplicationServiceImpl {
             let final_tenant_id = tenant_id.clone();
             merged_config.tenant_id = final_tenant_id.clone();
             
-            // Set namespace in ApplicationSpec for actor registration
-            // Priority: 1) spec.namespace from config, 2) namespace from request, 3) application_id
+            // Set namespace in ApplicationSpec for actor registration.
+            // Priority: 1) spec.namespace from config, 2) namespace from request, 3) application_id.
+            // Namespace is required for WASM deployments (actor IDs use name:namespace@node_id format).
             if merged_config.namespace.is_empty() {
                 merged_config.namespace = if !namespace.is_empty() {
                     namespace.clone()
@@ -275,6 +276,11 @@ impl ApplicationService for ApplicationServiceImpl {
                 };
             }
             let final_namespace = merged_config.namespace.clone();
+            if final_namespace.is_empty() {
+                return Err(Status::invalid_argument(
+                    "namespace is required for WASM deployment (set in ApplicationSpec, request header, or use application_id as default)"
+                ));
+            }
             
             // Clone values for observability logging before moving them
             let module_hash_for_log = module_hash.clone();

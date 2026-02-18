@@ -594,13 +594,8 @@ impl WasmApplication {
         // TODO(instance-pool): When config.use_instance_pool is true, checkout from per-module InstancePool
         // instead of runtime.instantiate() for faster spawn. Fits lightweight actors and worker pools.
         // See PROJECT_TRACKER.md.
-        // Include namespace in actor_id so multiple apps (e.g. leader-election-term1, leader-election-term2)
-        // get distinct actors that can contend for the same lock (e.g. leader election).
-        let actor_id = if namespace.is_empty() {
-            format!("{}@{}", child_spec.id, node.id())
-        } else {
-            format!("{}:{}@{}", child_spec.id, namespace, node.id())
-        };
+        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
+        let actor_id = format!("{}:{}@{}", child_spec.id, namespace, node.id());
         let wasm_instance = runtime
             .instantiate(
                 module,

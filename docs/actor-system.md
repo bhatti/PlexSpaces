@@ -16,10 +16,11 @@
 12. [State Transition Rules](#state-transition-rules)
 13. [Linking and Monitoring](#linking-and-monitoring)
 14. [Message Passing](#message-passing)
-15. [Observability](#observability)
-16. [Examples](#examples)
-17. [Best Practices](#best-practices)
-18. [Summary](#summary)
+15. [ActorRegistry Registration](#actorregistry-registration)
+16. [Observability](#observability)
+17. [Examples](#examples)
+18. [Best Practices](#best-practices)
+19. [Summary](#summary)
 
 ---
 
@@ -88,7 +89,7 @@ graph TB
 
 An **Actor** is the fundamental unit of computation in PlexSpaces. Every actor has:
 
-- **Identity**: Unique ID in format `name@node_id` (e.g., `counter@node1`)
+- **Identity**: Unique ID in canonical format `name:namespace@node_id` (e.g., `counter:default@node1`). For actors without a namespace, the shorter format `name@node_id` is also valid. Namespace is always present for WASM actors.
 - **State**: Private mutable state (no shared state between actors)
 - **Behavior**: Message handling logic (implemented via behaviors)
 - **Mailbox**: Message queue for incoming messages
@@ -97,7 +98,7 @@ An **Actor** is the fundamental unit of computation in PlexSpaces. Every actor h
 
 ```rust
 pub struct Actor {
-    id: ActorId,                                    // "actor@node"
+    id: ActorId,                                    // "name:namespace@node_id"
     state: ActorState,                              // Creating, Inactive, Active, Terminated, Failed
     behavior: Box<dyn Actor>,                       // Message handling logic
     mailbox: Arc<Mailbox>,                         // Message queue
@@ -1209,6 +1210,55 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 - Timeout-based
 - Uses correlation IDs for reply matching
 
+#### Ask Implementations
+
+There are two distinct `ask()` implementations in the system, each serving a different layer:
+
+**1. `core::MessageSender::ask()` (Framework-Level)**
+
+Used by `ActorRef` for framework-level request-reply. This is the primary ask implementation that handles correlation ID creation, oneshot channel setup for reply matching, and timeout enforcement. All internal actor-to-actor communication uses this path.
+
+```rust
+// ActorRef uses core::MessageSender::ask() internally
+let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+```
+
+**2. `wasm_runtime::MessageSender::ask()` (WASM Host Functions)**
+
+Used by WASM host functions to provide JSON-in/JSON-out ask semantics. When a WASM actor calls the `ask` host function, this implementation:
+1. Accepts a JSON request from the WASM guest
+2. Looks up the target actor via `ActorRegistry::lookup_actor()`
+3. Delegates to the target's `ActorRef` (which uses `core::MessageSender::ask()`)
+4. Returns the JSON response back to the WASM guest
+
+```rust
+// WASM guest calls host function: ask(target_actor_id, json_payload)
+// Internally, wasm_runtime::MessageSender::ask() resolves the ActorRef
+// via ActorRegistry and delegates to core::MessageSender::ask()
+```
+
+This two-layer design keeps the core ask pattern clean while allowing WASM actors to use a simplified JSON-based interface without needing direct `ActorRef` handles.
+
+#### Configurable Timeout
+
+HTTP ask operations (via the REST API) support a configurable timeout through the `?timeout=<seconds>` query parameter:
+
+- **Default**: 5 seconds
+- **Maximum**: 3600 seconds (1 hour)
+- **Usage**: `POST /v1/actors/{actor_id}/ask?timeout=30`
+
+```bash
+# Ask with default 5-second timeout
+curl -X POST http://localhost:8080/v1/actors/counter:default@node1/ask \
+  -H "Content-Type: application/json" \
+  -d '{"action": "get_count"}'
+
+# Ask with custom 30-second timeout
+curl -X POST http://localhost:8080/v1/actors/counter:default@node1/ask?timeout=30 \
+  -H "Content-Type: application/json" \
+  -d '{"action": "get_count"}'
+```
+
 ### Message Routing
 
 Messages are routed automatically based on actor location:
@@ -1247,6 +1297,51 @@ graph TB
 - **Client Caching**: gRPC clients are cached (TTL: 30-60 seconds)
 - **Connection Pooling**: Reuses connections for performance
 - **Failure Handling**: Retry with exponential backoff, circuit breaker
+
+---
+
+## ActorRegistry Registration
+
+### Registration During Supervision
+
+Actors are registered in the `ActorRegistry` during `supervisor.add_child()`. When a supervisor adds a child actor, the namespace is extracted from the actor ID (using the canonical `name:namespace@node_id` format) and stored as part of the registry metadata. This registration is what enables `lookup_actor()` to resolve actor references for the ask pattern (particularly important for `wasm_runtime::MessageSender::ask()`, which relies on registry lookups to find the target `ActorRef`).
+
+```rust
+// During supervisor.add_child(), the actor is registered:
+// 1. Actor ID "worker:my-app@node1" is parsed
+// 2. Namespace "my-app" is extracted from the ID
+// 3. Actor is registered in ActorRegistry with namespace metadata
+// 4. lookup_actor("worker:my-app@node1") now resolves to the ActorRef
+
+supervisor.add_child(child_spec).await?;
+// Actor is now registered and discoverable via ActorRegistry
+```
+
+### Namespace Isolation
+
+Namespace is a fundamental isolation boundary in the actor system. It is extracted from the canonical actor ID format (`name:namespace@node_id`) and stored in `ActorRegistry` metadata alongside each actor entry.
+
+**Key behaviors**:
+
+- **WASM actors** always include namespace in their actor ID (e.g., `worker:my-wasm-app@node1`)
+- **Namespace extraction** happens at registration time during `supervisor.add_child()`
+- **Stop operations** validate namespace boundaries -- an actor can only be stopped by operations within the same namespace
+- **Undeploy operations** validate namespace boundaries -- undeploying an application only affects actors within that application's namespace
+- **Lookup operations** can filter by namespace to scope actor discovery
+
+```rust
+// Namespace is extracted from actor ID and stored in registry metadata
+// Actor ID: "worker:my-app@node1"
+//   name:      "worker"
+//   namespace: "my-app"
+//   node_id:   "node1"
+
+// Stop/undeploy operations enforce namespace boundaries:
+// - stop_actor("worker:my-app@node1") validates the caller's namespace matches "my-app"
+// - undeploy_application("my-app") only stops actors with namespace "my-app"
+```
+
+This ensures that multi-tenant deployments maintain strict isolation -- actors in one namespace cannot interfere with actors in another namespace.
 
 ---
 

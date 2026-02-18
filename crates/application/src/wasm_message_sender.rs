@@ -3,20 +3,34 @@
 //
 // This file is part of PlexSpaces.
 
-//! MessageSender implementation for WASM actors
-//! Wraps ActorService to enable WASM actors to send messages
+//! WASM MessageSender implementation
+//!
+//! Bridges WASM host function calls (JSON-in/JSON-out) to the actor framework.
+//! Implements [`plexspaces_wasm_runtime::MessageSender`] using:
+//! - ActorService for tell (fire-and-forget) operations
+//! - ActorRegistry for ask (request-reply) via registered ActorRef
+//! - ActorFactory for stop_actor with tenant isolation
+//!
+//! Actor IDs follow the `name:namespace@node_id` format. When WASM actors refer
+//! to siblings by short name, [`qualify_actor_id`] infers the full ID from the
+//! sender's own ID.
 
 use async_trait::async_trait;
 use plexspaces_core::{ActorService, ServiceLocator};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_wasm_runtime::MessageSender;
 use std::sync::Arc;
+use tracing::{debug, trace, warn, instrument};
 
-/// MessageSender implementation that uses ActorService
+/// MessageSender implementation that delegates WASM host function calls to the actor framework.
+///
+/// Created per WASM application and shared by all actors within that application.
+/// Thread-safe: all fields are Arc-wrapped.
 pub struct ActorServiceMessageSender {
     actor_service: Arc<dyn ActorService + Send + Sync>,
     service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
-    /// Monitor reference mapping: monitor_ref_u64 -> (target_id, monitor_ref_string)
+    /// Monitor reference mapping: monitor_ref_u64 -> (target_id, monitor_ref_string).
+    /// Used to convert between WIT u64 refs and framework string refs.
     monitor_refs: Arc<tokio::sync::RwLock<std::collections::HashMap<u64, (String, String)>>>,
 }
 
@@ -36,9 +50,13 @@ impl ActorServiceMessageSender {
 
 /// Qualify a short actor ID using the sender's full ID.
 ///
-/// Actor IDs follow the format "child_spec_id:namespace@node_id" or "child_spec_id@node_id".
-/// When WASM actors refer to siblings by short name (e.g., "data-worker-0"), we qualify it
-/// using the sender's `:namespace@node_id` suffix so the lookup matches the registry key.
+/// Actor IDs follow the format `name:namespace@node_id`. When WASM actors refer to
+/// siblings by short name (e.g., "data-worker-0"), this function infers the full ID
+/// by copying the sender's `:namespace@node_id` suffix.
+///
+/// ## Examples
+/// - `qualify_actor_id("worker-0", "ps:my-ns@node1")` -> `"worker-0:my-ns@node1"`
+/// - `qualify_actor_id("worker-0:my-ns@node1", _)` -> `"worker-0:my-ns@node1"` (already qualified)
 fn qualify_actor_id(to: &str, from: &str) -> String {
     if to.contains('@') {
         // Already fully qualified
@@ -68,6 +86,7 @@ fn qualify_actor_id(to: &str, from: &str) -> String {
 impl MessageSender for ActorServiceMessageSender {
     async fn send_message(&self, from: &str, to: &str, message: &str) -> Result<(), String> {
         let qualified_to = qualify_actor_id(to, from);
+        trace!(from = %from, to = %to, qualified_to = %qualified_to, "WASM send_message (tell)");
 
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
@@ -85,6 +104,7 @@ impl MessageSender for ActorServiceMessageSender {
         Ok(())
     }
 
+    #[instrument(skip(self, payload), fields(from = %from, to = %to, msg_type = %message_type))]
     async fn ask(
         &self,
         from: &str,
@@ -96,6 +116,7 @@ impl MessageSender for ActorServiceMessageSender {
         use plexspaces_core::ActorId;
 
         let qualified_to = qualify_actor_id(to, from);
+        debug!(qualified_to = %qualified_to, timeout_ms = timeout_ms, "WASM ask: routing to registry");
 
         // Look up the target actor's ActorRef from the registry.
         // Each actor has an ActorRef created during spawn that handles local/remote routing.
@@ -104,9 +125,11 @@ impl MessageSender for ActorServiceMessageSender {
 
         let actor_id = ActorId::from(qualified_to.clone());
         let actor_ref = registry.lookup_actor(&actor_id).await
-            .ok_or_else(|| format!("Actor not found in registry: {}", qualified_to))?;
+            .ok_or_else(|| {
+                warn!(actor_id = %qualified_to, "WASM ask: actor not found in registry");
+                format!("Actor not found in registry: {}", qualified_to)
+            })?;
 
-        // Build the message
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             payload,
@@ -122,10 +145,16 @@ impl MessageSender for ActorServiceMessageSender {
             std::time::Duration::from_millis(timeout_ms)
         };
 
-        // Use the registered ActorRef's ask() method (handles local/remote routing)
+        // Use the registered ActorRef's ask() (handles local/remote routing)
         match actor_ref.ask(msg, timeout).await {
-            Ok(reply) => Ok(reply.payload),
-            Err(e) => Err(format!("Ask failed: {}", e)),
+            Ok(reply) => {
+                trace!(qualified_to = %qualified_to, reply_len = reply.payload.len(), "WASM ask: reply received");
+                Ok(reply.payload)
+            }
+            Err(e) => {
+                warn!(qualified_to = %qualified_to, error = %e, "WASM ask: failed");
+                Err(format!("Ask failed: {}", e))
+            }
         }
     }
 
@@ -162,6 +191,7 @@ impl MessageSender for ActorServiceMessageSender {
         Ok(spawned_id.id().to_string())
     }
 
+    #[instrument(skip(self), fields(from = %from, actor_id = %actor_id))]
     async fn stop_actor(
         &self,
         from: &str,
@@ -173,14 +203,18 @@ impl MessageSender for ActorServiceMessageSender {
         let actor_factory: Arc<dyn ActorFactory> = self.service_locator.get_actor_factory().await
             .ok_or_else(|| "ActorFactory not found in ServiceLocator".to_string())?;
 
-        // Get caller's tenant/namespace from ActorRegistry metadata for tenant isolation
+        // Get caller's tenant/namespace from ActorRegistry metadata for tenant isolation.
+        // This ensures stop_actor respects namespace boundaries.
         let ctx = if let Some(registry) = self.service_locator.actor_registry().await {
             if let Some((tenant_id, namespace)) = registry.get_actor_metadata(&from.to_string()).await {
+                debug!(tenant_id = %tenant_id, namespace = %namespace, "stop_actor: resolved caller metadata");
                 RequestContext::new_without_auth(tenant_id, namespace)
             } else {
+                warn!(from = %from, "stop_actor: no metadata found for caller, using empty context");
                 RequestContext::new_without_auth(String::new(), String::new())
             }
         } else {
+            warn!("stop_actor: ActorRegistry not available");
             RequestContext::new_without_auth(String::new(), String::new())
         };
 
@@ -188,8 +222,12 @@ impl MessageSender for ActorServiceMessageSender {
         actor_factory
             .stop_actor(&ctx, &actor_id_typed)
             .await
-            .map_err(|e| format!("Failed to stop actor: {}", e))?;
+            .map_err(|e| {
+                warn!(actor_id = %actor_id, error = %e, "stop_actor failed");
+                format!("Failed to stop actor: {}", e)
+            })?;
 
+        debug!(actor_id = %actor_id, "stop_actor: success");
         Ok(())
     }
 

@@ -1656,6 +1656,11 @@ pub struct InvokeActorRequest {
     /// Allowed values (Erlang-style): call, cast, info only. Others not supported at this time.
     #[prost(string, tag="10")]
     pub msg_type_override: ::prost::alloc::string::String,
+    /// Optional timeout for request-reply (ask) operations.
+    /// Defaults to 5 seconds if not specified. Use for long-running operations like training.
+    /// HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
+    #[prost(message, optional, tag="11")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
 /// Response from invoking an actor
 ///

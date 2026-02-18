@@ -164,16 +164,33 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn stop_actor(
         &self,
-        _from: &str,
+        from: &str,
         actor_id: &str,
         _timeout_ms: u64,
     ) -> Result<(), String> {
-        // Use ActorFactory to stop actor
-        use plexspaces_core::ActorId;
-        // Note: stop_actor requires ActorFactory, but application crate can't depend on services
-        // This method should be refactored to receive ActorFactory as parameter or use ApplicationNode
-        // For now, return error indicating this needs to be refactored
-        Err("stop_actor requires ActorFactory - this method should be refactored to receive ActorFactory as parameter".to_string())
+        use plexspaces_core::{ActorId, ActorFactory, RequestContext};
+
+        let actor_factory: Arc<dyn ActorFactory> = self.service_locator.get_actor_factory().await
+            .ok_or_else(|| "ActorFactory not found in ServiceLocator".to_string())?;
+
+        // Get caller's tenant/namespace from ActorRegistry metadata for tenant isolation
+        let ctx = if let Some(registry) = self.service_locator.actor_registry().await {
+            if let Some((tenant_id, namespace)) = registry.get_actor_metadata(&from.to_string()).await {
+                RequestContext::new_without_auth(tenant_id, namespace)
+            } else {
+                RequestContext::new_without_auth(String::new(), String::new())
+            }
+        } else {
+            RequestContext::new_without_auth(String::new(), String::new())
+        };
+
+        let actor_id_typed = ActorId::from(actor_id.to_string());
+        actor_factory
+            .stop_actor(&ctx, &actor_id_typed)
+            .await
+            .map_err(|e| format!("Failed to stop actor: {}", e))?;
+
+        Ok(())
     }
 
     async fn link_actor(
@@ -336,6 +353,54 @@ impl MessageSender for ActorServiceMessageSender {
         } else {
             Err(format!("Monitor reference {} not found", monitor_ref))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_qualify_actor_id_already_qualified() {
+        let result = qualify_actor_id("data-worker-0:ray-ps@test-node", "ps:ray-ps@test-node");
+        assert_eq!(result, "data-worker-0:ray-ps@test-node");
+    }
+
+    #[test]
+    fn test_qualify_actor_id_short_name_with_namespace_sender() {
+        // Sender "parameter-server:ray-ps@test-node" → qualify "data-worker-0"
+        // → "data-worker-0:ray-ps@test-node"
+        let result = qualify_actor_id("data-worker-0", "parameter-server:ray-ps@test-node");
+        assert_eq!(result, "data-worker-0:ray-ps@test-node");
+    }
+
+    #[test]
+    fn test_qualify_actor_id_short_name_without_namespace() {
+        // Sender "parameter-server@test-node" → qualify "data-worker-0"
+        // → "data-worker-0@test-node"
+        let result = qualify_actor_id("data-worker-0", "parameter-server@test-node");
+        assert_eq!(result, "data-worker-0@test-node");
+    }
+
+    #[test]
+    fn test_qualify_actor_id_target_has_namespace_sender_has_namespace() {
+        // Target already has namespace "worker:ns1", sender "ps:ns2@node-1"
+        // → "worker:ns1@node-1" (keep target's namespace, add node)
+        let result = qualify_actor_id("worker:ns1", "ps:ns2@node-1");
+        assert_eq!(result, "worker:ns1@node-1");
+    }
+
+    #[test]
+    fn test_qualify_actor_id_no_node_in_sender() {
+        // Sender has no @node → return as-is
+        let result = qualify_actor_id("data-worker-0", "parameter-server");
+        assert_eq!(result, "data-worker-0");
+    }
+
+    #[test]
+    fn test_qualify_actor_id_empty_strings() {
+        let result = qualify_actor_id("", "from@node");
+        assert_eq!(result, "@node");
     }
 }
 

@@ -502,8 +502,8 @@ impl WasmApplication {
         use crate::service_wrappers::ChannelServiceWrapper;
         let channel_service: Arc<dyn ChannelService> = Arc::new(ChannelServiceWrapper::new());
 
-        // Create MessageSender for WASM instance
-        use crate::wasm_message_sender::ActorServiceMessageSender;
+        // Create MessageSender for WASM instance (use application crate's consolidated impl)
+        use plexspaces_application::wasm_message_sender::ActorServiceMessageSender;
         use plexspaces_core::ActorService;
         let actor_service: Arc<dyn ActorService + Send + Sync> = service_locator
             .get_actor_service()

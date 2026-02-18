@@ -11,9 +11,9 @@
 //! - ActorRegistry for ask (request-reply) via registered ActorRef
 //! - ActorFactory for stop_actor with tenant isolation
 //!
-//! Actor IDs follow the `name:namespace@node_id` format. When WASM actors refer
-//! to siblings by short name, [`qualify_actor_id`] infers the full ID from the
-//! sender's own ID.
+//! Actor IDs follow the `name@node_id` format. The actor registry stores and
+//! looks up actors by their full ID — callers must always provide fully-qualified
+//! IDs (no short-name inference).
 
 use async_trait::async_trait;
 use plexspaces_core::{ActorService, ServiceLocator};
@@ -48,56 +48,21 @@ impl ActorServiceMessageSender {
     }
 }
 
-/// Qualify a short actor ID using the sender's full ID.
-///
-/// Actor IDs follow the format `name:namespace@node_id`. When WASM actors refer to
-/// siblings by short name (e.g., "data-worker-0"), this function infers the full ID
-/// by copying the sender's `:namespace@node_id` suffix.
-///
-/// ## Examples
-/// - `qualify_actor_id("worker-0", "ps:my-ns@node1")` -> `"worker-0:my-ns@node1"`
-/// - `qualify_actor_id("worker-0:my-ns@node1", _)` -> `"worker-0:my-ns@node1"` (already qualified)
-fn qualify_actor_id(to: &str, from: &str) -> String {
-    if to.contains('@') {
-        // Already fully qualified
-        return to.to_string();
-    }
-    if let Some(at_pos) = from.find('@') {
-        let node_suffix = &from[at_pos..]; // "@test-node"
-        if !to.contains(':') {
-            // Also extract namespace from sender if present
-            // Sender format: "name:namespace@node_id"
-            if let Some(colon_pos) = from.find(':') {
-                let namespace = &from[colon_pos..at_pos]; // ":ray-ps"
-                format!("{}{}{}", to, namespace, node_suffix)
-            } else {
-                format!("{}{}", to, node_suffix)
-            }
-        } else {
-            // Target already has namespace, just add @node_id
-            format!("{}{}", to, node_suffix)
-        }
-    } else {
-        to.to_string()
-    }
-}
-
 #[async_trait]
 impl MessageSender for ActorServiceMessageSender {
     async fn send_message(&self, from: &str, to: &str, message: &str) -> Result<(), String> {
-        let qualified_to = qualify_actor_id(to, from);
-        trace!(from = %from, to = %to, qualified_to = %qualified_to, "WASM send_message (tell)");
+        trace!(from = %from, to = %to, "WASM send_message (tell)");
 
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             payload: message.as_bytes().to_vec(),
             sender_id: from.to_string(),
-            receiver_id: qualified_to.clone(),
+            receiver_id: to.to_string(),
             ..Default::default()
         };
 
         self.actor_service
-            .send(&qualified_to, msg)
+            .send(to, msg)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -115,26 +80,25 @@ impl MessageSender for ActorServiceMessageSender {
     ) -> Result<Vec<u8>, String> {
         use plexspaces_core::ActorId;
 
-        let qualified_to = qualify_actor_id(to, from);
-        debug!(qualified_to = %qualified_to, timeout_ms = timeout_ms, "WASM ask: routing to registry");
+        debug!(from = %from, to = %to, timeout_ms = timeout_ms, "WASM ask: routing to registry");
 
         // Look up the target actor's ActorRef from the registry.
         // Each actor has an ActorRef created during spawn that handles local/remote routing.
         let registry = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not available".to_string())?;
 
-        let actor_id = ActorId::from(qualified_to.clone());
+        let actor_id = ActorId::from(to.to_string());
         let actor_ref = registry.lookup_actor(&actor_id).await
             .ok_or_else(|| {
-                warn!(actor_id = %qualified_to, "WASM ask: actor not found in registry");
-                format!("Actor not found in registry: {}", qualified_to)
+                warn!(actor_id = %to, "WASM ask: actor not found in registry");
+                format!("Actor not found in registry: {}", to)
             })?;
 
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             payload,
             sender_id: from.to_string(),
-            receiver_id: qualified_to.clone(),
+            receiver_id: to.to_string(),
             message_type: message_type.to_string(),
             ..Default::default()
         };
@@ -148,11 +112,11 @@ impl MessageSender for ActorServiceMessageSender {
         // Use the registered ActorRef's ask() (handles local/remote routing)
         match actor_ref.ask(msg, timeout).await {
             Ok(reply) => {
-                trace!(qualified_to = %qualified_to, reply_len = reply.payload.len(), "WASM ask: reply received");
+                trace!(to = %to, reply_len = reply.payload.len(), "WASM ask: reply received");
                 Ok(reply.payload)
             }
             Err(e) => {
-                warn!(qualified_to = %qualified_to, error = %e, "WASM ask: failed");
+                warn!(to = %to, error = %e, "WASM ask: failed");
                 Err(format!("Ask failed: {}", e))
             }
         }
@@ -394,51 +358,4 @@ impl MessageSender for ActorServiceMessageSender {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_qualify_actor_id_already_qualified() {
-        let result = qualify_actor_id("data-worker-0:ray-ps@test-node", "ps:ray-ps@test-node");
-        assert_eq!(result, "data-worker-0:ray-ps@test-node");
-    }
-
-    #[test]
-    fn test_qualify_actor_id_short_name_with_namespace_sender() {
-        // Sender "parameter-server:ray-ps@test-node" → qualify "data-worker-0"
-        // → "data-worker-0:ray-ps@test-node"
-        let result = qualify_actor_id("data-worker-0", "parameter-server:ray-ps@test-node");
-        assert_eq!(result, "data-worker-0:ray-ps@test-node");
-    }
-
-    #[test]
-    fn test_qualify_actor_id_short_name_without_namespace() {
-        // Sender "parameter-server@test-node" → qualify "data-worker-0"
-        // → "data-worker-0@test-node"
-        let result = qualify_actor_id("data-worker-0", "parameter-server@test-node");
-        assert_eq!(result, "data-worker-0@test-node");
-    }
-
-    #[test]
-    fn test_qualify_actor_id_target_has_namespace_sender_has_namespace() {
-        // Target already has namespace "worker:ns1", sender "ps:ns2@node-1"
-        // → "worker:ns1@node-1" (keep target's namespace, add node)
-        let result = qualify_actor_id("worker:ns1", "ps:ns2@node-1");
-        assert_eq!(result, "worker:ns1@node-1");
-    }
-
-    #[test]
-    fn test_qualify_actor_id_no_node_in_sender() {
-        // Sender has no @node → return as-is
-        let result = qualify_actor_id("data-worker-0", "parameter-server");
-        assert_eq!(result, "data-worker-0");
-    }
-
-    #[test]
-    fn test_qualify_actor_id_empty_strings() {
-        let result = qualify_actor_id("", "from@node");
-        assert_eq!(result, "@node");
-    }
-}
 

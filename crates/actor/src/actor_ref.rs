@@ -1424,6 +1424,12 @@ impl MessageSender for ActorRef {
         self.tell_impl(message).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
+
+    async fn ask(&self, message: Message, timeout: std::time::Duration) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+        // Delegate to ActorRef::ask() which handles correlation-based reply routing
+        ActorRef::ask(self, message, timeout).await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
 // =============================================================================

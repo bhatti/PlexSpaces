@@ -79,4 +79,24 @@ pub trait MessageSender: Send + Sync {
     /// - **Regular actors**: Uses ActorRef::tell() which sends to mailbox
     /// - **Virtual actors**: Activates if needed, then uses ActorRef::tell()
     async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Send a message and wait for a reply (request-reply pattern)
+    ///
+    /// ## Purpose
+    /// Erlang-style call/ask pattern. Sends a message and waits for the actor
+    /// to reply within the specified timeout.
+    ///
+    /// ## Arguments
+    /// * `message` - Message to send (must have sender_id set for reply routing)
+    /// * `timeout` - Maximum time to wait for reply
+    ///
+    /// ## Returns
+    /// Reply message from the actor
+    ///
+    /// ## Default Implementation
+    /// Returns an error by default. Implementations like `ActorRef` override this
+    /// with proper ask semantics (correlation-based reply routing).
+    async fn ask(&self, _message: Message, _timeout: std::time::Duration) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+        Err("ask() not supported by this MessageSender implementation".into())
+    }
 }

@@ -445,7 +445,21 @@ impl Supervisor {
             if let Some(registry) = service_locator.actor_registry().await {
                 let supervisor_id = ActorId::from(self.id.clone());
                 registry.register_parent_child(&supervisor_id, &child_id).await;
-                
+
+                // Register the actor's ActorRef so lookup_actor() works for inter-actor ask
+                use plexspaces_core::RequestContext;
+                let ctx = RequestContext::new_without_auth(String::new(), String::new());
+                let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+                registry.register_actor(
+                    &ctx,
+                    child_id.clone(),
+                    sender,
+                    Some(spec.child_id.clone()),
+                    None,
+                    None,
+                    None,
+                ).await;
+
                 // OBSERVABILITY: Log parent-child registration
                 trace!(
                     supervisor_id = %self.id,

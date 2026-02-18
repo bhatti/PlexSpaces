@@ -34,24 +34,54 @@ impl ActorServiceMessageSender {
     }
 }
 
+/// Qualify a short actor ID using the sender's full ID.
+///
+/// Actor IDs follow the format "child_spec_id:namespace@node_id" or "child_spec_id@node_id".
+/// When WASM actors refer to siblings by short name (e.g., "data-worker-0"), we qualify it
+/// using the sender's `:namespace@node_id` suffix so the lookup matches the registry key.
+fn qualify_actor_id(to: &str, from: &str) -> String {
+    if to.contains('@') {
+        // Already fully qualified
+        return to.to_string();
+    }
+    if let Some(at_pos) = from.find('@') {
+        let node_suffix = &from[at_pos..]; // "@test-node"
+        if !to.contains(':') {
+            // Also extract namespace from sender if present
+            // Sender format: "name:namespace@node_id"
+            if let Some(colon_pos) = from.find(':') {
+                let namespace = &from[colon_pos..at_pos]; // ":ray-ps"
+                format!("{}{}{}", to, namespace, node_suffix)
+            } else {
+                format!("{}{}", to, node_suffix)
+            }
+        } else {
+            // Target already has namespace, just add @node_id
+            format!("{}{}", to, node_suffix)
+        }
+    } else {
+        to.to_string()
+    }
+}
+
 #[async_trait]
 impl MessageSender for ActorServiceMessageSender {
     async fn send_message(&self, from: &str, to: &str, message: &str) -> Result<(), String> {
-        // Create Message from string payload
+        let qualified_to = qualify_actor_id(to, from);
+
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             payload: message.as_bytes().to_vec(),
             sender_id: from.to_string(),
-            receiver_id: to.to_string(),
+            receiver_id: qualified_to.clone(),
             ..Default::default()
         };
-        
-        // Use ActorService to send message
+
         self.actor_service
-            .send(to, msg)
+            .send(&qualified_to, msg)
             .await
             .map_err(|e| e.to_string())?;
-        
+
         Ok(())
     }
 
@@ -63,91 +93,39 @@ impl MessageSender for ActorServiceMessageSender {
         payload: Vec<u8>,
         timeout_ms: u64,
     ) -> Result<Vec<u8>, String> {
-        use plexspaces_actor::ActorRef;
         use plexspaces_core::ActorId;
-        
-        // Create Message with correlation_id for ask pattern
+
+        let qualified_to = qualify_actor_id(to, from);
+
+        // Look up the target actor's ActorRef from the registry.
+        // Each actor has an ActorRef created during spawn that handles local/remote routing.
+        let registry = self.service_locator.actor_registry().await
+            .ok_or_else(|| "ActorRegistry not available".to_string())?;
+
+        let actor_id = ActorId::from(qualified_to.clone());
+        let actor_ref = registry.lookup_actor(&actor_id).await
+            .ok_or_else(|| format!("Actor not found in registry: {}", qualified_to))?;
+
+        // Build the message
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             payload,
             sender_id: from.to_string(),
-            receiver_id: to.to_string(),
+            receiver_id: qualified_to.clone(),
             message_type: message_type.to_string(),
             ..Default::default()
         };
-        
-        // Parse actor ID to determine if local or remote
-        let (_actor_name, node_id) = if let Some((name, node)) = to.split_once('@') {
-            (name.to_string(), Some(node.to_string()))
-        } else {
-            (to.to_string(), None)
-        };
-        
-        // Create ActorRef for the target actor
-        // For ask() pattern, we always need an ActorRef (not just MessageSender)
-        // So we create ActorRef directly based on routing info
-        let actor_ref = if let Some(node) = node_id {
-            // Remote actor
-            // TODO: get namespace from WASM context
-            // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for WASM applications)
-            ActorRef::remote(
-                to.to_string(),
-                String::new(), // Empty tenant_id for WASM applications
-                String::new(), // Empty namespace for WASM applications
-                node,
-                self.service_locator.clone(),
-            )
-        } else {
-            // Local actor - look up routing to determine if local or remote
-            
-            // User path (WASM invocation): tenant/namespace come from auth, not config
-            use plexspaces_core::RequestContext;
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
 
-            if let Some(registry) = self.service_locator.actor_registry().await {
-                let actor_id = ActorId::from(to.to_string());
-                if let Some(routing) = registry.lookup_routing(&ctx, &actor_id).await.ok().flatten() {
-                    // Create ActorRef based on routing info
-                    // TODO: get namespace from WASM context
-                    // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for WASM applications)
-                    ActorRef::remote(
-                        to.to_string(),
-                        String::new(), // Empty tenant_id for WASM applications
-                        String::new(), // Empty namespace for WASM applications
-                        routing.node_id,
-                        self.service_locator.clone(),
-                    )
-                } else {
-                    return Err(format!("Actor not found: {}", to));
-                }
-            } else {
-                // No registry available, create remote ActorRef (will fail if actor doesn't exist)
-                // TODO: get namespace from WASM context
-                // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for WASM applications)
-                ActorRef::remote(
-                    to.to_string(),
-                    String::new(), // Empty tenant_id for WASM applications
-                    String::new(), // Empty namespace for WASM applications
-                    String::new(), // Empty node_id (will fail if actor doesn't exist)
-                    self.service_locator.clone(),
-                )
-            }
-        };
-        
-        // Use ActorRef::ask() for proper ask pattern
         let timeout = if timeout_ms == 0 {
-            std::time::Duration::from_secs(5) // Default 5 seconds
+            std::time::Duration::from_secs(5)
         } else {
             std::time::Duration::from_millis(timeout_ms)
         };
-        
+
+        // Use the registered ActorRef's ask() method (handles local/remote routing)
         match actor_ref.ask(msg, timeout).await {
-            Ok(reply) => {
-                Ok(reply.payload)
-            }
-            Err(e) => {
-                Err(format!("Ask request failed: {}", e))
-            }
+            Ok(reply) => Ok(reply.payload),
+            Err(e) => Err(format!("Ask failed: {}", e)),
         }
     }
 

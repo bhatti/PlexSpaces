@@ -608,7 +608,7 @@ impl WasmApplication {
                 &[], // No initial state
                 plexspaces_wasm_runtime::WasmConfig::default(),
                 Some(channel_service),
-                Some(message_sender),
+                Some(Arc::new(message_sender.clone()) as Arc<dyn std::any::Any + Send + Sync>),
                 tuplespace_provider,
                 keyvalue_store,
                 process_group_registry,

@@ -199,38 +199,38 @@ impl Actor for WasmActorBehavior {
         );
         match instance.handle_message_with_id(from, message_type.as_str(), payload, &message_id).await {
             Ok(response) => {
-                // Handle response for request-reply patterns
-                // If message has sender_id, send reply using ActorRef::send_reply()
-                if !message.sender_id.is_empty() {
-                    let sender_id = message.sender_id.clone();
-                    let correlation_id = message.correlation_id.clone();
-                    
-                    let mut reply_message = Message {
-                        id: format!("res-{}", ulid::Ulid::new().to_string()), // Ensure reply has "res-" prefix
+                // Send reply for ask (call) messages, same pattern as Byzantine example:
+                // Use ctx.send_reply() which routes via ActorService (handles local/remote)
+                if !message.sender_id.is_empty() && !message.correlation_id.is_empty() {
+                    let reply_message = Message {
+                        id: format!("res-{}", ulid::Ulid::new().to_string()),
                         payload: response,
-                        sender_id: message.receiver_id.clone(), // Use receiver as sender of reply
                         message_type: "reply".to_string(),
                         ..Default::default()
                     };
-                    // Preserve correlation_id if present
-                    if !correlation_id.is_empty() {
-                        reply_message.correlation_id = correlation_id.clone();
-                    }
-                    // Use ActorService::send() to send reply (handles local/remote automatically)
-                    // ActorService::send() will route via ActorRef::tell() which handles temporary sender IDs and correlation_id routing
-                    if let Some(actor_service) = ctx.service_locator.get_actor_service().await {
-                        // Set receiver to sender_id (the actor that called ask())
-                        reply_message.receiver_id = sender_id.clone();
-                        
-                        match actor_service.send(&sender_id, reply_message).await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                tracing::error!(error = %e, "WASM failed to send reply via ActorService");
-                            }
-                        }
+
+                    // Get current actor ID from context self_ref or message receiver_id
+                    let current_actor_id = ctx.self_ref()
+                        .map(|r| r.id().clone())
+                        .unwrap_or_else(|| message.receiver_id.clone());
+
+                    let correlation_id_opt = if message.correlation_id.is_empty() {
+                        None
                     } else {
-                        tracing::error!("WASM ActorService not available, cannot send reply");
+                        Some(message.correlation_id.as_str())
+                    };
+
+                    if let Err(e) = ctx.send_reply(
+                        correlation_id_opt,
+                        &message.sender_id,
+                        current_actor_id,
+                        reply_message,
+                    ).await {
+                        tracing::error!(error = %e, "WASM failed to send reply via ctx.send_reply()");
                     }
+                } else if !message.sender_id.is_empty() {
+                    // Fire-and-forget with sender_id but no correlation_id (tell pattern)
+                    tracing::trace!("WASM tell message (no correlation_id, not sending reply)");
                 } else {
                     tracing::trace!("WASM fire-and-forget message (no sender_id)");
                 }
@@ -420,6 +420,21 @@ impl WasmApplication {
             plexspaces_wasm_runtime::WasmConfig::default()
         );
 
+        // Create MessageSender for inter-actor communication (host.ask, host.tell)
+        let message_sender: Option<Arc<dyn std::any::Any + Send + Sync>> = {
+            if let Some(actor_service) = service_locator.get_actor_service().await {
+                let sender: Arc<dyn plexspaces_wasm_runtime::MessageSender> = Arc::new(
+                    crate::wasm_message_sender::ActorServiceMessageSender::new(
+                        actor_service,
+                        service_locator.clone(),
+                    )
+                );
+                Some(Arc::new(sender) as Arc<dyn std::any::Any + Send + Sync>)
+            } else {
+                None
+            }
+        };
+
         // Build init config from child_spec so actors know their role.
         // This enables Erlang-style ApplicationSpec where one WASM module
         // serves multiple actor types (e.g., ParameterServer + DataWorker).
@@ -443,7 +458,7 @@ impl WasmApplication {
             &init_config_json,
             config_any,
             Some(channel_service),
-            None,
+            message_sender,
             tuplespace_provider,
             None,
             None,
@@ -1024,7 +1039,13 @@ impl WasmApplication {
     ) -> Result<ActorChildSpec, ApplicationError> {
         let node_id = node.id().to_string();
         let child_id = proto_child_spec.id.clone();
-        let actor_id = format!("{}@{}", child_id, node_id);
+        // Include namespace in actor_id to match build_wasm_actor's format:
+        // "child_spec_id:namespace@node_id" (with namespace) or "child_spec_id@node_id" (without)
+        let actor_id = if namespace.is_empty() {
+            format!("{}@{}", child_id, node_id)
+        } else {
+            format!("{}:{}@{}", child_id, namespace, node_id)
+        };
         
         // Capture context for factory
         let node_clone = node.clone();
@@ -1121,8 +1142,13 @@ impl WasmApplication {
             .ok_or_else(|| ApplicationError::Other("ServiceLocator not available".to_string()))?;
 
         // Resolve module by hash and create WASM instance using helper
+        // Include namespace in instance ID so WASM actors can qualify sibling IDs correctly
         let node_id = node.id().to_string();
-        let actor_id_for_instance = format!("{}@{}", child_spec.id, node_id);
+        let actor_id_for_instance = if namespace.is_empty() {
+            format!("{}@{}", child_spec.id, node_id)
+        } else {
+            format!("{}:{}@{}", child_spec.id, namespace, node_id)
+        };
         let wasm_instance = Self::create_wasm_instance_for_behavior(
             node.clone(),
             child_spec,

@@ -191,22 +191,23 @@ impl Actor for WasmActorBehavior {
         let instance = self.instance.clone();
         let message_id = message.id.clone();
         
-        // Call WASM instance's handle_message (message_id for correlation with INVOKE_ACTOR logs)
+        // Trace request: log message-id (should start with req-), sender-id, recipient-id
         tracing::info!(
             message_id = %message_id,
             sender_id = %message.sender_id,
             receiver_id = %message.receiver_id,
             correlation_id = %message.correlation_id,
             msg_type = %message_type,
-            "WasmActor received message"
+            "WasmActor handle_message: received request"
         );
         match instance.handle_message_with_id(from, message_type.as_str(), payload, &message_id).await {
             Ok(response) => {
-                // Send reply for ask (call) messages, same pattern as Byzantine example:
-                // Use ctx.send_reply() which routes via ActorService (handles local/remote)
+                // Send reply for ask (call) messages:
+                // Use ctx.send_reply() which routes reply to the temp sender via ActorService
                 if !message.sender_id.is_empty() && !message.correlation_id.is_empty() {
+                    let reply_id = format!("res-{}", ulid::Ulid::new());
                     let reply_message = Message {
-                        id: format!("res-{}", ulid::Ulid::new().to_string()),
+                        id: reply_id.clone(),
                         payload: response,
                         message_type: "reply".to_string(),
                         ..Default::default()
@@ -223,14 +224,15 @@ impl Actor for WasmActorBehavior {
                         Some(message.correlation_id.as_str())
                     };
 
+                    // Trace reply: log reply message-id (res-), recipient = temp sender
                     tracing::info!(
-                        request_message_id = %message_id,
-                        sender_id = %message.sender_id,
-                        receiver_id = %message.receiver_id,
+                        request_id = %message_id,
+                        reply_id = %reply_id,
+                        reply_to = %message.sender_id,
+                        from_actor = %current_actor_id,
                         correlation_id = %message.correlation_id,
-                        msg_type = %message_type,
                         response_len = reply_message.payload.len(),
-                        "WasmActor sending reply to sender"
+                        "WasmActor handle_message: sending reply to temp sender"
                     );
                     if let Err(e) = ctx.send_reply(
                         correlation_id_opt,
@@ -239,25 +241,26 @@ impl Actor for WasmActorBehavior {
                         reply_message,
                     ).await {
                         tracing::error!(
-                            request_message_id = %message_id,
-                            sender_id = %message.sender_id,
+                            request_id = %message_id,
+                            reply_id = %reply_id,
+                            reply_to = %message.sender_id,
                             correlation_id = %message.correlation_id,
                             error = %e,
-                            "WASM failed to send reply via ctx.send_reply()"
+                            "WasmActor handle_message: failed to send reply"
                         );
                     }
                 } else if !message.sender_id.is_empty() {
-                    // Fire-and-forget with sender_id but no correlation_id (tell pattern)
-                    tracing::trace!("WASM tell message (no correlation_id, not sending reply)");
+                    tracing::trace!(message_id = %message_id, "WasmActor: tell message (no correlation_id)");
                 } else {
-                    tracing::trace!("WASM fire-and-forget message (no sender_id)");
+                    tracing::trace!(message_id = %message_id, "WasmActor: fire-and-forget (no sender_id)");
                 }
                 Ok(())
             }
             Err(e) => {
                 tracing::debug!(
+                    message_id = %message_id,
                     error = %e,
-                    "WASM handle_message failed (full error logged by wasm_runtime)"
+                    "WasmActor handle_message: WASM call failed"
                 );
                 Err(BehaviorError::ProcessingError(format!(
                     "WASM handle_message failed: {}",

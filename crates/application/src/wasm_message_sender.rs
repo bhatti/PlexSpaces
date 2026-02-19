@@ -81,10 +81,7 @@ impl MessageSender for ActorServiceMessageSender {
     ) -> Result<Vec<u8>, String> {
         use plexspaces_core::ActorId;
 
-        debug!(from = %from, to = %to, timeout_ms = timeout_ms, "WASM ask: routing to registry");
-
         // Look up the target actor's ActorRef from the registry.
-        // Each actor has an ActorRef created during spawn that handles local/remote routing.
         let registry = self.service_locator.actor_registry().await
             .ok_or_else(|| "ActorRegistry not available".to_string())?;
 
@@ -95,8 +92,10 @@ impl MessageSender for ActorServiceMessageSender {
                 format!("Actor not found in registry: {}", to)
             })?;
 
+        // Build request message with req- prefix (ActorRef::ask will also add req- if missing)
+        let request_id = format!("req-{}", ulid::Ulid::new());
         let msg = Message {
-            id: ulid::Ulid::new().to_string(),
+            id: request_id.clone(),
             payload,
             sender_id: from.to_string(),
             receiver_id: to.to_string(),
@@ -110,14 +109,38 @@ impl MessageSender for ActorServiceMessageSender {
             std::time::Duration::from_millis(timeout_ms)
         };
 
-        // Use the registered ActorRef's ask() (handles local/remote routing)
+        debug!(
+            message_id = %request_id,
+            sender_id = %from,
+            recipient_id = %to,
+            msg_type = %message_type,
+            timeout_ms = timeout_ms,
+            "WASM ask: sending request via ActorRef"
+        );
+
+        // Use the registered ActorRef's ask() — creates temp sender, routes, waits for reply
         match actor_ref.ask(msg, timeout).await {
             Ok(reply) => {
-                trace!(to = %to, reply_len = reply.payload.len(), "WASM ask: reply received");
+                debug!(
+                    request_id = %request_id,
+                    reply_id = %reply.id,
+                    sender_id = %from,
+                    recipient_id = %to,
+                    reply_sender = %reply.sender_id,
+                    reply_receiver = %reply.receiver_id,
+                    reply_len = reply.payload.len(),
+                    "WASM ask: reply received"
+                );
                 Ok(reply.payload)
             }
             Err(e) => {
-                warn!(to = %to, error = %e, "WASM ask: failed");
+                warn!(
+                    request_id = %request_id,
+                    sender_id = %from,
+                    recipient_id = %to,
+                    error = %e,
+                    "WASM ask: failed"
+                );
                 Err(format!("Ask failed: {}", e))
             }
         }

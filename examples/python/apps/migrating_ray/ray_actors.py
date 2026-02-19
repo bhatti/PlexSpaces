@@ -243,16 +243,20 @@ class DataWorker:
     worker_id: str = state(default="")
     shard_size: int = state(default=2000)
     batch_size: int = state(default=256)
-    data_shard: List[List[float]] = state(default_factory=list)
+    # data_shard is NOT persisted (too large for WASM get_state serialization).
+    # It is derived data regenerated from the deterministic seed when needed.
 
     @init_handler
     def on_init(self, config: dict):
         """Initialize data worker with synthetic data shard."""
         actor_id = config.get("actor_id", "")
         self.worker_id = actor_id
+        self._generate_data_shard()
+        host.info(f"DataWorker {self.worker_id}: {self.shard_size} samples, batch={self.batch_size}")
 
-        # Generate synthetic data shard (worker-specific seed for diversity)
-        seed = hash(actor_id) % 10000
+    def _generate_data_shard(self):
+        """Generate synthetic data shard (deterministic from worker_id seed)."""
+        seed = hash(self.worker_id) % 10000
         self.data_shard = []
         for i in range(self.shard_size):
             sample = []
@@ -262,7 +266,6 @@ class DataWorker:
             target = float((seed + i) % 10)
             sample.append(target)
             self.data_shard.append(sample)
-        host.info(f"DataWorker {self.worker_id}: {self.shard_size} samples, batch={self.batch_size}")
 
     @handler("compute_gradients")
     def compute_gradients(self, weights: Dict[str, Any] = None,
@@ -275,6 +278,9 @@ class DataWorker:
         Backward: MSE loss gradients via chain rule
         """
         host.info(f"DataWorker {self.worker_id} received compute_gradients from_actor={from_actor}")
+        # Regenerate data shard if lost after WASM re-instantiation
+        if not getattr(self, 'data_shard', None):
+            self._generate_data_shard()
         if not weights:
             return {"status": "error", "error": "No weights provided"}
         w1 = weights.get("w1", [])

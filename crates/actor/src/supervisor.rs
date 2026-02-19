@@ -467,22 +467,10 @@ impl Supervisor {
                 let supervisor_id = ActorId::from(self.id.clone());
                 registry.register_parent_child(&supervisor_id, &child_id).await;
 
-                // Register the actor's ActorRef so lookup_actor() works for inter-actor ask.
-                // Extract namespace from actor_id (format: "name:namespace@node" or "name@node")
-                // so that undeploy/stop operations can pass namespace isolation checks.
-                use plexspaces_core::RequestContext;
-                let namespace = extract_namespace_from_actor_id(&child_id.to_string());
-                let ctx = RequestContext::new_without_auth(String::new(), namespace.clone());
-                let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-                registry.register_actor(
-                    &ctx,
-                    child_id.clone(),
-                    sender,
-                    Some(spec.child_id.clone()),
-                    None,
-                    None,
-                    None,
-                ).await;
+                // NOTE: ActorRef is already registered during Actor::start() →
+                // register_in_registry() with proper actor_type and behavior_kind.
+                // No duplicate register_actor() call here – parent-child link above
+                // is sufficient for supervisor tree tracking.
 
                 // OBSERVABILITY: Log parent-child registration
                 trace!(

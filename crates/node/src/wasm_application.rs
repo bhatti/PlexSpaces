@@ -127,10 +127,13 @@ impl Actor for WasmActorBehavior {
         // Clone Arc before await to ensure Send
         let instance = self.instance.clone();
         
-        tracing::debug!(
+        tracing::info!(
             message_id = %message_id,
+            sender_id = %from,
+            receiver_id = %message.receiver_id,
+            correlation_id = %message.correlation_id,
             msg_type = %message_type,
-            "🟦 [WasmActorBehavior::handle_message] ENTRY (for tell, INVOKE_ACTOR SUCCESS already returned)"
+            "WasmActor received message"
         );
         // Call WASM instance's handle_message (message_id for correlation with INVOKE_ACTOR logs)
         let result = instance.handle_message_with_id(from, message_type.as_str(), payload, &message_id).await;
@@ -143,8 +146,19 @@ impl Actor for WasmActorBehavior {
             Ok(response) => {
                 // Handle response for request-reply patterns (ask/call)
                 if !message.sender_id.is_empty() {
+                    let reply_id = ulid::Ulid::new().to_string();
+                    tracing::info!(
+                        request_message_id = %message_id,
+                        reply_message_id = %reply_id,
+                        sender_id = %message.sender_id,
+                        receiver_id = %message.receiver_id,
+                        correlation_id = %message.correlation_id,
+                        msg_type = %message_type,
+                        response_len = response.len(),
+                        "WasmActor sending reply to sender"
+                    );
                     let reply_message = Message {
-                        id: ulid::Ulid::new().to_string(),
+                        id: reply_id,
                         payload: response,
                         sender_id: message.receiver_id.clone(),
                         receiver_id: message.sender_id.clone(),
@@ -154,7 +168,13 @@ impl Actor for WasmActorBehavior {
                     };
                     if let Some(actor_service) = ctx.service_locator.get_actor_service().await {
                         if let Err(e) = actor_service.send(&message.sender_id, reply_message).await {
-                            tracing::warn!(error = %e, "Failed to send reply via ActorService::send()");
+                            tracing::warn!(
+                                request_message_id = %message_id,
+                                sender_id = %message.sender_id,
+                                correlation_id = %message.correlation_id,
+                                error = %e,
+                                "Failed to send reply via ActorService::send()"
+                            );
                         }
                     } else {
                         tracing::warn!("ActorService not available in ServiceLocator, cannot send reply");

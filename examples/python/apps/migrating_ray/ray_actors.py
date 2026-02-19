@@ -86,21 +86,24 @@ class ParameterServer:
                    f"lr={self.learning_rate}, workers={self.num_workers}")
 
     @handler("get_weights")
-    def get_weights(self) -> dict:
+    def get_weights(self, from_actor: str = "") -> dict:
         """Get current model weights summary (for external inspection)."""
+        host.info(f"ParameterServer received get_weights from_actor={from_actor}")
         w1_flat = [w for row in self.w1 for w in row]
         w1_mean = sum(w1_flat) / len(w1_flat) if w1_flat else 0.0
         w2_mean = sum(self.w2) / len(self.w2) if self.w2 else 0.0
-        return {
+        result = {
             "status": "ok",
             "iteration": self.iteration,
             "total_params": self.input_dim * self.hidden_dim + self.hidden_dim,
             "w1_mean": w1_mean,
             "w2_mean": w2_mean,
         }
+        host.info(f"ParameterServer replying get_weights to from_actor={from_actor}")
+        return result
 
     @handler("train")
-    def train(self, iterations: int = 10) -> dict:
+    def train(self, iterations: int = 10, from_actor: str = "") -> dict:
         """
         Run synchronous distributed training for N iterations.
 
@@ -109,6 +112,7 @@ class ParameterServer:
         2. Workers: compute gradients on their data shards (computation)
         3. Fan-in: aggregate gradients and update weights (computation)
         """
+        host.info(f"ParameterServer received train iterations={iterations} from_actor={from_actor}")
         if not isinstance(iterations, int):
             iterations = int(iterations)
         total_params = self.input_dim * self.hidden_dim + self.hidden_dim
@@ -127,9 +131,13 @@ class ParameterServer:
             all_gradients = []
             for worker_id in self.worker_ids:
                 try:
-                    resp = host.ask(worker_id, "compute_gradients", weights_payload, timeout_ms=30000)
+                    host.info(f"ParameterServer asking worker={worker_id} compute_gradients timeout=5000ms")
+                    resp = host.ask(worker_id, "compute_gradients", weights_payload, timeout_ms=5000)
                     if isinstance(resp, dict) and resp.get("status") == "ok":
                         all_gradients.append(resp.get("gradients", {}))
+                        host.info(f"ParameterServer received reply from worker={worker_id} status=ok")
+                    else:
+                        host.warn(f"ParameterServer received unexpected reply from worker={worker_id}: {resp}")
                 except Exception as e:
                     host.warn(f"Worker {worker_id} failed: {e}")
 
@@ -188,17 +196,20 @@ class ParameterServer:
                 "workers": n_workers,
             })
 
-        return {
+        reply = {
             "status": "ok",
             "iterations_completed": self.iteration,
             "results": results,
             "total_coord_ms": self.total_coord_ms,
             "total_compute_ms": self.total_compute_ms,
         }
+        host.info(f"ParameterServer replying train iterations_completed={self.iteration} to from_actor={from_actor}")
+        return reply
 
     @handler("stats")
-    def get_stats(self) -> dict:
+    def get_stats(self, from_actor: str = "") -> dict:
         """Get comprehensive training statistics and benchmarks."""
+        host.info(f"ParameterServer received stats from_actor={from_actor}")
         total_params = self.input_dim * self.hidden_dim + self.hidden_dim
         w1_flat = [w for row in self.w1 for w in row]
         w1_mean = sum(w1_flat) / len(w1_flat) if w1_flat else 0.0
@@ -255,13 +266,15 @@ class DataWorker:
 
     @handler("compute_gradients")
     def compute_gradients(self, weights: Dict[str, Any] = None,
-                          input_dim: int = 100, hidden_dim: int = 64) -> dict:
+                          input_dim: int = 100, hidden_dim: int = 64,
+                          from_actor: str = "") -> dict:
         """
         Compute gradients via forward+backward pass on data shard.
 
         Forward: h = ReLU(X @ W1.T), y_pred = h @ W2
         Backward: MSE loss gradients via chain rule
         """
+        host.info(f"DataWorker {self.worker_id} received compute_gradients from_actor={from_actor}")
         if not weights:
             return {"status": "error", "error": "No weights provided"}
         w1 = weights.get("w1", [])
@@ -312,6 +325,7 @@ class DataWorker:
                     d_w1[i][j] /= n
                 d_w2[i] /= n
 
+        host.info(f"DataWorker {self.worker_id} replying compute_gradients samples={n} to from_actor={from_actor}")
         return {
             "status": "ok",
             "gradients": {"d_w1": d_w1, "d_w2": d_w2},
@@ -320,7 +334,8 @@ class DataWorker:
         }
 
     @handler("stats")
-    def get_stats(self) -> dict:
+    def get_stats(self, from_actor: str = "") -> dict:
+        host.info(f"DataWorker {self.worker_id} received stats from_actor={from_actor}")
         return {"status": "ok", "worker_id": self.worker_id,
                 "shard_size": self.shard_size, "batch_size": self.batch_size}
 

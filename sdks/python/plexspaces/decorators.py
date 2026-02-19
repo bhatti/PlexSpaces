@@ -524,14 +524,28 @@ def dispatch_message(instance: Any, from_actor: str, msg_type: str, payload: Dic
         except Exception:
             return data
 
+    # Make from_actor available to handlers that declare a `from_actor` parameter.
+    # This lets handlers log/use the sender identity for request/reply debugging.
+    def _inject_from_actor(method: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        if from_actor:
+            try:
+                sig = inspect.signature(method)
+                if "from_actor" in sig.parameters and "from_actor" not in kwargs:
+                    kwargs["from_actor"] = from_actor
+            except Exception:
+                pass
+        return kwargs
+
     # Check for exact match
     if effective_type in handlers:
         handler_method = handlers[effective_type]
         kwargs = _filter_kwargs(handler_method, handler_payload)
+        kwargs = _inject_from_actor(handler_method, kwargs)
         return handler_method(instance, **kwargs)
     if msg_type in handlers:
         handler_method = handlers[msg_type]
         kwargs = _filter_kwargs(handler_method, payload)
+        kwargs = _inject_from_actor(handler_method, kwargs)
         return handler_method(instance, **kwargs)
 
     # Check for "call" or "get_state" which might return state

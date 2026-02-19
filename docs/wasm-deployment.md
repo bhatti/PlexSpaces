@@ -1230,6 +1230,83 @@ Float values in actor state are automatically sanitized for WASM safety. The run
 
 This means actors can use float arithmetic freely (including operations that produce `NaN` or infinity) without worrying about state serialization failures. The sanitization and restoration process is fully transparent to the actor -- no special handling is required in actor code.
 
+### Inter-Actor Ask Pattern (Request-Reply)
+
+WASM actors can communicate with each other using the **ask** pattern (request-reply), following the same semantics as Erlang's `gen_server:call/2`. The Python SDK exposes this via `host.ask()`.
+
+**How it works:**
+
+1. Caller actor invokes `host.ask(target_id, msg_type, payload, timeout_ms)`
+2. The SDK serializes the payload and calls the WIT `host.ask` function
+3. The Rust runtime creates a **temporary sender** actor (`ask-{correlation_id}@{node_id}`) with a `ReplyWaiter`
+4. A request message is created with `id = req-{ULID}` and routed to the target actor
+5. Target actor's `handle()` method processes the message and returns a result
+6. The runtime wraps the result in a reply message with `id = res-{ULID}` and sends it back to the temporary sender
+7. The `ReplyWaiter` receives the reply and returns it to the caller
+
+**Message ID conventions:**
+- Request messages: `req-{ULID}` (e.g., `req-01JMXYZ...`)
+- Reply messages: `res-{ULID}` (e.g., `res-01JMXYZ...`)
+- These prefixes enable tracing request/reply flows in logs
+
+**Example (Python):**
+```python
+from plexspaces import actor, handler, host, state
+
+@actor
+class Coordinator:
+    @handler("run")
+    def run(self) -> dict:
+        # Ask a worker to compute something (request-reply)
+        result = host.ask("worker-0:my-app@node-1", "compute", {"x": 42}, timeout_ms=5000)
+        return {"status": "ok", "worker_result": result}
+
+@actor
+class Worker:
+    @handler("compute")
+    def compute(self, x: int = 0) -> dict:
+        return {"result": x * 2}
+```
+
+**Debugging ask flow:** Enable debug logging to trace the full message flow:
+```
+RUST_LOG=plexspaces_application=debug,plexspaces_actor::routing=debug
+```
+
+This will show:
+```
+WASM ask: sending request via ActorRef  message_id=req-01JMX...  sender_id=coordinator:app@node  recipient_id=worker-0:app@node
+ask_helper: routing request to target  message_id=req-01JMX...  sender_id=ask-CORR@node  correlation_id=CORR
+WasmActor handle_message: sending reply  request_id=req-01JMX...  reply_id=res-01JMX...  reply_to=ask-CORR@node
+ask_helper: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
+WASM ask: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
+```
+
+### Float Handling in Inter-Actor Messages
+
+**Important:** The Python SDK's `handle()` return path uses `json.dumps()` directly, which serializes Python floats as JSON numbers. This ensures that inter-actor `host.ask()` responses preserve numeric types correctly.
+
+Float sanitization (converting floats to strings) is **only** applied in the `get_state()` path for checkpoint persistence safety. The `set_state()` path reverses this with `_desanitize_from_wasm()`. This sanitization is **not** applied to `handle()` responses to avoid corrupting numeric values in inter-actor communication.
+
+If you encounter `"unsupported operand type(s) for +=: 'float' and 'str'"` errors in inter-actor ask responses, ensure your WASM module is built with the latest SDK (>= v0.2.0) where this fix is applied.
+
+### Re-Instantiation After handle() (wasmtime Component Model)
+
+Component-model WASM actors are **re-instantiated after each `handle()` call**. This is required because wasmtime 16.x raises a "cannot enter component instance" trap when a component is called a second time (see [wasmtime#8943](https://github.com/bytecodealliance/wasmtime/issues/8943)).
+
+**How it works:**
+1. Actor receives a message → `handle()` is called on the WASM instance
+2. After `handle()` returns, the runtime calls `get_state()` to capture actor state
+3. A new WASM instance is created from the same compiled module
+4. `set_state()` restores the captured state on the new instance
+5. The new instance is ready for the next message
+
+**State preservation:** The `get_state()`/`set_state()` cycle preserves all `state()` fields. Fields **not** declared with `state()` are lost across re-instantiation. For large derived data (e.g., data shards), regenerate from deterministic seeds rather than persisting.
+
+**When will this change?** The wasmtime project is working on `component-model-async` support which will allow re-entrant component calls. Once PlexSpaces upgrades to a wasmtime version with this feature, re-instantiation will no longer be needed and per-message performance will improve significantly.
+
+**Impact on performance:** Re-instantiation adds per-message overhead (typically 1-5ms for Python actors). For high-throughput single-actor scenarios, consider using traditional (non-component) WASM modules.
+
 ### Metrics
 
 State operations are fully instrumented with Prometheus metrics:

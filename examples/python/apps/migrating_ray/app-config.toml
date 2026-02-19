@@ -19,7 +19,7 @@ restart = "permanent"
 shutdown_timeout_seconds = 10
 
 [supervisor.children.args]
-num_workers = "4"
+num_workers = "2"
 learning_rate = "0.01"
 input_dim = "100"
 hidden_dim = "64"
@@ -33,18 +33,6 @@ shutdown_timeout_seconds = 5
 
 [[supervisor.children]]
 id = "data-worker-1"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 5
-
-[[supervisor.children]]
-id = "data-worker-2"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 5
-
-[[supervisor.children]]
-id = "data-worker-3"
 type = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5

@@ -23,7 +23,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 APP_ID="ray-ps"
-NUM_WORKERS=4
+NUM_WORKERS=2
 TRAIN_ITERATIONS=10
 
 cleanup() {
@@ -93,10 +93,12 @@ echo ""
 sleep 2
 
 # Helper to send POST and get response
+# Usage: send_op <actor> <payload> [timeout_secs]
 send_op() {
     local actor="$1"
     local payload="$2"
-    curl -s --max-time 60 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor" \
+    local timeout="${3:-60}"
+    curl -s --max-time "$timeout" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor?timeout=$timeout" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }
@@ -130,13 +132,13 @@ echo ""
 
 TRAIN_START=$(date +%s%N)
 
-TRAIN_RESP=$(send_op "parameter-server" "{\"op\":\"train\",\"iterations\":$TRAIN_ITERATIONS}")
+TRAIN_RESP=$(send_op "parameter-server" "{\"op\":\"train\",\"iterations\":$TRAIN_ITERATIONS}" 120)
 
 TRAIN_END=$(date +%s%N)
 WALL_MS=$(( (TRAIN_END - TRAIN_START) / 1000000 ))
 
 if echo "$TRAIN_RESP" | grep -q '"status":"ok"'; then
-    ITERS=$(echo "$TRAIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('iterations_completed',0))" 2>/dev/null || echo "?")
+    ITERS=$(echo "$TRAIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('iterations_completed',0))" 2>/dev/null || echo "?")
     echo -e "  ${GREEN}Training complete: $ITERS iterations${NC}"
 
     # Print per-iteration results
@@ -144,7 +146,8 @@ if echo "$TRAIN_RESP" | grep -q '"status":"ok"'; then
     echo "$TRAIN_RESP" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-results = d.get('results', [])
+p = d.get('payload', d)  # unwrap HTTP envelope
+results = p.get('results', [])
 for r in results:
     it = r.get('iteration', '?')
     loss = r.get('loss', 0)
@@ -173,7 +176,8 @@ if echo "$STATS_RESP" | grep -q '"status":"ok"'; then
     echo "$STATS_RESP" | python3 -c "
 import sys, json
 
-d = json.load(sys.stdin)
+raw = json.load(sys.stdin)
+d = raw.get('payload', raw)  # unwrap HTTP envelope
 model = d.get('model', {})
 training = d.get('training', {})
 bench = d.get('benchmarks', {})

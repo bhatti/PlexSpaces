@@ -37,7 +37,7 @@ class ParameterServer:
     w2: List[float] = state(default_factory=list)
     learning_rate: float = state(default=0.01)
     iteration: int = state(default=0)
-    num_workers: int = state(default=4)
+    num_workers: int = state(default=2)
     worker_ids: List[str] = state(default_factory=list)
 
     # Benchmark tracking
@@ -131,8 +131,8 @@ class ParameterServer:
             all_gradients = []
             for worker_id in self.worker_ids:
                 try:
-                    host.info(f"ParameterServer asking worker={worker_id} compute_gradients timeout=5000ms")
-                    resp = host.ask(worker_id, "compute_gradients", weights_payload, timeout_ms=5000)
+                    host.info(f"ParameterServer asking worker={worker_id} compute_gradients timeout=30000ms")
+                    resp = host.ask(worker_id, "compute_gradients", weights_payload, timeout_ms=30000)
                     if isinstance(resp, dict) and resp.get("status") == "ok":
                         all_gradients.append(resp.get("gradients", {}))
                         host.info(f"ParameterServer received reply from worker={worker_id} status=ok")

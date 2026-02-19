@@ -28,6 +28,7 @@ Usage:
 
 import json
 from typing import Any, Dict, List, Optional
+from .decorators import _desanitize_from_wasm
 
 # Global reference to actual host module (set by runtime)
 _host_impl = None
@@ -559,7 +560,10 @@ class Host:
         if result.startswith("ERROR:"):
             raise RuntimeError(result)
         try:
-            return json.loads(result)
+            parsed = json.loads(result)
+            # Defense-in-depth: restore stringified numbers from older WASM
+            # modules that may still sanitize floats to strings in handle().
+            return _desanitize_from_wasm(parsed)
         except (json.JSONDecodeError, ValueError):
             return result
 

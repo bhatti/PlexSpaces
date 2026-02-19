@@ -47,7 +47,9 @@ class ParameterServer:
     @init_handler
     def on_init(self, config: dict):
         """Initialize parameter server from framework config."""
-        # Config comes from child_spec: {"actor_id": "parameter-server", "args": {...}}
+        # Config comes from child_spec: {"actor_id": "parameter-server:ns@node", "args": {...}}
+        # actor_id uses full name:namespace@node_id format.
+        actor_id = config.get("actor_id", "")
         args = config.get("args", {})
         lr = args.get("learning_rate", None)
         self.learning_rate = float(lr) if lr else 0.01
@@ -72,8 +74,13 @@ class ParameterServer:
         self.w2 = [((i * 11 + 7) % 1000 - 500) / (500.0 * math.sqrt(self.hidden_dim))
                     for i in range(self.hidden_dim)]
 
-        # Build worker IDs from config
-        self.worker_ids = [f"data-worker-{i}" for i in range(self.num_workers)]
+        # Build worker IDs using full name:namespace@node_id format.
+        # Extract :namespace@node_id suffix from own actor_id to construct
+        # sibling actor IDs consistently.
+        id_suffix = ""
+        if ":" in actor_id:
+            id_suffix = actor_id[actor_id.index(":"):]  # e.g. ":ray-ps@test-node"
+        self.worker_ids = [f"data-worker-{i}{id_suffix}" for i in range(self.num_workers)]
         total_params = self.input_dim * self.hidden_dim + self.hidden_dim
         host.info(f"ParameterServer: {self.input_dim}x{self.hidden_dim} ({total_params} params), "
                    f"lr={self.learning_rate}, workers={self.num_workers}")
@@ -318,8 +325,9 @@ class DataWorker:
                 "shard_size": self.shard_size, "batch_size": self.batch_size}
 
 
-# Multi-actor role mapping: child_spec.id prefix -> actor class
-# Framework passes {"actor_id": "parameter-server"} or {"actor_id": "data-worker-0"}
+# Multi-actor role mapping: actor_id prefix -> actor class
+# Framework passes full IDs like {"actor_id": "parameter-server:ray-ps@node"}
+# or {"actor_id": "data-worker-0:ray-ps@node"}; prefix matching selects the class.
 ACTOR_ROLES = {
     "parameter-server": ParameterServer,
     "data-worker": DataWorker,

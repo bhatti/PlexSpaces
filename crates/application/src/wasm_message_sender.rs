@@ -11,9 +11,10 @@
 //! - ActorRegistry for ask (request-reply) via registered ActorRef
 //! - ActorFactory for stop_actor with tenant isolation
 //!
-//! Actor IDs follow the `name@node_id` format. The actor registry stores and
-//! looks up actors by their full ID — callers must always provide fully-qualified
-//! IDs (no short-name inference).
+//! Actor IDs follow the `name:namespace@node_id` format (e.g.,
+//! `parameter-server:ray-ps@test-node`). The actor registry stores and looks
+//! up actors by their full ID — callers must always provide fully-qualified
+//! IDs. The WASM host bridge passes IDs through unchanged.
 
 use async_trait::async_trait;
 use plexspaces_core::{ActorService, ServiceLocator};

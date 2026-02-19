@@ -447,8 +447,10 @@ impl WasmApplication {
         // Build init config from child_spec so actors know their role.
         // This enables Erlang-style ApplicationSpec where one WASM module
         // serves multiple actor types (e.g., ParameterServer + DataWorker).
+        // actor_id is the full name:namespace@node_id so WASM actors can
+        // construct full sibling IDs for inter-actor messaging.
         let mut init_config = serde_json::Map::new();
-        init_config.insert("actor_id".to_string(), serde_json::Value::String(child_spec.id.clone()));
+        init_config.insert("actor_id".to_string(), serde_json::Value::String(actor_id.to_string()));
         if let Some(ref bk) = child_spec.behavior_kind {
             init_config.insert("behavior_kind".to_string(), serde_json::Value::String(bk.clone()));
         }

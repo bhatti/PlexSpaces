@@ -192,10 +192,13 @@ impl Actor for WasmActorBehavior {
         let message_id = message.id.clone();
         
         // Call WASM instance's handle_message (message_id for correlation with INVOKE_ACTOR logs)
-        tracing::debug!(
+        tracing::info!(
             message_id = %message_id,
-            "WASM handle_message: from={}, msg_type={}, payload_len={}, sender_id={}",
-            from, message_type, payload.len(), message.sender_id
+            sender_id = %message.sender_id,
+            receiver_id = %message.receiver_id,
+            correlation_id = %message.correlation_id,
+            msg_type = %message_type,
+            "WasmActor received message"
         );
         match instance.handle_message_with_id(from, message_type.as_str(), payload, &message_id).await {
             Ok(response) => {
@@ -220,13 +223,28 @@ impl Actor for WasmActorBehavior {
                         Some(message.correlation_id.as_str())
                     };
 
+                    tracing::info!(
+                        request_message_id = %message_id,
+                        sender_id = %message.sender_id,
+                        receiver_id = %message.receiver_id,
+                        correlation_id = %message.correlation_id,
+                        msg_type = %message_type,
+                        response_len = reply_message.payload.len(),
+                        "WasmActor sending reply to sender"
+                    );
                     if let Err(e) = ctx.send_reply(
                         correlation_id_opt,
                         &message.sender_id,
                         current_actor_id,
                         reply_message,
                     ).await {
-                        tracing::error!(error = %e, "WASM failed to send reply via ctx.send_reply()");
+                        tracing::error!(
+                            request_message_id = %message_id,
+                            sender_id = %message.sender_id,
+                            correlation_id = %message.correlation_id,
+                            error = %e,
+                            "WASM failed to send reply via ctx.send_reply()"
+                        );
                     }
                 } else if !message.sender_id.is_empty() {
                     // Fire-and-forget with sender_id but no correlation_id (tell pattern)

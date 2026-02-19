@@ -439,6 +439,36 @@ impl ActorServiceImpl {
                     }
                     return Ok(message_id);
                 }
+
+                // Temp sender not found in ActorRegistry (may have been cleaned up after
+                // ask() timeout).  Try ReplyWaiterRegistry directly using correlation_id
+                // so the reply still reaches the waiter if it is still active.
+                {
+                    use plexspaces_core::TEMP_SENDER_PREFIX;
+                    let is_temp_sender = actor_id.starts_with(&format!("{}-", TEMP_SENDER_PREFIX));
+                    if is_temp_sender {
+                        if let Some(waiter_registry) = self.service_locator.reply_waiter_registry().await {
+                            let message_id = message.id.to_string();
+                            if waiter_registry.notify(&correlation_id, message).await {
+                                tracing::info!(
+                                    message_id = %message_id,
+                                    correlation_id = %correlation_id,
+                                    temp_sender = %actor_id,
+                                    "Reply routed directly via ReplyWaiterRegistry (temp sender already cleaned up)"
+                                );
+                                return Ok(message_id);
+                            }
+                            // Waiter already consumed (ask timed out) – reply is too late, discard gracefully
+                            tracing::warn!(
+                                message_id = %message_id,
+                                correlation_id = %correlation_id,
+                                temp_sender = %actor_id,
+                                "Reply arrived after ask timeout; temp sender and ReplyWaiter already cleaned up"
+                            );
+                            return Ok(message_id);
+                        }
+                    }
+                }
             }
         }
         

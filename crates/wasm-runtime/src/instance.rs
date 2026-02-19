@@ -1926,9 +1926,11 @@ impl WasmInstance {
                         Some(state_json)
                     }
                     Err(e) => {
-                        tracing::warn!(
+                        tracing::error!(
                             actor_id = %self.actor_id,
                             message_id = %message_id,
+                            from_actor = %from_string,
+                            msg_type = %message_type_string,
                             error = %e,
                             "Failed to capture state before re-instantiation; state will be lost"
                         );

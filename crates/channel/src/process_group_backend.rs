@@ -109,7 +109,11 @@ impl ProcessGroupChannel {
 
         // Create the process group (idempotent)
         match pg_service.create_group(&ctx, &group_name).await {
-            Ok(()) => debug!("Created process group: {}", group_name),
+            Ok(()) => {
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!("Created process group: {}", group_name);
+                }
+            }
             Err(e) => {
                 let err_str = e.to_string();
                 if !err_str.contains("already exists") {
@@ -331,7 +335,9 @@ impl Channel for ProcessGroupChannel {
             let mut stats = self.stats.write().await;
             stats.messages_pending = pending.len() as u64;
             metrics::counter!("plexspaces_pg_channel_ack_total").increment(1);
-            trace!("Acknowledged message: {}", message_id);
+            if tracing::enabled!(tracing::Level::TRACE) {
+                trace!("Acknowledged message: {}", message_id);
+            }
             Ok(())
         } else {
             Err(ChannelError::MessageNotFound(message_id.to_string()))

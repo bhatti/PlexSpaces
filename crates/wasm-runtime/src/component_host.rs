@@ -192,7 +192,9 @@ pub struct LoggingImpl {
 #[async_trait::async_trait]
 impl plexspaces::actor::logging::Host for LoggingImpl {
     async fn trace(&mut self, message: String) {
-        tracing::trace!(actor_id = %self.actor_id, "{}", message);
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(actor_id = %self.actor_id, "{}", message);
+        }
     }
 
     async fn debug(&mut self, message: String) {
@@ -215,7 +217,11 @@ impl plexspaces::actor::logging::Host for LoggingImpl {
 
     async fn log(&mut self, level: plexspaces::actor::logging::LogLevel, message: String) {
         match level {
-            plexspaces::actor::logging::LogLevel::Trace => tracing::trace!(actor_id = %self.actor_id, "{}", message),
+            plexspaces::actor::logging::LogLevel::Trace => {
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(actor_id = %self.actor_id, "{}", message);
+                }
+            },
             plexspaces::actor::logging::LogLevel::Debug => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %self.actor_id, "{}", message);
@@ -235,7 +241,9 @@ impl plexspaces::actor::logging::Host for LoggingImpl {
     ) {
         match level {
             plexspaces::actor::logging::LogLevel::Trace => {
-                tracing::trace!(actor_id = %self.actor_id, "{}", message);
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(actor_id = %self.actor_id, "{}", message);
+                }
             }
             plexspaces::actor::logging::LogLevel::Debug => {
                 if tracing::enabled!(tracing::Level::DEBUG) {

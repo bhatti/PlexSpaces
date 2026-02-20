@@ -1,0 +1,23 @@
+# Erlang/OTP Rate Limiter Application Configuration
+#
+# Deploys a sliding window rate limiter actor.
+# Equivalent to an Erlang/OTP GenServer under a supervisor.
+#
+# The rate limiter handles check_rate requests from multiple API clients,
+# each with independent sliding window counters.
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Rate limiter actor (GenServer equivalent)
+[[supervisor.children]]
+id = "rate-limiter"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+window_size_ms = "60000"
+max_requests = "100"

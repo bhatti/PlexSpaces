@@ -255,7 +255,16 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         metrics::counter!("plexspaces_wasm_simple_log_total").increment(1);
         
         match level.to_lowercase().as_str() {
-            "debug" => tracing::debug!(actor_id = %self.actor_id, "[WASM] {}", message),
+            "trace" => {
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(actor_id = %self.actor_id, "[WASM] {}", message);
+                }
+            },
+            "debug" => {
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(actor_id = %self.actor_id, "[WASM] {}", message);
+                }
+            },
             "info" => tracing::info!(actor_id = %self.actor_id, "[WASM] {}", message),
             "warn" | "warning" => tracing::warn!(actor_id = %self.actor_id, "[WASM] {}", message),
             "error" => tracing::error!(actor_id = %self.actor_id, "[WASM] {}", message),

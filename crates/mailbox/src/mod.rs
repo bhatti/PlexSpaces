@@ -851,7 +851,9 @@ impl Mailbox {
                 };
                 
                 if !has_receiver {
-                    tracing::trace!("Mailbox::dequeue: local_receiver not available (attempt {}), falling back to channel backend", attempts);
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!("Mailbox::dequeue: local_receiver not available (attempt {}), falling back to channel backend", attempts);
+                    }
                     break; // Fall through to channel backend
                 }
                 

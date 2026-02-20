@@ -24,7 +24,7 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 - **Five Foundational Pillars**: TupleSpace coordination, Erlang/OTP supervision, durable execution, WASM runtime, and Firecracker isolation
 - **Composable Abstractions**: One powerful actor model with dynamic facets instead of multiple specialized types
 - **Location Transparency**: Actors work seamlessly across local processes, containers, and cloud regions
-- **Polyglot Support**: Write actors in Rust, Python, JavaScript, or any language that compiles to WebAssembly
+- **Polyglot Support**: Write actors in Rust, Python, TypeScript, Go, or any language that compiles to WebAssembly
 - **Production Ready**: Built-in observability, fault tolerance, and resource-aware scheduling
 
 ## Features
@@ -313,6 +313,13 @@ PlexSpaces includes comprehensive examples organized by complexity:
 - **Byzantine Generals**: Consensus algorithms
 - **N-Body Simulation**: Complex physics simulation
 - **Order Processing**: Real-world workflow orchestration
+
+### WASM Polyglot Apps
+Real-world use cases deployed as WASM actors (Python, TypeScript, Go):
+- **[Ray Parameter Server](examples/python/apps/migrating_ray/)** (Python): Distributed ML training with gradient aggregation
+- **[Erlang/OTP Rate Limiter](examples/go/apps/migrating_erlang_otp/)** (Go): Sliding window rate limiting service
+- **[Bank Account](examples/python/apps/bank_account/)** (Python): Durable actors with checkpointing
+- **[Orleans Batch Predictor](examples/typescript/apps/migrating_orleans/)** (TypeScript): Virtual actor ML inference
 
 ### Framework Comparisons
 Side-by-side comparisons with 24+ frameworks:

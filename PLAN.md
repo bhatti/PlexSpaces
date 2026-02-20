@@ -82,14 +82,14 @@ Goal: **faster, simpler, polyglot** — compete with Ray, Temporal, Akka, Erlang
 
 ---
 
-## Phase 1: Fix migrating_ray Python Example (CURRENT)
+## Phase 1: Fix migrating_ray Python Example (DONE)
 
 - [x] Framework: pass child_spec.id as init config to WASM actors
 - [x] Python SDK: support multiple @actor classes per WASM module
-- [ ] Create ray_actors.py with ParameterServer + DataWorker (inter-actor host.ask)
-- [ ] Create build.sh and test.sh
-- [ ] Test end-to-end: server.sh -> build.sh -> test.sh
-- [ ] Remove examples/rust/embedded/migrating_ray
+- [x] Create ray_actors.py with ParameterServer + DataWorker (inter-actor host.ask)
+- [x] Create build.sh and test.sh
+- [x] Test end-to-end: server.sh -> build.sh -> test.sh
+- [ ] Remove examples/rust/embedded/migrating_ray (deferred - keep for reference)
 
 ---
 
@@ -103,7 +103,7 @@ based on the native framework's language. Work one at a time with full verificat
 | # | Example | Target Lang | Real-World Use Case | Key Abstractions |
 |---|---------|------------|---------------------|-----------------|
 | 1 | migrating_ray | Python | **Distributed ML training** - parameter server with gradient aggregation (Ray Train style) | GenServer, host.ask, multi-actor ApplicationSpec |
-| 2 | migrating_erlang_otp | Python | **Rate limiter service** - sliding window with distributed counters (API gateway) | GenServer, state, handler |
+| 2 | migrating_erlang_otp | Go | **Rate limiter service** - sliding window with distributed counters (API gateway) | GenServer, state, handler |
 | 3 | migrating_gosiris | Go | **IoT sensor aggregation** - temperature/humidity from 1000s of sensors | GenServer, process groups |
 | 4 | migrating_ractor | Python | **Matrix computation service** - parallel matrix multiply with work distribution | GenServer, spawn, parallel compute |
 | 5 | migrating_wasmcloud | Python | **API gateway with rate limiting** - HTTP proxy with per-tenant rate limits | GenServer, KV store, timer |
@@ -173,7 +173,7 @@ For 3-5 key examples, create equivalent in all 4 languages:
 
 | Example | Python | TypeScript | Go | Rust (embedded) |
 |---------|--------|-----------|-----|-----------------|
-| migrating_erlang_otp | Primary | Port | Port | Keep existing |
+| migrating_erlang_otp | Port | Port | Primary | Keep existing |
 | migrating_temporal | Port | Primary | Port | Keep existing |
 | migrating_ray | Primary | - | - | Remove |
 | discord_guild_sessions | - | Primary | - | - |
@@ -199,13 +199,23 @@ For each example:
 
 ---
 
-## Current Focus: #1 migrating_ray (Python)
+## Current Focus: #2 migrating_erlang_otp (Go)
 
-Fix the Python WASM app example end-to-end:
+Convert Rust embedded counter example to a Go WASM rate limiter service:
+1. [x] Go SDK: add WASM exports (exports.go) for TinyGo
+2. [x] Go SDK: add multi-actor router (ActorRouter) for ACTOR_ROLES equivalent
+3. [x] Create rate_limiter.go with SlidingWindowRateLimiter actor
+4. [x] Create native Erlang reference (rate_limiter.erl)
+5. [ ] Create build.sh and test.sh
+6. [ ] Test: server.sh -> build.sh -> test.sh
+7. [ ] Verify metrics output
+
+## Completed: #1 migrating_ray (Python) - DONE
+
+Python WASM app example completed end-to-end:
 1. [x] Framework fix: pass child_spec.id in init config
 2. [x] SDK fix: multi-actor class support in runtime.py
-3. [ ] Rewrite ray_actors.py with host.ask-based training coordination
-4. [ ] Create build.sh and test.sh
-5. [ ] Test: server.sh -> build.sh -> test.sh
-6. [ ] Verify metrics output
-7. [ ] Remove examples/rust/embedded/migrating_ray
+3. [x] Rewrite ray_actors.py with host.ask-based training coordination
+4. [x] Create build.sh and test.sh
+5. [x] Test: server.sh -> build.sh -> test.sh
+6. [x] Verify metrics output

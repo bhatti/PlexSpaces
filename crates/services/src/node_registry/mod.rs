@@ -599,7 +599,9 @@ impl NodeRegistry {
 
                     // Perform anti-entropy sync with a random peer
                     if let Some(peer) = swim.select_probe_target().await {
-                        debug!("Anti-entropy sync with peer: {}", peer.node_id);
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!("Anti-entropy sync with peer: {}", peer.node_id);
+                        }
                         // Full state sync would happen here via gRPC
                         // For now, just log
                     }
@@ -623,7 +625,9 @@ impl NodeRegistry {
                 return ProbeResult::Alive;
             }
             Err(e) => {
-                debug!("Direct ping to {} failed: {}", target.node_id, e);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!("Direct ping to {} failed: {}", target.node_id, e);
+                }
                 metrics::counter!("plexspaces_swim_direct_ping_failed").increment(1);
             }
         }
@@ -1001,7 +1005,9 @@ impl NodeRegistryTrait for NodeRegistry {
                     Ok(())
                 }
             }).await {
-                debug!("Heartbeat DB update failed (non-critical): {}", e);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!("Heartbeat DB update failed (non-critical): {}", e);
+                }
             }
         }
 

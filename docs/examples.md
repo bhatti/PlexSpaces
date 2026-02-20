@@ -65,7 +65,20 @@ cd examples/typescript/apps/bank_account
 ./test.sh            # Full E2E: start node, build WASM, deploy, HTTP ops (no Python)
 ```
 
-See [SDK Guide](sdk.md) for complete documentation (Python, TypeScript, and Rust).
+### Go SDK Examples
+
+| Example | Description | README |
+|---------|-------------|--------|
+| **Migrating Erlang/OTP** | Sliding window rate limiter demonstrating GenServer pattern. Per-client windows, batch benchmarks, configurable via ApplicationSpec. Uses Go SDK: `BaseActor`, `Host`, `ActorRouter`. | [README](../examples/go/apps/migrating_erlang_otp/README.md) |
+
+**Build and test (Go):**
+```bash
+cd examples/go/apps/migrating_erlang_otp
+./build.sh           # Build to WASM with TinyGo
+./test.sh 7993       # Test (server must be running)
+```
+
+See [SDK Guide](sdk.md) for complete documentation (Python, TypeScript, Go, and Rust).
 
 ### Rust SDK Examples
 

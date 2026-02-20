@@ -8,8 +8,14 @@
 // the //go:wasmimport directives tell the linker to import these from
 // the host environment.
 //
+// This file is excluded from native Go builds (only compiled for wasm).
+// See host_stubs.go for native/test stub implementations.
+//
 // Build with:
-//   tinygo build -target=wasi -o actor.wasm .
+//
+//	tinygo build -target=wasi -o actor.wasm .
+
+//go:build tinygo.wasm
 
 package plexspaces
 

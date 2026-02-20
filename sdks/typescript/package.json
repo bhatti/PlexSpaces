@@ -17,6 +17,7 @@
   "scripts": {
     "build": "npm run generate:types && tsc -p .",
     "generate:types": "node scripts/generate-types.mjs",
+    "test": "node --test test/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

@@ -7,14 +7,18 @@
 // They delegate to the registered Actor implementation (set via Register()).
 //
 // The host calls these functions to drive the actor lifecycle:
-//   init(config-json) -> error string (empty = success)
-//   handle(from, msg-type, payload-json) -> result JSON string
-//   get-state() -> state JSON string
-//   set-state(state-json) -> error string (empty = success)
+//   - init(config-json) -> error string (empty = success)
+//   - handle(from, msg-type, payload-json) -> result JSON string
+//   - get-state() -> state JSON string
+//   - set-state(state-json) -> error string (empty = success)
+//
+// This file is excluded from native Go builds (only compiled for wasm).
 //
 // Build with:
 //
 //	tinygo build -target=wasi -o actor.wasm .
+
+//go:build tinygo.wasm
 
 package plexspaces
 

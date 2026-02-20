@@ -81,8 +81,8 @@ func NewSlidingWindowLimiter() *SlidingWindowLimiter {
 
 func (s *SlidingWindowLimiter) Init(configJSON string) string {
 	var config struct {
-		ActorID string                 `json:"actor_id"`
-		Args    map[string]interface{} `json:"args"`
+		ActorID string         `json:"actor_id"`
+		Args    map[string]any `json:"args"`
 	}
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return "ERROR: " + err.Error()
@@ -122,7 +122,7 @@ func (s *SlidingWindowLimiter) Handle(fromActor, msgType, payloadJSON string) st
 	case "reset_client":
 		return s.resetClient(payloadJSON)
 	default:
-		return marshal(map[string]interface{}{"error": "unknown operation: " + msgType})
+		return marshal(map[string]any{"error": "unknown operation: " + msgType})
 	}
 }
 
@@ -132,10 +132,10 @@ func (s *SlidingWindowLimiter) checkRate(payloadJSON string) string {
 		ClientID string `json:"client_id"`
 	}
 	if err := json.Unmarshal([]byte(payloadJSON), &req); err != nil {
-		return marshal(map[string]interface{}{"error": "invalid payload"})
+		return marshal(map[string]any{"error": "invalid payload"})
 	}
 	if req.ClientID == "" {
-		return marshal(map[string]interface{}{"error": "client_id required"})
+		return marshal(map[string]any{"error": "client_id required"})
 	}
 
 	computeStart := host.NowMs()
@@ -186,7 +186,7 @@ func (s *SlidingWindowLimiter) checkRate(payloadJSON string) string {
 		retryAfterMs = oldestInWindow + s.WindowSizeMs - now
 	}
 
-	return marshal(map[string]interface{}{
+	return marshal(map[string]any{
 		"status":         "ok",
 		"allowed":        allowed,
 		"client_id":      req.ClientID,
@@ -205,7 +205,7 @@ func (s *SlidingWindowLimiter) checkRateBatch(payloadJSON string) string {
 		Count    int    `json:"count"`
 	}
 	if err := json.Unmarshal([]byte(payloadJSON), &req); err != nil {
-		return marshal(map[string]interface{}{"error": "invalid payload"})
+		return marshal(map[string]any{"error": "invalid payload"})
 	}
 	if req.ClientID == "" {
 		req.ClientID = "batch-client"
@@ -273,7 +273,7 @@ func (s *SlidingWindowLimiter) checkRateBatch(payloadJSON string) string {
 		opsPerSec = float64(total) / (durationMs / 1000.0)
 	}
 
-	return marshal(map[string]interface{}{
+	return marshal(map[string]any{
 		"status":          "ok",
 		"total_requests":  total,
 		"allowed":         allowed,
@@ -291,12 +291,12 @@ func (s *SlidingWindowLimiter) getClientStatus(payloadJSON string) string {
 		ClientID string `json:"client_id"`
 	}
 	if err := json.Unmarshal([]byte(payloadJSON), &req); err != nil {
-		return marshal(map[string]interface{}{"error": "invalid payload"})
+		return marshal(map[string]any{"error": "invalid payload"})
 	}
 
 	window, exists := s.Clients[req.ClientID]
 	if !exists {
-		return marshal(map[string]interface{}{
+		return marshal(map[string]any{
 			"status":        "ok",
 			"client_id":     req.ClientID,
 			"current_count": 0,
@@ -322,7 +322,7 @@ func (s *SlidingWindowLimiter) getClientStatus(payloadJSON string) string {
 		remaining = 0
 	}
 
-	return marshal(map[string]interface{}{
+	return marshal(map[string]any{
 		"status":        "ok",
 		"client_id":     req.ClientID,
 		"current_count": len(active),
@@ -363,20 +363,20 @@ func (s *SlidingWindowLimiter) getStats() string {
 	}
 	memoryKB := float64(totalEntries*8+len(s.Clients)*64) / 1024.0
 
-	return marshal(map[string]interface{}{
+	return marshal(map[string]any{
 		"status": "ok",
-		"config": map[string]interface{}{
+		"config": map[string]any{
 			"window_ms":    s.WindowSizeMs,
 			"max_requests": s.MaxRequests,
 		},
-		"counters": map[string]interface{}{
+		"counters": map[string]any{
 			"total_checks":  s.TotalChecks,
 			"total_allowed": s.TotalAllowed,
 			"total_denied":  s.TotalDenied,
 			"deny_rate_pct": math.Round(denyRate*100) / 100,
 			"active_clients": len(s.Clients),
 		},
-		"benchmarks": map[string]interface{}{
+		"benchmarks": map[string]any{
 			"total_ms":      math.Round(totalTime*100) / 100,
 			"compute_ms":    math.Round(s.TotalComputeMs*100) / 100,
 			"coord_ms":      math.Round(s.TotalCoordMs*100) / 100,
@@ -396,17 +396,17 @@ func (s *SlidingWindowLimiter) resetClient(payloadJSON string) string {
 		ClientID string `json:"client_id"`
 	}
 	if err := json.Unmarshal([]byte(payloadJSON), &req); err != nil {
-		return marshal(map[string]interface{}{"error": "invalid payload"})
+		return marshal(map[string]any{"error": "invalid payload"})
 	}
 	delete(s.Clients, req.ClientID)
-	return marshal(map[string]interface{}{"status": "ok", "reset": req.ClientID})
+	return marshal(map[string]any{"status": "ok", "reset": req.ClientID})
 }
 
 // ========================================================================
 // Helpers
 // ========================================================================
 
-func marshal(v interface{}) string {
+func marshal(v any) string {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return `{"error":"marshal failed"}`
@@ -414,7 +414,7 @@ func marshal(v interface{}) string {
 	return string(data)
 }
 
-func toUint64(v interface{}) uint64 {
+func toUint64(v any) uint64 {
 	switch n := v.(type) {
 	case float64:
 		return uint64(n)
@@ -427,7 +427,7 @@ func toUint64(v interface{}) uint64 {
 	}
 }
 
-func toInt(v interface{}) int {
+func toInt(v any) int {
 	switch n := v.(type) {
 	case float64:
 		return int(n)

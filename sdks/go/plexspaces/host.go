@@ -6,12 +6,20 @@
 // Provides Go wrappers for WIT host imports. When compiled with TinyGo
 // to WASM, the //go:wasmimport directives link to the actual host functions.
 // Outside WASM, stub implementations are used.
+//
+// All communication uses JSON strings over the WIT interface boundary.
+// Payload parameters accept any JSON-serializable value (consistent with
+// Python SDK's Any and TypeScript SDK's unknown).
 
 package plexspaces
 
 import (
 	"encoding/json"
+	"strings"
 )
+
+// errorPrefix is the convention used by WIT host functions to signal errors.
+const errorPrefix = "ERROR:"
 
 // Host provides access to PlexSpaces host functions from within a WASM actor.
 //
@@ -19,7 +27,7 @@ import (
 //
 //	host := plexspaces.NewHost()
 //	host.Send("other-actor", "ping", map[string]any{"data": "hello"})
-//	response := host.Ask("other-actor", "get_balance", nil, 5000)
+//	response, err := host.Ask("other-actor", "get_balance", nil, 5000)
 //	myID := host.SelfID()
 type Host struct{}
 
@@ -33,6 +41,8 @@ func NewHost() *Host {
 // ========================================================================
 
 // Send sends a message to another actor (fire-and-forget).
+// payload is JSON-serialized before sending. Accepts any JSON-serializable value,
+// a pre-serialized JSON string, or nil (sent as "{}").
 func (h *Host) Send(to, msgType string, payload any) string {
 	payloadJSON := marshalPayload(payload)
 	return hostSend(to, msgType, payloadJSON)
@@ -40,14 +50,16 @@ func (h *Host) Send(to, msgType string, payload any) string {
 
 // Ask sends a request and waits for a response (request-reply pattern).
 // timeoutMs is the maximum wait time in milliseconds (0 = default timeout).
+// Returns the parsed JSON response, or an error if the host returned an error.
 func (h *Host) Ask(to, msgType string, payload any, timeoutMs uint64) (any, error) {
 	payloadJSON := marshalPayload(payload)
 	result := hostAsk(to, msgType, payloadJSON, timeoutMs)
-	if len(result) > 6 && result[:6] == "ERROR:" {
+	if isHostError(result) {
 		return nil, &HostError{result}
 	}
 	var parsed any
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		// If not valid JSON, return as raw string (some host functions return plain strings)
 		return result, nil
 	}
 	return parsed, nil
@@ -57,7 +69,7 @@ func (h *Host) Ask(to, msgType string, payload any, timeoutMs uint64) (any, erro
 // Actor Identity
 // ========================================================================
 
-// SelfID returns the actor's own ID.
+// SelfID returns the actor's own ID (format: name:namespace@node_id).
 func (h *Host) SelfID() string {
 	return hostSelfID()
 }
@@ -66,14 +78,15 @@ func (h *Host) SelfID() string {
 // Actor Lifecycle
 // ========================================================================
 
-// Spawn creates a new actor. Delegates to ActorFactory::spawn_actor() via the host.
-// moduleRef is the actor type/module reference (must be a deployed WASM module or registered behavior).
+// Spawn creates a new actor via the node's actor management.
+// moduleRef is the actor type/module reference (must be a deployed WASM module).
 // actorID is the unique ID for the new actor (empty = auto-generated ULID).
+// initConfig is JSON-serialized and passed to the new actor's Init().
 // Returns the spawned actor ID (may be auto-generated if actorID was empty).
 func (h *Host) Spawn(moduleRef, actorID string, initConfig any) (string, error) {
 	configJSON := marshalPayload(initConfig)
 	result := hostSpawn(moduleRef, actorID, configJSON)
-	if len(result) > 6 && result[:6] == "ERROR:" {
+	if isHostError(result) {
 		return "", &HostError{result}
 	}
 	return result, nil
@@ -90,6 +103,7 @@ func (h *Host) Stop(actorID string) error {
 // ========================================================================
 
 // Link creates a bidirectional link with another actor.
+// If either linked actor crashes, the other receives a DOWN notification.
 func (h *Host) Link(actorID string) error {
 	result := hostLink(actorID)
 	return checkError(result)
@@ -102,9 +116,10 @@ func (h *Host) Unlink(actorID string) error {
 }
 
 // Monitor creates a unidirectional monitor. Returns a monitor reference.
+// The monitoring actor receives DOWN notifications if the monitored actor stops.
 func (h *Host) Monitor(actorID string) (string, error) {
 	result := hostMonitor(actorID)
-	if len(result) > 6 && result[:6] == "ERROR:" {
+	if isHostError(result) {
 		return "", &HostError{result}
 	}
 	return result, nil
@@ -132,7 +147,7 @@ func (h *Host) SendAfter(delayMs uint64, msgType string, payload any) string {
 // Logging & Time
 // ========================================================================
 
-// Log logs a message at the specified level.
+// Log logs a message at the specified level (debug, info, warn, error).
 func (h *Host) Log(level, message string) {
 	hostLog(level, message)
 }
@@ -159,7 +174,6 @@ func (h *Host) NowMs() uint64 {
 // ========================================================================
 
 // KVGet retrieves a value by key. Returns value or empty if not found.
-// Errors return "ERROR:message".
 func (h *Host) KVGet(key string) string { return hostKVGet(key) }
 
 // KVPut stores a value. Returns empty on success, "ERROR:message" on failure.
@@ -169,7 +183,6 @@ func (h *Host) KVPut(key, value string) string { return hostKVPut(key, value) }
 func (h *Host) KVDelete(key string) string { return hostKVDelete(key) }
 
 // KVList lists keys with a prefix. Returns JSON array of keys.
-// Errors return "ERROR:message".
 func (h *Host) KVList(prefix string) string { return hostKVList(prefix) }
 
 // ========================================================================
@@ -182,7 +195,7 @@ func (h *Host) KVList(prefix string) string { return hostKVList(prefix) }
 func (h *Host) TSWrite(tupleJSON string) string { return hostTSWrite(tupleJSON) }
 
 // TSRead performs a non-destructive read from the TupleSpace.
-// patternJSON: JSON array with wildcards (null or "*" matches any), e.g. ["task","*",null].
+// patternJSON: JSON array with wildcards (null or "*" matches any).
 // Returns matched tuple as JSON array, or empty if not found.
 func (h *Host) TSRead(patternJSON string) string { return hostTSRead(patternJSON) }
 
@@ -229,14 +242,13 @@ func (h *Host) BlobUpload(blobID, data, contentType string) string {
 }
 
 // BlobDownload downloads blob data.
-// Returns base64-encoded content on success, empty if not found, "ERROR:message" on failure.
+// Returns base64-encoded content on success, empty if not found.
 func (h *Host) BlobDownload(blobID string) string { return hostBlobDownload(blobID) }
 
 // BlobDelete deletes a blob. Returns empty on success, "ERROR:message" on failure.
 func (h *Host) BlobDelete(blobID string) string { return hostBlobDelete(blobID) }
 
 // BlobList lists blobs with a prefix. Returns JSON array of blob IDs.
-// Errors return "ERROR:message".
 func (h *Host) BlobList(prefix string) string { return hostBlobList(prefix) }
 
 // ========================================================================
@@ -261,10 +273,10 @@ func (pg *ProcessGroups) Leave(group string) error {
 	return checkError(result)
 }
 
-// Members returns the members of a process group.
+// Members returns the members of a process group as a list of actor IDs.
 func (pg *ProcessGroups) Members(group string) ([]string, error) {
 	result := hostPGMembers(group)
-	if len(result) > 6 && result[:6] == "ERROR:" {
+	if isHostError(result) {
 		return nil, &HostError{result}
 	}
 	var members []string
@@ -286,12 +298,33 @@ func (pg *ProcessGroups) Broadcast(group, msgType string, payload any) error {
 // ========================================================================
 
 // HostError represents an error from a host function call.
+// The error message follows the WIT convention: "ERROR:<details>".
 type HostError struct {
 	Message string
 }
 
 func (e *HostError) Error() string { return e.Message }
 
+// isHostError checks if a host function result is an error response.
+func isHostError(result string) bool {
+	return strings.HasPrefix(result, errorPrefix)
+}
+
+// checkError converts a host function result to an error if it's an error response.
+func checkError(result string) error {
+	if isHostError(result) {
+		return &HostError{result}
+	}
+	return nil
+}
+
+// marshalPayload serializes a payload to JSON for WIT communication.
+// Accepts:
+//   - nil: returns "{}"
+//   - string: returned as-is (assumed to be pre-serialized JSON)
+//   - any other type: JSON-marshaled
+//
+// On marshal failure, returns the error as a JSON error object.
 func marshalPayload(payload any) string {
 	if payload == nil {
 		return "{}"
@@ -301,14 +334,7 @@ func marshalPayload(payload any) string {
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return "{}"
+		return `{"error":"marshal failed: ` + err.Error() + `"}`
 	}
 	return string(data)
-}
-
-func checkError(result string) error {
-	if len(result) > 6 && result[:6] == "ERROR:" {
-		return &HostError{result}
-	}
-	return nil
 }

@@ -5,18 +5,18 @@
 //
 // Provides ActorRouter for routing messages to multiple actor types
 // within a single WASM module. This is the Go equivalent of the Python
-// SDK's ACTOR_ROLES mapping.
+// SDK's ACTOR_ROLES mapping and TypeScript SDK's ActorRouter.
 //
 // Example:
 //
 //	func main() {
 //	    router := plexspaces.NewActorRouter()
-//	    router.Register("rate-limiter", func() plexspaces.Actor {
+//	    router.Route("rate-limiter", func() plexspaces.Actor {
 //	        a := &RateLimiter{}
 //	        a.SetSelf(a)
 //	        return a
 //	    })
-//	    router.Register("counter", func() plexspaces.Actor {
+//	    router.Route("counter", func() plexspaces.Actor {
 //	        a := &Counter{}
 //	        a.SetSelf(a)
 //	        return a
@@ -34,11 +34,19 @@ import (
 // ActorFactory is a function that creates a new Actor instance.
 type ActorFactory func() Actor
 
+// initConfig is the JSON structure passed by the framework to Init().
+// The actor_id field identifies which actor type to create.
+type initConfig struct {
+	ActorID string          `json:"actor_id"`
+	Args    json.RawMessage `json:"args"`
+}
+
 // ActorRouter routes messages to multiple actor types within a single
 // WASM module. It implements the Actor interface and delegates to the
 // appropriate actor based on the actor_id prefix in the init config.
 //
-// This is the Go equivalent of Python SDK's ACTOR_ROLES dict.
+// This is the Go equivalent of Python SDK's ACTOR_ROLES dict and
+// TypeScript SDK's ActorRouter class.
 type ActorRouter struct {
 	BaseActor
 	factories map[string]ActorFactory
@@ -70,11 +78,7 @@ func (r *ActorRouter) Route(prefix string, factory ActorFactory) {
 // Init initializes the router by selecting the appropriate actor type
 // based on the actor_id field in the config JSON.
 func (r *ActorRouter) Init(configJSON string) string {
-	// Parse config to extract actor_id
-	var config struct {
-		ActorID string                 `json:"actor_id"`
-		Args    map[string]interface{} `json:"args"`
-	}
+	var config initConfig
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return "ERROR: failed to parse config: " + err.Error()
 	}

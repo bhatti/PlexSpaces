@@ -1,0 +1,11 @@
+node_modules/
+*.wasm
+*.js
+!native/*.js
+*.mjs
+!build-bundle.mjs
+!verify.mjs
+!node-loader.mjs
+*.d.ts
+src/generated/
+.DS_Store

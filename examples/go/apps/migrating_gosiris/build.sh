@@ -33,7 +33,9 @@ fi
 
 # Find WASI adapter (reactor mode for library/actor modules)
 ADAPTER=""
+GLOBAL_NPM="$(npm root -g 2>/dev/null || echo /usr/local/lib/node_modules)"
 for candidate in \
+    "$GLOBAL_NPM/@bytecodealliance/jco/lib/wasi_snapshot_preview1.reactor.wasm" \
     "$REPO_ROOT/examples/typescript/apps/bank_account/node_modules/@bytecodealliance/jco/lib/wasi_snapshot_preview1.reactor.wasm" \
     "$REPO_ROOT/examples/typescript/apps/migrating_cloudflare_workers/node_modules/@bytecodealliance/jco/lib/wasi_snapshot_preview1.reactor.wasm" \
     "$HOME/.wasi_snapshot_preview1.reactor.wasm"; do
@@ -43,8 +45,9 @@ for candidate in \
     fi
 done
 if [ -z "$ADAPTER" ]; then
-    echo "ERROR: WASI adapter not found. Install jco: npm install @bytecodealliance/jco"
-    echo "  Or download from: https://github.com/bytecodealliance/wasmtime/releases"
+    echo "ERROR: WASI adapter not found."
+    echo "  Install jco globally: npm install -g @bytecodealliance/jco"
+    echo "  Or locally in a TS example: cd $REPO_ROOT/examples/typescript/apps/bank_account && npm install"
     exit 1
 fi
 

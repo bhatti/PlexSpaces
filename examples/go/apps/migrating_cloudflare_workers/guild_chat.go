@@ -797,6 +797,6 @@ func main() {
 	router.Route("chat-room", NewChatRoom)
 	router.Route("rate-limiter", NewRateLimiter)
 	plexspaces.Register(router)
-	// Keep alive for WASM runtime
-	select {}
+	// In reactor mode (WASM component model), main() must return.
+	// The host drives the actor lifecycle via exported functions.
 }

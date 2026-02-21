@@ -540,14 +540,10 @@ impl WasmApplication {
             .await;
 
         // KeyValue store for WASM actors (simple-actor kv_get/kv_put).
-        // Use in-memory SQLite store so Python/WASM actors can persist sensor data etc. per actor.
-        let keyvalue_store: Option<Arc<dyn plexspaces_keyvalue::KeyValueStore>> = match plexspaces_keyvalue::SqliteKVStore::new(":memory:").await {
-            Ok(store) => Some(Arc::new(store)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to create SQLite :memory: KV store for WASM actors");
-                None
-            }
-        };
+        // Use the shared KeyValueStore from ServiceLocator (initialized during node startup).
+        let keyvalue_store: Option<Arc<dyn plexspaces_core::KeyValueStore>> = service_locator
+            .get_keyvalue_store()
+            .await;
 
         // Get ProcessGroupRegistry from service locator if available
         // Note: get_service_by_name requires Sized, so we can't call it on trait object

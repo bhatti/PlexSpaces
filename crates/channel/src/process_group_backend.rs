@@ -532,7 +532,11 @@ mod tests {
         // Node registry
         async fn get_node_registry(&self) -> Option<Arc<dyn plexspaces_core::NodeRegistryTrait>> { None }
         async fn register_node_registry(&self, _: Arc<dyn plexspaces_core::NodeRegistryTrait>) {}
-        
+
+        // KeyValue store
+        async fn get_keyvalue_store(&self) -> Option<Arc<dyn plexspaces_core::KeyValueStore>> { None }
+        async fn register_keyvalue_store(&self, _: Arc<dyn plexspaces_core::KeyValueStore>) {}
+
         // Process group service
         async fn get_process_group_service(&self) -> Option<Arc<dyn ProcessGroupService>> {
             self.process_group_service.read().await.clone()

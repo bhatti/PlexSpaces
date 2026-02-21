@@ -446,6 +446,6 @@ func toInt(v any) int {
 
 func main() {
 	plexspaces.Register(NewSlidingWindowLimiter())
-	// Keep alive for WASM runtime - the host drives lifecycle via exports
-	select {}
+	// In reactor mode (WASM component model), main() must return.
+	// The host drives the actor lifecycle via exported functions.
 }

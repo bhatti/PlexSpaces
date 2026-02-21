@@ -1405,6 +1405,95 @@ impl KeyValueStore for PostgreSQLKVStore {
     }
 }
 
+// Implement plexspaces_common::KeyValueStore (the consumer-facing trait used by WASM host and actors)
+// for SqliteKVStore. This allows the node's shared KV store to be passed to WASM actors via ServiceLocator.
+#[async_trait]
+impl plexspaces_common::KeyValueStore for SqliteKVStore {
+    async fn get(&self, ctx: &RequestContext, key: &str) -> plexspaces_common::KeyValueStoreResult<Option<Vec<u8>>> {
+        KeyValueStore::get(self, ctx, key).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>) -> plexspaces_common::KeyValueStoreResult<()> {
+        KeyValueStore::put(self, ctx, key, value).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> plexspaces_common::KeyValueStoreResult<()> {
+        KeyValueStore::put_with_ttl(self, ctx, key, value, ttl).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn delete(&self, ctx: &RequestContext, key: &str) -> plexspaces_common::KeyValueStoreResult<()> {
+        KeyValueStore::delete(self, ctx, key).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn exists(&self, ctx: &RequestContext, key: &str) -> plexspaces_common::KeyValueStoreResult<bool> {
+        KeyValueStore::exists(self, ctx, key).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn list_keys(&self, ctx: &RequestContext, prefix: &str) -> plexspaces_common::KeyValueStoreResult<Vec<String>> {
+        KeyValueStore::list(self, ctx, prefix).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn cas(&self, ctx: &RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> plexspaces_common::KeyValueStoreResult<bool> {
+        KeyValueStore::cas(self, ctx, key, expected, new_value).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn increment(&self, ctx: &RequestContext, key: &str, delta: i64) -> plexspaces_common::KeyValueStoreResult<i64> {
+        KeyValueStore::increment(self, ctx, key, delta).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+}
+
+// Implement plexspaces_common::KeyValueStore for PostgreSQLKVStore as well
+#[async_trait]
+impl plexspaces_common::KeyValueStore for PostgreSQLKVStore {
+    async fn get(&self, ctx: &RequestContext, key: &str) -> plexspaces_common::KeyValueStoreResult<Option<Vec<u8>>> {
+        KeyValueStore::get(self, ctx, key).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>) -> plexspaces_common::KeyValueStoreResult<()> {
+        KeyValueStore::put(self, ctx, key, value).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> plexspaces_common::KeyValueStoreResult<()> {
+        KeyValueStore::put_with_ttl(self, ctx, key, value, ttl).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn delete(&self, ctx: &RequestContext, key: &str) -> plexspaces_common::KeyValueStoreResult<()> {
+        KeyValueStore::delete(self, ctx, key).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn exists(&self, ctx: &RequestContext, key: &str) -> plexspaces_common::KeyValueStoreResult<bool> {
+        KeyValueStore::exists(self, ctx, key).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn list_keys(&self, ctx: &RequestContext, prefix: &str) -> plexspaces_common::KeyValueStoreResult<Vec<String>> {
+        KeyValueStore::list(self, ctx, prefix).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn cas(&self, ctx: &RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> plexspaces_common::KeyValueStoreResult<bool> {
+        KeyValueStore::cas(self, ctx, key, expected, new_value).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+
+    async fn increment(&self, ctx: &RequestContext, key: &str, delta: i64) -> plexspaces_common::KeyValueStoreResult<i64> {
+        KeyValueStore::increment(self, ctx, key, delta).await
+            .map_err(|e| plexspaces_common::KeyValueStoreError::StorageError(e.to_string()))
+    }
+}
+
 #[cfg(all(test, feature = "sql-backend"))]
 mod tests {
     use super::*;

@@ -408,7 +408,11 @@ pub struct ServiceLocatorImpl {
     /// Registered NodeRegistry (stored separately for type-safe access)
     /// This allows components to retrieve NodeRegistry for node discovery with caching
     node_registry: Arc<RwLock<Option<Arc<dyn plexspaces_core::NodeRegistryTrait>>>>,
-    
+
+    /// Registered KeyValueStore (stored separately for type-safe access)
+    /// This allows WASM actors and other components to access shared KV storage
+    keyvalue_store: Arc<RwLock<Option<Arc<dyn plexspaces_core::KeyValueStore>>>>,
+
     /// Registered TaskRouter (stored separately for type-safe access)
     /// This allows components to register shard groups for task routing
     task_router: Arc<RwLock<Option<Arc<plexspaces_scheduler::TaskRouter>>>>,
@@ -455,6 +459,7 @@ impl ServiceLocatorImpl {
             process_group_service: Arc::new(RwLock::new(None)),
             blob_service: Arc::new(RwLock::new(None)),
             node_registry: Arc::new(RwLock::new(None)),
+            keyvalue_store: Arc::new(RwLock::new(None)),
             task_router: Arc::new(RwLock::new(None)),
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
             security_config: Arc::new(tokio::sync::Mutex::new(None)),
@@ -1662,6 +1667,16 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         let mut node_registry = self.node_registry.write().await;
         *node_registry = Some(registry);
     }
+
+    async fn get_keyvalue_store(&self) -> Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>> {
+        let store = self.keyvalue_store.read().await;
+        store.clone()
+    }
+
+    async fn register_keyvalue_store(&self, store: std::sync::Arc<dyn plexspaces_core::KeyValueStore>) {
+        let mut keyvalue_store = self.keyvalue_store.write().await;
+        *keyvalue_store = Some(store);
+    }
 }
 
 impl ServiceLocatorImpl {
@@ -1807,7 +1822,7 @@ async fn initialize_services_impl(
     // Create KeyValueStore based on configuration (for ProcessGroupRegistry and other services)
     // Always use SQLite - use :memory: for in-memory mode
     let effective_db_path = if use_memory { ":memory:".to_string() } else { db_path.clone() };
-    let kv_store: Arc<dyn plexspaces_keyvalue::KeyValueStore> = match SqliteKVStore::new(&effective_db_path).await {
+    let kv_store_concrete: Arc<SqliteKVStore> = match SqliteKVStore::new(&effective_db_path).await {
         Ok(store) => {
             if use_memory {
                 tracing::info!(backend = "SQLite :memory:", "KeyValue storage using in-memory SQLite");
@@ -1832,6 +1847,10 @@ async fn initialize_services_impl(
             fatal_exit(&error_msg);
         }
     };
+    // plexspaces_keyvalue::KeyValueStore - used by ProcessGroupRegistry and internal services
+    let kv_store: Arc<dyn plexspaces_keyvalue::KeyValueStore> = kv_store_concrete.clone();
+    // plexspaces_common::KeyValueStore - used by WASM actors via ServiceLocator
+    let kv_store_common: Arc<dyn plexspaces_core::KeyValueStore> = kv_store_concrete;
     
     // Create ObjectRegistry with its own repository backend (indexed columns for fast queries)
     // Uses the same SQLite database path as KeyValueStore for simplicity, but with its own table
@@ -1938,6 +1957,9 @@ async fn initialize_services_impl(
     // Register LockManager in ServiceLocator (use locks::LockManager directly)
     let service_locator: &dyn plexspaces_core::ServiceLocator = service_locator_impl.as_ref();
     service_locator.register_lock_manager(lock_manager.clone()).await;
+
+    // Register KeyValueStore in ServiceLocator so WASM actors can access the shared store
+    service_locator.register_keyvalue_store(kv_store_common).await;
     
     // Create ActorRegistry with ObjectRegistry (ObjectRegistry implements the trait directly)
     let object_registry_trait: Arc<dyn plexspaces_core::ObjectRegistry> = object_registry.clone();

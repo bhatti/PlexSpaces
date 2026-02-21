@@ -820,5 +820,6 @@ func main() {
 	router.Route("sensor", NewSensorActor)
 	router.Route("aggregator", NewAggregatorActor)
 	plexspaces.Register(router)
-	select {}
+	// In reactor mode (WASM component model), main() must return.
+	// The host drives the actor lifecycle via exported functions.
 }

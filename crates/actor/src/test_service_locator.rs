@@ -298,6 +298,14 @@ impl ServiceLocator for TestServiceLocatorStub {
     async fn register_node_registry(&self, _registry: Arc<dyn plexspaces_core::NodeRegistryTrait>) {
         // No-op for stub
     }
+
+    async fn get_keyvalue_store(&self) -> Option<Arc<dyn plexspaces_core::KeyValueStore>> {
+        None
+    }
+
+    async fn register_keyvalue_store(&self, _store: Arc<dyn plexspaces_core::KeyValueStore>) {
+        // No-op for stub
+    }
 }
 
 #[async_trait]

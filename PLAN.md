@@ -199,18 +199,104 @@ For each example:
 
 ---
 
-## Current Focus: #2 migrating_erlang_otp (Go)
+## Current Status (Session 2026-02-21)
 
-Convert Rust embedded counter example to a Go WASM rate limiter service:
-1. [x] Go SDK: add WASM exports (exports.go) for TinyGo
-2. [x] Go SDK: add multi-actor router (ActorRouter) for ACTOR_ROLES equivalent
-3. [x] Create rate_limiter.go with SlidingWindowRateLimiter actor
-4. [x] Create native Erlang reference (rate_limiter.erl)
-5. [ ] Create build.sh and test.sh
-6. [ ] Test: server.sh -> build.sh -> test.sh
-7. [ ] Verify metrics output
+### WASM SDK Build Infrastructure
 
-## Completed: #1 migrating_ray (Python) - DONE
+- **jco installed globally**: `npm install -g @bytecodealliance/jco` at `/opt/node22/lib/node_modules`
+- **All build.sh scripts** for Go, TypeScript, and Python examples search global npm path via `npm root -g`
+- **WASI adapter**: Found at `$(npm root -g)/@bytecodealliance/jco/lib/wasi_snapshot_preview1.reactor.wasm`
+- All Go examples (migrating_gosiris, migrating_erlang_otp, migrating_cloudflare_workers) build successfully
+- TypeScript migrating_cloudflare_workers builds successfully
+
+### KeyValueStore Fix (Critical - Completed This Session)
+
+**Problem**: WASM actors logged `KeyValue store not configured; kv_get will return error` because
+each actor was creating its own ephemeral `:memory:` SQLite KV store instead of using the node's
+shared KeyValue store.
+
+**Fix Applied**:
+1. Added `get_keyvalue_store()` / `register_keyvalue_store()` to `ServiceLocator` trait
+   - `crates/core/src/service_locator_trait.rs` - trait definition
+   - `crates/services/src/service_locator.rs` - ServiceLocatorImpl field + methods
+   - `crates/actor/src/test_service_locator.rs` - TestServiceLocatorStub stubs
+   - `crates/channel/src/process_group_backend.rs` - test stub
+2. Implemented `plexspaces_common::KeyValueStore` for `SqliteKVStore` and `PostgreSQLKVStore`
+   - `crates/keyvalue/src/sql.rs` - adapter from `plexspaces_keyvalue::KeyValueStore` to `plexspaces_common::KeyValueStore`
+   - Maps `KVError` -> `KeyValueStoreError::StorageError`
+3. Registered KV store in `initialize_services_impl` (service_locator.rs)
+   - Creates `Arc<SqliteKVStore>` concrete, then derives both trait objects:
+     - `Arc<dyn plexspaces_keyvalue::KeyValueStore>` for ProcessGroupRegistry
+     - `Arc<dyn plexspaces_core::KeyValueStore>` for ServiceLocator (WASM actors)
+4. Changed `wasm_application.rs` to use `service_locator.get_keyvalue_store().await`
+   instead of creating `SqliteKVStore::new(":memory:")`
+
+**Note**: `deployment_service.rs:238` still passes `None` for `keyvalue_store` when called via
+gRPC `instantiate_actor`. This path is only used for gRPC-initiated actor instantiation (not the
+HTTP deploy path used by test scripts). Fix if needed for gRPC actor instantiation use cases.
+
+### Node Log Analysis
+
+The plexspaces-node.log shows only expected/transient issues:
+- `WARN: Blob service unavailable` - MinIO/S3 not running, expected in dev
+- `WARN: Failed to renew lease: database is locked` - Transient SQLite locking
+- No actual errors
+
+### Build Status
+
+All Go examples, TypeScript migrating_cloudflare_workers, and the full workspace compile successfully.
+
+---
+
+## Example Completion Status
+
+### Go Apps (3/3 have build.sh + test.sh + .wasm)
+| App | Status |
+|-----|--------|
+| migrating_cloudflare_workers | DONE - guild_chat.wasm |
+| migrating_erlang_otp | DONE - rate_limiter.wasm |
+| migrating_gosiris | DONE - sensor_aggregation.wasm |
+
+### TypeScript Apps
+| App | Status |
+|-----|--------|
+| bank_account | Has build.sh + test.sh, needs build |
+| migrating_cloudflare_workers | DONE - guild_chat_actor.wasm |
+| migrating_orleans | INCOMPLETE - missing build.sh/test.sh |
+
+### Python Apps (4/17 built)
+| App | Status |
+|-----|--------|
+| bank_account | DONE |
+| calculator | DONE |
+| migrating_ractor | DONE |
+| migrating_ray | DONE |
+| *13 others* | Have build.sh/test.sh but not yet built |
+
+### Rust Embedded: 42 examples in examples/rust/embedded/
+
+---
+
+## Next Steps (For Next Session)
+
+1. **Test TypeScript migrating_cloudflare_workers end-to-end** - Start node, deploy, run test.sh
+   - The KeyValueStore fix should resolve the `kv_get will return error` issue
+   - Verify chat room and rate limiter actors work with KV operations
+
+2. **Build remaining Python examples** - Run build.sh for the 13 unbuilt Python apps
+
+3. **Complete TypeScript migrating_orleans** - Needs build.sh and test.sh
+
+4. **Continue migration examples** per Phase 2 plan (Group B, C, D, E)
+
+5. **Consider**: Fix `deployment_service.rs` to also pass `keyvalue_store` from a ServiceLocator
+   reference (currently only wasm_application.rs path has it)
+
+---
+
+## Completed Examples
+
+### #1 migrating_ray (Python) - DONE
 
 Python WASM app example completed end-to-end:
 1. [x] Framework fix: pass child_spec.id in init config
@@ -219,3 +305,26 @@ Python WASM app example completed end-to-end:
 4. [x] Create build.sh and test.sh
 5. [x] Test: server.sh -> build.sh -> test.sh
 6. [x] Verify metrics output
+
+### #2 migrating_erlang_otp (Go) - DONE
+
+Go WASM rate limiter service:
+1. [x] Go SDK: add WASM exports (exports.go) for TinyGo
+2. [x] Go SDK: add multi-actor router (ActorRouter) for ACTOR_ROLES equivalent
+3. [x] Create rate_limiter.go with SlidingWindowRateLimiter actor
+4. [x] Create native Erlang reference (rate_limiter.erl)
+5. [x] Create build.sh and test.sh
+6. [x] Build and test verified
+
+### #3 migrating_gosiris (Go) - DONE
+
+Go WASM IoT sensor aggregation:
+1. [x] Build.sh and test.sh created
+2. [x] sensor_aggregation.wasm built successfully
+
+### #6 migrating_cloudflare_workers (TypeScript + Go) - DONE (Build Only)
+
+Both TypeScript and Go versions build successfully:
+- TypeScript: guild_chat_actor.wasm
+- Go: guild_chat.wasm
+- Needs end-to-end test verification with the KeyValueStore fix applied

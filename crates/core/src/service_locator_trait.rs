@@ -405,6 +405,25 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `registry` - NodeRegistry to register
     async fn register_node_registry(&self, registry: std::sync::Arc<dyn NodeRegistryTrait>);
+
+    /// Get KeyValueStore
+    ///
+    /// ## Purpose
+    /// Returns KeyValueStore for key-value storage operations.
+    /// Used by WASM actors (kv_get/kv_put) and other components that need KV storage.
+    ///
+    /// ## Returns
+    /// Some(Arc<dyn KeyValueStore>) if registered, None otherwise
+    async fn get_keyvalue_store(&self) -> Option<std::sync::Arc<dyn KeyValueStore>>;
+
+    /// Register KeyValueStore
+    ///
+    /// ## Purpose
+    /// Registers KeyValueStore for key-value storage operations.
+    ///
+    /// ## Arguments
+    /// * `store` - KeyValueStore to register
+    async fn register_keyvalue_store(&self, store: std::sync::Arc<dyn KeyValueStore>);
 }
 
 /// Trait for WASM Runtime (defined in wasm-runtime crate)

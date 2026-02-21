@@ -1,10 +1,13 @@
 #!/bin/bash
-# Build Rate Limiter WASM actor using TinyGo
+# Build Rate Limiter WASM component using TinyGo
+#
+# Pipeline: TinyGo → core WASM → embed WIT → WASM Component
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 ACTOR_NAME="rate_limiter"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
 
 cd "$SCRIPT_DIR"
 
@@ -18,7 +21,46 @@ if ! command -v tinygo &>/dev/null; then
     exit 1
 fi
 
-# Build WASM module with TinyGo
-tinygo build -target=wasi -o "${ACTOR_NAME}.wasm" .
+# Check for wasm-tools
+if ! command -v wasm-tools &>/dev/null; then
+    echo "ERROR: wasm-tools not found. Install: cargo install wasm-tools"
+    exit 1
+fi
 
+# Find WASI adapter (reactor mode for library/actor modules)
+ADAPTER=""
+for candidate in \
+    "$REPO_ROOT/examples/typescript/apps/bank_account/node_modules/@bytecodealliance/jco/lib/wasi_snapshot_preview1.reactor.wasm" \
+    "$REPO_ROOT/examples/typescript/apps/migrating_cloudflare_workers/node_modules/@bytecodealliance/jco/lib/wasi_snapshot_preview1.reactor.wasm" \
+    "$HOME/.wasi_snapshot_preview1.reactor.wasm"; do
+    if [ -f "$candidate" ]; then
+        ADAPTER="$candidate"
+        break
+    fi
+done
+if [ -z "$ADAPTER" ]; then
+    echo "ERROR: WASI adapter not found. Install jco: npm install @bytecodealliance/jco"
+    exit 1
+fi
+
+# Step 1: Build core WASM module with TinyGo
+echo "  Step 1: TinyGo → core WASM module"
+tinygo build -target=wasi -o "${ACTOR_NAME}_core.wasm" .
+echo "    core module: $(ls -lh ${ACTOR_NAME}_core.wasm | awk '{print $5}')"
+
+# Step 2: Embed WIT metadata (legacy naming matches TinyGo's import convention)
+echo "  Step 2: Embed WIT metadata"
+wasm-tools component embed "$WIT_DIR" -w actor-world --dummy-names legacy \
+    "${ACTOR_NAME}_core.wasm" -o "${ACTOR_NAME}_embedded.wasm"
+
+# Step 3: Convert to WASM Component with WASI adapter
+echo "  Step 3: Create WASM Component"
+wasm-tools component new "${ACTOR_NAME}_embedded.wasm" \
+    --adapt "wasi_snapshot_preview1=$ADAPTER" \
+    -o "${ACTOR_NAME}.wasm"
+
+# Cleanup intermediate files
+rm -f "${ACTOR_NAME}_core.wasm" "${ACTOR_NAME}_embedded.wasm"
+
+echo ""
 echo "Built: ${ACTOR_NAME}.wasm ($(ls -lh ${ACTOR_NAME}.wasm | awk '{print $5}'))"

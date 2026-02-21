@@ -1,12 +1,16 @@
 #!/bin/bash
-# Build Guild Chat WASM component using TinyGo
+# Build IoT Sensor Aggregation WASM component using TinyGo
 #
 # Pipeline: TinyGo → core WASM → embed WIT → WASM Component
+#
+# TinyGo produces a WASI Preview 1 core module. We then use wasm-tools
+# to embed WIT metadata and convert to a WASM Component with a WASI
+# Preview 1→2 adapter, producing a fully conformant component.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-ACTOR_NAME="guild_chat"
+ACTOR_NAME="sensor_aggregation"
 WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
 
 cd "$SCRIPT_DIR"
@@ -40,6 +44,7 @@ for candidate in \
 done
 if [ -z "$ADAPTER" ]; then
     echo "ERROR: WASI adapter not found. Install jco: npm install @bytecodealliance/jco"
+    echo "  Or download from: https://github.com/bytecodealliance/wasmtime/releases"
     exit 1
 fi
 

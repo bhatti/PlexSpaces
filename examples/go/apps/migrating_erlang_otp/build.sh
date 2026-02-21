@@ -16,7 +16,7 @@ echo "Building $ACTOR_NAME using TinyGo..."
 # Check for tinygo
 if ! command -v tinygo &>/dev/null; then
     echo "ERROR: tinygo not found. Install from https://tinygo.org/getting-started/install/"
-    echo "  brew install tinygo  (macOS)"
+    echo "  brew tap tinygo-org/tools && brew install tinygo  (macOS)"
     echo "  snap install tinygo  (Linux)"
     exit 1
 fi

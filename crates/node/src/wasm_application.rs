@@ -545,10 +545,15 @@ impl WasmApplication {
             .get_keyvalue_store()
             .await;
 
-        // Get ProcessGroupRegistry from service locator if available
-        // Note: get_service_by_name requires Sized, so we can't call it on trait object
-        // For now, pass None - ProcessGroupRegistry is optional for WASM actors
-        let process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>> = None;
+        // Get ProcessGroupRegistry for WASM actors (needed for pg_join/pg_leave/pg_members/pg_broadcast)
+        // Create from the shared KeyValueStore so all actors share the same group membership state.
+        let process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>> =
+            keyvalue_store.as_ref().map(|kv| {
+                Arc::new(plexspaces_process_groups::ProcessGroupRegistry::new(
+                    node.id(),
+                    kv.clone(),
+                ))
+            });
 
         // Get LockManager from service locator so WASM actors can use host.lock_acquire/renew/release
         let lock_manager = service_locator.get_lock_manager().await;

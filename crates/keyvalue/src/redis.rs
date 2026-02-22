@@ -416,6 +416,10 @@ impl KeyValueStore for RedisKVStore {
     }
 }
 
+// Bridge plexspaces_keyvalue::KeyValueStore → plexspaces_common::KeyValueStore
+// for the Redis backend using the shared macro.
+crate::impl_common_keyvalue_store!(RedisKVStore);
+
 // ============================================================================
 // TESTS (TDD Approach)
 // ============================================================================

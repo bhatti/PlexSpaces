@@ -441,11 +441,13 @@ func toInt(v any) int {
 }
 
 // ========================================================================
-// Main - Register actor for WASM export
+// Registration - Register actor for WASM export
 // ========================================================================
 
-func main() {
+// init() runs during _initialize (before main), ensuring the actor is
+// registered before the host calls any exported functions like init/handle.
+func init() {
 	plexspaces.Register(NewSlidingWindowLimiter())
-	// In reactor mode (WASM component model), main() must return.
-	// The host drives the actor lifecycle via exported functions.
 }
+
+func main() {}

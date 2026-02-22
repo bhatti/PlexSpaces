@@ -1202,15 +1202,6 @@ impl AuditLogger {
 }
 ```
 
-### Legacy macros (backward compatibility)
-
-The following are still supported but prefer the new annotations:
-
-| Legacy API | Replacement |
-|------------|-------------|
-| `#[derive(PlexSpacesActor)]` | `#[actor]` or `#[gen_server_actor]` |
-| `plexspaces_impl_handlers!(Actor, behavior, ...)` | `#[plexspaces_handlers]` + `#[handler(...)]` |
-
 ### Rust examples using the SDK
 
 - **webhook_handler** — `#[gen_server_actor]`, `#[plexspaces_handlers]`, HTTP deliver/list; `examples/rust/embedded/webhook_handler/`
@@ -1218,6 +1209,159 @@ The following are still supported but prefer the new annotations:
 - **timeseries_forecasting** — uses `spawn_with_behavior_type` for BehaviorRegistry-based actors (pipeline by type name); see its README for when to use BehaviorRegistry vs SDK `spawn`
 
 Going forward, new Rust examples should use these SDK annotations and `spawn_actor` with facets where applicable. See [Examples](examples.md) and [Detailed Design - Behaviors](detailed-design.md#behaviors).
+
+---
+
+## Go SDK
+
+The Go SDK uses **TinyGo** to compile actors to WASM components. Actors implement a simple `Actor` interface with JSON-based state management. The SDK provides `BaseActor` for zero-boilerplate state serialization and `ActorRouter` for multi-actor modules.
+
+**Location**: `sdks/go/plexspaces/`
+
+### Installation
+
+```bash
+# TinyGo required (0.36+)
+brew install tinygo  # macOS
+# or see https://tinygo.org/getting-started/install/
+
+# wasm-tools required for Component Model
+cargo install wasm-tools
+```
+
+### Quick Start
+
+**1. Write your actor**
+
+```go
+package main
+
+import "github.com/example/plexspaces/sdks/go/plexspaces"
+
+type Counter struct {
+    plexspaces.BaseActor
+    Count int `json:"count"`
+}
+
+func (c *Counter) Handle(from, msgType, payloadJSON string) string {
+    switch msgType {
+    case "increment":
+        c.Count++
+        return fmt.Sprintf(`{"count":%d}`, c.Count)
+    case "get":
+        return fmt.Sprintf(`{"count":%d}`, c.Count)
+    default:
+        return `{"error":"unknown operation"}`
+    }
+}
+
+func init() {
+    plexspaces.Register(&Counter{})
+}
+
+func main() {}
+```
+
+**2. Build to WASM**
+
+```bash
+tinygo build -target=wasi -o counter_core.wasm .
+wasm-tools component embed wit/ -w actor-world counter_core.wasm -o counter_embedded.wasm
+wasm-tools component new counter_embedded.wasm --adapt wasi_snapshot_preview1.reactor.wasm -o counter.wasm
+```
+
+**3. Deploy**
+
+```bash
+curl -X POST http://localhost:8094/api/v1/deploy \
+  -F "namespace=default" \
+  -F "actor_type=counter" \
+  -F "wasm=@counter.wasm"
+```
+
+### Actor Interface
+
+```go
+type Actor interface {
+    Init(configJSON string) string
+    Handle(fromActor, msgType, payloadJSON string) string
+    GetState() string
+    SetState(stateJSON string) string
+}
+```
+
+`BaseActor` provides default `Init`, `GetState`, and `SetState` implementations using JSON serialization. You only need to implement `Handle`.
+
+### Multi-Actor Modules (ActorRouter)
+
+```go
+func init() {
+    router := plexspaces.NewActorRouter()
+    router.Route("chat-room", NewChatRoom)
+    router.Route("rate-limiter", NewRateLimiter)
+    plexspaces.Register(router)
+}
+```
+
+The router selects the actor by longest-prefix match on the actor ID. For example, `"chat-room-lobby:default"` matches `"chat-room"`.
+
+### Host Functions
+
+Access PlexSpaces capabilities via the `Host` singleton:
+
+| Function | Description |
+|----------|-------------|
+| **Messaging** | |
+| `host.Send(to, msgType, payload)` | Fire-and-forget message |
+| `host.Ask(to, msgType, payload, timeoutMs)` | Request-reply |
+| `host.SelfID()` | Get own actor ID |
+| **Actor Lifecycle** | |
+| `host.Spawn(moduleRef, actorID, config)` | Create actor |
+| `host.Stop(actorID)` | Terminate actor |
+| `host.Link(actorID)` / `host.Unlink(actorID)` | Erlang-style linking |
+| `host.Monitor(actorID)` / `host.Demonitor(ref)` | Unidirectional monitoring |
+| **Timers** | |
+| `host.SendAfter(delayMs, msgType, payload)` | Delayed message |
+| **Logging & Time** | |
+| `host.Log(level, msg)` / `host.Info(msg)` / `host.Warn(msg)` / `host.Error(msg)` | Structured logging |
+| `host.NowMs()` | Current timestamp (ms) |
+| **Key-Value Storage** | |
+| `host.KVGet(key)` / `host.KVPut(key, value)` / `host.KVDelete(key)` / `host.KVList(prefix)` | Key-value operations |
+| **TupleSpace** | |
+| `host.TSWrite(tupleJSON)` / `host.TSRead(patternJSON)` / `host.TSTake(patternJSON)` / `host.TSReadAll(patternJSON)` | Linda-style coordination |
+| **Distributed Locks** | |
+| `host.LockAcquire(...)` / `host.LockRelease(...)` / `host.LockRenew(...)` | Distributed locks with leases |
+| **Blob Storage** | |
+| `host.BlobUpload(id, data, contentType)` / `host.BlobDownload(id)` / `host.BlobDelete(id)` / `host.BlobList(prefix)` | S3-compatible storage |
+| **Process Groups** | |
+| `host.PG().Join(group)` / `host.PG().Leave(group)` / `host.PG().Members(group)` / `host.PG().Broadcast(group, msgType, payload)` | Distributed pub/sub |
+
+### WASM Component Model Architecture
+
+The Go SDK implements the WASM Component Model canonical ABI directly in `exports.go`:
+
+- **`cabi_realloc`**: Memory allocation for host-to-guest string passing
+- **Qualified export names**: `plexspaces:simple-actor/actor@0.1.0#init`, `#handle`, `#get-state`, `#set-state`
+- **Raw uint32 signatures**: String parameters as `(ptr, len)` pairs, returns via 8-byte return area
+- **`cabi_post_*` cleanup functions**: Called by host after reading return values
+
+This eliminates the need for `--dummy-names legacy` in `wasm-tools component embed` and ensures proper matching between TinyGo exports and the WIT interface.
+
+### Testing
+
+The SDK includes comprehensive tests (`plexspaces_test.go`) that run natively (not in WASM) using stub implementations of all host functions. Tests cover:
+- Actor interface and BaseActor state round-trip
+- ActorRouter prefix matching and longest-match-wins logic
+- Host function stubs for all capabilities (KV, PG, Locks, Blobs, TupleSpace)
+- Error handling and HostError type
+
+### Examples
+
+| Example | Pattern | Actors | Features |
+|---------|---------|--------|----------|
+| `migrating_erlang_otp` | Erlang GenServer | 1 (RateLimiter) | Sliding window algorithm, benchmarking |
+| `migrating_cloudflare_workers` | Cloudflare Durable Objects | 2 (ChatRoom, RateLimiter) | ActorRouter, KV store, fan-out |
+| `migrating_gosiris` | Gosiris Actor Model | 2 (Sensor, Aggregator) | Process groups, polling, anomaly detection |
 
 ---
 
@@ -1297,8 +1441,13 @@ sdks/
 │   └── plexspaces-sdk-macros/  # #[derive(PlexSpacesActor)]
 └── go/                    # Go SDK (TinyGo WASM actors)
     └── plexspaces/
-        ├── host.go        # Host function wrappers
-        └── host_imports.go # WIT wasmimport directives
+        ├── actor.go       # Actor interface + BaseActor
+        ├── host.go        # Host function wrappers (Host singleton)
+        ├── host_imports.go # WIT wasmimport directives (TinyGo)
+        ├── host_stubs.go  # Native/test stub implementations
+        ├── exports.go     # WASM Component Model canonical ABI exports
+        ├── router.go      # ActorRouter for multi-actor modules
+        └── plexspaces_test.go # Comprehensive unit tests
 ```
 
 ---

@@ -56,9 +56,9 @@ echo "  Step 1: TinyGo → core WASM module"
 tinygo build -target=wasi -o "${ACTOR_NAME}_core.wasm" .
 echo "    core module: $(ls -lh ${ACTOR_NAME}_core.wasm | awk '{print $5}')"
 
-# Step 2: Embed WIT metadata (legacy naming matches TinyGo's import convention)
+# Step 2: Embed WIT metadata into the core module
 echo "  Step 2: Embed WIT metadata"
-wasm-tools component embed "$WIT_DIR" -w actor-world --dummy-names legacy \
+wasm-tools component embed "$WIT_DIR" -w actor-world \
     "${ACTOR_NAME}_core.wasm" -o "${ACTOR_NAME}_embedded.wasm"
 
 # Step 3: Convert to WASM Component with WASI adapter

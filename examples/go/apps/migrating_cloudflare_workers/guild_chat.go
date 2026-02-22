@@ -789,14 +789,16 @@ func toInt(v any) int {
 }
 
 // ========================================================================
-// Main - Register multi-actor router for WASM export
+// Registration - Register actors for WASM export
 // ========================================================================
 
-func main() {
+// init() runs during _initialize (before main), ensuring the actors are
+// registered before the host calls any exported functions like init/handle.
+func init() {
 	router := plexspaces.NewActorRouter()
 	router.Route("chat-room", NewChatRoom)
 	router.Route("rate-limiter", NewRateLimiter)
 	plexspaces.Register(router)
-	// In reactor mode (WASM component model), main() must return.
-	// The host drives the actor lifecycle via exported functions.
 }
+
+func main() {}

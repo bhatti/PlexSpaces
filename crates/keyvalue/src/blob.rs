@@ -701,5 +701,9 @@ impl KeyValueStore for BlobKVStore {
     }
 }
 
+// Bridge plexspaces_keyvalue::KeyValueStore → plexspaces_common::KeyValueStore
+// for the Blob backend using the shared macro.
+crate::impl_common_keyvalue_store!(BlobKVStore);
+
 // Import futures::StreamExt for stream.next()
 use futures::StreamExt;

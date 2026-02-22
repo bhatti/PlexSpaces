@@ -812,14 +812,16 @@ func hashString(s string) uint64 {
 }
 
 // ========================================================================
-// Main - Register actors for WASM export
+// Registration - Register actors for WASM export
 // ========================================================================
 
-func main() {
+// init() runs during _initialize (before main), ensuring the actors are
+// registered before the host calls any exported functions like init/handle.
+func init() {
 	router := plexspaces.NewActorRouter()
 	router.Route("sensor", NewSensorActor)
 	router.Route("aggregator", NewAggregatorActor)
 	plexspaces.Register(router)
-	// In reactor mode (WASM component model), main() must return.
-	// The host drives the actor lifecycle via exported functions.
 }
+
+func main() {}

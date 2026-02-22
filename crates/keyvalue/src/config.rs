@@ -277,6 +277,116 @@ pub async fn create_keyvalue_from_env() -> KVResult<Arc<dyn KeyValueStore>> {
     create_keyvalue_from_config(config).await
 }
 
+/// Create both rich and common KeyValue store trait objects from environment configuration.
+///
+/// Returns a tuple of:
+/// - `Arc<dyn KeyValueStore>` (rich trait for ProcessGroupRegistry and internal services)
+/// - `Arc<dyn plexspaces_common::KeyValueStore>` (common trait for WASM actors via ServiceLocator)
+///
+/// Each backend type implements both traits, so both Arc references point to the same underlying store.
+pub async fn create_keyvalue_stores_from_env() -> KVResult<(Arc<dyn KeyValueStore>, Arc<dyn plexspaces_common::KeyValueStore>)> {
+    let config = KVConfig::from_env()?;
+    create_keyvalue_stores_from_config(config).await
+}
+
+/// Create both rich and common KeyValue store trait objects from explicit configuration.
+///
+/// Returns a tuple of:
+/// - `Arc<dyn KeyValueStore>` (rich trait for ProcessGroupRegistry and internal services)
+/// - `Arc<dyn plexspaces_common::KeyValueStore>` (common trait for WASM actors via ServiceLocator)
+pub async fn create_keyvalue_stores_from_config(config: KVConfig) -> KVResult<(Arc<dyn KeyValueStore>, Arc<dyn plexspaces_common::KeyValueStore>)> {
+    match config.backend {
+        BackendType::InMemory => {
+            #[cfg(feature = "sql-backend")]
+            {
+                use crate::sql::SqliteKVStore;
+                let store = Arc::new(SqliteKVStore::new(":memory:").await?);
+                let rich: Arc<dyn KeyValueStore> = store.clone();
+                let common: Arc<dyn plexspaces_common::KeyValueStore> = store;
+                Ok((rich, common))
+            }
+            #[cfg(not(feature = "sql-backend"))]
+            {
+                Err(KVError::ConfigError(
+                    "InMemory backend requires 'sql-backend' feature (uses SQLite :memory:)".to_string(),
+                ))
+            }
+        }
+
+        #[cfg(feature = "sql-backend")]
+        BackendType::Sqlite { path } => {
+            use crate::sql::SqliteKVStore;
+            let store = Arc::new(SqliteKVStore::new(&path).await?);
+            let rich: Arc<dyn KeyValueStore> = store.clone();
+            let common: Arc<dyn plexspaces_common::KeyValueStore> = store;
+            Ok((rich, common))
+        }
+
+        #[cfg(not(feature = "sql-backend"))]
+        BackendType::Sqlite { .. } => Err(KVError::ConfigError(
+            "SQLite backend requires 'sql-backend' feature".to_string(),
+        )),
+
+        #[cfg(feature = "sql-backend")]
+        BackendType::PostgreSQL {
+            connection_string,
+            pool_size,
+        } => {
+            use crate::sql::PostgreSQLKVStore;
+            let store = Arc::new(PostgreSQLKVStore::new(&connection_string, pool_size).await?);
+            let rich: Arc<dyn KeyValueStore> = store.clone();
+            let common: Arc<dyn plexspaces_common::KeyValueStore> = store;
+            Ok((rich, common))
+        }
+
+        #[cfg(not(feature = "sql-backend"))]
+        BackendType::PostgreSQL { .. } => Err(KVError::ConfigError(
+            "PostgreSQL backend requires 'sql-backend' feature".to_string(),
+        )),
+
+        #[cfg(feature = "redis-backend")]
+        BackendType::Redis { url, namespace } => {
+            use crate::redis::RedisKVStore;
+            let store = Arc::new(RedisKVStore::new(&url, &namespace).await?);
+            let rich: Arc<dyn KeyValueStore> = store.clone();
+            let common: Arc<dyn plexspaces_common::KeyValueStore> = store;
+            Ok((rich, common))
+        }
+
+        #[cfg(not(feature = "redis-backend"))]
+        BackendType::Redis { .. } => Err(KVError::ConfigError(
+            "Redis backend requires 'redis-backend' feature".to_string(),
+        )),
+
+        #[cfg(feature = "ddb-backend")]
+        BackendType::DynamoDB {
+            region,
+            table_prefix,
+            endpoint_url,
+        } => {
+            use crate::ddb::DynamoDBKVStore;
+            let table_name = format!("{}{}", table_prefix, "keyvalue");
+            let store = Arc::new(DynamoDBKVStore::new(region, table_name, endpoint_url)
+                .await
+                .map_err(|e| KVError::ConfigError(format!("Failed to create DynamoDB keyvalue store: {}", e)))?);
+            let rich: Arc<dyn KeyValueStore> = store.clone();
+            let common: Arc<dyn plexspaces_common::KeyValueStore> = store;
+            Ok((rich, common))
+        }
+
+        #[cfg(feature = "blob-backend")]
+        BackendType::BlobFromEnv { config } => {
+            use crate::blob::BlobKVStore;
+            let store = Arc::new(BlobKVStore::new(config)
+                .await
+                .map_err(|e| KVError::ConfigError(format!("Failed to create blob keyvalue store: {}", e)))?);
+            let rich: Arc<dyn KeyValueStore> = store.clone();
+            let common: Arc<dyn plexspaces_common::KeyValueStore> = store;
+            Ok((rich, common))
+        }
+    }
+}
+
 /// Create a KeyValue store from explicit configuration.
 ///
 /// ## Examples

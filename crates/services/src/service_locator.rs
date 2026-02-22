@@ -1733,7 +1733,6 @@ async fn initialize_services_impl(
 ) {
     // Get trait object for methods that need it (used implicitly via service_locator_impl)
     use plexspaces_core::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
-    use plexspaces_keyvalue::SqliteKVStore;
     use plexspaces_object_registry::SqliteObjectRegistryRepository;
     use plexspaces_process_groups::ProcessGroupRegistry;
     use std::collections::HashMap;
@@ -1819,38 +1818,58 @@ async fn initialize_services_impl(
         format!("/tmp/plexspaces-kv-{}.db", sanitized_node_id)
     };
 
-    // Create KeyValueStore based on configuration (for ProcessGroupRegistry and other services)
-    // Always use SQLite - use :memory: for in-memory mode
+    // Create KeyValueStore based on environment configuration.
+    // If PLEXSPACES_KV_BACKEND is set, use create_keyvalue_stores_from_env() to select the backend.
+    // Otherwise, fall back to SQLite with the config-derived path for backward compatibility.
+    // Each backend implements both plexspaces_keyvalue::KeyValueStore (rich) and
+    // plexspaces_common::KeyValueStore (consumer-facing for WASM actors).
     let effective_db_path = if use_memory { ":memory:".to_string() } else { db_path.clone() };
-    let kv_store_concrete: Arc<SqliteKVStore> = match SqliteKVStore::new(&effective_db_path).await {
-        Ok(store) => {
-            if use_memory {
-                tracing::info!(backend = "SQLite :memory:", "KeyValue storage using in-memory SQLite");
-            } else {
-                tracing::info!(backend = "SQLite", path = %effective_db_path, "KeyValue storage using file-based SQLite");
+    let (kv_store, kv_store_common): (Arc<dyn plexspaces_keyvalue::KeyValueStore>, Arc<dyn plexspaces_core::KeyValueStore>) = if std::env::var("PLEXSPACES_KV_BACKEND").is_ok() {
+        // Use environment-configured backend (Redis, PostgreSQL, DynamoDB, Blob, etc.)
+        match plexspaces_keyvalue::create_keyvalue_stores_from_env().await {
+            Ok(stores) => {
+                tracing::info!("KeyValue storage initialized from PLEXSPACES_KV_BACKEND environment variable");
+                stores
             }
-            Arc::new(store)
+            Err(e) => {
+                let error_msg = format!(
+                    "FATAL: Failed to initialize KeyValue store from environment: {}. \
+                    Check PLEXSPACES_KV_BACKEND and related environment variables.",
+                    e
+                );
+                tracing::error!(error = %e, "FATAL: Failed to initialize KeyValue store from environment.");
+                fatal_exit(&error_msg);
+            }
         }
-        Err(e) => {
-            let error_msg = format!(
-                "FATAL: Failed to initialize SQLite KeyValue store at '{}': {}. \
-                Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
-                effective_db_path, e
-            );
-            tracing::error!(
-                db_path = %effective_db_path,
-                error = %e,
-                "FATAL: Failed to initialize SQLite KeyValue store. Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory."
-            );
-            // Note: initialize_services_impl doesn't have access to ServiceLocatorImpl
-            // So we can't use the channel here - use direct exit
-            fatal_exit(&error_msg);
+    } else {
+        // Default: SQLite with config-derived path (backward compatible)
+        let config = plexspaces_keyvalue::KVConfig::new(plexspaces_keyvalue::BackendType::Sqlite {
+            path: effective_db_path.clone(),
+        });
+        match plexspaces_keyvalue::create_keyvalue_stores_from_config(config).await {
+            Ok(stores) => {
+                if use_memory {
+                    tracing::info!(backend = "SQLite :memory:", "KeyValue storage using in-memory SQLite");
+                } else {
+                    tracing::info!(backend = "SQLite", path = %effective_db_path, "KeyValue storage using file-based SQLite");
+                }
+                stores
+            }
+            Err(e) => {
+                let error_msg = format!(
+                    "FATAL: Failed to initialize SQLite KeyValue store at '{}': {}. \
+                    Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
+                    effective_db_path, e
+                );
+                tracing::error!(
+                    db_path = %effective_db_path,
+                    error = %e,
+                    "FATAL: Failed to initialize SQLite KeyValue store."
+                );
+                fatal_exit(&error_msg);
+            }
         }
     };
-    // plexspaces_keyvalue::KeyValueStore - used by ProcessGroupRegistry and internal services
-    let kv_store: Arc<dyn plexspaces_keyvalue::KeyValueStore> = kv_store_concrete.clone();
-    // plexspaces_common::KeyValueStore - used by WASM actors via ServiceLocator
-    let kv_store_common: Arc<dyn plexspaces_core::KeyValueStore> = kv_store_concrete;
     
     // Create ObjectRegistry with its own repository backend (indexed columns for fast queries)
     // Uses the same SQLite database path as KeyValueStore for simplicity, but with its own table

@@ -40,5 +40,6 @@ pub mod wasm_application_integration;
 pub mod wasm_application_spec_integration_tests;
 pub mod wasm_app_facet_toml_integration;
 pub mod wasm_apps_loader_tests;
+pub mod wasm_ask_message_id_tests;
 pub mod wasm_checkpoint_durability_tests;
 pub mod wasm_component_deployment_integration;

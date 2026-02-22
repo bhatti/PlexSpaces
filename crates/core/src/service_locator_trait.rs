@@ -405,6 +405,25 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `registry` - NodeRegistry to register
     async fn register_node_registry(&self, registry: std::sync::Arc<dyn NodeRegistryTrait>);
+
+    /// Get KeyValueStore
+    ///
+    /// ## Purpose
+    /// Returns KeyValueStore for key-value storage operations.
+    /// Used by WASM actors (kv_get/kv_put) and other components that need KV storage.
+    ///
+    /// ## Returns
+    /// Some(Arc<dyn KeyValueStore>) if registered, None otherwise
+    async fn get_keyvalue_store(&self) -> Option<std::sync::Arc<dyn KeyValueStore>>;
+
+    /// Register KeyValueStore
+    ///
+    /// ## Purpose
+    /// Registers KeyValueStore for key-value storage operations.
+    ///
+    /// ## Arguments
+    /// * `store` - KeyValueStore to register
+    async fn register_keyvalue_store(&self, store: std::sync::Arc<dyn KeyValueStore>);
 }
 
 /// Trait for WASM Runtime (defined in wasm-runtime crate)
@@ -468,9 +487,9 @@ pub trait WasmRuntimeTrait: Send + Sync {
     /// specific to wasm-runtime crate. `process_group_registry` and `blob_service` are also
     /// concrete types, so they remain as `Arc<dyn Any>`.
     /// 
-    /// `message_sender` uses `plexspaces_core::MessageSender` for proper trait-based design.
-    /// The wasm-runtime implementation will need to adapt between the core MessageSender
-    /// and its internal MessageSender trait if needed.
+    /// `message_sender` is `Arc<dyn Any>` because the wasm-runtime crate has its own
+    /// `MessageSender` trait (with ask, spawn, etc.) that differs from core's `MessageSender`.
+    /// Callers pass the concrete wasm-runtime `MessageSender` wrapped in `Arc<dyn Any>`.
     async fn instantiate(
         &self,
         module: std::sync::Arc<dyn std::any::Any + Send + Sync>,
@@ -478,7 +497,7 @@ pub trait WasmRuntimeTrait: Send + Sync {
         initial_state: &[u8],
         config: std::sync::Arc<dyn std::any::Any + Send + Sync>,
         channel_service: Option<std::sync::Arc<dyn ChannelService>>,
-        message_sender: Option<std::sync::Arc<dyn MessageSender>>,
+        message_sender: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
         tuplespace_provider: Option<std::sync::Arc<dyn TupleSpaceProvider>>,
         keyvalue_store: Option<std::sync::Arc<dyn KeyValueStore>>,
         process_group_registry: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,

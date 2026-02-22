@@ -138,13 +138,20 @@ pub fn ask_helper(
     Box::pin(async move {
         // Clone message_id before message is moved
         let message_id = message.id.clone();
-        
+
         message.sender_id = temp_sender_id.clone();
         message.correlation_id = correlation_id.clone();
         if message.receiver_id.is_empty() {
             message.receiver_id = target_actor_id.clone();
         }
 
+        tracing::debug!(
+            message_id = %message_id,
+            sender_id = %temp_sender_id,
+            recipient_id = %target_actor_id,
+            correlation_id = %correlation_id,
+            "ask_helper: routing request to target, waiting for reply on temp sender"
+        );
 
         let waiter = ReplyWaiter::new();
         let waiter_registry = service_locator
@@ -171,6 +178,26 @@ pub fn ask_helper(
         }
 
         let result = waiter.wait(timeout).await;
+        match &result {
+            Ok(reply) => {
+                tracing::debug!(
+                    request_id = %message_id,
+                    reply_id = %reply.id,
+                    temp_sender = %temp_sender_id,
+                    correlation_id = %correlation_id,
+                    "ask_helper: reply received from target"
+                );
+            }
+            Err(e) => {
+                tracing::debug!(
+                    request_id = %message_id,
+                    temp_sender = %temp_sender_id,
+                    correlation_id = %correlation_id,
+                    error = %e,
+                    "ask_helper: wait for reply failed"
+                );
+            }
+        }
         result.map_err(|e| match e {
             ReplyWaiterError::Timeout => ActorRefError::Timeout,
             _ => ActorRefError::SendFailed(format!("Reply waiter error: {}", e)),

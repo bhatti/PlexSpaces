@@ -1,0 +1,76 @@
+# Gosiris IoT Sensor Aggregation Application Configuration
+#
+# Deploys a sensor network with multiple sensor actors and an aggregator.
+# Demonstrates Gosiris-style actor model with process groups for discovery.
+#
+# Architecture:
+#   sensor-* actors -> join "sensors" process group -> aggregator polls via PG
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Aggregator actor - collects and analyzes sensor data
+[[supervisor.children]]
+id = "aggregator"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+max_readings = "200"
+alert_thresh_temp_c = "5.0"
+alert_thresh_humid = "20.0"
+
+# Sensor 1 - Data center zone A (cool)
+[[supervisor.children]]
+id = "sensor-dc-zone-a"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+location = "dc-zone-a"
+sensor_type = "temp_humidity"
+base_temp_c = "18.5"
+base_humidity = "35.0"
+
+# Sensor 2 - Data center zone B (warm)
+[[supervisor.children]]
+id = "sensor-dc-zone-b"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+location = "dc-zone-b"
+sensor_type = "temp_humidity"
+base_temp_c = "24.0"
+base_humidity = "42.0"
+
+# Sensor 3 - Server room (hot)
+[[supervisor.children]]
+id = "sensor-server-room"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+location = "server-room"
+sensor_type = "temp_humidity"
+base_temp_c = "28.5"
+base_humidity = "30.0"
+
+# Sensor 4 - Outdoor (variable)
+[[supervisor.children]]
+id = "sensor-outdoor"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+location = "outdoor"
+sensor_type = "temp_humidity"
+base_temp_c = "15.0"
+base_humidity = "65.0"

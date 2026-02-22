@@ -2,18 +2,15 @@
 // Comparison: Ray Parameter Server (Distributed ML Training with Elastic Pools)
 // Based on: https://docs.ray.io/en/latest/ray-core/examples/plot_parameter_server.html
 
-use plexspaces_actor::{ActorBuilder, ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use plexspaces_actor::ActorRef;
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, Message};
+use plexspaces_core::behavior_factory::BehaviorRegistry;
 use plexspaces_node::NodeBuilder;
-use std::sync::Arc;
-use plexspaces_tuplespace::{Tuple, TupleField, Pattern, PatternField};
-use plexspaces_mailbox::Message as MailboxMessage;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
-use std::collections::HashMap;
-use tracing::{info, warn};
-use async_trait::async_trait;
+use tracing::info;
 
 /// Model weights (simplified neural network)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,7 +66,7 @@ impl ParameterServerActor {
         // Aggregate gradients from multiple workers
         let mut aggregated_d_w1 = vec![vec![0.0; 784]; 200];
         let mut aggregated_d_w2 = vec![0.0; 200];
-        
+
         for grad in gradients {
             for (i, row) in grad.d_w1.iter().enumerate() {
                 for (j, val) in row.iter().enumerate() {
@@ -80,7 +77,7 @@ impl ParameterServerActor {
                 aggregated_d_w2[i] += val;
             }
         }
-        
+
         // Average gradients
         let num_workers = gradients.len() as f32;
         for row in aggregated_d_w1.iter_mut() {
@@ -91,7 +88,7 @@ impl ParameterServerActor {
         for val in aggregated_d_w2.iter_mut() {
             *val /= num_workers;
         }
-        
+
         // Update weights (SGD)
         for (i, row) in aggregated_d_w1.iter().enumerate() {
             for (j, grad) in row.iter().enumerate() {
@@ -101,7 +98,7 @@ impl ParameterServerActor {
         for (i, grad) in aggregated_d_w2.iter().enumerate() {
             self.model_weights.w2[i] -= self.learning_rate * grad;
         }
-        
+
         self.iteration += 1;
     }
 }
@@ -111,7 +108,7 @@ impl Actor for ParameterServerActor {
     async fn handle_message(
         &mut self,
         ctx: &ActorContext,
-        msg: MailboxMessage,
+        msg: Message,
     ) -> Result<(), BehaviorError> {
         <Self as GenServer>::route_message(self, ctx, msg).await
     }
@@ -126,29 +123,32 @@ impl GenServer for ParameterServerActor {
     async fn handle_request(
         &mut self,
         ctx: &ActorContext,
-        msg: MailboxMessage,
+        msg: Message,
     ) -> Result<(), BehaviorError> {
-        let ps_msg: ParameterServerMessage = serde_json::from_slice(msg.payload())
+        let ps_msg: ParameterServerMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
-        
-        let sender_id = match &msg.sender {
-            Some(id) => id,
-            None => return Ok(()), // No reply needed
-        };
-        
+
+        if msg.sender_id.is_empty() {
+            return Ok(()); // No reply needed
+        }
+
         match ps_msg {
             ParameterServerMessage::ApplyGradients { gradients } => {
-                info!("[PARAMETER SERVER] Applying gradients from {} workers (iteration {})", 
+                info!("[PARAMETER SERVER] Applying gradients from {} workers (iteration {})",
                     gradients.len(), self.iteration);
                 self.apply_gradients(&gradients);
                 let reply_msg = ParameterServerMessage::Weights {
                     weights: self.model_weights.clone(),
                 };
-                let reply = MailboxMessage::new(serde_json::to_vec(&reply_msg).unwrap());
+                let reply = Message {
+                    id: ulid::Ulid::new().to_string(),
+                    payload: serde_json::to_vec(&reply_msg).unwrap(),
+                    ..Default::default()
+                };
                 ctx.send_reply(
-                    msg.correlation_id.as_deref(),
-                    sender_id,
-                    msg.receiver.clone(),
+                    Some(&msg.correlation_id),
+                    &msg.sender_id,
+                    msg.receiver_id.clone(),
                     reply,
                 ).await
                     .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
@@ -159,11 +159,15 @@ impl GenServer for ParameterServerActor {
                 let reply_msg = ParameterServerMessage::Weights {
                     weights: self.model_weights.clone(),
                 };
-                let reply = MailboxMessage::new(serde_json::to_vec(&reply_msg).unwrap());
+                let reply = Message {
+                    id: ulid::Ulid::new().to_string(),
+                    payload: serde_json::to_vec(&reply_msg).unwrap(),
+                    ..Default::default()
+                };
                 ctx.send_reply(
-                    msg.correlation_id.as_deref(),
-                    sender_id,
-                    msg.receiver.clone(),
+                    Some(&msg.correlation_id),
+                    &msg.sender_id,
+                    msg.receiver_id.clone(),
                     reply,
                 ).await
                     .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
@@ -191,16 +195,16 @@ impl DataWorkerActor {
         }
     }
 
-    fn compute_gradients(&self, weights: &ModelWeights) -> Gradients {
+    fn compute_gradients(&self, _weights: &ModelWeights) -> Gradients {
         // Simulate gradient computation on data shard
         // In real app, this would compute actual gradients using backpropagation
-        info!("[DATA WORKER {}] Computing gradients on {} samples", 
+        info!("[DATA WORKER {}] Computing gradients on {} samples",
             self.worker_id, self.data_shard.len());
-        
+
         // Simulate gradient computation
         let mut d_w1 = vec![vec![0.0; 784]; 200];
         let mut d_w2 = vec![0.0; 200];
-        
+
         // Process batch
         for (input, _target) in self.data_shard.iter().take(self.batch_size) {
             // Simulate forward/backward pass (simplified)
@@ -211,7 +215,7 @@ impl DataWorkerActor {
                 d_w2[i] += 0.001; // Simulated gradient
             }
         }
-        
+
         Gradients { d_w1, d_w2 }
     }
 }
@@ -221,7 +225,7 @@ impl Actor for DataWorkerActor {
     async fn handle_message(
         &mut self,
         ctx: &ActorContext,
-        msg: MailboxMessage,
+        msg: Message,
     ) -> Result<(), BehaviorError> {
         <Self as GenServer>::route_message(self, ctx, msg).await
     }
@@ -236,25 +240,28 @@ impl GenServer for DataWorkerActor {
     async fn handle_request(
         &mut self,
         ctx: &ActorContext,
-        msg: MailboxMessage,
+        msg: Message,
     ) -> Result<(), BehaviorError> {
-        let worker_msg: DataWorkerMessage = serde_json::from_slice(msg.payload())
+        let worker_msg: DataWorkerMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
-        
-        let sender_id = match &msg.sender {
-            Some(id) => id,
-            None => return Ok(()), // No reply needed
-        };
-        
+
+        if msg.sender_id.is_empty() {
+            return Ok(()); // No reply needed
+        }
+
         match worker_msg {
             DataWorkerMessage::ComputeGradients { weights } => {
                 let gradients = self.compute_gradients(&weights);
                 let reply_msg = DataWorkerMessage::Gradients { gradients };
-                let reply = MailboxMessage::new(serde_json::to_vec(&reply_msg).unwrap());
+                let reply = Message {
+                    id: ulid::Ulid::new().to_string(),
+                    payload: serde_json::to_vec(&reply_msg).unwrap(),
+                    ..Default::default()
+                };
                 ctx.send_reply(
-                    msg.correlation_id.as_deref(),
-                    sender_id,
-                    msg.receiver.clone(),
+                    Some(&msg.correlation_id),
+                    &msg.sender_id,
+                    msg.receiver_id.clone(),
                     reply,
                 ).await
                     .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
@@ -289,35 +296,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = NodeBuilder::new("comparison-node-1")
         .build().await;
 
+    // Register behaviors in BehaviorRegistry so ActorFactory can create them
+    let behavior_registry = BehaviorRegistry::new();
+    behavior_registry.register("ParameterServer", |_args| {
+        Box::pin(async move {
+            Ok(Box::new(ParameterServerActor::new(0.01)) as Box<dyn Actor>)
+        })
+    }).await;
+    behavior_registry.register("DataWorker", |_args| {
+        Box::pin(async move {
+            Ok(Box::new(DataWorkerActor::new(
+                "worker".to_string(),
+                Vec::new(),
+                32,
+            )) as Box<dyn Actor>)
+        })
+    }).await;
+    node.service_locator().register_behavior_registry(Arc::new(behavior_registry)).await;
+
     // Create Parameter Server (centralized model weights)
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("Creating Parameter Server (centralized model weights)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    // Create DurabilityFacet
-    let storage = MemoryJournalStorage::new();
-    let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
-    
-    // Spawn using ActorFactory with facets
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+
+    // Spawn using Node::spawn (delegates to ActorFactory)
     let actor_id = "parameter-server@comparison-node-1".to_string();
     let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-    let _message_sender = actor_factory.spawn_actor(
+    let _message_sender = node.spawn(
         &ctx,
         &actor_id,
-        "GenServer",
+        "ParameterServer",
         vec![], // initial_state
         None, // config
         std::collections::HashMap::new(), // labels
-        vec![durability_facet], // facets
+        vec![], // facets
     ).await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    
-    // Create ActorRef directly - no need to access mailbox
-    let parameter_server = plexspaces_actor::ActorRef::remote(
+
+    // Create ActorRef for messaging
+    let parameter_server = ActorRef::remote(
         actor_id.clone(),
-        node.id().as_str().to_string(),
+        "internal".to_string(),
+        "system".to_string(),
+        node.id().to_string(),
         node.service_locator().clone(),
     );
 
@@ -334,53 +355,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("Creating elastic pool of data workers (horizontal scaling)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
+
     let mut data_workers = Vec::new();
     let worker_count = 4; // Elastic pool size (can scale dynamically)
-    
+
     // Generate data shards for each worker
     for i in 0..worker_count {
         // Each worker gets a shard of the dataset
-        let data_shard: Vec<(Vec<f32>, f32)> = (0..1000)
+        let _data_shard: Vec<(Vec<f32>, f32)> = (0..1000)
             .map(|j| {
                 let input = (0..784).map(|_| (j as f32 + i as f32) * 0.001).collect();
                 let target = (j % 10) as f32;
                 (input, target)
             })
             .collect();
-        
-        let behavior = Box::new(DataWorkerActor::new(
-            format!("worker-{}", i),
-            data_shard,
-            32, // batch_size
-        ));
-        let actor = ActorBuilder::new(behavior)
-            .with_id(format!("data-worker-{}@comparison-node-1", i))
-            .build().await
-            .await;
-        
-        // Spawn using ActorFactory with facets
-        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-        use std::sync::Arc;
-        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
+
+        // Spawn using Node::spawn
         let worker_id = format!("data-worker-{}@comparison-node-1", i);
         let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-        let _message_sender = actor_factory.spawn_actor(
+        let _message_sender = node.spawn(
             &ctx,
             &worker_id,
-            "GenServer",
+            "DataWorker",
             vec![], // initial_state
             None, // config
             std::collections::HashMap::new(), // labels
             vec![], // facets
         ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-        
-        // Create ActorRef directly - no need to access mailbox
-        let worker = plexspaces_actor::ActorRef::remote(
+
+        // Create ActorRef for messaging
+        let worker = ActorRef::remote(
             worker_id.clone(),
-            node.id().as_str().to_string(),
+            "internal".to_string(),
+            "system".to_string(),
+            node.id().to_string(),
             node.service_locator().clone(),
         );
         data_workers.push(worker);
@@ -402,17 +411,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("Test: Synchronous Parameter Server Training (Ray pattern)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
+
     let iterations = 10;
     let training_start = std::time::Instant::now();
-    
+
     // Get initial weights
-    let msg = MailboxMessage::new(serde_json::to_vec(&ParameterServerMessage::GetWeights)?)
-        .with_message_type("call".to_string());
+    let msg = Message {
+        id: ulid::Ulid::new().to_string(),
+        payload: serde_json::to_vec(&ParameterServerMessage::GetWeights)?,
+        message_type: "call".to_string(),
+        ..Default::default()
+    };
     let result = parameter_server
-        .ask(msg.clone(), Duration::from_secs(5))
+        .ask(msg, Duration::from_secs(5))
         .await?;
-    let reply: ParameterServerMessage = serde_json::from_slice(result.payload())?;
+    let reply: ParameterServerMessage = serde_json::from_slice(&result.payload)?;
     let mut current_weights = if let ParameterServerMessage::Weights { weights } = reply {
         weights
     } else {
@@ -421,48 +434,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for iteration in 0..iterations {
         info!("[ITERATION {}] Starting training step", iteration);
-        
+
         // Step 1: All workers compute gradients in parallel
         let mut gradient_futures = Vec::new();
         for worker in &data_workers {
-            let worker_msg = MailboxMessage::new(serde_json::to_vec(&DataWorkerMessage::ComputeGradients {
-                weights: current_weights.clone(),
-            })?)
-                .with_message_type("call".to_string());
+            let worker_msg = Message {
+                id: ulid::Ulid::new().to_string(),
+                payload: serde_json::to_vec(&DataWorkerMessage::ComputeGradients {
+                    weights: current_weights.clone(),
+                })?,
+                message_type: "call".to_string(),
+                ..Default::default()
+            };
             gradient_futures.push(worker.ask(worker_msg, Duration::from_secs(10)));
         }
-        
+
         // Wait for all gradients
         let mut gradients = Vec::new();
         for future in gradient_futures {
             let result = future.await?;
-            let reply: DataWorkerMessage = serde_json::from_slice(result.payload())?;
+            let reply: DataWorkerMessage = serde_json::from_slice(&result.payload)?;
             if let DataWorkerMessage::Gradients { gradients: grad } = reply {
                 gradients.push(grad);
             }
         }
-        
+
         info!("[ITERATION {}] Received gradients from {} workers", iteration, gradients.len());
-        
+
         // Step 2: Parameter server aggregates and applies gradients
-        let ps_msg = MailboxMessage::new(serde_json::to_vec(&ParameterServerMessage::ApplyGradients {
-            gradients,
-        })?)
-            .with_message_type("call".to_string());
+        let ps_msg = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: serde_json::to_vec(&ParameterServerMessage::ApplyGradients {
+                gradients,
+            })?,
+            message_type: "call".to_string(),
+            ..Default::default()
+        };
         let result = parameter_server
             .ask(ps_msg, Duration::from_secs(5))
             .await?;
-        let reply: ParameterServerMessage = serde_json::from_slice(result.payload())?;
+        let reply: ParameterServerMessage = serde_json::from_slice(&result.payload)?;
         if let ParameterServerMessage::Weights { weights } = reply {
             current_weights = weights;
             info!("[ITERATION {}] Updated model weights", iteration);
         }
-        
+
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     let training_elapsed = training_start.elapsed();
-    
+
     println!();
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("📊 Training Summary");
@@ -490,7 +511,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║  ✅ Distributed Training: Parallel gradient computation        ║");
     println!("║  ✅ Resource-Aware Scheduling: Tasks distributed across workers║");
     println!("╚════════════════════════════════════════════════════════════════╝");
-    
+
     info!("=== Comparison Complete ===");
     info!("✅ Parameter Server: Centralized model weights (Ray pattern)");
     info!("✅ Elastic Worker Pools: Horizontal scaling of data workers");
@@ -509,48 +530,53 @@ mod tests {
         let node = NodeBuilder::new("test-node")
             .build().await;
 
-        let behavior = Box::new(ParameterServerActor::new(0.01));
-        let actor = ActorBuilder::new(behavior)
-            .with_id("test-ps@test-node".to_string())
-            .build().await
-            .await;
-        
-        // Spawn using ActorFactory with facets
-        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-        use std::sync::Arc;
-        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        // Register behavior
+        let behavior_registry = BehaviorRegistry::new();
+        behavior_registry.register("ParameterServer", |_args| {
+            Box::pin(async move {
+                Ok(Box::new(ParameterServerActor::new(0.01)) as Box<dyn Actor>)
+            })
+        }).await;
+        node.service_locator().register_behavior_registry(Arc::new(behavior_registry)).await;
+
+        // Spawn using Node::spawn
         let actor_id = "test-ps@test-node".to_string();
         let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-        let _message_sender = actor_factory.spawn_actor(
+        let _message_sender = node.spawn(
             &ctx,
             &actor_id,
-            "GenServer",
+            "ParameterServer",
             vec![], // initial_state
             None, // config
             std::collections::HashMap::new(), // labels
             vec![], // facets
         ).await
             .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
-        
-        // Create ActorRef directly - no need to access mailbox
-        let ps = plexspaces_actor::ActorRef::remote(
+
+        // Create ActorRef for messaging
+        let ps = ActorRef::remote(
             actor_id.clone(),
-            node.id().as_str().to_string(),
+            "internal".to_string(),
+            "system".to_string(),
+            node.id().to_string(),
             node.service_locator().clone(),
         );
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Test get weights
-        let msg = MailboxMessage::new(serde_json::to_vec(&ParameterServerMessage::GetWeights).unwrap())
-            .with_message_type("call".to_string());
+        let msg = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: serde_json::to_vec(&ParameterServerMessage::GetWeights).unwrap(),
+            message_type: "call".to_string(),
+            ..Default::default()
+        };
         let result = ps
             .ask(msg, Duration::from_secs(5))
             .await
             .unwrap();
 
-        let reply: ParameterServerMessage = serde_json::from_slice(result.payload()).unwrap();
+        let reply: ParameterServerMessage = serde_json::from_slice(&result.payload).unwrap();
         if let ParameterServerMessage::Weights { weights } = reply {
             assert_eq!(weights.w1.len(), 200);
             assert_eq!(weights.w2.len(), 200);

@@ -258,6 +258,7 @@ async fn test_handle_request_error() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -319,6 +320,7 @@ async fn test_handle_event_error() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -403,6 +405,7 @@ async fn test_channel_host_function_error_handling() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         Some(channel_service),
         None, // message_sender
         None, // tuplespace_provider

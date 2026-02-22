@@ -101,6 +101,27 @@ pub trait SupervisedChild: Send + Sync {
     fn id(&self) -> &str;
 }
 
+/// Extract namespace from an actor ID string.
+///
+/// Actor IDs follow the format `name:namespace@node`. This function extracts
+/// the namespace portion between the colon and the at-sign. Returns an empty
+/// string if the ID does not contain both delimiters in the correct order.
+///
+/// ## Examples
+/// - `"worker-0:my-ns@node1"` -> `"my-ns"`
+/// - `"worker-0@node1"` -> `""`
+/// - `"worker-0:my-ns"` -> `""`
+fn extract_namespace_from_actor_id(actor_id: &str) -> String {
+    if let Some(colon_pos) = actor_id.find(':') {
+        if let Some(at_pos) = actor_id.find('@') {
+            if colon_pos < at_pos {
+                return actor_id[colon_pos + 1..at_pos].to_string();
+            }
+        }
+    }
+    String::new()
+}
+
 /// Supervisor for managing actor lifecycle and fault tolerance
 pub struct Supervisor {
     /// Supervisor ID
@@ -410,10 +431,10 @@ impl Supervisor {
             ))?
             .clone();
 
-        // Create ActorRef from the actor crate (has tell() method) for return value
-        // TODO: get namespace from child actor context or supervisor context
-        // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for supervisor-created actors)
-        let actor_ref = ActorActorRef::local(child_id.clone(), String::new(), String::new(), mailbox, service_locator);
+        // Create ActorRef from the actor crate (has tell() method) for return value.
+        // Extract namespace from actor_id (format: "name:namespace@node") for proper isolation.
+        let child_namespace = extract_namespace_from_actor_id(&child_id.to_string());
+        let actor_ref = ActorActorRef::local(child_id.clone(), String::new(), child_namespace, mailbox, service_locator);
         
         // Create core ActorRef for internal storage
         let core_actor_ref = ActorRef::new(child_id.clone())
@@ -445,7 +466,12 @@ impl Supervisor {
             if let Some(registry) = service_locator.actor_registry().await {
                 let supervisor_id = ActorId::from(self.id.clone());
                 registry.register_parent_child(&supervisor_id, &child_id).await;
-                
+
+                // NOTE: ActorRef is already registered during Actor::start() →
+                // register_in_registry() with proper actor_type and behavior_kind.
+                // No duplicate register_actor() call here – parent-child link above
+                // is sufficient for supervisor tree tracking.
+
                 // OBSERVABILITY: Log parent-child registration
                 trace!(
                     supervisor_id = %self.id,
@@ -3435,5 +3461,57 @@ mod tests {
         );
         let _ = event_rx.recv().await; // ChildFailed
         let _ = event_rx.recv().await; // ChildRestarted
+    }
+
+    // ========================================================================
+    // Tests for extract_namespace_from_actor_id helper
+    // ========================================================================
+
+    #[test]
+    fn test_extract_namespace_with_namespace() {
+        assert_eq!(
+            extract_namespace_from_actor_id("worker-0:my-ns@node1"),
+            "my-ns"
+        );
+    }
+
+    #[test]
+    fn test_extract_namespace_without_namespace() {
+        assert_eq!(
+            extract_namespace_from_actor_id("worker-0@node1"),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_extract_namespace_no_node() {
+        assert_eq!(
+            extract_namespace_from_actor_id("worker-0:my-ns"),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_extract_namespace_empty() {
+        assert_eq!(
+            extract_namespace_from_actor_id(""),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_extract_namespace_colon_after_at() {
+        assert_eq!(
+            extract_namespace_from_actor_id("worker-0@node1:port"),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_extract_namespace_complex() {
+        assert_eq!(
+            extract_namespace_from_actor_id("data-worker-3:ray-ps@test-node"),
+            "ray-ps"
+        );
     }
 }

@@ -14,7 +14,8 @@ from plexspaces import actor, state, handler, init_handler
 from plexspaces.decorators import (
     get_state_dict, set_state_dict, dispatch_message, init_actor,
     event_actor, fsm_actor, gen_server_actor, workflow_actor,
-    BEHAVIOR_GEN_SERVER, BEHAVIOR_GEN_EVENT, BEHAVIOR_GEN_STATE_MACHINE, BEHAVIOR_WORKFLOW
+    BEHAVIOR_GEN_SERVER, BEHAVIOR_GEN_EVENT, BEHAVIOR_GEN_STATE_MACHINE, BEHAVIOR_WORKFLOW,
+    _sanitize_payload_for_wasm, _desanitize_from_wasm
 )
 
 
@@ -444,6 +445,157 @@ class TestFacets:
         assert BankAccount.__behavior_type__ == BEHAVIOR_GEN_SERVER
         assert "deposit" in BankAccount._plexspaces_handlers
         assert "balance" in BankAccount._plexspaces_state_fields
+
+
+class TestDesanitizeFromWasm:
+    """Tests for _desanitize_from_wasm() which reverses WASM float-to-string sanitization."""
+
+    def test_desanitize_int_string(self):
+        """Integer strings should be converted back to int."""
+        assert _desanitize_from_wasm("42") == 42
+        assert isinstance(_desanitize_from_wasm("42"), int)
+
+    def test_desanitize_float_string(self):
+        """Float strings should be converted back to float."""
+        assert _desanitize_from_wasm("3.14") == 3.14
+        assert isinstance(_desanitize_from_wasm("3.14"), float)
+
+    def test_desanitize_negative_float(self):
+        """Negative float strings should be converted back to float."""
+        assert _desanitize_from_wasm("-1.5") == -1.5
+        assert isinstance(_desanitize_from_wasm("-1.5"), float)
+
+    def test_desanitize_non_numeric_string(self):
+        """Non-numeric strings should remain unchanged."""
+        assert _desanitize_from_wasm("hello") == "hello"
+        assert isinstance(_desanitize_from_wasm("hello"), str)
+
+    def test_desanitize_nested_dict(self):
+        """Stringified numbers in dicts should be restored to numeric types."""
+        result = _desanitize_from_wasm({"a": "1", "b": "2.5"})
+        assert result == {"a": 1, "b": 2.5}
+        assert isinstance(result["a"], int)
+        assert isinstance(result["b"], float)
+
+    def test_desanitize_nested_list(self):
+        """Stringified numbers in lists should be restored to numeric types."""
+        result = _desanitize_from_wasm(["1.0", "2.0", "3.0"])
+        assert result == [1.0, 2.0, 3.0]
+        assert all(isinstance(v, float) for v in result)
+
+    def test_desanitize_mixed_types(self):
+        """Mixed structures with strings, ints, and floats should be desanitized correctly."""
+        input_obj = {"name": "test", "count": "42", "values": ["1.0", "2.0"]}
+        expected = {"name": "test", "count": 42, "values": [1.0, 2.0]}
+        result = _desanitize_from_wasm(input_obj)
+        assert result == expected
+        assert isinstance(result["name"], str)
+        assert isinstance(result["count"], int)
+        assert all(isinstance(v, float) for v in result["values"])
+
+    def test_desanitize_roundtrip_with_sanitize(self):
+        """Sanitize then desanitize should produce the original object for various inputs."""
+        test_cases = [
+            {"count": 42, "name": "test"},
+            {"x": 1.5, "y": -2.3},
+            {"items": [1.0, 2.0, 3.0]},
+            {"nested": {"a": 1, "b": 2.5}},
+            {"mixed": [1, 2.0, "hello", True, None]},
+        ]
+        for obj in test_cases:
+            sanitized = _sanitize_payload_for_wasm(obj)
+            restored = _desanitize_from_wasm(sanitized)
+            assert restored == obj, f"Roundtrip failed for {obj!r}: sanitized={sanitized!r}, restored={restored!r}"
+
+    def test_desanitize_preserves_none_and_bool(self):
+        """None and bool values should pass through unchanged."""
+        assert _desanitize_from_wasm(None) is None
+        assert _desanitize_from_wasm(True) is True
+        assert _desanitize_from_wasm(False) is False
+
+    def test_desanitize_empty_string(self):
+        """Empty string should remain an empty string (not converted to a number)."""
+        assert _desanitize_from_wasm("") == ""
+        assert isinstance(_desanitize_from_wasm(""), str)
+
+
+class TestDesanitizeNbodyRoundtrip:
+    """Roundtrip tests for the exact nbody bug scenario: state with lists of floats.
+
+    The nbody simulation stores body positions, velocities, and masses as lists
+    of floats. When state is serialized through WASM, floats become strings.
+    _desanitize_from_wasm must restore them so arithmetic works correctly.
+    """
+
+    def test_nbody_positions_roundtrip(self):
+        """Lists of float positions should survive sanitize/desanitize roundtrip."""
+        state = {
+            "x": [0.0, 4.84143144246472090e+00, 8.34336671824457987e+00],
+            "y": [0.0, -1.16032004402742839e+00, 4.12479856412430479e+00],
+            "z": [0.0, -1.03622044471123109e-01, -4.03523417114321381e-01],
+        }
+        sanitized = _sanitize_payload_for_wasm(state)
+        # After sanitize, all values should be strings
+        for key in ("x", "y", "z"):
+            assert all(isinstance(v, str) for v in sanitized[key])
+        restored = _desanitize_from_wasm(sanitized)
+        assert restored == state
+
+    def test_nbody_velocities_roundtrip(self):
+        """Lists of float velocities (small values) should survive roundtrip."""
+        state = {
+            "vx": [0.0, 1.66007664274403694e-03, -2.76742510726862411e-03],
+            "vy": [0.0, 7.69901118419740425e-03, 4.99852801234917238e-03],
+            "vz": [0.0, -6.90460016972063023e-05, 2.30417297573763929e-05],
+        }
+        sanitized = _sanitize_payload_for_wasm(state)
+        restored = _desanitize_from_wasm(sanitized)
+        assert restored == state
+
+    def test_nbody_masses_roundtrip(self):
+        """Float masses should survive roundtrip."""
+        state = {
+            "mass": [1.0, 9.54791938424326609e-04, 2.85885980666130812e-04],
+        }
+        sanitized = _sanitize_payload_for_wasm(state)
+        restored = _desanitize_from_wasm(sanitized)
+        assert restored == state
+
+    def test_nbody_full_state_roundtrip(self):
+        """Complete nbody state with int count + float lists should survive roundtrip."""
+        state = {
+            "n_bodies": 3,
+            "dt": 0.01,
+            "x": [0.0, 4.84143144246472090e+00, 8.34336671824457987e+00],
+            "y": [0.0, -1.16032004402742839e+00, 4.12479856412430479e+00],
+            "vx": [0.0, 1.66007664274403694e-03, -2.76742510726862411e-03],
+            "vy": [0.0, 7.69901118419740425e-03, 4.99852801234917238e-03],
+            "mass": [1.0, 9.54791938424326609e-04, 2.85885980666130812e-04],
+        }
+        sanitized = _sanitize_payload_for_wasm(state)
+        # n_bodies (int) should pass through sanitize unchanged
+        assert sanitized["n_bodies"] == 3
+        # dt (float) should become a string
+        assert isinstance(sanitized["dt"], str)
+        restored = _desanitize_from_wasm(sanitized)
+        assert restored == state
+        assert isinstance(restored["n_bodies"], int)
+        assert isinstance(restored["dt"], float)
+        assert all(isinstance(v, float) for v in restored["x"])
+
+    def test_nbody_arithmetic_after_roundtrip(self):
+        """Restored float values must support arithmetic (the actual nbody bug)."""
+        state = {"x": [1.0, 2.5, -3.7], "vx": [0.1, -0.2, 0.3]}
+        sanitized = _sanitize_payload_for_wasm(state)
+        restored = _desanitize_from_wasm(sanitized)
+        # Simulate one Euler step: x[i] += vx[i] * dt
+        dt = 0.01
+        for i in range(len(restored["x"])):
+            restored["x"][i] += restored["vx"][i] * dt
+        # Verify arithmetic worked (values should be close to expected)
+        expected_x = [1.0 + 0.1 * dt, 2.5 + (-0.2) * dt, -3.7 + 0.3 * dt]
+        for actual, expected in zip(restored["x"], expected_x):
+            assert abs(actual - expected) < 1e-15
 
 
 if __name__ == "__main__":

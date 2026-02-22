@@ -91,7 +91,9 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
         .with_listen_addr(listen_addr.to_string());
     
     let mut spec = if let Some(release_config_path) = release_config {
-        debug!("Loading release config from: {}", release_config_path);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!("Loading release config from: {}", release_config_path);
+        }
         use plexspaces_node::config::loader::ConfigLoader;
         let loader = ConfigLoader::new();
         match loader.load_release_spec(release_config_path).await {
@@ -100,7 +102,9 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
                 // This ensures actor IDs use the correct node ID (e.g., node1, node2, node3) instead of
                 // the hardcoded value in release.yaml (e.g., my-node)
                 if let Some(ref mut node_config) = spec.node {
-                    debug!("Overriding node.id from '{}' to '{}' (from CLI --node-id)", node_config.id, node_id);
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!("Overriding node.id from '{}' to '{}' (from CLI --node-id)", node_config.id, node_id);
+                    }
                     node_config.id = node_id.to_string();
                 } else {
                     // Create node config if missing

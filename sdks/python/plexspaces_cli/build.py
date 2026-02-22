@@ -54,47 +54,47 @@ def find_wit_dir() -> str:
 def generate_wrapper(actor_file: Path, work_dir: Path) -> Path:
     """
     Generate the WIT interface wrapper for an actor file.
-    
+
+    Supports multiple @actor classes in one file (Erlang-style ApplicationSpec).
     Returns path to the generated wrapper file.
     """
     import importlib.util
-    
+
     # Copy actor file to work directory
     actor_name = actor_file.stem
     shutil.copy(actor_file, work_dir / actor_file.name)
-    
-    # Load the module to find @actor class
+
+    # Load the module to find @actor classes
     spec = importlib.util.spec_from_file_location(actor_name, actor_file)
     module = importlib.util.module_from_spec(spec)
-    
+
     # Add plexspaces to path
     sdk_path = Path(__file__).parent.parent.parent
     sys.path.insert(0, str(sdk_path))
-    
+
     spec.loader.exec_module(module)
-    
-    # Find @actor class
-    actor_class = None
+
+    # Find ALL @actor classes
+    actor_classes = []
     for name in dir(module):
         obj = getattr(module, name)
         if isinstance(obj, type) and hasattr(obj, '_plexspaces_is_actor'):
-            actor_class = obj
-            break
-    
-    if actor_class is None:
+            actor_classes.append(obj)
+
+    if not actor_classes:
         # No @actor decorator - assume it's already a WIT-compatible module
         # Just use it as-is (backward compatible with old examples)
         return actor_file
-    
-    # Generate wrapper using SDK
+
+    # Generate wrapper using SDK (supports single or multi-actor)
     from plexspaces.runtime import generate_wrapper as gen_wrapper
-    
-    wrapper_code = gen_wrapper(actor_class, actor_name)
+
+    wrapper_code = gen_wrapper(actor_classes, actor_name)
     wrapper_path = work_dir / f"{actor_name}_actor.py"
-    
+
     with open(wrapper_path, 'w') as f:
         f.write(wrapper_code)
-    
+
     return wrapper_path
 
 
@@ -157,13 +157,11 @@ def build_wasm(
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         
-        # Find @actor class
-        has_sdk_actor = False
-        for name in dir(module):
-            obj = getattr(module, name)
-            if isinstance(obj, type) and hasattr(obj, '_plexspaces_is_actor'):
-                has_sdk_actor = True
-                break
+        # Find @actor class(es)
+        has_sdk_actor = any(
+            isinstance(getattr(module, name), type) and hasattr(getattr(module, name), '_plexspaces_is_actor')
+            for name in dir(module)
+        )
         
         if has_sdk_actor:
             # Generate wrapper for SDK-style actor

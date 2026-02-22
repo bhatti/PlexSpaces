@@ -23,7 +23,7 @@
 //! Uses the same table schema as the main keyvalue DDB implementation
 //! but with a simpler interface matching the facet's needs.
 
-use super::KeyValueStore;
+use super::{KeyValueStore, KeyValueStoreResult, KeyValueStoreError};
 use async_trait::async_trait;
 use aws_sdk_dynamodb::{
     error::ProvideErrorMetadata,
@@ -396,7 +396,7 @@ impl DynamoDBStore {
 
 #[async_trait]
 impl KeyValueStore for DynamoDBStore {
-    async fn get(&self, ctx: &RequestContext, key: &str) -> Result<Option<Vec<u8>>, String> {
+    async fn get(&self, ctx: &RequestContext, key: &str) -> KeyValueStoreResult<Option<Vec<u8>>> {
         let pk = Self::composite_key(ctx, key);
 
         match self
@@ -428,18 +428,37 @@ impl KeyValueStore for DynamoDBStore {
                 }
                 Ok(None)
             }
-            Err(e) => Err(format!("DynamoDB get_item failed: {}", e)),
+            Err(e) => Err(KeyValueStoreError::StorageError(format!("DynamoDB get_item failed: {}", e))),
         }
     }
 
-    async fn set(
+    async fn put(
         &self,
         ctx: &RequestContext,
         key: &str,
         value: Vec<u8>,
-        ttl: Option<u64>,
-    ) -> Result<(), String> {
-        let expires_at_secs = ttl.map(|t| Utc::now().timestamp() + t as i64);
+    ) -> KeyValueStoreResult<()> {
+        let item = self.kv_to_item(ctx, key, &value, None);
+
+        self.client
+            .put_item()
+            .table_name(&self.table_name)
+            .set_item(Some(item))
+            .send()
+            .await
+            .map_err(|e| KeyValueStoreError::StorageError(format!("DynamoDB put_item failed: {}", e)))?;
+
+        Ok(())
+    }
+
+    async fn put_with_ttl(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        value: Vec<u8>,
+        ttl: Duration,
+    ) -> KeyValueStoreResult<()> {
+        let expires_at_secs = Some(Utc::now().timestamp() + ttl.as_secs() as i64);
         let item = self.kv_to_item(ctx, key, &value, expires_at_secs);
 
         self.client
@@ -448,16 +467,13 @@ impl KeyValueStore for DynamoDBStore {
             .set_item(Some(item))
             .send()
             .await
-            .map_err(|e| format!("DynamoDB put_item failed: {}", e))?;
+            .map_err(|e| KeyValueStoreError::StorageError(format!("DynamoDB put_item failed: {}", e)))?;
 
         Ok(())
     }
 
-    async fn delete(&self, ctx: &RequestContext, key: &str) -> Result<bool, String> {
+    async fn delete(&self, ctx: &RequestContext, key: &str) -> KeyValueStoreResult<()> {
         let pk = Self::composite_key(ctx, key);
-
-        // Check if key exists first
-        let exists = self.get(ctx, key).await?.is_some();
 
         self.client
             .delete_item()
@@ -466,12 +482,12 @@ impl KeyValueStore for DynamoDBStore {
             .key("sk", AttributeValue::S("KV".to_string()))
             .send()
             .await
-            .map_err(|e| format!("DynamoDB delete_item failed: {}", e))?;
+            .map_err(|e| KeyValueStoreError::StorageError(format!("DynamoDB delete_item failed: {}", e)))?;
 
-        Ok(exists)
+        Ok(())
     }
 
-    async fn exists(&self, ctx: &RequestContext, key: &str) -> Result<bool, String> {
+    async fn exists(&self, ctx: &RequestContext, key: &str) -> KeyValueStoreResult<bool> {
         match self.get(ctx, key).await {
             Ok(Some(_)) => Ok(true),
             Ok(None) => Ok(false),
@@ -479,7 +495,7 @@ impl KeyValueStore for DynamoDBStore {
         }
     }
 
-    async fn list_keys(&self, ctx: &RequestContext, prefix: &str) -> Result<Vec<String>, String> {
+    async fn list_keys(&self, ctx: &RequestContext, prefix: &str) -> KeyValueStoreResult<Vec<String>> {
         let tenant_namespace = Self::tenant_namespace_key(ctx);
 
         let mut keys = Vec::new();
@@ -522,12 +538,43 @@ impl KeyValueStore for DynamoDBStore {
                         prefix = %prefix,
                         "Failed to query keys from DynamoDB"
                     );
-                    return Err(format!("DynamoDB query failed: {}", e));
+                    return Err(KeyValueStoreError::StorageError(format!("DynamoDB query failed: {}", e)));
                 }
             }
         }
 
         Ok(keys)
+    }
+
+    async fn cas(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        expected: Option<Vec<u8>>,
+        new_value: Vec<u8>,
+    ) -> KeyValueStoreResult<bool> {
+        // Read current value and compare
+        let current = self.get(ctx, key).await?;
+        if current != expected {
+            return Ok(false);
+        }
+        self.put(ctx, key, new_value).await?;
+        Ok(true)
+    }
+
+    async fn increment(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        delta: i64,
+    ) -> KeyValueStoreResult<i64> {
+        let current: i64 = self.get(ctx, key).await?
+            .and_then(|v| String::from_utf8(v).ok())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let new_val = current + delta;
+        self.put(ctx, key, new_val.to_string().into_bytes()).await?;
+        Ok(new_val)
     }
 }
 

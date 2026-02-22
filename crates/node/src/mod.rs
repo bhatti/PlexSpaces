@@ -2058,6 +2058,12 @@ impl Node {
                         (ask, normalized)
                     };
 
+                    // Extract optional timeout from ?timeout=<seconds> query param (default: 5s)
+                    let timeout_duration = query_params.get("timeout")
+                        .and_then(|s| s.parse::<i64>().ok())
+                        .filter(|&secs| secs > 0 && secs <= 3600)
+                        .map(|secs| prost_types::Duration { seconds: secs, nanos: 0 });
+
                     // Create InvokeActorRequest
                     use plexspaces_proto::actor::v1::InvokeActorRequest;
                     let invoke_req = InvokeActorRequest {
@@ -2079,6 +2085,7 @@ impl Node {
                         subpath: String::new(),
                         ask,
                         msg_type_override,
+                        timeout: timeout_duration,
                     };
                     
                     // Call InvokeActor via ActorService (tenant_id from JWT/middleware or path when auth disabled)

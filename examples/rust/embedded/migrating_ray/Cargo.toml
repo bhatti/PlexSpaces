@@ -9,16 +9,13 @@ edition.workspace = true
 plexspaces-core.workspace = true
 plexspaces-actor.workspace = true
 plexspaces-behavior.workspace = true
-plexspaces-tuplespace.workspace = true
 plexspaces-node.workspace = true
-plexspaces-mailbox.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ulid.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-reqwest.workspace = true
 async-trait.workspace = true
 
 [[bin]]

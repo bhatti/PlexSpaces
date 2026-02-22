@@ -193,7 +193,9 @@ impl UdpChannel {
                 if let Err(e) = socket.set_reuse_port(true) {
                     // If SO_REUSEPORT is not supported, log warning but continue
                     // Some systems may not support it, but SO_REUSEADDR should still work
-                    debug!("SO_REUSEPORT not supported: {}, continuing with SO_REUSEADDR only", e);
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!("SO_REUSEPORT not supported: {}, continuing with SO_REUSEADDR only", e);
+                    }
                 }
             }
 

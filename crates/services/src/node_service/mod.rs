@@ -640,7 +640,9 @@ impl NodeServiceTrait for NodeServiceImpl {
     ) -> Result<Response<plexspaces_proto::node::v1::PingResponse>, Status> {
         let req = request.into_inner();
         
-        debug!("Received ping from node: {}", req.source_node_id);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!("Received ping from node: {}", req.source_node_id);
+        }
         metrics::counter!("plexspaces_swim_pings_received").increment(1);
 
         // Get our incarnation from SWIM protocol

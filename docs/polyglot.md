@@ -11,7 +11,7 @@ PlexSpaces supports **polyglot development** - you can write actors, application
 - ✅ **Isolation**: Each WASM module runs in isolation with resource limits
 - ✅ **Dynamic Deployment**: Deploy applications at runtime without restarting nodes
 
-> **📦 SDKs Available!** For Python, use the [PlexSpaces Python SDK](sdk.md) (decorator-based: `@actor`, `@handler`, `state()`). For TypeScript, use the [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) (inheritance-based: extend `PlexSpacesActor`, implement `on<Op>()` handlers). Both target the same `plexspaces-simple-actor` WIT world.
+> **📦 SDKs Available!** For Python, use the [PlexSpaces Python SDK](sdk.md) (decorator-based: `@actor`, `@handler`, `state()`). For TypeScript, use the [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) (inheritance-based: extend `PlexSpacesActor`, implement `on<Op>()` handlers). For Go, use the [PlexSpaces Go SDK](sdk.md#go-sdk) (interface-based: implement `Actor`, embed `BaseActor`). All target the same `plexspaces-simple-actor` WIT world.
 
 ## Supported Languages
 
@@ -715,9 +715,10 @@ cargo build --target wasm32-wasip2 --release
 
 ### Go
 
-**Compiler**: `tinygo`  
-**WASM Size**: 2-5MB  
+**Compiler**: `tinygo`
+**WASM Size**: 2-5MB
 **Best For**: Good balance, fast iteration
+**SDK**: `sdks/go/plexspaces` (interface-based: implement `Actor`, embed `BaseActor`)
 
 #### Setup
 
@@ -730,37 +731,80 @@ cargo build --target wasm32-wasip2 --release
 #### Example Actor
 
 ```go
-// calculator_actor.go
 package main
 
-//export init
-func init(initialState *byte, len uint32) {
-    // Initialize actor state
+import (
+    "encoding/json"
+    "github.com/plexobject/plexspaces/sdks/go/plexspaces"
+)
+
+// Counter implements a simple counter actor.
+type Counter struct {
+    plexspaces.BaseActor
+    Value int `json:"value"`
 }
 
-//export handle_message
-func handleMessage(
-    from *byte, fromLen uint32,
-    msgType *byte, msgTypeLen uint32,
-    payload *byte, payloadLen uint32,
-) *byte {
-    // Handle incoming messages
-    // Use WIT host functions via Go bindings
+var host = plexspaces.NewHost()
+
+func (c *Counter) Init(configJSON string) string {
+    host.Info("Counter initialized")
+    return ""
 }
 
-//export snapshot_state
-func snapshotState() *byte {
-    // Serialize state for checkpointing
+func (c *Counter) Handle(from, msgType, payloadJSON string) string {
+    switch msgType {
+    case "increment":
+        c.Value++
+        data, _ := json.Marshal(map[string]any{"value": c.Value})
+        return string(data)
+    case "get":
+        data, _ := json.Marshal(map[string]any{"value": c.Value})
+        return string(data)
+    default:
+        return `{"error":"unknown operation"}`
+    }
 }
 
-func main() {}
+func main() {
+    counter := &Counter{}
+    counter.SetSelf(counter) // enables automatic JSON state serialization
+    plexspaces.Register(counter)
+    select {} // keep alive for WASM runtime
+}
+```
+
+#### Multi-Actor Module
+
+```go
+func main() {
+    router := plexspaces.NewActorRouter()
+    router.Route("counter", func() plexspaces.Actor {
+        a := &Counter{}
+        a.SetSelf(a)
+        return a
+    })
+    plexspaces.Register(router)
+    select {}
+}
+```
+
+#### Host Functions
+
+```go
+host := plexspaces.NewHost()
+host.Send("other-actor", "ping", map[string]any{"data": "hello"})
+resp, err := host.Ask("other-actor", "get_balance", nil, 5000)
+host.PG().Join("workers")
+host.KVPut("key", "value")
 ```
 
 #### Building
 
 ```bash
-tinygo build -target=wasip2 -o calculator_actor.wasm calculator_actor.go
+tinygo build -target=wasi -o counter.wasm .
 ```
+
+**See**: `examples/go/apps/migrating_erlang_otp/` for a complete Go WASM example (rate limiter)
 
 ## Deployment
 

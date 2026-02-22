@@ -439,6 +439,36 @@ impl ActorServiceImpl {
                     }
                     return Ok(message_id);
                 }
+
+                // Temp sender not found in ActorRegistry (may have been cleaned up after
+                // ask() timeout).  Try ReplyWaiterRegistry directly using correlation_id
+                // so the reply still reaches the waiter if it is still active.
+                {
+                    use plexspaces_core::TEMP_SENDER_PREFIX;
+                    let is_temp_sender = actor_id.starts_with(&format!("{}-", TEMP_SENDER_PREFIX));
+                    if is_temp_sender {
+                        if let Some(waiter_registry) = self.service_locator.reply_waiter_registry().await {
+                            let message_id = message.id.to_string();
+                            if waiter_registry.notify(&correlation_id, message).await {
+                                tracing::info!(
+                                    message_id = %message_id,
+                                    correlation_id = %correlation_id,
+                                    temp_sender = %actor_id,
+                                    "Reply routed directly via ReplyWaiterRegistry (temp sender already cleaned up)"
+                                );
+                                return Ok(message_id);
+                            }
+                            // Waiter already consumed (ask timed out) – reply is too late, discard gracefully
+                            tracing::warn!(
+                                message_id = %message_id,
+                                correlation_id = %correlation_id,
+                                temp_sender = %actor_id,
+                                "Reply arrived after ask timeout; temp sender and ReplyWaiter already cleaned up"
+                            );
+                            return Ok(message_id);
+                        }
+                    }
+                }
             }
         }
         
@@ -1468,10 +1498,14 @@ impl ActorServiceTrait for ActorServiceImpl {
         message.uri_path = full_path.clone();
         message.uri_method = http_method.clone();
 
-        // route_message: wait_for_response=true => ask (request-reply), false => tell (fire-and-forget)
+        // route_message: wait_for_response=true => ask (request-reply), false => tell (fire-and-forget).
+        // Use timeout from request if provided, otherwise default to 5 seconds for ask operations.
         let wait_for_response = use_ask;
         let timeout = if wait_for_response {
-            Some(std::time::Duration::from_secs(5))
+            req.timeout.map(|d| {
+                std::time::Duration::from_secs(d.seconds as u64)
+                    + std::time::Duration::from_nanos(d.nanos as u64)
+            }).or_else(|| Some(std::time::Duration::from_secs(5)))
         } else {
             None
         };

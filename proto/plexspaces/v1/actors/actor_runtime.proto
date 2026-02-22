@@ -2792,6 +2792,14 @@ message InvokeActorRequest {
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {in: ["", "call", "cast", "info"]}
   ];
+
+  // Optional timeout for request-reply (ask) operations.
+  // Defaults to 5 seconds if not specified. Use for long-running operations like training.
+  // HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
+  google.protobuf.Duration timeout = 11 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).duration.lte.seconds = 3600  // Max 1 hour
+  ];
 }
 
 // Response from invoking an actor

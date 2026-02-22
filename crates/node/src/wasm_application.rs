@@ -127,10 +127,13 @@ impl Actor for WasmActorBehavior {
         // Clone Arc before await to ensure Send
         let instance = self.instance.clone();
         
-        tracing::debug!(
+        tracing::info!(
             message_id = %message_id,
+            sender_id = %from,
+            receiver_id = %message.receiver_id,
+            correlation_id = %message.correlation_id,
             msg_type = %message_type,
-            "🟦 [WasmActorBehavior::handle_message] ENTRY (for tell, INVOKE_ACTOR SUCCESS already returned)"
+            "WasmActor received message"
         );
         // Call WASM instance's handle_message (message_id for correlation with INVOKE_ACTOR logs)
         let result = instance.handle_message_with_id(from, message_type.as_str(), payload, &message_id).await;
@@ -143,8 +146,19 @@ impl Actor for WasmActorBehavior {
             Ok(response) => {
                 // Handle response for request-reply patterns (ask/call)
                 if !message.sender_id.is_empty() {
+                    let reply_id = ulid::Ulid::new().to_string();
+                    tracing::info!(
+                        request_message_id = %message_id,
+                        reply_message_id = %reply_id,
+                        sender_id = %message.sender_id,
+                        receiver_id = %message.receiver_id,
+                        correlation_id = %message.correlation_id,
+                        msg_type = %message_type,
+                        response_len = response.len(),
+                        "WasmActor sending reply to sender"
+                    );
                     let reply_message = Message {
-                        id: ulid::Ulid::new().to_string(),
+                        id: reply_id,
                         payload: response,
                         sender_id: message.receiver_id.clone(),
                         receiver_id: message.sender_id.clone(),
@@ -154,7 +168,13 @@ impl Actor for WasmActorBehavior {
                     };
                     if let Some(actor_service) = ctx.service_locator.get_actor_service().await {
                         if let Err(e) = actor_service.send(&message.sender_id, reply_message).await {
-                            tracing::warn!(error = %e, "Failed to send reply via ActorService::send()");
+                            tracing::warn!(
+                                request_message_id = %message_id,
+                                sender_id = %message.sender_id,
+                                correlation_id = %message.correlation_id,
+                                error = %e,
+                                "Failed to send reply via ActorService::send()"
+                            );
                         }
                     } else {
                         tracing::warn!("ActorService not available in ServiceLocator, cannot send reply");
@@ -502,8 +522,8 @@ impl WasmApplication {
         use crate::service_wrappers::ChannelServiceWrapper;
         let channel_service: Arc<dyn ChannelService> = Arc::new(ChannelServiceWrapper::new());
 
-        // Create MessageSender for WASM instance
-        use crate::wasm_message_sender::ActorServiceMessageSender;
+        // Create MessageSender for WASM instance (use application crate's consolidated impl)
+        use plexspaces_application::wasm_message_sender::ActorServiceMessageSender;
         use plexspaces_core::ActorService;
         let actor_service: Arc<dyn ActorService + Send + Sync> = service_locator
             .get_actor_service()
@@ -520,19 +540,20 @@ impl WasmApplication {
             .await;
 
         // KeyValue store for WASM actors (simple-actor kv_get/kv_put).
-        // Use in-memory SQLite store so Python/WASM actors can persist sensor data etc. per actor.
-        let keyvalue_store: Option<Arc<dyn plexspaces_keyvalue::KeyValueStore>> = match plexspaces_keyvalue::SqliteKVStore::new(":memory:").await {
-            Ok(store) => Some(Arc::new(store)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to create SQLite :memory: KV store for WASM actors");
-                None
-            }
-        };
+        // Use the shared KeyValueStore from ServiceLocator (initialized during node startup).
+        let keyvalue_store: Option<Arc<dyn plexspaces_core::KeyValueStore>> = service_locator
+            .get_keyvalue_store()
+            .await;
 
-        // Get ProcessGroupRegistry from service locator if available
-        // Note: get_service_by_name requires Sized, so we can't call it on trait object
-        // For now, pass None - ProcessGroupRegistry is optional for WASM actors
-        let process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>> = None;
+        // Get ProcessGroupRegistry for WASM actors (needed for pg_join/pg_leave/pg_members/pg_broadcast)
+        // Create from the shared KeyValueStore so all actors share the same group membership state.
+        let process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>> =
+            keyvalue_store.as_ref().map(|kv| {
+                Arc::new(plexspaces_process_groups::ProcessGroupRegistry::new(
+                    node.id(),
+                    kv.clone(),
+                ))
+            });
 
         // Get LockManager from service locator so WASM actors can use host.lock_acquire/renew/release
         let lock_manager = service_locator.get_lock_manager().await;
@@ -594,13 +615,8 @@ impl WasmApplication {
         // TODO(instance-pool): When config.use_instance_pool is true, checkout from per-module InstancePool
         // instead of runtime.instantiate() for faster spawn. Fits lightweight actors and worker pools.
         // See PROJECT_TRACKER.md.
-        // Include namespace in actor_id so multiple apps (e.g. leader-election-term1, leader-election-term2)
-        // get distinct actors that can contend for the same lock (e.g. leader election).
-        let actor_id = if namespace.is_empty() {
-            format!("{}@{}", child_spec.id, node.id())
-        } else {
-            format!("{}:{}@{}", child_spec.id, namespace, node.id())
-        };
+        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
+        let actor_id = format!("{}:{}@{}", child_spec.id, namespace, node.id());
         let wasm_instance = runtime
             .instantiate(
                 module,
@@ -608,7 +624,7 @@ impl WasmApplication {
                 &[], // No initial state
                 plexspaces_wasm_runtime::WasmConfig::default(),
                 Some(channel_service),
-                Some(message_sender),
+                Some(Arc::new(message_sender.clone()) as Arc<dyn std::any::Any + Send + Sync>),
                 tuplespace_provider,
                 keyvalue_store,
                 process_group_registry,

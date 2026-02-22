@@ -12,6 +12,32 @@ PlexSpaces supports deploying WebAssembly (WASM) applications from multiple lang
 
 ## Architecture
 
+### Namespace (Required)
+
+Namespace is now **required** for all WASM deployments. It scopes all actors within an application and is used to construct actor IDs.
+
+- If not explicitly specified in the TOML config or API request, the namespace **defaults to the application name**.
+- Actor IDs use the format: **`name:namespace@node_id`**
+
+**Example**: An application named `my-app` deployed to node `node-1` without an explicit namespace will have actors with IDs like `my-app:my-app@node-1`.
+
+**Specifying in TOML config**:
+```toml
+name = "my-app"
+version = "1.0.0"
+namespace = "my-app"  # Required: all actors scoped to this namespace
+```
+
+**Specifying in API request** (form field):
+```bash
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
+  -F "application_id=my-app" \
+  -F "name=my-app" \
+  -F "namespace=my-app" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@my_actor.wasm"
+```
+
 ### WASM Dependencies Verification
 
 **✅ WASM actors only use WIT (WebAssembly Interface Types) APIs** - they do NOT include framework dependencies:
@@ -423,6 +449,20 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "wasm_file=@calculator_actor.wasm" \
   -F "config=@config.toml"
 ```
+
+### HTTP Timeout Query Parameter
+
+For long-running operations (e.g., actors performing heavy computation or large data processing), you can specify a timeout in seconds using the `?timeout=` query parameter. This overrides the default request timeout and keeps the connection open for the specified duration.
+
+**Usage**: Append `?timeout=<seconds>` to any actor API endpoint.
+
+**Example**:
+```bash
+# Wait up to 30 seconds for the trainer actor to respond
+curl "http://localhost:7993/api/v1/actors/my-app/trainer?timeout=30"
+```
+
+Without the timeout parameter, the default HTTP timeout applies. Use this when interacting with actors that perform long-running tasks such as model training, batch processing, or complex simulations.
 
 ### HTTP Undeploy
 
@@ -1004,11 +1044,31 @@ interface actor {
 }
 
 interface host {
+    // Messaging
     send: func(to: string, msg-type: string, payload-json: string) -> string;
+    ask: func(to: string, msg-type: string, payload-json: string, timeout-ms: u64) -> string;
+    // Actor Identity
+    self-id: func() -> string;
+    // Actor Lifecycle
+    spawn: func(module-ref: string, actor-id: string, init-config-json: string) -> string;
+    stop: func(actor-id: string) -> string;
+    // Linking & Monitoring (Erlang/OTP patterns)
+    link: func(actor-id: string) -> string;
+    unlink: func(actor-id: string) -> string;
+    monitor: func(actor-id: string) -> string;
+    demonitor: func(monitor-ref: string) -> string;
+    // Timers (Delayed Messaging)
+    send-after: func(delay-ms: u64, msg-type: string, payload-json: string) -> string;
+    // Logging & Time
     log: func(level: string, message: string);
     now-ms: func() -> u64;
+    // Key-Value Store
     kv-get: func(key: string) -> string;
     kv-put: func(key: string, value: string) -> string;
+    kv-delete: func(key: string) -> string;
+    kv-list: func(prefix: string) -> string;
+    // TupleSpace, Locks, Blob Storage, Process Groups
+    // (see wit/plexspaces-simple-actor/world.wit for full interface)
 }
 
 world actor-world {
@@ -1164,6 +1224,89 @@ class StatefulActor:
 - **Graceful degradation**: `set-state()` should handle empty/null input
 - **Size matters**: Keep state small for fast checkpointing
 
+### State Serialization: Float Safety
+
+Float values in actor state are automatically sanitized for WASM safety. The runtime detects special IEEE 754 float values (`NaN`, `Infinity`, `-Infinity`) that are not valid in JSON and replaces them with safe defaults before serialization. On deserialization, these values are restored transparently.
+
+This means actors can use float arithmetic freely (including operations that produce `NaN` or infinity) without worrying about state serialization failures. The sanitization and restoration process is fully transparent to the actor -- no special handling is required in actor code.
+
+### Inter-Actor Ask Pattern (Request-Reply)
+
+WASM actors can communicate with each other using the **ask** pattern (request-reply), following the same semantics as Erlang's `gen_server:call/2`. The Python SDK exposes this via `host.ask()`.
+
+**How it works:**
+
+1. Caller actor invokes `host.ask(target_id, msg_type, payload, timeout_ms)`
+2. The SDK serializes the payload and calls the WIT `host.ask` function
+3. The Rust runtime creates a **temporary sender** actor (`ask-{correlation_id}@{node_id}`) with a `ReplyWaiter`
+4. A request message is created with `id = req-{ULID}` and routed to the target actor
+5. Target actor's `handle()` method processes the message and returns a result
+6. The runtime wraps the result in a reply message with `id = res-{ULID}` and sends it back to the temporary sender
+7. The `ReplyWaiter` receives the reply and returns it to the caller
+
+**Message ID conventions:**
+- Request messages: `req-{ULID}` (e.g., `req-01JMXYZ...`)
+- Reply messages: `res-{ULID}` (e.g., `res-01JMXYZ...`)
+- These prefixes enable tracing request/reply flows in logs
+
+**Example (Python):**
+```python
+from plexspaces import actor, handler, host, state
+
+@actor
+class Coordinator:
+    @handler("run")
+    def run(self) -> dict:
+        # Ask a worker to compute something (request-reply)
+        result = host.ask("worker-0:my-app@node-1", "compute", {"x": 42}, timeout_ms=5000)
+        return {"status": "ok", "worker_result": result}
+
+@actor
+class Worker:
+    @handler("compute")
+    def compute(self, x: int = 0) -> dict:
+        return {"result": x * 2}
+```
+
+**Debugging ask flow:** Enable debug logging to trace the full message flow:
+```
+RUST_LOG=plexspaces_application=debug,plexspaces_actor::routing=debug
+```
+
+This will show:
+```
+WASM ask: sending request via ActorRef  message_id=req-01JMX...  sender_id=coordinator:app@node  recipient_id=worker-0:app@node
+ask_helper: routing request to target  message_id=req-01JMX...  sender_id=ask-CORR@node  correlation_id=CORR
+WasmActor handle_message: sending reply  request_id=req-01JMX...  reply_id=res-01JMX...  reply_to=ask-CORR@node
+ask_helper: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
+WASM ask: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
+```
+
+### Float Handling in Inter-Actor Messages
+
+**Important:** The Python SDK's `handle()` return path uses `json.dumps()` directly, which serializes Python floats as JSON numbers. This ensures that inter-actor `host.ask()` responses preserve numeric types correctly.
+
+Float sanitization (converting floats to strings) is **only** applied in the `get_state()` path for checkpoint persistence safety. The `set_state()` path reverses this with `_desanitize_from_wasm()`. This sanitization is **not** applied to `handle()` responses to avoid corrupting numeric values in inter-actor communication.
+
+If you encounter `"unsupported operand type(s) for +=: 'float' and 'str'"` errors in inter-actor ask responses, ensure your WASM module is built with the latest SDK (>= v0.2.0) where this fix is applied.
+
+### Re-Instantiation After handle() (wasmtime Component Model)
+
+Component-model WASM actors are **re-instantiated after each `handle()` call**. This is required because wasmtime 16.x raises a "cannot enter component instance" trap when a component is called a second time (see [wasmtime#8943](https://github.com/bytecodealliance/wasmtime/issues/8943)).
+
+**How it works:**
+1. Actor receives a message → `handle()` is called on the WASM instance
+2. After `handle()` returns, the runtime calls `get_state()` to capture actor state
+3. A new WASM instance is created from the same compiled module
+4. `set_state()` restores the captured state on the new instance
+5. The new instance is ready for the next message
+
+**State preservation:** The `get_state()`/`set_state()` cycle preserves all `state()` fields. Fields **not** declared with `state()` are lost across re-instantiation. For large derived data (e.g., data shards), regenerate from deterministic seeds rather than persisting.
+
+**When will this change?** The wasmtime project is working on `component-model-async` support which will allow re-entrant component calls. Once PlexSpaces upgrades to a wasmtime version with this feature, re-instantiation will no longer be needed and per-message performance will improve significantly.
+
+**Impact on performance:** Re-instantiation adds per-message overhead (typically 1-5ms for Python actors). For high-throughput single-actor scenarios, consider using traditional (non-component) WASM modules.
+
 ### Metrics
 
 State operations are fully instrumented with Prometheus metrics:
@@ -1205,6 +1348,20 @@ WasmApplication
        ├── worker-1 (WASM actor) ← Factory can recreate on crash
        └── worker-2 (WASM actor) ← Factory can recreate on crash
 ```
+
+### Supervisor Tree Actor ID Format
+
+Applications with supervisor trees create actors whose IDs incorporate the child spec ID, namespace, and node ID. The format is:
+
+**`child_spec_id:namespace@node_id`**
+
+For example, given an application with namespace `my-app` deployed to `node-1` with a child spec ID of `worker-1`, the actor ID will be:
+
+```
+worker-1:my-app@node-1
+```
+
+This format ensures that all actors within a supervisor tree are uniquely identifiable and properly scoped to their namespace, even when multiple applications share the same node.
 
 ### Key Components
 
@@ -1253,6 +1410,10 @@ To customize supervisor settings, provide a config TOML file:
 
 ```toml
 # app-config.toml
+name = "my-app"
+version = "1.0.0"
+namespace = "my-app"  # Required: all actors scoped to this namespace
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10

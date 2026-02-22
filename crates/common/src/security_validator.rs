@@ -86,7 +86,9 @@ pub enum SecurityValidationError {
 pub async fn validate_security_config(config: &SecurityConfig) -> Result<(), SecurityValidationError> {
     // Check if auth is disabled via env variable (for testing)
     if get_env_bool(ENV_DISABLE_AUTH) {
-        tracing::debug!("Auth disabled via {} - skipping security validation", ENV_DISABLE_AUTH);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!("Auth disabled via {} - skipping security validation", ENV_DISABLE_AUTH);
+        }
         return Ok(());
     }
     

@@ -117,6 +117,7 @@ async fn test_genserver_handle_request() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -176,6 +177,7 @@ async fn test_genevent_handle_event() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -235,6 +237,7 @@ async fn test_genfsm_handle_transition() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -293,6 +296,7 @@ async fn test_fallback_to_handle_message() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -364,6 +368,7 @@ async fn test_channel_send_to_queue() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         Some(channel_service), // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -414,6 +419,7 @@ async fn test_channel_publish_to_topic() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         Some(channel_service), // channel_service
         None, // message_sender
         None, // tuplespace_provider
@@ -466,6 +472,7 @@ async fn test_channel_service_optional() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
+        10_000_000_000, // max_fuel
         None, // channel_service
         None, // message_sender
         None, // tuplespace_provider

@@ -234,8 +234,11 @@ pub fn parse_app_config_toml(toml_str: &str, app_name: &str) -> Result<Applicati
         .unwrap_or("1.0.0")
         .to_string();
 
-    // Extract namespace (explicit property for multi-tenancy)
-    // If not specified in config, will be set to application_id during deployment
+    // Extract namespace from TOML config (optional).
+    // Actor IDs use name:namespace@node_id format.
+    // If not set in TOML, leave empty so the application_service can default
+    // to application_id (from the deploy request), which is the correct namespace
+    // for HTTP-deployed apps (e.g., "ray-ps" for /api/v1/actors/ray-ps/parameter-server).
     let namespace = parsed
         .get("namespace")
         .and_then(|v| v.as_str())
@@ -411,6 +414,26 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
         vec![]
     };
 
+    // Parse args map (string -> string) from TOML
+    let args = if let Some(args_val) = value.get("args") {
+        let mut map = std::collections::HashMap::new();
+        if let Some(args_table) = args_val.as_table() {
+            for (key, val) in args_table {
+                let val_str = match val {
+                    toml::Value::String(s) => s.clone(),
+                    toml::Value::Integer(i) => i.to_string(),
+                    toml::Value::Float(f) => f.to_string(),
+                    toml::Value::Boolean(b) => b.to_string(),
+                    other => other.to_string(),
+                };
+                map.insert(key.clone(), val_str);
+            }
+        }
+        map
+    } else {
+        std::collections::HashMap::new()
+    };
+
     Ok(ChildSpec {
         id,
         r#type: child_type as i32,
@@ -420,6 +443,7 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
             nanos: 0,
         }),
         facets,
+        args,
         ..Default::default()
     })
 }

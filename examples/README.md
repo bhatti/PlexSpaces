@@ -14,7 +14,7 @@ examples/
 ├── typescript/
 │   └── apps/               # 2 TypeScript WASM actors
 ├── go/
-│   └── apps/               # (empty - TODO)
+│   └── apps/               # 1 Go WASM actor
 ├── native_references/      # Reference code from other frameworks
 └── README.md
 ```
@@ -26,8 +26,8 @@ examples/
 | Rust | 50 | 2 | 52 |
 | Python | - | 10 | 10 |
 | TypeScript | - | 2 | 2 |
-| Go | - | 0 | 0 |
-| **Total** | **50** | **14** | **64** |
+| Go | - | 1 | 1 |
+| **Total** | **50** | **15** | **65** |
 
 ---
 
@@ -99,11 +99,24 @@ jco compile <actor>.ts -o <app>.wasm
 plexspaces deploy <app>.wasm --tenant my-tenant
 ```
 
+### Go Apps
+```bash
+cd go/apps/<app>
+./build.sh    # builds WASM with TinyGo
+./test.sh     # deploys and runs E2E tests
+```
+
+#### Go SDK Examples
+
+| Example | Description | README |
+|---------|-------------|--------|
+| **Migrating Erlang/OTP** | Sliding window rate limiter (GenServer pattern) | [README](go/apps/migrating_erlang_otp/README.md) |
+
 ---
 
 ## TODOs
 
-- [ ] Add Go apps (counter, calculator)
+- [ ] Add more Go apps (counter, calculator)
 - [ ] Add more TypeScript apps
 - [ ] Review and verify each example compiles/runs
 - [ ] Consolidate similar migration examples

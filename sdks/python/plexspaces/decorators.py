@@ -450,6 +450,31 @@ def _sanitize_payload_for_wasm(obj: Any) -> Any:
     return obj
 
 
+def _desanitize_from_wasm(obj: Any) -> Any:
+    """Recursively restore stringified numbers back to numeric types.
+    Reverses _sanitize_payload_for_wasm: strings that look like numbers become int or float.
+    Applied to state dicts loaded via set_state so arithmetic operations work correctly."""
+    if isinstance(obj, dict):
+        return {k: _desanitize_from_wasm(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_desanitize_from_wasm(v) for v in obj]
+    if isinstance(obj, str):
+        # Try int first (stricter), then float
+        try:
+            int_val = int(obj)
+            # Only convert if the string is exactly the int representation
+            # (avoids converting "1.0" to int 1)
+            if str(int_val) == obj:
+                return int_val
+        except (ValueError, TypeError):
+            pass
+        try:
+            return float(obj)
+        except (ValueError, TypeError):
+            pass
+    return obj
+
+
 def dispatch_message(instance: Any, from_actor: str, msg_type: str, payload: Dict[str, Any]) -> Any:
     """
     Dispatch a message to the appropriate handler.
@@ -499,14 +524,28 @@ def dispatch_message(instance: Any, from_actor: str, msg_type: str, payload: Dic
         except Exception:
             return data
 
+    # Make from_actor available to handlers that declare a `from_actor` parameter.
+    # This lets handlers log/use the sender identity for request/reply debugging.
+    def _inject_from_actor(method: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        if from_actor:
+            try:
+                sig = inspect.signature(method)
+                if "from_actor" in sig.parameters and "from_actor" not in kwargs:
+                    kwargs["from_actor"] = from_actor
+            except Exception:
+                pass
+        return kwargs
+
     # Check for exact match
     if effective_type in handlers:
         handler_method = handlers[effective_type]
         kwargs = _filter_kwargs(handler_method, handler_payload)
+        kwargs = _inject_from_actor(handler_method, kwargs)
         return handler_method(instance, **kwargs)
     if msg_type in handlers:
         handler_method = handlers[msg_type]
         kwargs = _filter_kwargs(handler_method, payload)
+        kwargs = _inject_from_actor(handler_method, kwargs)
         return handler_method(instance, **kwargs)
 
     # Check for "call" or "get_state" which might return state

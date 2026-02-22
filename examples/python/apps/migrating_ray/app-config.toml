@@ -1,11 +1,10 @@
 # Ray Parameter Server Application Configuration
-# 
-# Deploys parameter server and data workers for distributed ML training.
-# Demonstrates Ray-style parameter server pattern with elastic worker pools.
 #
-# This single ApplicationSpec deploys multiple actor types from one WASM file:
-# - ParameterServer: Centralized model weights management
-# - DataWorker: Gradient computation workers
+# Deploys ParameterServer + DataWorker actors from one WASM module.
+# The framework passes child_spec.id as "actor_id" in init config,
+# and the SDK's ACTOR_ROLES mapping selects the correct class:
+#   "parameter-server" -> ParameterServer
+#   "data-worker-*"    -> DataWorker (prefix match)
 
 [supervisor]
 strategy = "one_for_one"
@@ -13,18 +12,19 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 # Parameter server (centralized model weights)
-# Uses ParameterServer actor class from ray_actors.wasm
 [[supervisor.children]]
 id = "parameter-server"
 type = "worker"
 restart = "permanent"
-shutdown_timeout_seconds = 5
-# Note: actor_type/behavior_kind determines which actor class to instantiate
-# For now, the first @actor class (ParameterServer) is used by default
-# TODO: Add support for specifying actor class name in child spec
+shutdown_timeout_seconds = 10
 
-# Data workers (elastic pool - can scale horizontally)
-# Uses DataWorker actor class from ray_actors.wasm
+[supervisor.children.args]
+num_workers = "2"
+learning_rate = "0.01"
+input_dim = "100"
+hidden_dim = "64"
+
+# Data workers (gradient computation)
 [[supervisor.children]]
 id = "data-worker-0"
 type = "worker"
@@ -33,42 +33,6 @@ shutdown_timeout_seconds = 5
 
 [[supervisor.children]]
 id = "data-worker-1"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 5
-
-[[supervisor.children]]
-id = "data-worker-2"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 5
-
-[[supervisor.children]]
-id = "data-worker-3"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 5
-
-[[supervisor.children]]
-id = "data-worker-4"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 5
-
-[[supervisor.children]]
-id = "data-worker-5"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 5
-
-[[supervisor.children]]
-id = "data-worker-6"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 5
-
-[[supervisor.children]]
-id = "data-worker-7"
 type = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5

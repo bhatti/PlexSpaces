@@ -379,19 +379,32 @@ Binary large object storage with streaming support.
 
 **Proto**: `proto/plexspaces/v1/keyvalue/keyvalue.proto`
 
-Key-value storage for actor state.
+Multi-backend key-value storage for actor state, configuration, registries, leases, and metrics.
+
+#### Architecture
+
+The KeyValueStore has a layered trait design:
+
+- **`plexspaces_common::KeyValueStore`**: Base trait for actors, facets, and WASM host (CRUD + TTL + CAS + increment). Defined in `common` crate to avoid circular dependencies.
+- **`plexspaces_keyvalue::KeyValueStore`**: Extended trait for backend implementations (adds watch, multi_get, stats). Defined in the `keyvalue` crate.
+- **`plexspaces_core`** re-exports the base trait from `common` for convenience.
+
+Backends: SQLite (`:memory:` or file), PostgreSQL, Redis, DynamoDB, S3/Blob (all via feature flags).
 
 #### RPCs
 
 | Method | Description | Request | Response |
 |--------|-------------|---------|----------|
 | `Get` | Get value | `GetRequest` | `GetResponse` |
-| `Set` | Set value | `SetRequest` | `SetResponse` |
+| `Put` | Put value | `PutRequest` | `PutResponse` |
 | `Delete` | Delete key | `DeleteRequest` | `DeleteResponse` |
 | `Exists` | Check if key exists | `ExistsRequest` | `ExistsResponse` |
 | `List` | List keys with prefix | `ListRequest` | `ListResponse` |
-| `BatchGet` | Batch get | `BatchGetRequest` | `BatchGetResponse` |
-| `BatchSet` | Batch set | `BatchSetRequest` | `BatchSetResponse` |
+| `MultiGet` | Batch get | `MultiGetRequest` | `MultiGetResponse` |
+| `MultiPut` | Batch put | `MultiPutRequest` | `MultiPutResponse` |
+| `PutWithTtl` | Put with TTL | `PutWithTtlRequest` | `PutWithTtlResponse` |
+| `Cas` | Compare-and-swap | `CasRequest` | `CasResponse` |
+| `Increment` | Atomic increment | `IncrementRequest` | `IncrementResponse` |
 
 ### ObjectRegistry
 

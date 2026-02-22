@@ -197,8 +197,130 @@ pub mod blob;
 #[cfg(feature = "ddb-backend")]
 pub mod ddb;
 
-pub use config::{create_keyvalue_from_config, create_keyvalue_from_env, BackendType, KVConfig};
+pub use config::{create_keyvalue_from_config, create_keyvalue_from_env, create_keyvalue_stores_from_config, create_keyvalue_stores_from_env, BackendType, KVConfig};
 pub use error::{KVError, KVResult};
+
+/// Maps `KVError` to `plexspaces_common::KeyValueStoreError` with semantic error preservation.
+///
+/// This function preserves error semantics rather than flattening all errors to `StorageError`:
+/// - `KVError::KeyNotFound` → `KeyValueStoreError::NotFound`
+/// - `KVError::CASFailed` → `KeyValueStoreError::CasConflict`
+/// - `KVError::SerializationError`/`DeserializationError` → `KeyValueStoreError::SerializationError`
+/// - All others → `KeyValueStoreError::StorageError`
+pub fn map_kv_error(e: KVError) -> plexspaces_common::KeyValueStoreError {
+    match e {
+        KVError::KeyNotFound(k) => plexspaces_common::KeyValueStoreError::NotFound(k),
+        KVError::CASFailed => plexspaces_common::KeyValueStoreError::CasConflict,
+        KVError::SerializationError(msg) => plexspaces_common::KeyValueStoreError::SerializationError(msg),
+        KVError::DeserializationError(msg) => plexspaces_common::KeyValueStoreError::SerializationError(msg),
+        other => plexspaces_common::KeyValueStoreError::StorageError(other.to_string()),
+    }
+}
+
+/// Generates `plexspaces_common::KeyValueStore` impl for a backend type that already
+/// implements `plexspaces_keyvalue::KeyValueStore`.
+///
+/// This macro eliminates boilerplate: each backend's rich trait methods are delegated
+/// to the consumer-facing trait with proper error mapping via [`map_kv_error`].
+///
+/// # Usage
+/// ```ignore
+/// impl_common_keyvalue_store!(SqliteKVStore);
+/// impl_common_keyvalue_store!(RedisKVStore);
+/// ```
+#[macro_export]
+macro_rules! impl_common_keyvalue_store {
+    ($store_type:ty) => {
+        #[async_trait::async_trait]
+        impl plexspaces_common::KeyValueStore for $store_type {
+            async fn get(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                key: &str,
+            ) -> plexspaces_common::KeyValueStoreResult<Option<Vec<u8>>> {
+                $crate::KeyValueStore::get(self, ctx, key)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn put(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                key: &str,
+                value: Vec<u8>,
+            ) -> plexspaces_common::KeyValueStoreResult<()> {
+                $crate::KeyValueStore::put(self, ctx, key, value)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn put_with_ttl(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                key: &str,
+                value: Vec<u8>,
+                ttl: std::time::Duration,
+            ) -> plexspaces_common::KeyValueStoreResult<()> {
+                $crate::KeyValueStore::put_with_ttl(self, ctx, key, value, ttl)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn delete(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                key: &str,
+            ) -> plexspaces_common::KeyValueStoreResult<()> {
+                $crate::KeyValueStore::delete(self, ctx, key)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn exists(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                key: &str,
+            ) -> plexspaces_common::KeyValueStoreResult<bool> {
+                $crate::KeyValueStore::exists(self, ctx, key)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn list_keys(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                prefix: &str,
+            ) -> plexspaces_common::KeyValueStoreResult<Vec<String>> {
+                $crate::KeyValueStore::list(self, ctx, prefix)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn cas(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                key: &str,
+                expected: Option<Vec<u8>>,
+                new_value: Vec<u8>,
+            ) -> plexspaces_common::KeyValueStoreResult<bool> {
+                $crate::KeyValueStore::cas(self, ctx, key, expected, new_value)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn increment(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                key: &str,
+                delta: i64,
+            ) -> plexspaces_common::KeyValueStoreResult<i64> {
+                $crate::KeyValueStore::increment(self, ctx, key, delta)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+        }
+    };
+}
 
 #[cfg(feature = "sql-backend")]
 pub use sql::{PostgreSQLKVStore, SqliteKVStore};

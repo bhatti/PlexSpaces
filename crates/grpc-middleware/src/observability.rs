@@ -130,7 +130,9 @@ impl ObservabilityManager {
     ) {
         match level {
             LogLevel::Debug => {
-                debug!(tenant_id = %tenant_id, ?fields, "{}", message);
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(tenant_id = %tenant_id, ?fields, "{}", message);
+                }
             }
             LogLevel::Info => {
                 info!(tenant_id = %tenant_id, ?fields, "{}", message);

@@ -28,6 +28,7 @@ Usage:
 
 import json
 from typing import Any, Dict, List, Optional
+from .decorators import _desanitize_from_wasm
 
 # Global reference to actual host module (set by runtime)
 _host_impl = None
@@ -176,121 +177,114 @@ class _MockHost:
         """Blob list (mock). Returns empty array."""
         return "[]"
 
+    def ask(self, to: str, msg_type: str, payload_json: str, timeout_ms: int) -> str:
+        """Ask (mock). Returns empty JSON."""
+        print(f"[MOCK] ask({to}, {msg_type}, timeout={timeout_ms})")
+        return "{}"
+
+    def self_id(self) -> str:
+        """Self ID (mock). Returns mock actor ID."""
+        return "mock-actor"
+
+    def spawn(self, module_ref: str, actor_id: str, init_config_json: str) -> str:
+        """Spawn (mock). Returns spawned actor ID."""
+        spawned_id = actor_id if actor_id else f"mock-{module_ref}-1"
+        print(f"[MOCK] spawn({module_ref}, {actor_id}) -> {spawned_id}")
+        return spawned_id
+
+    def stop(self, actor_id: str) -> str:
+        """Stop (mock). Returns empty on success."""
+        print(f"[MOCK] stop({actor_id})")
+        return ""
+
+    def link(self, actor_id: str) -> str:
+        """Link (mock). Returns empty on success."""
+        return ""
+
+    def unlink(self, actor_id: str) -> str:
+        """Unlink (mock). Returns empty on success."""
+        return ""
+
+    def monitor(self, actor_id: str) -> str:
+        """Monitor (mock). Returns mock monitor ref."""
+        return "mock-monitor-1"
+
+    def demonitor(self, monitor_ref: str) -> str:
+        """Demonitor (mock). Returns empty on success."""
+        return ""
+
+    def send_after(self, delay_ms: int, msg_type: str, payload_json: str) -> str:
+        """Send-after (mock). Returns timer ID."""
+        return "mock-timer-1"
+
+    def pg_join(self, group_name: str) -> str:
+        """Process group join (mock). Returns empty on success."""
+        return ""
+
+    def pg_leave(self, group_name: str) -> str:
+        """Process group leave (mock). Returns empty on success."""
+        return ""
+
+    def pg_members(self, group_name: str) -> str:
+        """Process group members (mock). Returns empty array."""
+        return "[]"
+
+    def pg_broadcast(self, group_name: str, msg_type: str, payload_json: str) -> str:
+        """Process group broadcast (mock). Returns empty on success."""
+        return ""
+
 
 class ProcessGroups:
     """
     Process groups host functions for pub/sub coordination.
-    
+
     Process groups allow actors to:
     - Join named groups
     - Broadcast messages to all group members
+    - List members
     - Leave groups
-    
+
     Example:
         from plexspaces import host
-        
-        # Join a chat room
-        host.process_groups.join("chat-room", "user-123")
-        
-        # Send message to all in room
-        host.process_groups.publish("chat-room", {"text": "Hello!"})
-        
-        # Leave room
-        host.process_groups.leave("chat-room", "user-123")
+
+        host.process_groups.join("chat-room")
+        members = host.process_groups.members("chat-room")
+        host.process_groups.broadcast("chat-room", "chat", {"text": "Hello!"})
+        host.process_groups.leave("chat-room")
     """
-    
-    def join(self, group: str, actor_id: str, topics: List[str] = None) -> None:
-        """
-        Join a process group.
-        
-        Args:
-            group: Name of the group to join
-            actor_id: Actor ID to register in the group
-            topics: Optional list of topics to subscribe to (empty = all)
-        """
+
+    def join(self, group: str) -> None:
+        """Join a process group (uses self actor ID)."""
         h = _get_host()
-        if hasattr(h, 'process_groups_join'):
-            h.process_groups_join(group, actor_id, topics or [])
-        else:
-            # Simple host doesn't have process groups, use send
-            h.send("process-groups", "join_group", json.dumps({
-                "group": group,
-                "actor_id": actor_id,
-                "topics": topics or []
-            }))
-    
-    def leave(self, group: str, actor_id: str) -> None:
-        """
-        Leave a process group.
-        
-        Args:
-            group: Name of the group to leave
-            actor_id: Actor ID to remove from the group
-        """
+        result = h.pg_join(group)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def leave(self, group: str) -> None:
+        """Leave a process group."""
         h = _get_host()
-        if hasattr(h, 'process_groups_leave'):
-            h.process_groups_leave(group, actor_id)
-        else:
-            h.send("process-groups", "leave_group", json.dumps({
-                "group": group,
-                "actor_id": actor_id
-            }))
-    
-    def publish(self, group: str, message: Any, topic: str = None) -> List[str]:
-        """
-        Publish a message to all members of a group.
-        
-        Args:
-            group: Name of the group
-            message: Message to broadcast (will be JSON-serialized)
-            topic: Optional topic filter (None = broadcast to all)
-        
-        Returns:
-            List of actor IDs that received the message
-        """
+        result = h.pg_leave(group)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def members(self, group: str) -> List[str]:
+        """Get all members of a group. Returns list of actor IDs."""
         h = _get_host()
-        payload = json.dumps(message) if not isinstance(message, str) else message
-        
-        if hasattr(h, 'process_groups_publish'):
-            return h.process_groups_publish(group, payload.encode(), topic)
-        else:
-            result = h.send("process-groups", "publish", json.dumps({
-                "group": group,
-                "message": message,
-                "topic": topic
-            }))
-            if result:
-                try:
-                    data = json.loads(result)
-                    return data.get("recipients", [])
-                except:
-                    pass
+        result = h.pg_members(group)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        try:
+            return json.loads(result)
+        except (json.JSONDecodeError, ValueError):
             return []
-    
-    def get_members(self, group: str) -> List[str]:
-        """
-        Get all members of a group.
-        
-        Args:
-            group: Name of the group
-        
-        Returns:
-            List of actor IDs in the group
-        """
+
+    def broadcast(self, group: str, msg_type: str, payload: Any = None) -> None:
+        """Broadcast a message to all members of a group."""
         h = _get_host()
-        if hasattr(h, 'process_groups_get_members'):
-            return h.process_groups_get_members(group)
-        else:
-            result = h.send("process-groups", "get_members", json.dumps({
-                "group": group
-            }))
-            if result:
-                try:
-                    data = json.loads(result)
-                    return data.get("members", [])
-                except:
-                    pass
-            return []
+        payload_json = json.dumps(payload) if payload is not None else "{}"
+        result = h.pg_broadcast(group, msg_type, payload_json)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
 
 
 class Host:
@@ -540,6 +534,147 @@ class Host:
         if hasattr(h, "blob_list"):
             return h.blob_list(prefix)
         return getattr(h, "blob-list", lambda _: "[]")(prefix)
+
+    # ========================================================================
+    # Messaging: ask (request-reply)
+    # ========================================================================
+
+    def ask(self, to: str, msg_type: str, payload: Any = None, timeout_ms: int = 5000) -> Any:
+        """
+        Send request and wait for response (request-reply pattern).
+
+        Args:
+            to: Target actor ID
+            msg_type: Message type
+            payload: Message payload (will be JSON-serialized)
+            timeout_ms: Max wait time in milliseconds (default 5000)
+
+        Returns:
+            Parsed JSON response, or raw string if not valid JSON
+        """
+        h = _get_host()
+        payload_json = ""
+        if payload is not None:
+            payload_json = json.dumps(payload) if not isinstance(payload, str) else payload
+        result = h.ask(to, msg_type, payload_json, timeout_ms)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        try:
+            parsed = json.loads(result)
+            # Defense-in-depth: restore stringified numbers from older WASM
+            # modules that may still sanitize floats to strings in handle().
+            return _desanitize_from_wasm(parsed)
+        except (json.JSONDecodeError, ValueError):
+            return result
+
+    # ========================================================================
+    # Actor Identity
+    # ========================================================================
+
+    def self_id(self) -> str:
+        """Get own actor ID."""
+        h = _get_host()
+        return h.self_id()
+
+    # ========================================================================
+    # Actor Lifecycle
+    # ========================================================================
+
+    def spawn(self, module_ref: str, actor_id: str = "", init_config: Any = None) -> str:
+        """
+        Spawn a new actor. Delegates to ActorFactory::spawn_actor() via the host.
+
+        Args:
+            module_ref: Actor type/module reference (must be a deployed WASM module or registered behavior)
+            actor_id: Unique ID for the new actor (empty = auto-generated ULID)
+            init_config: Optional config passed to the new actor's init()
+
+        Returns:
+            Spawned actor ID string (may be auto-generated if actor_id was empty).
+            Raises RuntimeError on failure.
+        """
+        h = _get_host()
+        config_json = json.dumps(init_config) if init_config is not None else "{}"
+        result = h.spawn(module_ref, actor_id, config_json)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return result
+
+    def stop(self, actor_id: str) -> None:
+        """
+        Stop an actor gracefully.
+
+        Args:
+            actor_id: ID of the actor to stop
+
+        Raises:
+            RuntimeError: on failure
+        """
+        h = _get_host()
+        result = h.stop(actor_id)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    # ========================================================================
+    # Actor Linking & Monitoring (Erlang/OTP patterns)
+    # ========================================================================
+
+    def link(self, actor_id: str) -> None:
+        """Bidirectional link: if either actor crashes, the other is notified."""
+        h = _get_host()
+        result = h.link(actor_id)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def unlink(self, actor_id: str) -> None:
+        """Remove a bidirectional link."""
+        h = _get_host()
+        result = h.unlink(actor_id)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def monitor(self, actor_id: str) -> str:
+        """
+        Monitor an actor (unidirectional). Returns monitor reference string.
+        """
+        h = _get_host()
+        result = h.monitor(actor_id)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return result
+
+    def demonitor(self, monitor_ref: str) -> None:
+        """Cancel a monitor."""
+        h = _get_host()
+        result = h.demonitor(monitor_ref)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    # ========================================================================
+    # Timers (Delayed Messaging)
+    # ========================================================================
+
+    def send_after(self, delay_ms: int, msg_type: str, payload: Any = None) -> str:
+        """
+        Send a message to self after a delay.
+
+        The host spawns a tracked background task that delivers the message
+        after delay_ms milliseconds. The timer-id is returned for observability.
+
+        Note: Timer cancellation is managed by the framework's TimerFacet/ReminderFacet,
+        not by individual actors. Stop the actor to cancel pending timers.
+
+        Args:
+            delay_ms: Delay in milliseconds
+            msg_type: Message type
+            payload: Optional payload (will be JSON-serialized)
+
+        Returns:
+            Timer ID string (for tracking/observability)
+        """
+        h = _get_host()
+        payload_json = json.dumps(payload) if payload is not None else "{}"
+        return h.send_after(delay_ms, msg_type, payload_json)
 
 
 # Global host instance

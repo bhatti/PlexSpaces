@@ -1405,6 +1405,12 @@ impl KeyValueStore for PostgreSQLKVStore {
     }
 }
 
+// Bridge plexspaces_keyvalue::KeyValueStore → plexspaces_common::KeyValueStore
+// for both SQL backends. The macro delegates all 8 consumer-facing methods to the
+// rich trait, mapping KVError to KeyValueStoreError with semantic error preservation.
+crate::impl_common_keyvalue_store!(SqliteKVStore);
+crate::impl_common_keyvalue_store!(PostgreSQLKVStore);
+
 #[cfg(all(test, feature = "sql-backend"))]
 mod tests {
     use super::*;

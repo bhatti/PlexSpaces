@@ -639,7 +639,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
         initial_state: &[u8],
         config: std::sync::Arc<dyn std::any::Any + Send + Sync>,
         channel_service: Option<std::sync::Arc<dyn plexspaces_core::ChannelService>>,
-        message_sender: Option<std::sync::Arc<dyn plexspaces_core::MessageSender>>,
+        message_sender: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
         tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
         keyvalue_store: Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>>,
         process_group_registry: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
@@ -678,10 +678,20 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
                 .ok()
         });
         
-        // Note: We pass None for message_sender because plexspaces_core::MessageSender
-        // is a different trait from host_functions::MessageSender. For full integration,
-        // implement an adapter or use the concrete WasmRuntime methods directly.
-        let _ = message_sender; // Acknowledge unused parameter
+        // Downcast message_sender from Arc<dyn Any> to Arc<dyn MessageSender>
+        // The caller passes Arc<dyn wasm_runtime::MessageSender> wrapped in Arc<dyn Any>
+        let wasm_message_sender: Option<std::sync::Arc<dyn crate::MessageSender>> =
+            message_sender.and_then(|ms| {
+                let result = ms.downcast::<std::sync::Arc<dyn crate::MessageSender>>()
+                    .ok()
+                    .map(|inner| (*inner).clone());
+                if result.is_some() {
+                    tracing::info!("MessageSender successfully configured for WASM actor");
+                } else {
+                    tracing::warn!("Failed to downcast MessageSender from Arc<dyn Any> - host.ask() will not work");
+                }
+                result
+            });
         
         // Convert BlobServiceTrait to concrete BlobService via as_any + downcast
         let concrete_blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>> = blob_service
@@ -701,7 +711,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             limits,
             wasm_config.limits.max_fuel,
             channel_service,
-            None, // message_sender - trait types differ, pass None
+            wasm_message_sender,
             tuplespace_provider,
             keyvalue_store,
             pg_registry,

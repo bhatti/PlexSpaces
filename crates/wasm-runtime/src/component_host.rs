@@ -192,7 +192,9 @@ pub struct LoggingImpl {
 #[async_trait::async_trait]
 impl plexspaces::actor::logging::Host for LoggingImpl {
     async fn trace(&mut self, message: String) {
-        tracing::trace!(actor_id = %self.actor_id, "{}", message);
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(actor_id = %self.actor_id, "{}", message);
+        }
     }
 
     async fn debug(&mut self, message: String) {
@@ -215,7 +217,11 @@ impl plexspaces::actor::logging::Host for LoggingImpl {
 
     async fn log(&mut self, level: plexspaces::actor::logging::LogLevel, message: String) {
         match level {
-            plexspaces::actor::logging::LogLevel::Trace => tracing::trace!(actor_id = %self.actor_id, "{}", message),
+            plexspaces::actor::logging::LogLevel::Trace => {
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(actor_id = %self.actor_id, "{}", message);
+                }
+            },
             plexspaces::actor::logging::LogLevel::Debug => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %self.actor_id, "{}", message);
@@ -235,7 +241,9 @@ impl plexspaces::actor::logging::Host for LoggingImpl {
     ) {
         match level {
             plexspaces::actor::logging::LogLevel::Trace => {
-                tracing::trace!(actor_id = %self.actor_id, "{}", message);
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(actor_id = %self.actor_id, "{}", message);
+                }
             }
             plexspaces::actor::logging::LogLevel::Debug => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
@@ -2038,9 +2046,8 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         // Get BlobService from host_functions
         let blob_service = self.host_functions.blob_service();
         if let Some(blob_service) = blob_service {
-            use plexspaces_core::RequestContext;
             use plexspaces_blob::repository::ListFilters;
-            
+
             // Create RequestContext from context (empty strings use defaults)
             let request_ctx = context_to_request_context(&ctx);
             
@@ -2136,8 +2143,6 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         // Get BlobService from host_functions
         let blob_service = self.host_functions.blob_service();
         if let Some(blob_service) = blob_service {
-            use plexspaces_core::RequestContext;
-            
             // Use blob_id if provided, otherwise we'd need to look up by bucket+key
             // NOTE: Blob lookup by bucket+key is not yet implemented. blob_id is required
             // for download operations. This is an acceptable limitation - bucket+key lookup
@@ -2148,19 +2153,10 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 blob_id
             };
             
-            // Get blob metadata first to extract tenant/namespace for proper RequestContext.
-            // Use default context (no admin) so tenant isolation is preserved.
-            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
-            let metadata = blob_service.get_metadata(&temp_ctx, &effective_blob_id).await
-                .map_err(|e| {
-                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
-                    make_actor_error(error_code, format!("Failed to get blob metadata: {}", e))
-                })?;
-            
-            // Create proper RequestContext from blob metadata tenant/namespace
-            let request_ctx = RequestContext::new_without_auth(metadata.tenant_id.clone(), metadata.namespace.clone());
-            
-            // Download blob using BlobService with proper context
+            // Build RequestContext from caller's context for tenant-isolated lookup
+            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+
+            // Download blob using BlobService with caller's context
             match blob_service.download_blob(&request_ctx, &effective_blob_id).await {
                 Ok(data) => {
                     let duration = start_time.elapsed();
@@ -2218,8 +2214,6 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         // Get BlobService from host_functions
         let blob_service = self.host_functions.blob_service();
         if let Some(blob_service) = blob_service {
-            use plexspaces_core::RequestContext;
-            
             // Use blob_id if provided
             let effective_blob_id = if blob_id.is_empty() {
                 return Err(make_actor_error("invalid-message", "blob_id is required for delete".to_string()));
@@ -2227,19 +2221,10 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 blob_id
             };
             
-            // Get blob metadata first to extract tenant/namespace for proper RequestContext.
-            // Use default context (no admin) so tenant isolation is preserved.
-            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
-            let metadata = blob_service.get_metadata(&temp_ctx, &effective_blob_id).await
-                .map_err(|e| {
-                    let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
-                    make_actor_error(error_code, format!("Failed to get blob metadata: {}", e))
-                })?;
-            
-            // Create proper RequestContext from blob metadata tenant/namespace
-            let request_ctx = RequestContext::new_without_auth(metadata.tenant_id.clone(), metadata.namespace.clone());
-            
-            // Delete blob using BlobService with proper context
+            // Build RequestContext from caller's context for tenant-isolated lookup
+            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+
+            // Delete blob using BlobService with caller's context
             match blob_service.delete_blob(&request_ctx, &effective_blob_id).await {
                 Ok(()) => {
                     let duration = start_time.elapsed();
@@ -2284,8 +2269,6 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         // Get BlobService from host_functions
         let blob_service = self.host_functions.blob_service();
         if let Some(blob_service) = blob_service {
-            use plexspaces_core::RequestContext;
-            
             // Use blob_id if provided
             let effective_blob_id = if blob_id.is_empty() {
                 return Err(make_actor_error("invalid-message", "blob_id is required for exists check".to_string()));
@@ -2293,12 +2276,10 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 blob_id
             };
             
-            // Get blob metadata to check existence. Use default context (no admin) for tenant isolation.
-            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
-            match blob_service.get_metadata(&temp_ctx, &effective_blob_id).await {
-                Ok(metadata) => {
-                    // Blob exists - return true (we could use the metadata to create proper context
-                    // but for exists check, we just need to return the boolean)
+            // Build RequestContext from caller's context for tenant-isolated lookup
+            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            match blob_service.get_metadata(&request_ctx, &effective_blob_id).await {
+                Ok(_metadata) => {
                     Ok(true)
                 }
                 Err(e) => {
@@ -2337,9 +2318,8 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         // Get BlobService from host_functions
         let blob_service = self.host_functions.blob_service();
         if let Some(blob_service) = blob_service {
-            use plexspaces_core::RequestContext;
             use plexspaces_blob::repository::ListFilters;
-            
+
             // Create RequestContext from context (empty strings use defaults)
             let request_ctx = context_to_request_context(&ctx);
             
@@ -2426,8 +2406,6 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         // Get BlobService from host_functions
         let blob_service = self.host_functions.blob_service();
         if let Some(blob_service) = blob_service {
-            use plexspaces_core::RequestContext;
-            
             // Use blob_id if provided
             let effective_blob_id = if blob_id.is_empty() {
                 return Err(make_actor_error("invalid-message", "blob_id is required for metadata".to_string()));
@@ -2435,9 +2413,9 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 blob_id
             };
             
-            // Get metadata using BlobService. Use default context (no admin) for tenant isolation.
-            let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
-            match blob_service.get_metadata(&temp_ctx, &effective_blob_id).await {
+            // Build RequestContext from caller's context for tenant-isolated lookup
+            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            match blob_service.get_metadata(&request_ctx, &effective_blob_id).await {
                 Ok(m) => {
                     let last_modified = m.created_at
                         .map(|ts| {
@@ -2506,8 +2484,6 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         // Get BlobService from host_functions
         let blob_service = self.host_functions.blob_service();
         if let Some(blob_service) = blob_service {
-            use plexspaces_core::RequestContext;
-            
             // Use source_blob_id if provided, otherwise we'd need to look up by bucket+key
             let effective_source_blob_id = if source_blob_id.is_empty() {
                 return Err(make_actor_error("invalid-message", "source_blob_id is required for copy".to_string()));
@@ -2515,20 +2491,8 @@ impl plexspaces::actor::blob::Host for BlobImpl {
                 source_blob_id
             };
             
-            // Create RequestContext from context (empty strings use defaults)
-            let request_ctx = if ctx.tenant_id.is_empty() && ctx.namespace.is_empty() {
-                // If not provided, look up metadata first to get tenant/namespace. Use default context (no admin).
-                let temp_ctx = RequestContext::new_without_auth(String::new(), String::new());
-                let source_metadata = blob_service.get_metadata(&temp_ctx, &effective_source_blob_id).await
-                    .map_err(|e| {
-                        let error_code = if e.to_string().contains("not found") || e.to_string().contains("NotFound") { "actor-not-found" } else { "internal" };
-                        make_actor_error(error_code, format!("Failed to get source blob metadata: {}", e))
-                    })?;
-                RequestContext::new_without_auth(source_metadata.tenant_id.clone(), source_metadata.namespace.clone())
-            } else {
-                // Use provided tenant/namespace
-                RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone())
-            };
+            // Build RequestContext from caller's context for tenant-isolated lookup
+            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
             
             // Get source blob metadata to preserve content_type and other properties
             let source_metadata = blob_service.get_metadata(&request_ctx, &effective_source_blob_id).await

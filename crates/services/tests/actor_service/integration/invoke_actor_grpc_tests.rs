@@ -53,6 +53,7 @@ async fn test_invoke_actor_get_counter_real_grpc() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     });
 
     let response = client.invoke_actor(request).await;
@@ -122,6 +123,7 @@ async fn test_invoke_actor_post_counter_real_grpc() {
         subpath: String::new(),
         ask: false,
         msg_type_override: String::new(),
+        timeout: None,
     });
 
     let response = client.invoke_actor(request).await;
@@ -228,6 +230,7 @@ async fn test_invoke_actor_delete_tell_real_grpc() {
         subpath: String::new(),
         ask: false, // DELETE uses tell by default
         msg_type_override: String::new(),
+        timeout: None,
     });
 
     let response = client.invoke_actor(request).await;

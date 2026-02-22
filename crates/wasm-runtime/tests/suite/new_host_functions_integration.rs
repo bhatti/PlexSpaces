@@ -61,37 +61,37 @@ mod tests {
 
     #[async_trait::async_trait]
     impl plexspaces_core::KeyValueStore for TestMemoryKVStore {
-        async fn get(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> Result<Option<Vec<u8>>, String> {
+        async fn get(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> plexspaces_core::KeyValueStoreResult<Option<Vec<u8>>> {
             Ok(self.data.read().await.get(key).cloned())
         }
 
-        async fn put(&self, _ctx: &plexspaces_core::RequestContext, key: &str, value: Vec<u8>) -> Result<(), String> {
+        async fn put(&self, _ctx: &plexspaces_core::RequestContext, key: &str, value: Vec<u8>) -> plexspaces_core::KeyValueStoreResult<()> {
             self.data.write().await.insert(key.to_string(), value);
             Ok(())
         }
 
-        async fn put_with_ttl(&self, _ctx: &plexspaces_core::RequestContext, key: &str, value: Vec<u8>, _ttl: Duration) -> Result<(), String> {
+        async fn put_with_ttl(&self, _ctx: &plexspaces_core::RequestContext, key: &str, value: Vec<u8>, _ttl: Duration) -> plexspaces_core::KeyValueStoreResult<()> {
             self.data.write().await.insert(key.to_string(), value);
             Ok(())
         }
 
-        async fn delete(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> Result<(), String> {
+        async fn delete(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> plexspaces_core::KeyValueStoreResult<()> {
             self.data.write().await.remove(key);
             Ok(())
         }
 
-        async fn exists(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> Result<bool, String> {
+        async fn exists(&self, _ctx: &plexspaces_core::RequestContext, key: &str) -> plexspaces_core::KeyValueStoreResult<bool> {
             Ok(self.data.read().await.contains_key(key))
         }
 
-        async fn list_keys(&self, _ctx: &plexspaces_core::RequestContext, prefix: &str) -> Result<Vec<String>, String> {
+        async fn list_keys(&self, _ctx: &plexspaces_core::RequestContext, prefix: &str) -> plexspaces_core::KeyValueStoreResult<Vec<String>> {
             Ok(self.data.read().await.keys()
                 .filter(|k| k.starts_with(prefix))
                 .cloned()
                 .collect())
         }
 
-        async fn cas(&self, _ctx: &plexspaces_core::RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> Result<bool, String> {
+        async fn cas(&self, _ctx: &plexspaces_core::RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> plexspaces_core::KeyValueStoreResult<bool> {
             let mut data = self.data.write().await;
             let current = data.get(key).cloned();
             if current == expected {
@@ -102,7 +102,7 @@ mod tests {
             }
         }
 
-        async fn increment(&self, _ctx: &plexspaces_core::RequestContext, key: &str, delta: i64) -> Result<i64, String> {
+        async fn increment(&self, _ctx: &plexspaces_core::RequestContext, key: &str, delta: i64) -> plexspaces_core::KeyValueStoreResult<i64> {
             let mut data = self.data.write().await;
             let current = data.get(key)
                 .and_then(|v| String::from_utf8(v.clone()).ok())

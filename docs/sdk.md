@@ -2,6 +2,10 @@
 
 PlexSpaces provides language-specific SDKs for building actors with minimal boilerplate. The SDKs are inspired by industry-leading frameworks like [Ray](https://docs.ray.io/en/latest/ray-core/api/doc/ray.remote.html), [Temporal](https://docs.temporal.io/), and [Orleans](https://learn.microsoft.com/en-us/dotnet/orleans/).
 
+## SDK Architecture
+
+The SDK is a **thin decorator layer** over the core framework crates. Core functionality -- actor registry, message routing, supervision, and state management -- lives in the main crates (`crates/behavior`, `crates/services`, `crates/core`). The SDK simplifies the developer experience by removing boilerplate: decorators like `@actor` and `@handler` generate the WIT interface glue, state serialization, and message dispatch that you would otherwise write by hand. This means the SDK adds no new runtime capabilities; it is purely a developer ergonomics layer that compiles down to the same WIT exports the framework already expects.
+
 ## Available SDKs
 
 | Language | Status | Location | Build Target |
@@ -9,7 +13,7 @@ PlexSpaces provides language-specific SDKs for building actors with minimal boil
 | **Python** | ✅ Available | `sdks/python/` | WASM actors (componentize-py) |
 | **TypeScript** | ✅ Available | `sdks/typescript/` | WASM actors (jco componentize) |
 | **Rust** | ✅ Available | `sdks/rust/plexspaces-sdk` | Native (embedded) actors; annotations + spawn_actor + facets |
-| Go | 📋 Planned | `sdks/go/` | WASM actors |
+| **Go** | ✅ Available | `sdks/go/` | WASM actors (TinyGo) |
 
 ## Python SDK
 
@@ -68,6 +72,23 @@ curl -X POST http://localhost:8094/api/v1/deploy \
   -F "actor_type=bank_account" \
   -F "wasm=@bank_account_actor.wasm"
 ```
+
+### Actor ID Format
+
+All WASM actors use the `name:namespace@node_id` format for actor identification. The namespace component is **required** for WASM deployment -- it determines where the actor is registered and how it is addressed by other actors.
+
+| Component | Required | Description | Example |
+|-----------|----------|-------------|---------|
+| `name` | Yes | Actor instance name | `account-alice` |
+| `namespace` | Yes (WASM) | Deployment namespace | `default`, `banking` |
+| `node_id` | Optional | Target node (for remote addressing) | `node-abc123` |
+
+**Examples:**
+- `account-alice:default` -- actor "account-alice" in the "default" namespace
+- `worker-1:ml-training@node-abc123` -- actor "worker-1" in the "ml-training" namespace on a specific node
+- When calling `host.self_id()`, the returned ID includes the namespace
+
+When deploying via the HTTP API, the namespace is specified in the deploy request (`-F "namespace=default"`). When sending messages between actors, use the full `name:namespace` format in the `to` field.
 
 ### API Reference
 
@@ -142,6 +163,8 @@ class Counter:
     history: list = state(default_factory=list)  # Mutable default (use factory)
 ```
 
+**State Serialization Safety (WASM JSON):** The SDK automatically handles float-to-string conversion for WASM JSON safety. When state is serialized via `get_state()`, the internal `_sanitize_payload_for_wasm` function converts float values to string representations to avoid JSON precision issues in WASM runtimes. When state is restored via `set_state()`, the `_desanitize_from_wasm` function converts them back. This is fully transparent to user code -- you read and write normal Python floats, and the SDK handles the round-trip safety automatically.
+
 #### Message Handlers
 
 Use `@handler()` to route messages to methods:
@@ -180,7 +203,22 @@ class ChatRoom:
 
 | Function | Description |
 |----------|-------------|
-| `host.send(to, msg_type, payload)` | Send message to another actor |
+| **Messaging** | |
+| `host.send(to, msg_type, payload)` | Send message to another actor (fire-and-forget) |
+| `host.ask(to, msg_type, payload, timeout_ms)` | Request-reply: send and wait for response. Raises RuntimeError on timeout/error. |
+| **Actor Identity** | |
+| `host.self_id()` | Get own actor ID (e.g., `"account-alice"`) |
+| **Actor Lifecycle** | |
+| `host.spawn(module_ref, actor_id, init_config)` | Spawn a new actor. Returns spawned actor ID (auto-generated ULID if actor_id is empty). |
+| `host.stop(actor_id)` | Stop an actor gracefully |
+| **Linking & Monitoring (Erlang/OTP)** | |
+| `host.link(actor_id)` | Bidirectional link: if either actor crashes, the other is notified |
+| `host.unlink(actor_id)` | Remove a bidirectional link |
+| `host.monitor(actor_id)` | Unidirectional monitor: receive DOWN notification when target exits. Returns monitor ref. |
+| `host.demonitor(monitor_ref)` | Cancel a monitor |
+| **Timers** | |
+| `host.send_after(delay_ms, msg_type, payload)` | Send message to self after delay. Returns timer-id for tracking. |
+| **Logging & Time** | |
 | `host.log(level, message)` | Log a message |
 | `host.info(message)` | Log info message |
 | `host.debug(message)` | Log debug message |
@@ -198,18 +236,57 @@ class ChatRoom:
 | `host.ts_take(pattern_json)` | Take tuple (destructive). Returns and removes matched tuple. |
 | `host.ts_read_all(pattern_json)` | Read all matching tuples. Returns JSON array of tuples. |
 | **Distributed Locks** | |
-| `host.lock_acquire(lock_id, timeout_ms)` | Acquire lock. Returns lock version on success. |
-| `host.lock_release(lock_id, lock_version)` | Release lock. Returns empty on success. |
+| `host.lock_acquire(tenant_id, namespace, holder_id, lock_name, lease_secs, timeout_ms)` | Acquire lock. Returns JSON with lock_key, version, holder_id. |
+| `host.lock_release(lock_id, tenant_id, namespace, holder_id, lock_version)` | Release lock. Returns empty on success. |
+| `host.lock_renew(lock_id, tenant_id, namespace, holder_id, lock_version, lease_secs)` | Renew lock lease. Returns new version. |
 | **Blob Storage** | |
 | `host.blob_upload(path, data, content_type)` | Upload blob (base64 data). Returns empty on success. |
 | `host.blob_download(path)` | Download blob. Returns base64 data or empty if not found. |
 | `host.blob_delete(path)` | Delete blob. Returns empty on success. |
 | `host.blob_list(prefix)` | List blobs by prefix. Returns JSON array of blob IDs. |
 | **Process Groups** | |
-| `host.process_groups.join(group, actor_id)` | Join a process group |
-| `host.process_groups.leave(group, actor_id)` | Leave a process group |
-| `host.process_groups.publish(group, message)` | Broadcast to group |
-| `host.process_groups.get_members(group)` | Get group members |
+| `host.process_groups.join(group)` | Join a process group (uses self actor ID) |
+| `host.process_groups.leave(group)` | Leave a process group |
+| `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members |
+| `host.process_groups.members(group)` | Get group member IDs |
+
+#### Ask Pattern (Request-Reply Between WASM Actors)
+
+The `host.ask(to, msg_type, payload, timeout_ms)` function enables synchronous request-reply communication between WASM actors. Unlike `host.send()` (fire-and-forget), `host.ask()` blocks the caller until a response is received or the timeout expires.
+
+```python
+import json
+from plexspaces import actor, handler, host, state
+
+@actor
+class TrainingWorker:
+    worker_id: str = state(default="")
+
+    @handler("train_step")
+    def train_step(self) -> dict:
+        # Request current weights from the parameter server
+        result = host.ask(
+            "parameter-server:ml-training",  # target actor (name:namespace)
+            "get_weights",                    # message type
+            json.dumps({"worker_id": self.worker_id}),  # payload
+            5000                              # timeout in milliseconds
+        )
+        weights = json.loads(result)
+
+        # ... perform training step with weights ...
+
+        # Push gradient update (fire-and-forget)
+        host.send("parameter-server:ml-training", "push_gradient",
+                   json.dumps({"worker_id": self.worker_id, "gradient": [0.1, -0.2]}))
+
+        return {"status": "step_complete"}
+```
+
+**Behavior:**
+- Returns the response payload as a string on success.
+- Raises `RuntimeError` if the target actor does not respond within `timeout_ms`.
+- Raises `RuntimeError` if the target actor returns an error.
+- The caller actor is blocked during the ask; other messages to it are queued.
 
 #### Key-Value Storage (WASM)
 
@@ -385,6 +462,71 @@ plexspaces-py build myactor.py -v
 # Custom WIT directory
 plexspaces-py build myactor.py --wit-dir /path/to/wit
 ```
+
+### Multi-Actor Modules
+
+A single WASM module can contain multiple actor classes using the `ACTOR_ROLES` mapping. This allows you to deploy related actors together (e.g., a parameter server and its workers) while keeping them as separate logical actors.
+
+```python
+# ml_actors.py
+import json
+from plexspaces import actor, handler, host, state
+
+@actor
+class ParameterServer:
+    weights: dict = state(default_factory=dict)
+
+    @handler("get_weights")
+    def get_weights(self, worker_id: str) -> dict:
+        return {"weights": self.weights}
+
+    @handler("push_gradient")
+    def push_gradient(self, worker_id: str, gradient: list) -> dict:
+        # Apply gradient update
+        return {"status": "applied"}
+
+@actor
+class TrainingWorker:
+    worker_id: str = state(default="")
+    epoch: int = state(default=0)
+
+    @handler("train_step")
+    def train_step(self) -> dict:
+        result = host.ask("parameter-server:ml-training", "get_weights",
+                          json.dumps({"worker_id": self.worker_id}), 5000)
+        # ... train ...
+        return {"epoch": self.epoch}
+
+# Map role names to actor classes
+ACTOR_ROLES = {
+    "parameter-server": ParameterServer,
+    "training-worker": TrainingWorker,
+}
+```
+
+When the WASM module is loaded, the runtime inspects `ACTOR_ROLES` to determine which actor class to instantiate based on the role specified at spawn time. Each role is an independent actor with its own state and message handlers, but they share the same WASM binary.
+
+### HTTP Invocation with Timeout
+
+When invoking actors via the HTTP API, you can specify a `timeout` query parameter for long-running operations. This is particularly useful for actors that perform expensive computation (e.g., ML training steps, data aggregation).
+
+```bash
+# Default timeout: 5 seconds
+curl -X POST http://localhost:8094/api/v1/actors/my-actor:default/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"msg_type": "train", "payload": {"epochs": 10}}'
+
+# Extended timeout: 30 seconds for long-running operations
+curl -X POST "http://localhost:8094/api/v1/actors/my-actor:default/invoke?timeout=30" \
+  -H "Content-Type: application/json" \
+  -d '{"msg_type": "train", "payload": {"epochs": 10}}'
+```
+
+| Parameter | Default | Max | Description |
+|-----------|---------|-----|-------------|
+| `timeout` | 5 seconds | 3600 seconds (1 hour) | How long the HTTP gateway waits for the actor response |
+
+If the actor does not respond within the specified timeout, the HTTP API returns a `504 Gateway Timeout`. The actor itself continues running -- only the HTTP caller's wait is bounded.
 
 ---
 
@@ -1060,15 +1202,6 @@ impl AuditLogger {
 }
 ```
 
-### Legacy macros (backward compatibility)
-
-The following are still supported but prefer the new annotations:
-
-| Legacy API | Replacement |
-|------------|-------------|
-| `#[derive(PlexSpacesActor)]` | `#[actor]` or `#[gen_server_actor]` |
-| `plexspaces_impl_handlers!(Actor, behavior, ...)` | `#[plexspaces_handlers]` + `#[handler(...)]` |
-
 ### Rust examples using the SDK
 
 - **webhook_handler** — `#[gen_server_actor]`, `#[plexspaces_handlers]`, HTTP deliver/list; `examples/rust/embedded/webhook_handler/`
@@ -1076,6 +1209,159 @@ The following are still supported but prefer the new annotations:
 - **timeseries_forecasting** — uses `spawn_with_behavior_type` for BehaviorRegistry-based actors (pipeline by type name); see its README for when to use BehaviorRegistry vs SDK `spawn`
 
 Going forward, new Rust examples should use these SDK annotations and `spawn_actor` with facets where applicable. See [Examples](examples.md) and [Detailed Design - Behaviors](detailed-design.md#behaviors).
+
+---
+
+## Go SDK
+
+The Go SDK uses **TinyGo** to compile actors to WASM components. Actors implement a simple `Actor` interface with JSON-based state management. The SDK provides `BaseActor` for zero-boilerplate state serialization and `ActorRouter` for multi-actor modules.
+
+**Location**: `sdks/go/plexspaces/`
+
+### Installation
+
+```bash
+# TinyGo required (0.36+)
+brew install tinygo  # macOS
+# or see https://tinygo.org/getting-started/install/
+
+# wasm-tools required for Component Model
+cargo install wasm-tools
+```
+
+### Quick Start
+
+**1. Write your actor**
+
+```go
+package main
+
+import "github.com/example/plexspaces/sdks/go/plexspaces"
+
+type Counter struct {
+    plexspaces.BaseActor
+    Count int `json:"count"`
+}
+
+func (c *Counter) Handle(from, msgType, payloadJSON string) string {
+    switch msgType {
+    case "increment":
+        c.Count++
+        return fmt.Sprintf(`{"count":%d}`, c.Count)
+    case "get":
+        return fmt.Sprintf(`{"count":%d}`, c.Count)
+    default:
+        return `{"error":"unknown operation"}`
+    }
+}
+
+func init() {
+    plexspaces.Register(&Counter{})
+}
+
+func main() {}
+```
+
+**2. Build to WASM**
+
+```bash
+tinygo build -target=wasi -o counter_core.wasm .
+wasm-tools component embed wit/ -w actor-world counter_core.wasm -o counter_embedded.wasm
+wasm-tools component new counter_embedded.wasm --adapt wasi_snapshot_preview1.reactor.wasm -o counter.wasm
+```
+
+**3. Deploy**
+
+```bash
+curl -X POST http://localhost:8094/api/v1/deploy \
+  -F "namespace=default" \
+  -F "actor_type=counter" \
+  -F "wasm=@counter.wasm"
+```
+
+### Actor Interface
+
+```go
+type Actor interface {
+    Init(configJSON string) string
+    Handle(fromActor, msgType, payloadJSON string) string
+    GetState() string
+    SetState(stateJSON string) string
+}
+```
+
+`BaseActor` provides default `Init`, `GetState`, and `SetState` implementations using JSON serialization. You only need to implement `Handle`.
+
+### Multi-Actor Modules (ActorRouter)
+
+```go
+func init() {
+    router := plexspaces.NewActorRouter()
+    router.Route("chat-room", NewChatRoom)
+    router.Route("rate-limiter", NewRateLimiter)
+    plexspaces.Register(router)
+}
+```
+
+The router selects the actor by longest-prefix match on the actor ID. For example, `"chat-room-lobby:default"` matches `"chat-room"`.
+
+### Host Functions
+
+Access PlexSpaces capabilities via the `Host` singleton:
+
+| Function | Description |
+|----------|-------------|
+| **Messaging** | |
+| `host.Send(to, msgType, payload)` | Fire-and-forget message |
+| `host.Ask(to, msgType, payload, timeoutMs)` | Request-reply |
+| `host.SelfID()` | Get own actor ID |
+| **Actor Lifecycle** | |
+| `host.Spawn(moduleRef, actorID, config)` | Create actor |
+| `host.Stop(actorID)` | Terminate actor |
+| `host.Link(actorID)` / `host.Unlink(actorID)` | Erlang-style linking |
+| `host.Monitor(actorID)` / `host.Demonitor(ref)` | Unidirectional monitoring |
+| **Timers** | |
+| `host.SendAfter(delayMs, msgType, payload)` | Delayed message |
+| **Logging & Time** | |
+| `host.Log(level, msg)` / `host.Info(msg)` / `host.Warn(msg)` / `host.Error(msg)` | Structured logging |
+| `host.NowMs()` | Current timestamp (ms) |
+| **Key-Value Storage** | |
+| `host.KVGet(key)` / `host.KVPut(key, value)` / `host.KVDelete(key)` / `host.KVList(prefix)` | Key-value operations |
+| **TupleSpace** | |
+| `host.TSWrite(tupleJSON)` / `host.TSRead(patternJSON)` / `host.TSTake(patternJSON)` / `host.TSReadAll(patternJSON)` | Linda-style coordination |
+| **Distributed Locks** | |
+| `host.LockAcquire(...)` / `host.LockRelease(...)` / `host.LockRenew(...)` | Distributed locks with leases |
+| **Blob Storage** | |
+| `host.BlobUpload(id, data, contentType)` / `host.BlobDownload(id)` / `host.BlobDelete(id)` / `host.BlobList(prefix)` | S3-compatible storage |
+| **Process Groups** | |
+| `host.PG().Join(group)` / `host.PG().Leave(group)` / `host.PG().Members(group)` / `host.PG().Broadcast(group, msgType, payload)` | Distributed pub/sub |
+
+### WASM Component Model Architecture
+
+The Go SDK implements the WASM Component Model canonical ABI directly in `exports.go`:
+
+- **`cabi_realloc`**: Memory allocation for host-to-guest string passing
+- **Qualified export names**: `plexspaces:simple-actor/actor@0.1.0#init`, `#handle`, `#get-state`, `#set-state`
+- **Raw uint32 signatures**: String parameters as `(ptr, len)` pairs, returns via 8-byte return area
+- **`cabi_post_*` cleanup functions**: Called by host after reading return values
+
+This eliminates the need for `--dummy-names legacy` in `wasm-tools component embed` and ensures proper matching between TinyGo exports and the WIT interface.
+
+### Testing
+
+The SDK includes comprehensive tests (`plexspaces_test.go`) that run natively (not in WASM) using stub implementations of all host functions. Tests cover:
+- Actor interface and BaseActor state round-trip
+- ActorRouter prefix matching and longest-match-wins logic
+- Host function stubs for all capabilities (KV, PG, Locks, Blobs, TupleSpace)
+- Error handling and HostError type
+
+### Examples
+
+| Example | Pattern | Actors | Features |
+|---------|---------|--------|----------|
+| `migrating_erlang_otp` | Erlang GenServer | 1 (RateLimiter) | Sliding window algorithm, benchmarking |
+| `migrating_cloudflare_workers` | Cloudflare Durable Objects | 2 (ChatRoom, RateLimiter) | ActorRouter, KV store, fan-out |
+| `migrating_gosiris` | Gosiris Actor Model | 2 (Sensor, Aggregator) | Process groups, polling, anomaly detection |
 
 ---
 
@@ -1146,13 +1432,22 @@ sdks/
 ├── typescript/            # TypeScript SDK (inheritance-based)
 │   ├── src/
 │   │   ├── actor.ts       # PlexSpacesActor base class
+│   │   ├── host.ts        # Host function wrappers
 │   │   └── index.ts       # Exports
 │   ├── package.json
 │   └── README.md          # TypeScript SDK docs
 ├── rust/                  # Rust SDK (native embedded actors)
 │   ├── plexspaces-sdk/    # Re-exports, spawn_actor, plexspaces_impl_handlers!
 │   └── plexspaces-sdk-macros/  # #[derive(PlexSpacesActor)]
-└── go/                    # Planned
+└── go/                    # Go SDK (TinyGo WASM actors)
+    └── plexspaces/
+        ├── actor.go       # Actor interface + BaseActor
+        ├── host.go        # Host function wrappers (Host singleton)
+        ├── host_imports.go # WIT wasmimport directives (TinyGo)
+        ├── host_stubs.go  # Native/test stub implementations
+        ├── exports.go     # WASM Component Model canonical ABI exports
+        ├── router.go      # ActorRouter for multi-actor modules
+        └── plexspaces_test.go # Comprehensive unit tests
 ```
 
 ---

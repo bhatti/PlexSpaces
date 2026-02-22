@@ -332,7 +332,9 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         state.insert(cache_key, LocalGroupState::default());
 
         metrics::counter!("plexspaces_process_groups_created_total", "tenant" => ctx.tenant_id().to_string()).increment(1);
-        debug!("Process group created: {}", group_name);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!("Process group created: {}", group_name);
+        }
 
         Ok(())
     }
@@ -368,7 +370,9 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         state.remove(&cache_key);
 
         metrics::counter!("plexspaces_process_groups_deleted_total", "tenant" => ctx.tenant_id().to_string()).increment(1);
-        debug!("Process group deleted: {}", group_name);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!("Process group deleted: {}", group_name);
+        }
 
         Ok(())
     }
@@ -439,7 +443,9 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         object_registry.register(ctx, registration).await?;
 
         metrics::counter!("plexspaces_process_groups_joins_total", "group" => group_name.to_string(), "tenant" => ctx.tenant_id().to_string()).increment(1);
-        debug!("Actor {} joined group {}", actor_id, group_name);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!("Actor {} joined group {}", actor_id, group_name);
+        }
 
         Ok(())
     }
@@ -512,7 +518,9 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         }
 
         metrics::counter!("plexspaces_process_groups_leaves_total", "group" => group_name.to_string(), "tenant" => ctx.tenant_id().to_string()).increment(1);
-        debug!("Actor {} left group {}", actor_id, group_name);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!("Actor {} left group {}", actor_id, group_name);
+        }
 
         Ok(())
     }

@@ -287,6 +287,12 @@ where
                             (ask, normalized)
                         };
 
+                        // Extract optional timeout from ?timeout=<seconds> query param (default: 5s)
+                        let timeout_duration = query_params.get("timeout")
+                            .and_then(|s| s.parse::<i64>().ok())
+                            .filter(|&secs| secs > 0 && secs <= 3600)
+                            .map(|secs| prost_types::Duration { seconds: secs, nanos: 0 });
+
                         // Create InvokeActorRequest (tenant_id comes from auth, not request)
                         use plexspaces_proto::actor::v1::InvokeActorRequest;
                         let mut invoke_req = InvokeActorRequest {
@@ -300,6 +306,7 @@ where
                             subpath: String::new(),
                             ask,
                             msg_type_override,
+                            timeout: timeout_duration,
                         };
                         
                         // For POST/PUT, read body as payload

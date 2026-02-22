@@ -1431,3 +1431,7 @@ impl KeyValueStore for DynamoDBKVStore {
     }
 }
 
+// Bridge plexspaces_keyvalue::KeyValueStore → plexspaces_common::KeyValueStore
+// for the DynamoDB backend using the shared macro.
+crate::impl_common_keyvalue_store!(DynamoDBKVStore);
+

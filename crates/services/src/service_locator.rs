@@ -413,6 +413,10 @@ pub struct ServiceLocatorImpl {
     /// This allows WASM actors and other components to access shared KV storage
     keyvalue_store: Arc<RwLock<Option<Arc<dyn plexspaces_core::KeyValueStore>>>>,
 
+    /// Registered ProcessGroupRegistry (as Arc<dyn Any> to avoid dependency on process-groups crate)
+    /// Created during node startup from the shared KeyValueStore
+    process_group_registry: Arc<RwLock<Option<Arc<dyn std::any::Any + Send + Sync>>>>,
+
     /// Registered TaskRouter (stored separately for type-safe access)
     /// This allows components to register shard groups for task routing
     task_router: Arc<RwLock<Option<Arc<plexspaces_scheduler::TaskRouter>>>>,
@@ -460,6 +464,7 @@ impl ServiceLocatorImpl {
             blob_service: Arc::new(RwLock::new(None)),
             node_registry: Arc::new(RwLock::new(None)),
             keyvalue_store: Arc::new(RwLock::new(None)),
+            process_group_registry: Arc::new(RwLock::new(None)),
             task_router: Arc::new(RwLock::new(None)),
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
             security_config: Arc::new(tokio::sync::Mutex::new(None)),
@@ -1677,6 +1682,16 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         let mut keyvalue_store = self.keyvalue_store.write().await;
         *keyvalue_store = Some(store);
     }
+
+    async fn get_process_group_registry(&self) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        let registry = self.process_group_registry.read().await;
+        registry.clone()
+    }
+
+    async fn register_process_group_registry(&self, registry: std::sync::Arc<dyn std::any::Any + Send + Sync>) {
+        let mut pg_registry = self.process_group_registry.write().await;
+        *pg_registry = Some(registry);
+    }
 }
 
 impl ServiceLocatorImpl {
@@ -1979,6 +1994,9 @@ async fn initialize_services_impl(
 
     // Register KeyValueStore in ServiceLocator so WASM actors can access the shared store
     service_locator.register_keyvalue_store(kv_store_common).await;
+
+    // Register ProcessGroupRegistry in ServiceLocator so WASM actors can use pg_join/pg_leave/pg_members/pg_broadcast
+    service_locator.register_process_group_registry(process_group_registry.clone() as Arc<dyn std::any::Any + Send + Sync>).await;
     
     // Create ActorRegistry with ObjectRegistry (ObjectRegistry implements the trait directly)
     let object_registry_trait: Arc<dyn plexspaces_core::ObjectRegistry> = object_registry.clone();

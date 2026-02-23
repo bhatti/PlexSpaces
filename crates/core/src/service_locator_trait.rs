@@ -424,6 +424,27 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `store` - KeyValueStore to register
     async fn register_keyvalue_store(&self, store: std::sync::Arc<dyn KeyValueStore>);
+
+    /// Get ProcessGroupRegistry (as Arc<dyn Any> to avoid dependency on process-groups crate)
+    ///
+    /// ## Purpose
+    /// Returns the ProcessGroupRegistry for WASM actors (pg_join/pg_leave/pg_members/pg_broadcast).
+    /// Stored as Arc<dyn Any> because core crate doesn't depend on process-groups crate.
+    /// Callers downcast to Arc<ProcessGroupRegistry>.
+    ///
+    /// ## Returns
+    /// Some(Arc<dyn Any>) containing ProcessGroupRegistry if registered, None otherwise
+    async fn get_process_group_registry(&self) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        None
+    }
+
+    /// Register ProcessGroupRegistry (as Arc<dyn Any>)
+    ///
+    /// ## Purpose
+    /// Registers ProcessGroupRegistry for WASM actors. Created during node startup
+    /// from the shared KeyValueStore.
+    async fn register_process_group_registry(&self, _registry: std::sync::Arc<dyn std::any::Any + Send + Sync>) {
+    }
 }
 
 /// Trait for WASM Runtime (defined in wasm-runtime crate)

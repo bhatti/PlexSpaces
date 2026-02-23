@@ -400,6 +400,15 @@ pub struct RequestContext {
     /// If auth is disabled, tenant_id can be empty.
     #[prost(bool, tag="10")]
     pub auth_enabled: bool,
+    /// HTTP-style headers for auth credential propagation (OpenAPI securitySchemes pattern)
+    ///
+    /// Carries authorization headers and security credentials through the call chain.
+    /// Header names are stored lowercase (HTTP/2 convention). Common entries:
+    /// - authorization: Bearer token (OpenAPI bearerAuth)
+    /// - x-api-key: API key in header (OpenAPI apiKey in: header)
+    /// - apikey-query:<name>: API key as query param (OpenAPI apiKey in: query)
+    #[prost(map="string, string", tag="11")]
+    pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 // ============================================================================
 // UNIFIED MESSAGE TYPE

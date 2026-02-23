@@ -926,6 +926,320 @@ assert!(result.is_none());
 - ✅ SQL query filtered by tenant-1 (database-level enforcement)
 - ✅ No way to bypass tenant filtering (type-safe)
 
+## Auth Headers & Security Schemes (OpenAPI-Style)
+
+### Overview
+
+PlexSpaces supports propagating authentication credentials and custom headers through the
+entire call chain via the `RequestContext.headers` field. This follows the same patterns
+defined by [OpenAPI 3.0 Security Schemes](https://swagger.io/docs/specification/authentication/),
+allowing actors and services to make authenticated outbound calls using credentials
+propagated from the original request.
+
+### Supported Security Schemes
+
+PlexSpaces maps to OpenAPI security scheme types:
+
+| OpenAPI Scheme                     | PlexSpaces API                          | Header Key           | Example Value                 |
+|------------------------------------|-----------------------------------------|----------------------|-------------------------------|
+| `type: http, scheme: bearer`       | `ctx.with_bearer_token(token)`          | `authorization`      | `Bearer eyJhbGci...`         |
+| `type: apiKey, in: header`         | `ctx.with_api_key_header(name, key)`    | `x-api-key` (or custom) | `sk-abc123`              |
+| `type: apiKey, in: query`          | `ctx.with_api_key_query(name, key)`     | `apikey-query:<name>` | `sk-abc123`                  |
+| `type: mutualTLS`                  | mTLS at transport layer                 | (TLS, not header)    | Certificate-based             |
+| Custom headers                     | `ctx.with_header(name, value)`          | any lowercase name   | any value                     |
+
+### OpenAPI Security Definitions (Proto-Generated)
+
+Security schemes are defined in proto files using `protoc-gen-openapiv2` annotations and
+are automatically included in the generated OpenAPI spec. From `common.proto`:
+
+```protobuf
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  // ...
+  security_definitions: {
+    security: {
+      key: "BearerAuth";
+      value: {
+        type: TYPE_API_KEY;
+        in: IN_HEADER;
+        name: "Authorization";
+        description: "JWT Bearer token. Format: Bearer <token>.";
+      };
+    };
+    security: {
+      key: "ApiKeyHeader";
+      value: {
+        type: TYPE_API_KEY;
+        in: IN_HEADER;
+        name: "X-API-Key";
+        description: "API key authentication via header.";
+      };
+    };
+    security: {
+      key: "ApiKeyQuery";
+      value: {
+        type: TYPE_API_KEY;
+        in: IN_QUERY;
+        name: "api_key";
+        description: "API key via query parameter.";
+      };
+    };
+  };
+  security: {
+    security_requirement: {
+      key: "BearerAuth";
+      value: {};
+    };
+  };
+};
+```
+
+This generates the standard OpenAPI `securityDefinitions` / `security` blocks when
+`protoc-gen-openapiv2` runs. The generated spec (`docs/openapi.json`) will include:
+
+```json
+{
+  "securityDefinitions": {
+    "BearerAuth": { "type": "apiKey", "name": "Authorization", "in": "header" },
+    "ApiKeyHeader": { "type": "apiKey", "name": "X-API-Key", "in": "header" },
+    "ApiKeyQuery": { "type": "apiKey", "name": "api_key", "in": "query" }
+  },
+  "security": [{ "BearerAuth": [] }]
+}
+```
+
+### Rust API
+
+#### Attaching Credentials
+
+```rust
+use plexspaces_common::RequestContext;
+
+// Bearer token (most common — JWT)
+let ctx = RequestContext::new("tenant-123".to_string(), "prod".to_string(), true)?
+    .with_bearer_token("eyJhbGciOiJIUzI1NiIs...".to_string());
+
+// API key in header
+let ctx = RequestContext::new("tenant-123".to_string(), "prod".to_string(), false)?
+    .with_api_key_header("x-api-key".to_string(), "sk-live-abc123".to_string());
+
+// API key in query parameter
+let ctx = RequestContext::new("tenant-123".to_string(), "prod".to_string(), false)?
+    .with_api_key_query("api_key".to_string(), "sk-live-abc123".to_string());
+
+// Multiple credentials + custom headers
+let ctx = RequestContext::new("tenant-123".to_string(), "prod".to_string(), true)?
+    .with_bearer_token("eyJ...".to_string())
+    .with_header("x-request-source".to_string(), "mobile-app".to_string())
+    .with_header("x-idempotency-key".to_string(), "req-abc-123".to_string());
+
+// Bulk headers (e.g., from inbound HTTP request)
+let mut headers = std::collections::HashMap::new();
+headers.insert("authorization".to_string(), "Bearer eyJ...".to_string());
+headers.insert("x-api-key".to_string(), "sk-abc".to_string());
+let ctx = RequestContext::new("tenant-123".to_string(), "prod".to_string(), false)?
+    .with_headers(headers);
+```
+
+#### Reading Credentials
+
+```rust
+// Bearer token (strips "Bearer " prefix)
+if let Some(token) = ctx.bearer_token() {
+    // token = "eyJhbGciOiJIUzI1NiIs..."
+}
+
+// Any header by name
+if let Some(api_key) = ctx.get_header("x-api-key") {
+    // api_key = "sk-live-abc123"
+}
+
+// API key query parameter
+if let Some(key) = ctx.api_key_query("api_key") {
+    // key = "sk-live-abc123"
+}
+
+// All HTTP headers (excludes internal apikey-query:* entries)
+let http_headers = ctx.http_headers();
+// Returns: {"authorization": "Bearer ...", "x-api-key": "sk-..."}
+
+// All query-param API keys
+let query_params = ctx.api_key_query_params();
+// Returns: {"api_key": "sk-..."}
+```
+
+#### Creating Context from Auth with Headers
+
+```rust
+// From validated JWT + inbound request headers
+let ctx = RequestContext::from_auth_with_headers(
+    Some("tenant-123".to_string()),  // from JWT
+    Some("prod".to_string()),        // from request path
+    Some("user-456".to_string()),    // from JWT sub
+    false,                           // admin
+    true,                            // auth_enabled
+    None,                            // default_tenant_id
+    None,                            // default_namespace
+    inbound_headers,                 // propagate from request
+)?;
+```
+
+### Proto Wire Format
+
+The `RequestContext` proto message includes a `headers` map (field 11):
+
+```protobuf
+message RequestContext {
+  string tenant_id = 1;
+  string namespace = 2;
+  string user_id = 3;
+  string request_id = 4;
+  string correlation_id = 5;
+  google.protobuf.Timestamp timestamp = 6;
+  map<string, string> metadata = 7;
+  bool admin = 8;
+  bool internal = 9;
+  bool auth_enabled = 10;
+  map<string, string> headers = 11;  // Auth/credential propagation
+}
+```
+
+Headers survive proto serialization roundtrips:
+
+```rust
+let original = RequestContext::new_without_auth("t1".into(), "ns".into())
+    .with_bearer_token("tok".to_string());
+
+let proto = original.to_proto();
+let restored = RequestContext::from_proto(&proto, false).unwrap();
+
+assert_eq!(restored.bearer_token(), Some("tok"));
+```
+
+### WIT (WASM Actors)
+
+The WIT `context` record includes a `headers` field for WASM actors:
+
+```wit
+record context {
+    tenant-id: string,
+    namespace: string,
+    headers: list<tuple<string, string>>,
+}
+```
+
+WASM actors can read and propagate auth headers when making outbound calls:
+
+```python
+# Python SDK example
+from plexspaces import host
+
+def handle_message(ctx, msg):
+    # Read bearer token from context
+    for name, value in ctx.headers:
+        if name == "authorization":
+            # Use token for outbound HTTP call
+            host.http_request("https://api.example.com/data",
+                              headers={"Authorization": value})
+```
+
+```typescript
+// TypeScript SDK example
+import { Host } from "plexspaces";
+
+function handleMessage(ctx: Context, msg: Message) {
+    const authHeader = ctx.headers.find(([k]) => k === "authorization");
+    if (authHeader) {
+        // Propagate to downstream service
+        Host.tell(targetActor, msgType, payload, {
+            headers: [authHeader]
+        });
+    }
+}
+```
+
+### Header Propagation Flow
+
+```
+Client Request
+    │
+    ├── Authorization: Bearer <JWT>
+    ├── X-API-Key: sk-abc123
+    └── X-Custom: value
+         │
+         ▼
+┌────────────────────────────────┐
+│   HTTP Gateway / gRPC Middleware│
+│                                │
+│  1. Validate JWT/mTLS          │
+│  2. Extract tenant_id from JWT │
+│  3. Build RequestContext with   │
+│     headers from request       │
+└────────────────────────────────┘
+         │
+         ▼
+┌────────────────────────────────┐
+│       RequestContext            │
+│  tenant_id: "tenant-123"       │
+│  namespace: "prod"             │
+│  headers:                      │
+│    authorization: Bearer <JWT> │
+│    x-api-key: sk-abc123        │
+│    x-custom: value             │
+└────────────────────────────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+ Actor     Service
+  │           │
+  │  ctx.bearer_token()
+  │  ctx.get_header("x-api-key")
+  │           │
+  ▼           ▼
+ Outbound HTTP/gRPC calls
+ with propagated headers
+```
+
+### Security Considerations
+
+1. **Bearer tokens from JWT only (when auth enabled)**: When authentication is enabled,
+   the `authorization` header in `RequestContext.headers` is set from the validated JWT
+   token only. Client-supplied `Authorization` headers are stripped by the auth middleware
+   before being added to the context. This prevents token injection attacks.
+
+2. **Header names are lowercase**: All header names are stored in lowercase per HTTP/2
+   convention. The `with_header()` and `get_header()` methods handle case normalization.
+
+3. **Sensitive headers should not be logged**: When logging `RequestContext`, the `headers`
+   field may contain secrets (tokens, API keys). Use the `SecretMasker` utility or exclude
+   headers from log output.
+
+4. **Headers propagate across nodes**: When an actor message is forwarded to a remote node,
+   `RequestContext` (including headers) is serialized via proto. Ensure auth headers are
+   appropriate for cross-node propagation (e.g., internal service tokens vs. user tokens).
+
+5. **API keys in query params are less secure**: The `with_api_key_query()` method stores
+   keys internally but they may appear in URLs/logs. Prefer header-based API keys when
+   possible.
+
+6. **WASM actor sandbox**: WASM actors can read headers from their context but cannot
+   modify the context of their parent. Headers flow downward (caller → callee), never
+   upward.
+
+### Comparison with OpenAPI Security Schemes
+
+| Feature                    | OpenAPI 3.0               | PlexSpaces RequestContext         |
+|----------------------------|---------------------------|-----------------------------------|
+| Bearer token (HTTP)        | `type: http, scheme: bearer` | `with_bearer_token()`          |
+| API key in header          | `type: apiKey, in: header` | `with_api_key_header(name, key)` |
+| API key in query           | `type: apiKey, in: query`  | `with_api_key_query(name, key)`  |
+| Mutual TLS                 | `type: mutualTLS`          | Transport-level mTLS config       |
+| OAuth2 / OpenID Connect    | `type: oauth2` / `openIdConnect` | JWT token from OIDC provider → `with_bearer_token()` |
+| Custom scheme              | extension (`x-*`)          | `with_header(name, value)`        |
+| Multiple schemes (AND)     | `security: [{A, B}]`      | Chain multiple `with_*` calls     |
+| Multiple schemes (OR)      | `security: [{A}, {B}]`    | Different code paths per scheme   |
+| Scope-based authorization  | `security: [{A: [read]}]` | Roles/scopes in JWT claims        |
+
 ## Troubleshooting
 
 ### Common Issues
@@ -953,7 +1267,10 @@ assert!(result.is_none());
 
 ## References
 
-- [RequestContext](crates/common/src/request_context.rs) - RequestContext and auth hint constant
+- [RequestContext](crates/common/src/request_context.rs) - RequestContext with auth header propagation (see `with_bearer_token()`, `with_api_key_header()`, `with_header()`)
+- [Common Proto](proto/plexspaces/v1/common.proto) - RequestContext proto definition with `headers` field (tag 11) and OpenAPI security definitions
+- [Security Proto](proto/plexspaces/v1/security/security.proto) - Security API proto with OpenAPI security schemes
+- [WIT Types](wit/plexspaces-actor/types.wit) - WIT `context` record with `headers: list<tuple<string, string>>`
 - [HTTP JWT validation](crates/node/src/http_jwt.rs) - HTTP gateway JWT validation
 - [gRPC Auth Interceptor](crates/grpc-middleware/src/auth.rs) - JWT/mTLS middleware for gRPC
 - [InterceptorChain](crates/grpc-middleware/src/chain.rs) - Composable gRPC middleware chain

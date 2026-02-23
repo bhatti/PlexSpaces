@@ -30,11 +30,19 @@ use wasmtime::Result as WasmtimeResult;
 // These are used in conversion functions below
 
 /// Helper function to convert WIT context to RequestContext
-/// Uses tenant_id/namespace from WIT context (from gRPC request), or empty strings if not provided
+/// Uses tenant_id/namespace from WIT context (from gRPC request), or empty strings if not provided.
+/// Also propagates auth/credential headers from the WIT context.
 fn context_to_request_context(ctx: &plexspaces::actor::types::Context) -> RequestContext {
     // Use tenant_id/namespace from WIT context (which comes from gRPC request)
     // If empty, use empty strings (works when auth is disabled)
-    RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone())
+    let rc = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+    // Propagate headers from WIT context (auth credentials, custom headers)
+    if ctx.headers.is_empty() {
+        rc
+    } else {
+        let headers: std::collections::HashMap<String, String> = ctx.headers.iter().cloned().collect();
+        rc.with_headers(headers)
+    }
 }
 
 /// Create a structured error string for WIT actor-error type
@@ -2154,7 +2162,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            let request_ctx = context_to_request_context(&ctx);
 
             // Download blob using BlobService with caller's context
             match blob_service.download_blob(&request_ctx, &effective_blob_id).await {
@@ -2222,7 +2230,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            let request_ctx = context_to_request_context(&ctx);
 
             // Delete blob using BlobService with caller's context
             match blob_service.delete_blob(&request_ctx, &effective_blob_id).await {
@@ -2277,7 +2285,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            let request_ctx = context_to_request_context(&ctx);
             match blob_service.get_metadata(&request_ctx, &effective_blob_id).await {
                 Ok(_metadata) => {
                     Ok(true)
@@ -2414,7 +2422,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            let request_ctx = context_to_request_context(&ctx);
             match blob_service.get_metadata(&request_ctx, &effective_blob_id).await {
                 Ok(m) => {
                     let last_modified = m.created_at
@@ -2492,8 +2500,8 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
-            
+            let request_ctx = context_to_request_context(&ctx);
+
             // Get source blob metadata to preserve content_type and other properties
             let source_metadata = blob_service.get_metadata(&request_ctx, &effective_source_blob_id).await
                 .map_err(|e| {

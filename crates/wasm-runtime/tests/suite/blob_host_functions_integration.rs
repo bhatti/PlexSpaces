@@ -95,6 +95,7 @@ mod tests {
         Context {
             tenant_id: tenant_id.to_string(),
             namespace: namespace.to_string(),
+            headers: vec![],
         }
     }
 

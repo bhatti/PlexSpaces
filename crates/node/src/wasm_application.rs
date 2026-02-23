@@ -555,6 +555,12 @@ impl WasmApplication {
                 ))
             });
 
+        tracing::info!(
+            keyvalue_store_available = keyvalue_store.is_some(),
+            process_group_registry_available = process_group_registry.is_some(),
+            "spawn_wasm_actor: service availability check"
+        );
+
         // Get LockManager from service locator so WASM actors can use host.lock_acquire/renew/release
         let lock_manager = service_locator.get_lock_manager().await;
 

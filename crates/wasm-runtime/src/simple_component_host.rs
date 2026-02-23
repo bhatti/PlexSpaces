@@ -120,6 +120,21 @@ impl SimpleHostImpl {
         }
     }
 
+    /// Build a RequestContext for process group operations.
+    /// Uses the application namespace (from actor_id format `name:namespace@node`)
+    /// so all actors in the same application share the same process group scope.
+    fn pg_context(&self) -> RequestContext {
+        let actor_str = self.actor_id.to_string();
+        // Extract namespace from actor_id format: "name:namespace@node"
+        let namespace = actor_str
+            .split(':')
+            .nth(1)
+            .and_then(|rest| rest.split('@').next())
+            .unwrap_or("")
+            .to_string();
+        RequestContext::new_without_auth(String::new(), namespace)
+    }
+
     /// Parse tuple_json (JSON array of strings/numbers) into Tuple for existing TupleSpaceProvider.write
     fn parse_tuple_json(tuple_json: &str) -> Result<Tuple, String> {
         let arr: Vec<serde_json::Value> = serde_json::from_str(tuple_json)
@@ -996,14 +1011,27 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     // Process Groups
     // ========================================================================
 
-    /// Join a named process group
+    /// Join a named process group (auto-creates the group if it doesn't exist, like Erlang pg:join/2)
     async fn pg_join(&mut self, group_name: String) -> String {
         let self_id = self.actor_id.clone();
-        let ctx = RequestContext::new_without_auth(String::new(), self_id.to_string());
+        let ctx = self.pg_context();
         match self.host_functions.process_group_registry() {
             Some(registry) => {
                 match registry.join_group(&ctx, &group_name, &self_id, vec![]).await {
                     Ok(()) => String::new(),
+                    Err(plexspaces_process_groups::ProcessGroupError::GroupNotFound(_)) => {
+                        // Auto-create group and retry join (Erlang pg semantics)
+                        if let Err(e) = registry.create_group(&ctx, &group_name).await {
+                            // Ignore GroupAlreadyExists (race condition with another actor)
+                            if !matches!(e, plexspaces_process_groups::ProcessGroupError::GroupAlreadyExists(_)) {
+                                return format!("ERROR: Failed to create group: {}", e);
+                            }
+                        }
+                        match registry.join_group(&ctx, &group_name, &self_id, vec![]).await {
+                            Ok(()) => String::new(),
+                            Err(e) => format!("ERROR: {}", e),
+                        }
+                    }
                     Err(e) => format!("ERROR: {}", e),
                 }
             }
@@ -1014,7 +1042,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     /// Leave a named process group
     async fn pg_leave(&mut self, group_name: String) -> String {
         let self_id = self.actor_id.clone();
-        let ctx = RequestContext::new_without_auth(String::new(), self_id.to_string());
+        let ctx = self.pg_context();
         match self.host_functions.process_group_registry() {
             Some(registry) => {
                 match registry.leave_group(&ctx, &group_name, &self_id).await {
@@ -1028,8 +1056,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
 
     /// List members of a process group
     async fn pg_members(&mut self, group_name: String) -> String {
-        let self_id = self.actor_id.to_string();
-        let ctx = RequestContext::new_without_auth(String::new(), self_id);
+        let ctx = self.pg_context();
         match self.host_functions.process_group_registry() {
             Some(registry) => {
                 match registry.get_members(&ctx, &group_name).await {
@@ -1047,7 +1074,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     /// Broadcast message to all members of a process group
     async fn pg_broadcast(&mut self, group_name: String, _msg_type: String, payload_json: String) -> String {
         let self_id = self.actor_id.to_string();
-        let ctx = RequestContext::new_without_auth(String::new(), self_id.clone());
+        let ctx = self.pg_context();
         let registry = match self.host_functions.process_group_registry() {
             Some(r) => r.clone(),
             None => return "ERROR: ProcessGroupRegistry not configured".to_string(),

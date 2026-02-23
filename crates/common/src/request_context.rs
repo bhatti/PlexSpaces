@@ -44,48 +44,82 @@ use prost_types::Timestamp;
 /// Request context (Go-style context.Context)
 ///
 /// ## Purpose
-/// Carries tenant isolation, tracing, and request metadata through call chain.
-/// Similar to Go's context.Context but with explicit tenant isolation.
+/// Carries tenant isolation, tracing, auth credentials, and request metadata through call chain.
+/// Similar to Go's context.Context but with explicit tenant isolation and security header
+/// propagation (inspired by OpenAPI security schemes).
 ///
 /// ## Usage Pattern
 /// ```rust
 /// // Create context from request (tenant_id and namespace are REQUIRED)
 /// let ctx = RequestContext::new("tenant-123".to_string(), "production".to_string(), false)?;
+///
+/// // Attach auth credentials (OpenAPI-style security schemes)
+/// let ctx = ctx
+///     .with_bearer_token("eyJhbGciOiJIUzI1NiIs...".to_string())
+///     .with_header("x-custom-header".to_string(), "value".to_string());
 /// ```
+///
+/// ## Security Header Propagation
+/// The `headers` field carries HTTP-style headers through the call chain, similar to
+/// OpenAPI's `securitySchemes`. Supported patterns:
+///
+/// - **Bearer Auth**: `Authorization: Bearer <token>` via `with_bearer_token()`
+/// - **API Key (header)**: `X-API-Key: <key>` via `with_api_key_header()`
+/// - **API Key (query)**: Stored as `apikey-query:<name>` via `with_api_key_query()`
+/// - **Custom Headers**: Any header via `with_header()`
+///
+/// These headers propagate when actors make outbound HTTP calls, invoke external
+/// services, or forward requests across node boundaries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestContext {
     /// Tenant ID (REQUIRED for all operations)
     pub tenant_id: String,
-    
+
     /// Namespace within tenant (optional, can be empty)
     ///
     /// Used for further isolation within a tenant. Can be empty string.
     /// For admin/internal contexts with empty namespace, repository lookups
     /// bypass namespace filtering to allow cross-namespace queries.
     pub namespace: String,
-    
+
     /// User ID (from JWT, optional)
     pub user_id: Option<String>,
-    
+
     /// Request ID (for tracing)
     pub request_id: String,
-    
+
     /// Correlation ID (for distributed tracing)
     pub correlation_id: Option<String>,
-    
+
     /// Request timestamp
     pub timestamp: Timestamp,
-    
+
     /// Metadata (extensible key-value pairs)
     pub metadata: HashMap<String, String>,
-    
+
+    /// HTTP-style headers for auth credential propagation (OpenAPI securitySchemes pattern)
+    ///
+    /// Carries authorization headers and security credentials through the call chain.
+    /// Header names are stored lowercase (HTTP/2 convention). Common entries:
+    ///
+    /// | Header              | Set by                  | OpenAPI Equivalent         |
+    /// |---------------------|-------------------------|----------------------------|
+    /// | `authorization`     | `with_bearer_token()`   | `bearerAuth` (type: http)  |
+    /// | `x-api-key`         | `with_api_key_header()` | `apiKey` (in: header)      |
+    /// | `apikey-query:name` | `with_api_key_query()`  | `apiKey` (in: query)       |
+    /// | any custom header   | `with_header()`         | custom securityScheme      |
+    ///
+    /// **Security**: When auth is enabled, the `authorization` header is set from validated
+    /// JWT only—never from client-supplied headers. See `AuthInterceptor` for enforcement.
+    pub headers: HashMap<String, String>,
+
     /// Admin flag (from JWT, optional)
     ///
     /// When true, indicates the user has admin privileges.
     /// Admin users with empty namespace can bypass namespace filtering for
     /// administrative operations (see should_skip_namespace_filter()).
     pub admin: bool,
-    
+
     /// Internal flag (for system operations)
     ///
     /// When true, indicates this is an internal system operation.
@@ -93,7 +127,7 @@ pub struct RequestContext {
     /// Internal contexts with empty namespace can bypass namespace filtering
     /// for system operations (see should_skip_namespace_filter()).
     pub internal: bool,
-    
+
     /// Auth enabled flag (from SecurityConfig)
     ///
     /// When true, indicates authentication is enabled.
@@ -139,6 +173,7 @@ impl RequestContext {
                 nanos: now.timestamp_subsec_nanos() as i32,
             },
             metadata: HashMap::new(),
+            headers: HashMap::new(),
             admin: false,
             internal: false,
             auth_enabled,
@@ -204,6 +239,7 @@ impl RequestContext {
                 }
             }),
             metadata: proto.metadata.clone(),
+            headers: proto.headers.clone(),
             admin: proto.admin,
             internal: proto.internal,
             auth_enabled,
@@ -220,6 +256,7 @@ impl RequestContext {
             correlation_id: self.correlation_id.clone().unwrap_or_default(),
             timestamp: Some(self.timestamp.clone()),
             metadata: self.metadata.clone(),
+            headers: self.headers.clone(),
             admin: self.admin,
             internal: self.internal,
             auth_enabled: self.auth_enabled,
@@ -248,6 +285,131 @@ impl RequestContext {
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
         self
+    }
+
+    // ========== Auth / Header propagation (OpenAPI securitySchemes pattern) ==========
+
+    /// Set a propagation header (builder pattern)
+    ///
+    /// Header names are lowercased per HTTP/2 convention.
+    ///
+    /// ## Example
+    /// ```rust
+    /// # use plexspaces_common::RequestContext;
+    /// let ctx = RequestContext::new_without_auth("t1".into(), "ns".into())
+    ///     .with_header("x-custom-trace".to_string(), "abc123".to_string());
+    /// assert_eq!(ctx.get_header("x-custom-trace"), Some("abc123"));
+    /// ```
+    pub fn with_header(mut self, name: String, value: String) -> Self {
+        self.headers.insert(name.to_lowercase(), value);
+        self
+    }
+
+    /// Attach a Bearer token (OpenAPI: `type: http, scheme: bearer`)
+    ///
+    /// Sets `authorization: Bearer <token>` in propagation headers.
+    ///
+    /// ## Example
+    /// ```rust
+    /// # use plexspaces_common::RequestContext;
+    /// let ctx = RequestContext::new_without_auth("t1".into(), "ns".into())
+    ///     .with_bearer_token("eyJhbGciOiJIUzI1NiIs...".to_string());
+    /// assert_eq!(ctx.bearer_token(), Some("eyJhbGciOiJIUzI1NiIs..."));
+    /// ```
+    pub fn with_bearer_token(self, token: String) -> Self {
+        self.with_header("authorization".to_string(), format!("Bearer {}", token))
+    }
+
+    /// Attach an API key via header (OpenAPI: `type: apiKey, in: header`)
+    ///
+    /// ## Arguments
+    /// * `header_name` - Header name (e.g., `"x-api-key"`, `"api-key"`)
+    /// * `key` - The API key value
+    ///
+    /// ## Example
+    /// ```rust
+    /// # use plexspaces_common::RequestContext;
+    /// let ctx = RequestContext::new_without_auth("t1".into(), "ns".into())
+    ///     .with_api_key_header("x-api-key".to_string(), "sk-abc123".to_string());
+    /// assert_eq!(ctx.get_header("x-api-key"), Some("sk-abc123"));
+    /// ```
+    pub fn with_api_key_header(self, header_name: String, key: String) -> Self {
+        self.with_header(header_name, key)
+    }
+
+    /// Attach an API key via query parameter (OpenAPI: `type: apiKey, in: query`)
+    ///
+    /// Stored as `apikey-query:<name>` in headers for propagation.
+    /// Downstream HTTP clients should extract these and add them as query parameters.
+    ///
+    /// ## Example
+    /// ```rust
+    /// # use plexspaces_common::RequestContext;
+    /// let ctx = RequestContext::new_without_auth("t1".into(), "ns".into())
+    ///     .with_api_key_query("api_key".to_string(), "sk-abc123".to_string());
+    /// assert_eq!(ctx.api_key_query("api_key"), Some("sk-abc123"));
+    /// ```
+    pub fn with_api_key_query(self, param_name: String, key: String) -> Self {
+        self.with_header(format!("apikey-query:{}", param_name), key)
+    }
+
+    /// Set multiple headers at once (builder pattern)
+    pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
+        for (k, v) in headers {
+            self.headers.insert(k.to_lowercase(), v);
+        }
+        self
+    }
+
+    /// Get a propagation header value
+    pub fn get_header(&self, name: &str) -> Option<&str> {
+        self.headers.get(&name.to_lowercase()).map(|s| s.as_str())
+    }
+
+    /// Check if a propagation header exists
+    pub fn has_header(&self, name: &str) -> bool {
+        self.headers.contains_key(&name.to_lowercase())
+    }
+
+    /// Get the Bearer token (if set)
+    ///
+    /// Returns the token without the "Bearer " prefix.
+    pub fn bearer_token(&self) -> Option<&str> {
+        self.headers
+            .get("authorization")
+            .and_then(|v| v.strip_prefix("Bearer "))
+    }
+
+    /// Get an API key stored as a query parameter
+    pub fn api_key_query(&self, param_name: &str) -> Option<&str> {
+        self.headers
+            .get(&format!("apikey-query:{}", param_name))
+            .map(|s| s.as_str())
+    }
+
+    /// Get all propagation headers (for outbound HTTP requests)
+    ///
+    /// Returns only actual HTTP headers (excludes internal `apikey-query:*` entries).
+    /// Use this when building outbound HTTP requests from the context.
+    pub fn http_headers(&self) -> HashMap<&str, &str> {
+        self.headers
+            .iter()
+            .filter(|(k, _)| !k.starts_with("apikey-query:"))
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect()
+    }
+
+    /// Get all API key query parameters (for outbound HTTP requests)
+    ///
+    /// Returns `(param_name, key_value)` pairs for building query strings.
+    pub fn api_key_query_params(&self) -> HashMap<&str, &str> {
+        self.headers
+            .iter()
+            .filter_map(|(k, v)| {
+                k.strip_prefix("apikey-query:")
+                    .map(|name| (name, v.as_str()))
+            })
+            .collect()
     }
 
     /// Set admin flag (builder pattern)
@@ -387,6 +549,32 @@ impl RequestContext {
 
         Ok(ctx)
     }
+
+    /// Create RequestContext from auth config with header propagation
+    ///
+    /// Same as `from_auth` but also attaches propagation headers (for outbound calls).
+    /// Headers are typically extracted from the inbound HTTP/gRPC request.
+    pub fn from_auth_with_headers(
+        tenant_id: Option<String>,
+        namespace: Option<String>,
+        user_id: Option<String>,
+        admin: bool,
+        auth_enabled: bool,
+        default_tenant_id: Option<String>,
+        default_namespace: Option<String>,
+        headers: HashMap<String, String>,
+    ) -> Result<Self, RequestContextError> {
+        let ctx = Self::from_auth(
+            tenant_id,
+            namespace,
+            user_id,
+            admin,
+            auth_enabled,
+            default_tenant_id,
+            default_namespace,
+        )?;
+        Ok(ctx.with_headers(headers))
+    }
 }
 
 /// Hint appended to auth errors so users know how to fix or disable auth for testing.
@@ -484,6 +672,7 @@ mod tests {
                 map.insert("key1".to_string(), "value1".to_string());
                 map
             },
+            headers: HashMap::new(),
             admin: false,
             internal: false,
         };
@@ -509,6 +698,7 @@ mod tests {
             auth_enabled: false,
             timestamp: None,
             metadata: HashMap::new(),
+            headers: HashMap::new(),
             admin: false,
             internal: false,
         };
@@ -538,6 +728,7 @@ mod tests {
             correlation_id: "".to_string(), // Empty should be None
             timestamp: None, // None should use current time
             metadata: HashMap::new(),
+            headers: HashMap::new(),
             admin: false,
             internal: false,
             auth_enabled: false,
@@ -627,6 +818,112 @@ mod tests {
         assert_eq!(ctx1.tenant_id(), ctx2.tenant_id());
         assert_eq!(ctx1.namespace(), ctx2.namespace());
         assert_eq!(ctx1.user_id(), ctx2.user_id());
+    }
+
+    // ========== Auth headers (OpenAPI securitySchemes pattern) ==========
+
+    #[test]
+    fn test_with_bearer_token() {
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string())
+            .with_bearer_token("eyJtoken".to_string());
+
+        assert_eq!(ctx.bearer_token(), Some("eyJtoken"));
+        assert_eq!(ctx.get_header("authorization"), Some("Bearer eyJtoken"));
+    }
+
+    #[test]
+    fn test_with_api_key_header() {
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string())
+            .with_api_key_header("x-api-key".to_string(), "sk-abc123".to_string());
+
+        assert_eq!(ctx.get_header("x-api-key"), Some("sk-abc123"));
+        assert!(ctx.has_header("x-api-key"));
+        assert!(!ctx.has_header("x-nonexistent"));
+    }
+
+    #[test]
+    fn test_with_api_key_query() {
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string())
+            .with_api_key_query("api_key".to_string(), "sk-xyz".to_string());
+
+        assert_eq!(ctx.api_key_query("api_key"), Some("sk-xyz"));
+        assert_eq!(ctx.api_key_query("other"), None);
+    }
+
+    #[test]
+    fn test_with_header() {
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string())
+            .with_header("X-Custom-Header".to_string(), "value".to_string());
+
+        // Should be lowercased
+        assert_eq!(ctx.get_header("x-custom-header"), Some("value"));
+        assert_eq!(ctx.get_header("X-Custom-Header"), Some("value"));
+    }
+
+    #[test]
+    fn test_with_headers_bulk() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer tok".to_string());
+        headers.insert("X-API-Key".to_string(), "key123".to_string());
+
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string())
+            .with_headers(headers);
+
+        assert_eq!(ctx.bearer_token(), Some("tok"));
+        assert_eq!(ctx.get_header("x-api-key"), Some("key123"));
+    }
+
+    #[test]
+    fn test_http_headers_excludes_query_keys() {
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string())
+            .with_bearer_token("tok".to_string())
+            .with_api_key_header("x-api-key".to_string(), "key1".to_string())
+            .with_api_key_query("api_key".to_string(), "key2".to_string());
+
+        let http_hdrs = ctx.http_headers();
+        assert_eq!(http_hdrs.get("authorization"), Some(&"Bearer tok"));
+        assert_eq!(http_hdrs.get("x-api-key"), Some(&"key1"));
+        // Query keys should NOT appear in http_headers
+        assert!(!http_hdrs.contains_key("apikey-query:api_key"));
+
+        let query_params = ctx.api_key_query_params();
+        assert_eq!(query_params.get("api_key"), Some(&"key2"));
+    }
+
+    #[test]
+    fn test_headers_roundtrip_proto() {
+        let original = RequestContext::new_without_auth("t1".to_string(), "ns".to_string())
+            .with_bearer_token("my-token".to_string())
+            .with_api_key_header("x-api-key".to_string(), "key123".to_string());
+
+        let proto = original.to_proto();
+        let restored = RequestContext::from_proto(&proto, false).unwrap();
+
+        assert_eq!(restored.bearer_token(), Some("my-token"));
+        assert_eq!(restored.get_header("x-api-key"), Some("key123"));
+    }
+
+    #[test]
+    fn test_from_auth_with_headers() {
+        let mut headers = HashMap::new();
+        headers.insert("authorization".to_string(), "Bearer tok123".to_string());
+        headers.insert("x-custom".to_string(), "val".to_string());
+
+        let ctx = RequestContext::from_auth_with_headers(
+            Some("t1".to_string()),
+            Some("ns".to_string()),
+            Some("user1".to_string()),
+            false,
+            false,
+            None,
+            None,
+            headers,
+        )
+        .unwrap();
+
+        assert_eq!(ctx.tenant_id(), "t1");
+        assert_eq!(ctx.bearer_token(), Some("tok123"));
+        assert_eq!(ctx.get_header("x-custom"), Some("val"));
     }
 
     // ========== from_auth propagation (multi-tenancy) ==========

@@ -113,14 +113,28 @@ interface types {
         supervisor: option<actor-id>,
     }
 
-    /// Request context for multi-tenancy
+    /// Request context for multi-tenancy and auth header propagation
     ///
     /// All WASM host functions require a context parameter as the first argument
     /// to ensure proper tenant/namespace isolation. Empty strings use default/internal context.
+    ///
+    /// The optional `headers` field carries HTTP-style headers through the call chain,
+    /// following OpenAPI securitySchemes patterns:
+    ///
+    /// | Header              | OpenAPI Equivalent                          |
+    /// |---------------------|---------------------------------------------|
+    /// | authorization       | bearerAuth (type: http, scheme: bearer)     |
+    /// | x-api-key           | apiKey (in: header)                         |
+    /// | apikey-query:<name> | apiKey (in: query)                          |
+    /// | any custom header   | custom securityScheme                       |
     record context {
         /// Tenant ID (empty string for default/internal context)
         tenant-id: string,
         /// Namespace (empty string for default/internal context)
         namespace: string,
+        /// HTTP-style headers for auth/credential propagation (optional)
+        /// Header names should be lowercase (HTTP/2 convention).
+        /// Common: ("authorization", "Bearer <token>"), ("x-api-key", "<key>")
+        headers: list<tuple<string, string>>,
     }
 }

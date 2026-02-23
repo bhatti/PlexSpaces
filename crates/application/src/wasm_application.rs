@@ -444,7 +444,18 @@ impl WasmApplication {
         };
         
         let blob_service = node.blob_service().await;
-        
+
+        // Get KeyValueStore from ServiceLocator (needed for kv_get/kv_put)
+        let keyvalue_store: Option<Arc<dyn plexspaces_core::KeyValueStore>> = service_locator
+            .get_keyvalue_store()
+            .await;
+
+        // Get ProcessGroupRegistry from ServiceLocator (registered during node startup from shared KeyValueStore)
+        // Stored as Arc<dyn Any> to avoid cross-crate trait dependency; downcast by the runtime
+        let process_group_registry: Option<Arc<dyn std::any::Any + Send + Sync>> = service_locator
+            .get_process_group_registry()
+            .await;
+
         let module_any: Arc<dyn std::any::Any + Send + Sync> = module.clone();
         let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(
             plexspaces_wasm_runtime::WasmConfig::default()
@@ -492,8 +503,8 @@ impl WasmApplication {
             Some(channel_service),
             message_sender,
             tuplespace_provider,
-            None,
-            None,
+            keyvalue_store,
+            process_group_registry,
             lock_manager,
             object_registry,
             journal_storage,

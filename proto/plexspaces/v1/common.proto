@@ -153,6 +153,41 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   schemes: HTTPS;
   consumes: "application/json";
   produces: "application/json";
+  security_definitions: {
+    security: {
+      key: "BearerAuth";
+      value: {
+        type: TYPE_API_KEY;
+        in: IN_HEADER;
+        name: "Authorization";
+        description: "JWT Bearer token. Format: `Bearer <token>`. Must contain a `tenant_id` claim for multi-tenant isolation. Create tokens via `plexspaces-cli jwt create`.";
+      };
+    };
+    security: {
+      key: "ApiKeyHeader";
+      value: {
+        type: TYPE_API_KEY;
+        in: IN_HEADER;
+        name: "X-API-Key";
+        description: "API key authentication via header. Service-scoped keys with configurable scopes.";
+      };
+    };
+    security: {
+      key: "ApiKeyQuery";
+      value: {
+        type: TYPE_API_KEY;
+        in: IN_QUERY;
+        name: "api_key";
+        description: "API key authentication via query parameter. Use only when headers cannot be set.";
+      };
+    };
+  };
+  security: {
+    security_requirement: {
+      key: "BearerAuth";
+      value: {};
+    };
+  };
 };
 
 // NOTE: Actor IDs are represented as plain strings throughout PlexSpaces.
@@ -572,6 +607,22 @@ message RequestContext {
   // Additional context for request processing.
   // Examples: "source_ip", "user_agent", "api_version"
   map<string, string> metadata = 7;
+
+  // HTTP-style headers for auth credential propagation (OpenAPI securitySchemes pattern)
+  //
+  // Carries authorization headers and security credentials through the call chain.
+  // Header names are stored lowercase (HTTP/2 convention). Common entries:
+  //
+  // | Header              | OpenAPI Equivalent                    |
+  // |---------------------|---------------------------------------|
+  // | authorization       | bearerAuth (type: http, scheme: bearer) |
+  // | x-api-key           | apiKey (in: header)                   |
+  // | apikey-query:<name> | apiKey (in: query)                    |
+  // | any custom header   | custom securityScheme                 |
+  //
+  // Security: When auth is enabled, the 'authorization' header is set from
+  // validated JWT only — never from client-supplied headers.
+  map<string, string> headers = 11;
 
   // Admin flag (from JWT, optional)
   //

@@ -2154,7 +2154,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            let request_ctx = context_to_request_context(&ctx);
 
             // Download blob using BlobService with caller's context
             match blob_service.download_blob(&request_ctx, &effective_blob_id).await {
@@ -2222,7 +2222,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            let request_ctx = context_to_request_context(&ctx);
 
             // Delete blob using BlobService with caller's context
             match blob_service.delete_blob(&request_ctx, &effective_blob_id).await {
@@ -2277,7 +2277,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            let request_ctx = context_to_request_context(&ctx);
             match blob_service.get_metadata(&request_ctx, &effective_blob_id).await {
                 Ok(_metadata) => {
                     Ok(true)
@@ -2414,7 +2414,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+            let request_ctx = context_to_request_context(&ctx);
             match blob_service.get_metadata(&request_ctx, &effective_blob_id).await {
                 Ok(m) => {
                     let last_modified = m.created_at
@@ -2492,8 +2492,8 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             };
             
             // Build RequestContext from caller's context for tenant-isolated lookup
-            let request_ctx = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
-            
+            let request_ctx = context_to_request_context(&ctx);
+
             // Get source blob metadata to preserve content_type and other properties
             let source_metadata = blob_service.get_metadata(&request_ctx, &effective_source_blob_id).await
                 .map_err(|e| {

@@ -30,11 +30,19 @@ use wasmtime::Result as WasmtimeResult;
 // These are used in conversion functions below
 
 /// Helper function to convert WIT context to RequestContext
-/// Uses tenant_id/namespace from WIT context (from gRPC request), or empty strings if not provided
+/// Uses tenant_id/namespace from WIT context (from gRPC request), or empty strings if not provided.
+/// Also propagates auth/credential headers from the WIT context.
 fn context_to_request_context(ctx: &plexspaces::actor::types::Context) -> RequestContext {
     // Use tenant_id/namespace from WIT context (which comes from gRPC request)
     // If empty, use empty strings (works when auth is disabled)
-    RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone())
+    let rc = RequestContext::new_without_auth(ctx.tenant_id.clone(), ctx.namespace.clone());
+    // Propagate headers from WIT context (auth credentials, custom headers)
+    if ctx.headers.is_empty() {
+        rc
+    } else {
+        let headers: std::collections::HashMap<String, String> = ctx.headers.iter().cloned().collect();
+        rc.with_headers(headers)
+    }
 }
 
 /// Create a structured error string for WIT actor-error type
